@@ -353,7 +353,7 @@ radio_offline_alert_email =          # alert recipient(s); falls back to nightly
 #            {hops}, {hops_label}, {elapsed}, {packet_hash}, {path_distance}, {firstlast_distance},
 #            {total_contacts}, {total_repeaters}, {total_companions}, ...
 test = "Message received from {sender} | {connection_info}"
-help = "Bot Help: test, ping, help, hello, cmd, ia, wx, aqi, sun, moon, solar, hfcond, satpass, dice, roll, joke, dadjoke, sports, channels, path, prefix, repeater, stats, alert"
+help = "Bot Help: test, ping, help, hello, cmd, llm, wx, aqi, sun, moon, solar, hfcond, satpass, dice, roll, joke, dadjoke, sports, channels, path, prefix, repeater, stats, alert"
 ```
 
 ### Channels
@@ -484,7 +484,7 @@ Or if installed as a package entry point:
 For a comprehensive list of all available commands with examples and detailed explanations, see [Command reference](docs/command-reference.md).
 
 Quick reference:
-- **Basic:** `test`, `ping`, `version`, `help`, `hello`, `cmd`, `ia`
+- **Basic:** `test`, `ping`, `version`, `help`, `hello`, `cmd`, `llm`
 - **Information:** `wx`, `gwx`, `aqi`, `sun`, `moon`, `solar`, `solarforecast`, `hfcond`, `satpass`, `channels`
 - **Emergency:** `alert`
 - **Gaming:** `dice`, `roll`, `magic8`
@@ -546,7 +546,7 @@ Example:
 [Keywords]
 test = "Message received from {sender} | {connection_info}"
 ping = "Pong!"
-help = "Bot Help: test, ping, help, hello, cmd, ia, wx, gwx, aqi, sun, moon, solar, solarforecast, hfcond, satpass, dice, roll, joke, dadjoke, sports, channels, path, prefix, repeater, stats, multitest, alert, webviewer"
+help = "Bot Help: test, ping, help, hello, cmd, llm, wx, gwx, aqi, sun, moon, solar, solarforecast, hfcond, satpass, dice, roll, joke, dadjoke, sports, channels, path, prefix, repeater, stats, multitest, alert, webviewer"
 ```
 
 ## Hardware Setup
