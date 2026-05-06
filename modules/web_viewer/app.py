@@ -1256,8 +1256,6 @@ class BotDataViewer:
         # supporting this cross-plugin introspection pattern.
         if hasattr(cmd_instance, '_enabled'):
             return bool(getattr(cmd_instance, '_enabled'))
-        if hasattr(cmd_instance, 'enabled'):
-            return bool(cmd_instance.enabled)
         return True
 
     def _get_command_info(self) -> list[dict]:
