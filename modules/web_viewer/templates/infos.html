@@ -91,6 +91,20 @@
                     <dt class="text-muted">Bot</dt>
                     <dd class="mb-2 fw-semibold">{{ bot_name }}</dd>
 
+<<<<<<< HEAD
+=======
+                    <dt class="text-muted">Monitored Channels</dt>
+                    <dd class="mb-2">
+                        {% if monitor_channels %}
+                            {% for ch in monitor_channels %}
+                                <span class="badge bg-secondary me-1 mb-1" style="font-size:0.78rem;">{{ ch }}</span>
+                            {% endfor %}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </dd>
+
+>>>>>>> 009dc86 (Translate /infos page UI labels from French to English)
                     <dt class="text-muted">Direct Messages (DM)</dt>
                     <dd class="mb-2">
                         {% if respond_to_dms %}
@@ -152,7 +166,7 @@
                 </a>
                 <a class="link-item" href="/admin/config">
                     <i class="fas fa-sliders-h"></i>
-                    <span>Current config</span>
+                    <span>Effective Config</span>
                 </a>
                 <a class="link-item" href="/stats">
                     <i class="fas fa-chart-bar"></i>
