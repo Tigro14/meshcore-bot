@@ -269,10 +269,14 @@ class TestPageRoutes:
         assert resp.status_code == 200
         html = resp.data.decode()
 <<<<<<< HEAD
+<<<<<<< HEAD
         assert 'href="https://meshcore.io"' in html
 =======
         assert "meshcore.io" in html
 >>>>>>> dac8f64 (Upgrade meshcore URL to meshcore.io and filter disabled commands from /infos)
+=======
+        assert 'href="https://meshcore.io"' in html
+>>>>>>> c7a3a34 (Fix CodeQL false positives in URL tests and improve _is_command_enabled docs)
         assert "meshcore.co.uk" not in html
 
     def test_base_footer_uses_meshcore_io_url(self, client):
@@ -281,10 +285,14 @@ class TestPageRoutes:
         assert resp.status_code == 200
         html = resp.data.decode()
 <<<<<<< HEAD
+<<<<<<< HEAD
         assert 'href="https://meshcore.io"' in html
 =======
         assert "meshcore.io" in html
 >>>>>>> dac8f64 (Upgrade meshcore URL to meshcore.io and filter disabled commands from /infos)
+=======
+        assert 'href="https://meshcore.io"' in html
+>>>>>>> c7a3a34 (Fix CodeQL false positives in URL tests and improve _is_command_enabled docs)
         assert "meshcore.co.uk" not in html
 
     def test_infos_disabled_command_filtered(self, tmp_path_factory):
