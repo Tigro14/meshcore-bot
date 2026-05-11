@@ -290,10 +290,11 @@ class BBSCommand(BaseCommand):
         try:
             with self.bot.db_manager.connection() as conn:
                 cursor = conn.cursor()
+                recipient_lower = recipient_name.lower()
                 cursor.execute(
                     "SELECT COUNT(*) FROM bbs_messages "
-                    "WHERE recipient_name = ? COLLATE NOCASE AND read_at IS NULL",
-                    (recipient_name,),
+                    "WHERE recipient_name = ? AND read_at IS NULL",
+                    (recipient_lower,),
                 )
                 count = cursor.fetchone()[0]
                 if count >= self.max_messages_per_user:
@@ -306,7 +307,7 @@ class BBSCommand(BaseCommand):
                     "INSERT INTO bbs_messages "
                     "(sender_id, sender_name, recipient_name, message) "
                     "VALUES (?, ?, ?, ?)",
-                    (sender_id, sender_name, recipient_name.lower(), message_text),
+                    (sender_id, sender_name, recipient_lower, message_text),
                 )
                 conn.commit()
                 self.logger.info(

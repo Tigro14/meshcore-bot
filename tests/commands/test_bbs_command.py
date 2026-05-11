@@ -2,6 +2,7 @@
 
 import configparser
 import sqlite3
+import time
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -335,8 +336,6 @@ class TestBBSInboxNotification:
 
     @pytest.mark.asyncio
     async def test_notification_cooldown_prevents_repeat(self):
-        import time
-
         self.cmd._store_message("id_alice", "Alice", "Bob", "hi")
         msg = mock_message("hello", is_dm=True, sender_id="Bob")
         await self.cmd.check_inbox_notification(msg)
@@ -348,8 +347,6 @@ class TestBBSInboxNotification:
 
     @pytest.mark.asyncio
     async def test_notification_resent_after_cooldown(self):
-        import time
-
         self.cmd._store_message("id_alice", "Alice", "Bob", "hi")
         msg = mock_message("hello", is_dm=True, sender_id="Bob")
         # Pre-expire the cooldown
