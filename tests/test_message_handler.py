@@ -1849,8 +1849,14 @@ class TestProcessMessageDmKeywordRouting:
     """Regression tests for DM keyword reply routing."""
 
     @pytest.mark.asyncio
+<<<<<<< HEAD
     async def test_keyword_reply_uses_pubkey_for_dm_send(self, handler):
         """DM keyword flow should route reply via send_response using pubkey identity."""
+=======
+    async def test_keyword_reply_uses_prefix_sender_id_for_dm_send(self, handler):
+        """DM keyword flow should route reply using pubkey (not display name) to avoid
+        misrouting when two contacts share a similar name."""
+>>>>>>> c11d43b (fix: use sender_pubkey over sender_id when replying to DMs to prevent misrouting)
         handler.should_process_message = Mock(return_value=True)
         handler.bot.command_manager.check_keywords = Mock(return_value=[("test", "ack")])
         handler.bot.command_manager.match_randomline = Mock(return_value=None)
@@ -1868,6 +1874,7 @@ class TestProcessMessageDmKeywordRouting:
 
         await handler.process_message(message)
 
+<<<<<<< HEAD
         handler.bot.command_manager.send_response.assert_awaited_once()
         call = handler.bot.command_manager.send_response.await_args
         assert call.args[0] is message
@@ -1902,6 +1909,15 @@ class TestProcessMessageChannelKeywordFloodScope:
         assert call.args[0].reply_scope == "#pl-mz"
         assert call.args[1] == "sunny"
         assert call.kwargs["command_id"].startswith("keyword_wx_alice_")
+=======
+        handler.bot.command_manager.send_dm.assert_awaited_once()
+        args, kwargs = handler.bot.command_manager.send_dm.await_args
+        # Must use the pubkey (unique) rather than the display name to avoid misrouting
+        assert args[0] == "ab12deadbeefcafebabe"
+        assert args[1] == "ack"
+        assert args[2].startswith("keyword_test_ab12_")
+        assert kwargs["rate_limit_key"] == "ab12deadbeef"
+>>>>>>> c11d43b (fix: use sender_pubkey over sender_id when replying to DMs to prevent misrouting)
 
 
 # ---------------------------------------------------------------------------
