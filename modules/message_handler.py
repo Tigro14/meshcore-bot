@@ -3013,6 +3013,15 @@ class MessageHandler:
         if not self.should_process_message(message):
             return
 
+        # Notify DM senders of any pending BBS messages (before command processing)
+        if message.is_dm and "bbs" in self.bot.command_manager.commands:
+            bbs_command = self.bot.command_manager.commands["bbs"]
+            if bbs_command:
+                try:
+                    await bbs_command.check_inbox_notification(message)
+                except Exception as e:
+                    self.logger.error(f"Error checking BBS inbox notification: {e}")
+
         # Handle respond_to_mentions for channel messages
         if not message.is_dm:
             _mention_mode = self.bot.config.get("Bot", "respond_to_mentions", fallback="also").strip().lower()
