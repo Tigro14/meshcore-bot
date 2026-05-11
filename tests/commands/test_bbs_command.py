@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
-from modules.commands.bbs_command import BBSCommand, _NOTIFICATION_COOLDOWN_SECONDS
+from modules.commands.bbs_command import BBSCommand, NOTIFICATION_COOLDOWN_SECONDS
 from tests.conftest import mock_message
 
 # ---------------------------------------------------------------------------
@@ -351,7 +351,7 @@ class TestBBSInboxNotification:
         msg = mock_message("hello", is_dm=True, sender_id="Bob")
         # Pre-expire the cooldown
         self.cmd._notification_cooldowns["Bob"] = (
-            time.time() - _NOTIFICATION_COOLDOWN_SECONDS - 1
+            time.time() - NOTIFICATION_COOLDOWN_SECONDS - 1
         )
         await self.cmd.check_inbox_notification(msg)
         assert self.bot.command_manager.send_response.call_count == 1

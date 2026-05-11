@@ -21,7 +21,10 @@ from ..models import MeshMessage
 from .base_command import BaseCommand
 
 # How long (seconds) to wait before sending another inbox notification to the same user.
-_NOTIFICATION_COOLDOWN_SECONDS = 300
+NOTIFICATION_COOLDOWN_SECONDS = 300
+
+# Maximum UTF-8 byte length for a single BBS read response before it is chunked into per-message lines.
+_MAX_SINGLE_MESSAGE_BYTES = 150
 
 
 class BBSCommand(BaseCommand):
@@ -187,7 +190,7 @@ class BBSCommand(BaseCommand):
 
         # Send chunked if responses won't fit in one message
         full_response = "\n".join(lines)
-        if len(full_response.encode("utf-8")) > 150:
+        if len(full_response.encode("utf-8")) > _MAX_SINGLE_MESSAGE_BYTES:
             for line in lines:
                 await self.send_response(message, line, skip_user_rate_limit=True)
         else:
@@ -249,7 +252,7 @@ class BBSCommand(BaseCommand):
         # Enforce per-user notification cooldown
         now = time.time()
         last_notified = self._notification_cooldowns.get(sender_name, 0.0)
-        if now - last_notified < _NOTIFICATION_COOLDOWN_SECONDS:
+        if now - last_notified < NOTIFICATION_COOLDOWN_SECONDS:
             return
 
         count = self._get_pending_count(sender_name)

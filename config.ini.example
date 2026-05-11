@@ -1321,6 +1321,24 @@ enabled = true
 enabled = true
 # channels =
 
+[BBS_Command]
+# Per-user store-and-forward BBS messaging service.
+# Users can leave messages for other nodes that are delivered when the recipient next DMs the bot.
+# Usage: 's <name> <message>' to send, 'bbs r' to read, 'bbs list' to count pending messages.
+# true: Enable BBS service (default)
+# false: Disable BBS service
+enabled = true
+
+# Maximum number of unread messages that can be held for a single recipient.
+# Once the limit is reached, further sends to that recipient are rejected until they read their mail.
+# Default: 10
+max_messages_per_user = 10
+
+# Number of days to retain messages before they are automatically deleted.
+# Messages older than this (whether read or unread) are purged when the next send occurs.
+# Default: 7
+max_message_age_days = 7
+
 [Cmd_Command]
 enabled = true
 # Optional: override `cmd` output with a link to your full docs page
