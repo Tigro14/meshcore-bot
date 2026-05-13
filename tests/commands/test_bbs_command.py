@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
-from modules.commands.bbs_command import BBSCommand, NOTIFICATION_COOLDOWN_SECONDS
+from modules.commands.bbs_command import (
+    BBSCommand,
+    NOTIFICATION_COOLDOWN_SECONDS,
+    _PENDING_SELECTION_TTL,
+)
 from tests.conftest import mock_message
 
 # ---------------------------------------------------------------------------
@@ -57,6 +61,18 @@ def _make_db_manager() -> MagicMock:
         "CREATE INDEX IF NOT EXISTS idx_bbs_recipient "
         "ON bbs_messages(recipient_name, read_at)"
     )
+    # Create the complete_contact_tracking table (minimal columns for lookup tests)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS complete_contact_tracking (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            public_key  TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            role        TEXT NOT NULL DEFAULT 'CLIENT',
+            last_heard  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     conn.commit()
 
     db = MagicMock()
@@ -68,6 +84,18 @@ def _make_db_manager() -> MagicMock:
     db.connection = _conn_ctx
     db.db_path = ":memory:"
     return db
+
+
+def _add_contact(db_manager: MagicMock, name: str, public_key: str | None = None) -> None:
+    """Insert a contact into the in-memory complete_contact_tracking table."""
+    pk = public_key or f"pk_{name}"
+    with db_manager.connection() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO complete_contact_tracking (public_key, name, role) "
+            "VALUES (?, ?, 'CLIENT')",
+            (pk, name),
+        )
+        conn.commit()
 
 
 def _make_bot(enabled: bool = True, max_messages: int = 5) -> MagicMock:
@@ -207,6 +235,9 @@ class TestBBSExecute:
         self.bot = _make_bot()
         self.cmd = BBSCommand(self.bot)
         self.bot.command_manager.send_response = AsyncMock(return_value=True)
+        # Register Alice and Bob as known contacts so send tests can resolve them.
+        _add_contact(self.bot.db_manager, "Alice")
+        _add_contact(self.bot.db_manager, "Bob")
 
     @pytest.mark.asyncio
     async def test_send_shorthand_s(self):
@@ -233,12 +264,15 @@ class TestBBSExecute:
         assert self.cmd._get_pending_count("Alice") == 1
 
     @pytest.mark.asyncio
-    async def test_send_missing_message_returns_usage(self):
+    async def test_send_no_message_shows_shortlist(self):
+        """'s Alice' with no message shows a shortlist and does NOT store a message."""
         msg = mock_message("s Alice", is_dm=True, sender_id="Bob")
         await self.cmd.execute(msg)
-        # Should show usage, not store a message
         assert self.cmd._get_pending_count("Alice") == 0
         self.bot.command_manager.send_response.assert_called_once()
+        # Response should contain "Alice" from the numbered shortlist
+        response_text = self.bot.command_manager.send_response.call_args[0][1]
+        assert "Alice" in response_text
 
     @pytest.mark.asyncio
     async def test_read_dm_returns_messages(self):
@@ -364,3 +398,271 @@ class TestBBSInboxNotification:
         msg = mock_message("hello", is_dm=True, sender_id="Bob")
         await cmd.check_inbox_notification(msg)
         bot.command_manager.send_response.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests — _lookup_contacts
+# ---------------------------------------------------------------------------
+
+
+class TestBBSContactLookup:
+    """Tests for the _lookup_contacts helper."""
+
+    def setup_method(self):
+        self.bot = _make_bot()
+        self.cmd = BBSCommand(self.bot)
+
+    def test_partial_match_returns_name(self):
+        _add_contact(self.bot.db_manager, "Tom COD WP")
+        results = self.cmd._lookup_contacts("tom")
+        assert results == ["Tom COD WP"]
+
+    def test_case_insensitive_match(self):
+        _add_contact(self.bot.db_manager, "Tomas")
+        results = self.cmd._lookup_contacts("TOMAS")
+        assert len(results) == 1
+        assert results[0] == "Tomas"
+
+    def test_multiple_matches(self):
+        for name in ("Tomas", "tom COD", "tomaso", "TomTom"):
+            _add_contact(self.bot.db_manager, name)
+        results = self.cmd._lookup_contacts("tom")
+        assert len(results) == 4
+        assert "Tomas" in results
+        assert "tom COD" in results
+
+    def test_no_match_returns_empty(self):
+        _add_contact(self.bot.db_manager, "Alice")
+        results = self.cmd._lookup_contacts("zzz")
+        assert results == []
+
+    def test_max_5_results(self):
+        for i in range(8):
+            _add_contact(self.bot.db_manager, f"TomNode{i}")
+        results = self.cmd._lookup_contacts("tom")
+        assert len(results) <= 5
+
+    def test_table_missing_returns_empty(self):
+        """When complete_contact_tracking does not exist, return []."""
+        with self.bot.db_manager.connection() as conn:
+            conn.execute("DROP TABLE IF EXISTS complete_contact_tracking")
+            conn.commit()
+        results = self.cmd._lookup_contacts("alice")
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Tests — pending selection state helpers
+# ---------------------------------------------------------------------------
+
+
+class TestBBSPendingSelection:
+    """Tests for _get/_set/_clear_pending_selection."""
+
+    def setup_method(self):
+        self.cmd = BBSCommand(_make_bot())
+
+    def test_set_and_get(self):
+        self.cmd._set_pending_selection("user1", ["Alice", "Bob"])
+        result = self.cmd._get_pending_selection("user1")
+        assert result == ["Alice", "Bob"]
+
+    def test_get_returns_none_when_absent(self):
+        assert self.cmd._get_pending_selection("nobody") is None
+
+    def test_clear_removes_entry(self):
+        self.cmd._set_pending_selection("user1", ["Alice"])
+        self.cmd._clear_pending_selection("user1")
+        assert self.cmd._get_pending_selection("user1") is None
+
+    def test_clear_no_op_when_absent(self):
+        self.cmd._clear_pending_selection("ghost")  # must not raise
+
+    def test_expired_entry_returns_none(self):
+        # Manually set an already-expired entry
+        self.cmd._pending_selections["user1"] = (["Alice"], time.time() - 1)
+        assert self.cmd._get_pending_selection("user1") is None
+
+    def test_expired_entry_is_removed(self):
+        self.cmd._pending_selections["user1"] = (["Alice"], time.time() - 1)
+        self.cmd._get_pending_selection("user1")
+        assert "user1" not in self.cmd._pending_selections
+
+    def test_separate_senders_are_independent(self):
+        self.cmd._set_pending_selection("userA", ["Alice"])
+        self.cmd._set_pending_selection("userB", ["Bob"])
+        assert self.cmd._get_pending_selection("userA") == ["Alice"]
+        assert self.cmd._get_pending_selection("userB") == ["Bob"]
+        self.cmd._clear_pending_selection("userA")
+        assert self.cmd._get_pending_selection("userB") == ["Bob"]
+
+
+# ---------------------------------------------------------------------------
+# Tests — two-step send flow
+# ---------------------------------------------------------------------------
+
+
+class TestBBSSendTwoStep:
+    """Integration tests for the two-step send flow."""
+
+    def setup_method(self):
+        self.bot = _make_bot()
+        self.cmd = BBSCommand(self.bot)
+        self.bot.command_manager.send_response = AsyncMock(return_value=True)
+
+    def _last_response(self) -> str:
+        return self.bot.command_manager.send_response.call_args[0][1]
+
+    # ------------------------------------------------------------------
+    # Step 1: search / shortlist
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_step1_no_match_shows_error(self):
+        msg = mock_message("s zzz", is_dm=True, sender_id="Bob")
+        await self.cmd.execute(msg)
+        assert "No contact found" in self._last_response()
+        assert self.cmd._get_pending_count("zzz") == 0
+
+    @pytest.mark.asyncio
+    async def test_step1_multiple_matches_shows_numbered_list(self):
+        for name in ("Tomas", "tom COD WP", "tomaso"):
+            _add_contact(self.bot.db_manager, name)
+        msg = mock_message("bbs s tom", is_dm=True, sender_id="Bob")
+        await self.cmd.execute(msg)
+        resp = self._last_response()
+        assert "1 " in resp
+        assert "2 " in resp
+        assert "3 " in resp
+        # No message stored yet
+        for name in ("Tomas", "tom COD WP", "tomaso"):
+            assert self.cmd._get_pending_count(name) == 0
+
+    @pytest.mark.asyncio
+    async def test_step1_single_match_with_message_sends_directly(self):
+        _add_contact(self.bot.db_manager, "Alice")
+        msg = mock_message("s Alice Hello!", is_dm=True, sender_id="Bob")
+        await self.cmd.execute(msg)
+        assert self.cmd._get_pending_count("Alice") == 1
+        assert "stored" in self._last_response().lower()
+
+    @pytest.mark.asyncio
+    async def test_step1_single_match_without_message_shows_shortlist(self):
+        _add_contact(self.bot.db_manager, "Alice")
+        msg = mock_message("s Alice", is_dm=True, sender_id="Bob")
+        await self.cmd.execute(msg)
+        resp = self._last_response()
+        assert "Alice" in resp
+        assert self.cmd._get_pending_count("Alice") == 0
+
+    @pytest.mark.asyncio
+    async def test_step1_sets_pending_state(self):
+        for name in ("Tomas", "TomTom"):
+            _add_contact(self.bot.db_manager, name)
+        sender_key = "Bob"
+        msg = mock_message("s tom", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(msg)
+        assert self.cmd._get_pending_selection(sender_key) is not None
+
+    # ------------------------------------------------------------------
+    # Step 2: confirm by number
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_step2_sends_to_correct_candidate(self):
+        for name in ("Tomas", "tom COD WP", "tomaso"):
+            _add_contact(self.bot.db_manager, name)
+        sender_key = "Bob"
+        # Step 1
+        msg1 = mock_message("s tom", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(msg1)
+        # Step 2 — pick #2
+        msg2 = mock_message("s 2 Hey there", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(msg2)
+        # Message should go to the second candidate
+        candidates = ["Tomas", "tom COD WP", "tomaso"]
+        # Get what was stored (one of the candidates)
+        total = sum(self.cmd._get_pending_count(n) for n in candidates)
+        assert total == 1
+        assert "stored" in self._last_response().lower()
+
+    @pytest.mark.asyncio
+    async def test_step2_clears_pending_after_send(self):
+        _add_contact(self.bot.db_manager, "Alice")
+        _add_contact(self.bot.db_manager, "AliceB")
+        sender_key = "Bob"
+        msg1 = mock_message("s Alice", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(msg1)
+        msg2 = mock_message("s 1 hi", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(msg2)
+        # Pending state should be cleared
+        assert self.cmd._get_pending_selection(sender_key) is None
+
+    @pytest.mark.asyncio
+    async def test_step2_without_pending_shows_error(self):
+        msg = mock_message("s 1 hello", is_dm=True, sender_id="Bob")
+        await self.cmd.execute(msg)
+        resp = self._last_response()
+        assert "No pending" in resp
+
+    @pytest.mark.asyncio
+    async def test_step2_out_of_range_number_shows_error(self):
+        _add_contact(self.bot.db_manager, "Alice")
+        _add_contact(self.bot.db_manager, "AliceB")
+        sender_key = "Bob"
+        msg1 = mock_message("s Alice", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(msg1)
+        msg2 = mock_message("s 9 hello", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(msg2)
+        resp = self._last_response()
+        assert "between 1 and" in resp
+
+    @pytest.mark.asyncio
+    async def test_step2_number_without_message_shows_usage(self):
+        _add_contact(self.bot.db_manager, "Alice")
+        sender_key = "Bob"
+        msg1 = mock_message("s Alice", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(msg1)
+        msg2 = mock_message("s 1", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(msg2)
+        resp = self._last_response()
+        assert "Usage" in resp or "s 1" in resp
+
+    @pytest.mark.asyncio
+    async def test_step2_expired_pending_shows_error(self):
+        sender_key = "Bob"
+        # Inject an already-expired pending entry
+        self.cmd._pending_selections[sender_key] = (["Alice"], time.time() - 1)
+        msg = mock_message("s 1 hello", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(msg)
+        resp = self._last_response()
+        assert "No pending" in resp
+
+    # ------------------------------------------------------------------
+    # Space-in-name end-to-end scenario
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_spaced_name_two_step_end_to_end(self):
+        """Full scenario: 'Tom COD WP' is correctly resolved via two-step flow."""
+        _add_contact(self.bot.db_manager, "Tom COD WP")
+        _add_contact(self.bot.db_manager, "Tomas")
+        sender_key = "Alice"
+
+        # Step 1
+        step1 = mock_message("bbs s Tom", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(step1)
+        resp1 = self._last_response()
+        # Both names should appear in the shortlist
+        assert "Tom COD WP" in resp1 or "Tomas" in resp1
+
+        # Find the index for "Tom COD WP"
+        candidates = self.cmd._get_pending_selection(sender_key)
+        assert candidates is not None
+        idx = candidates.index("Tom COD WP") + 1
+
+        # Step 2
+        step2 = mock_message(f"bbs s {idx} Test message", is_dm=True, sender_id=sender_key)
+        await self.cmd.execute(step2)
+        assert self.cmd._get_pending_count("Tom COD WP") == 1
+        assert self.cmd._get_pending_count("Tomas") == 0

@@ -5,10 +5,23 @@ BBS (Bulletin Board System) command for the MeshCore Bot.
 Provides per-user store-and-forward messaging so nodes can leave messages
 for other nodes to read when they next contact the bot.
 
-Usage examples:
-  s <name> <message>           — send a message (shorthand)
-  send <name> <message>        — send a message
-  bbs s <name> <message>       — send a message
+Sending uses a two-step flow to handle node names that contain spaces or
+special characters:
+
+  Step 1 — search for a recipient:
+    s <partial_name>             — show a numbered shortlist of matching contacts
+    send <partial_name>          — same
+    bbs s <partial_name>         — same
+
+  Step 2 — confirm recipient and send:
+    s <N> <message>              — send message to match N from the shortlist
+    send <N> <message>           — same
+    bbs s <N> <message>          — same
+
+  If the search returns exactly one match and a message is already provided
+  in step 1 (e.g. "s Alice hello"), the message is sent immediately without
+  a shortlist.
+
   bbs r                        — read your pending messages (DM only)
   bbs list                     — show count of pending messages (DM only)
 """
@@ -26,6 +39,9 @@ NOTIFICATION_COOLDOWN_SECONDS = 300
 # Maximum UTF-8 byte length for a single BBS read response before it is chunked into per-message lines.
 _MAX_SINGLE_MESSAGE_BYTES = 150
 
+# How long (seconds) a pending recipient shortlist remains valid before expiring.
+_PENDING_SELECTION_TTL = 300
+
 
 class BBSCommand(BaseCommand):
     """Per-user BBS store-and-forward messaging.
@@ -40,22 +56,25 @@ class BBSCommand(BaseCommand):
     keywords = ["bbs", "s", "send"]
     description = (
         "BBS store-and-forward messaging. "
-        "'s <name> <msg>' to send, 'bbs r' to read, 'bbs list' for count."
+        "'s <name>' to search contacts, 's <N> <msg>' to send, "
+        "'bbs r' to read, 'bbs list' for count."
     )
     category = "basic"
 
     # Documentation
     short_description = "Store-and-forward BBS messages between mesh nodes"
-    usage = "s <name> <message> | bbs r | bbs list"
+    usage = "s <name> | s <N> <message> | bbs r | bbs list"
     examples = [
-        "s John Hey, are you around?",
-        "send Alice Meet at noon.",
-        "bbs s Bob Roger that!",
+        "s Tom",
+        "s 2 Hey, are you around?",
+        "bbs s Alice",
+        "bbs s 1 Meet at noon.",
         "bbs r",
         "bbs list",
     ]
     parameters = [
-        {"name": "name", "description": "Recipient's node name"},
+        {"name": "name", "description": "Partial recipient name to search for"},
+        {"name": "N", "description": "Number from the shortlist to select as recipient"},
         {"name": "message", "description": "Message text to store for the recipient"},
     ]
 
@@ -72,6 +91,8 @@ class BBSCommand(BaseCommand):
         )
         # In-memory cooldown: sender_name -> last notification timestamp
         self._notification_cooldowns: dict[str, float] = {}
+        # In-memory pending recipient shortlists: sender_key -> (candidates, expires_at)
+        self._pending_selections: dict[str, tuple[list[str], float]] = {}
 
     # ------------------------------------------------------------------
     # BaseCommand interface
@@ -85,7 +106,8 @@ class BBSCommand(BaseCommand):
     def get_help_text(self) -> str:
         return (
             "BBS store-and-forward messaging:\n"
-            "  s <name> <msg>   — store a message for a user\n"
+            "  s <name>         — search contacts & show shortlist\n"
+            "  s <N> <msg>      — send msg to match N from shortlist\n"
             "  bbs r            — read your pending messages (DM only)\n"
             "  bbs list         — count pending messages (DM only)"
         )
@@ -131,24 +153,85 @@ class BBSCommand(BaseCommand):
     # ------------------------------------------------------------------
 
     async def _handle_send(self, message: MeshMessage, args: str) -> bool:
-        """Handle: [bbs] s|send <name> <message>"""
+        """Handle: [bbs] s|send <name_or_number> [message]
+
+        Two-step flow
+        -------------
+        Step 1 — search:
+            s <query>
+            Looks up *query* in known contacts.  If multiple matches are found
+            a numbered shortlist (max 5) is returned and the selection is kept
+            in memory for ``_PENDING_SELECTION_TTL`` seconds.  If there is
+            exactly one match *and* a message was already provided, the message
+            is sent immediately (no shortlist needed).
+
+        Step 2 — confirm and send:
+            s <N> <message>
+            *N* is the number the user chose from the shortlist.  The pending
+            selection for this sender is consumed and the message is stored.
+        """
         if not args:
-            await self.send_response(message, "Usage: s <name> <message>")
+            await self.send_response(message, "Usage: s <name> | s <N> <message>")
             return True
 
         parts = args.split(None, 1)
-        if len(parts) < 2:
-            await self.send_response(message, "Usage: s <name> <message>")
-            return True
+        first = parts[0]
+        rest = parts[1] if len(parts) > 1 else ""
 
-        recipient_name, msg_text = parts[0], parts[1]
-
+        sender_key = message.sender_pubkey or message.sender_id or "unknown"
         sender_name = message.sender_id or "unknown"
-        sender_id = message.sender_pubkey or message.sender_id or "unknown"
 
+        # ------------------------------------------------------------------
+        # Step 2: the user is selecting from a pending shortlist
+        # ------------------------------------------------------------------
+        if first.isdigit():
+            candidates = self._get_pending_selection(sender_key)
+            if candidates is None:
+                await self.send_response(
+                    message,
+                    "No pending recipient list. Send 's <name>' to search.",
+                )
+                return True
+
+            idx = int(first)
+            if not (1 <= idx <= len(candidates)):
+                await self.send_response(
+                    message,
+                    f"Pick a number between 1 and {len(candidates)}.",
+                )
+                return True
+
+            if not rest:
+                await self.send_response(message, f"Usage: s {idx} <message>")
+                return True
+
+            recipient_name = candidates[idx - 1]
+            self._clear_pending_selection(sender_key)
+
+        # ------------------------------------------------------------------
+        # Step 1: search for a recipient by partial name
+        # ------------------------------------------------------------------
+        else:
+            matches = self._lookup_contacts(first)
+            if not matches:
+                await self.send_response(
+                    message, f"No contact found matching '{first}'."
+                )
+                return True
+
+            if len(matches) == 1 and rest:
+                # Single unambiguous match with message already present — send directly.
+                recipient_name = matches[0]
+            else:
+                # Multiple matches, or single match without a message → show shortlist.
+                self._set_pending_selection(sender_key, matches)
+                lines = "\n".join(f"{i + 1} {name}" for i, name in enumerate(matches))
+                await self.send_response(message, f"{lines}\nReply: s <N> <message>")
+                return True
+
+        # Store the confirmed message
         self._purge_old_messages()
-
-        success = self._store_message(sender_id, sender_name, recipient_name, msg_text)
+        success = self._store_message(sender_key, sender_name, recipient_name, rest)
         if success:
             await self.send_response(message, f"Message stored for {recipient_name}.")
         else:
@@ -274,6 +357,63 @@ class BBSCommand(BaseCommand):
         """Return True if the message is a BBS read or list command."""
         read_cmds = {"bbs r", "bbs read", "bbs l", "bbs list"}
         return content_lower in read_cmds or content_lower.startswith("bbs r ") or content_lower.startswith("bbs l ")
+
+    # ------------------------------------------------------------------
+    # Contact lookup
+    # ------------------------------------------------------------------
+
+    def _lookup_contacts(self, query: str) -> list[str]:
+        """Return up to 5 known contact names that contain *query* (case-insensitive).
+
+        Queries the ``complete_contact_tracking`` table.  Returns an empty list
+        when that table does not yet exist (e.g. fresh install before migrations
+        have run) or when no contacts match.
+        """
+        try:
+            with self.bot.db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name='complete_contact_tracking'"
+                )
+                if not cursor.fetchone():
+                    return []
+                cursor.execute(
+                    "SELECT DISTINCT name FROM complete_contact_tracking "
+                    "WHERE name LIKE ? COLLATE NOCASE "
+                    "ORDER BY last_heard DESC LIMIT 5",
+                    (f"%{query}%",),
+                )
+                return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            self.logger.error(f"Error looking up BBS contacts: {e}")
+            return []
+
+    # ------------------------------------------------------------------
+    # Pending recipient-selection state
+    # ------------------------------------------------------------------
+
+    def _get_pending_selection(self, sender_key: str) -> list[str] | None:
+        """Return the unexpired candidate list for *sender_key*, or ``None``."""
+        entry = self._pending_selections.get(sender_key)
+        if entry is None:
+            return None
+        candidates, expires_at = entry
+        if time.time() > expires_at:
+            self._pending_selections.pop(sender_key, None)
+            return None
+        return candidates
+
+    def _set_pending_selection(self, sender_key: str, candidates: list[str]) -> None:
+        """Store *candidates* for *sender_key* with a TTL of ``_PENDING_SELECTION_TTL``."""
+        self._pending_selections[sender_key] = (
+            candidates,
+            time.time() + _PENDING_SELECTION_TTL,
+        )
+
+    def _clear_pending_selection(self, sender_key: str) -> None:
+        """Remove the pending selection for *sender_key* (no-op if absent)."""
+        self._pending_selections.pop(sender_key, None)
 
     # ------------------------------------------------------------------
     # Database helpers
