@@ -2361,6 +2361,10 @@ def format_keyword_response_with_placeholders(
                 'total_companions_30d': mesh_info.get('total_companions_30d', 0),
                 'total_roomservers_30d': mesh_info.get('total_roomservers_30d', 0),
                 'total_sensors_30d': mesh_info.get('total_sensors_30d', 0),
+                # BBS statistics
+                'bbs_messages_today': mesh_info.get('bbs_messages_today', 0),
+                'bbs_pending_messages': mesh_info.get('bbs_pending_messages', 0),
+                'bbs_users_with_pending': mesh_info.get('bbs_users_with_pending', 0),
                 # Legacy placeholders
                 'repeaters': mesh_info.get('total_repeaters', 0),
                 'companions': mesh_info.get('total_companions', 0),
@@ -2383,6 +2387,9 @@ def format_keyword_response_with_placeholders(
                 'total_companions_30d': 0,
                 'total_roomservers_30d': 0,
                 'total_sensors_30d': 0,
+                'bbs_messages_today': 0,
+                'bbs_pending_messages': 0,
+                'bbs_users_with_pending': 0,
                 'repeaters': 0,
                 'companions': 0,
             }

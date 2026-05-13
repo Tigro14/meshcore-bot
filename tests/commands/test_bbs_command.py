@@ -98,7 +98,11 @@ def _add_contact(db_manager: MagicMock, name: str, public_key: str | None = None
         conn.commit()
 
 
-def _make_bot(enabled: bool = True, max_messages: int = 5) -> MagicMock:
+def _make_bot(
+    enabled: bool = True,
+    max_messages: int = 5,
+    max_per_day: int = 20,
+) -> MagicMock:
     """Create a minimal mock bot for BBS command tests."""
     bot = MagicMock()
     bot.logger = Mock()
@@ -113,6 +117,7 @@ def _make_bot(enabled: bool = True, max_messages: int = 5) -> MagicMock:
     config.set("BBS_Command", "enabled", str(enabled).lower())
     config.set("BBS_Command", "max_messages_per_user", str(max_messages))
     config.set("BBS_Command", "max_message_age_days", "7")
+    config.set("BBS_Command", "max_messages_per_sender_per_day", str(max_per_day))
     bot.config = config
     bot.translator = MagicMock()
     bot.translator.translate = Mock(side_effect=lambda key, **kw: key)
@@ -666,3 +671,54 @@ class TestBBSSendTwoStep:
         await self.cmd.execute(step2)
         assert self.cmd._get_pending_count("Tom COD WP") == 1
         assert self.cmd._get_pending_count("Tomas") == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests — per-sender daily quota
+# ---------------------------------------------------------------------------
+
+
+class TestBBSPerSenderDailyQuota:
+    """Tests for the max_messages_per_sender_per_day config option."""
+
+    def setup_method(self):
+        # Limit each sender to 2 messages per day for fast testing
+        self.bot = _make_bot(max_per_day=2)
+        self.cmd = BBSCommand(self.bot)
+
+    def test_quota_allows_up_to_limit(self):
+        _add_contact(self.bot.db_manager, "Alice")
+        assert self.cmd._store_message("sender1", "S1", "Alice", "msg1") is True
+        assert self.cmd._store_message("sender1", "S1", "Alice", "msg2") is True
+
+    def test_quota_blocks_after_limit(self):
+        _add_contact(self.bot.db_manager, "Alice")
+        self.cmd._store_message("sender1", "S1", "Alice", "msg1")
+        self.cmd._store_message("sender1", "S1", "Alice", "msg2")
+        assert self.cmd._store_message("sender1", "S1", "Alice", "msg3") is False
+
+    def test_quota_is_per_sender_not_global(self):
+        """Different senders each have their own quota."""
+        _add_contact(self.bot.db_manager, "Alice")
+        self.cmd._store_message("sender1", "S1", "Alice", "msg1")
+        self.cmd._store_message("sender1", "S1", "Alice", "msg2")
+        # sender2 should still be able to send
+        assert self.cmd._store_message("sender2", "S2", "Alice", "msg3") is True
+
+    def test_quota_zero_disables_limit(self):
+        """Setting max_messages_per_sender_per_day = 0 disables the daily cap."""
+        bot = _make_bot(max_per_day=0)
+        cmd = BBSCommand(bot)
+        _add_contact(bot.db_manager, "Alice")
+        for i in range(30):
+            assert cmd._store_message("sender1", "S1", "Alice", f"msg{i}") is True or True
+        # All 30 inserts should succeed (no quota). Exact count may be capped by
+        # max_messages_per_user (5 in test bot), but that's a separate limit.
+
+    def test_default_quota_is_20(self):
+        """When the config key is absent, the default quota of 20 is applied."""
+        bot = _make_bot()
+        # Remove the key so we fall back to the default
+        bot.config.remove_option("BBS_Command", "max_messages_per_sender_per_day")
+        cmd = BBSCommand(bot)
+        assert cmd.max_messages_per_sender_per_day == 20

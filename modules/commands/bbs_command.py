@@ -89,6 +89,9 @@ class BBSCommand(BaseCommand):
         self.max_message_age_days: int = self.get_config_value(
             "BBS_Command", "max_message_age_days", fallback=7, value_type="int"
         )
+        self.max_messages_per_sender_per_day: int = self.get_config_value(
+            "BBS_Command", "max_messages_per_sender_per_day", fallback=20, value_type="int"
+        )
         # In-memory cooldown: sender_name -> last notification timestamp
         self._notification_cooldowns: dict[str, float] = {}
         # In-memory pending recipient shortlists: sender_key -> (candidates, expires_at)
@@ -428,12 +431,15 @@ class BBSCommand(BaseCommand):
     ) -> bool:
         """Store a BBS message for *recipient_name*.
 
-        Returns True on success, False if the mailbox is full or an error occurs.
+        Returns True on success, False if the mailbox is full, the sender has
+        exceeded their daily quota, or an error occurs.
         """
         try:
             with self.bot.db_manager.connection() as conn:
                 cursor = conn.cursor()
                 recipient_lower = recipient_name.lower()
+
+                # Check recipient mailbox capacity
                 cursor.execute(
                     "SELECT COUNT(*) FROM bbs_messages "
                     "WHERE recipient_name = ? AND read_at IS NULL",
@@ -445,6 +451,22 @@ class BBSCommand(BaseCommand):
                         f"BBS mailbox full for {recipient_name} ({count} unread)"
                     )
                     return False
+
+                # Check per-sender daily quota (0 = unlimited)
+                if self.max_messages_per_sender_per_day > 0:
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM bbs_messages "
+                        "WHERE sender_id = ? "
+                        "AND date(sent_at) = date('now')",
+                        (sender_id,),
+                    )
+                    sent_today = cursor.fetchone()[0]
+                    if sent_today >= self.max_messages_per_sender_per_day:
+                        self.logger.warning(
+                            f"BBS daily quota reached for sender {sender_name} "
+                            f"({sent_today}/{self.max_messages_per_sender_per_day})"
+                        )
+                        return False
 
                 conn.execute(
                     "INSERT INTO bbs_messages "

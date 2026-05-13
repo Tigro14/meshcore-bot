@@ -1689,3 +1689,95 @@ class TestDeviceModeSchedulerJobs:
 
         scheduler.bot.repeater_manager.sync_device_mode_favourites_pass1.assert_awaited_once()
         scheduler.bot.repeater_manager.sync_device_mode_favourites_pass2.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# TestGetMeshInfoBBSStats
+# ---------------------------------------------------------------------------
+
+
+class TestGetMeshInfoBBSStats:
+    """Tests for the BBS stats keys populated by _get_mesh_info()."""
+
+    def _make_scheduler_with_bbs_db(self, messages_today=3, pending=5, users_with_pending=2):
+        """Return a scheduler whose DB mock returns realistic BBS stats."""
+        import sqlite3
+        from contextlib import contextmanager
+
+        conn = sqlite3.connect(":memory:")
+        conn.execute(
+            """CREATE TABLE bbs_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_id TEXT NOT NULL,
+                sender_name TEXT,
+                recipient_name TEXT NOT NULL,
+                message TEXT NOT NULL,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                read_at TIMESTAMP
+            )"""
+        )
+        # Insert rows for today
+        for i in range(messages_today):
+            conn.execute(
+                "INSERT INTO bbs_messages (sender_id, sender_name, recipient_name, message) "
+                "VALUES (?, ?, ?, ?)",
+                (f"sid{i}", f"Sender{i}", f"user{i % users_with_pending}", f"msg{i}"),
+            )
+        conn.commit()
+
+        db = MagicMock()
+
+        @contextmanager
+        def _conn_ctx():
+            yield conn
+
+        db.connection = _conn_ctx
+
+        scheduler = _make_scheduler()
+        del scheduler.bot.repeater_manager
+        scheduler.bot.db_manager = db
+        return scheduler, conn
+
+    def test_bbs_keys_present_in_result(self):
+        scheduler = _make_scheduler()
+        del scheduler.bot.repeater_manager
+        result = asyncio.run(scheduler._get_mesh_info())
+        assert "bbs_messages_today" in result
+        assert "bbs_pending_messages" in result
+        assert "bbs_users_with_pending" in result
+
+    def test_bbs_messages_today_counts_todays_rows(self):
+        scheduler, _ = self._make_scheduler_with_bbs_db(messages_today=4, pending=4, users_with_pending=2)
+        result = asyncio.run(scheduler._get_mesh_info())
+        assert result["bbs_messages_today"] == 4
+
+    def test_bbs_pending_messages_counts_unread(self):
+        scheduler, conn = self._make_scheduler_with_bbs_db(messages_today=3, pending=3, users_with_pending=2)
+        # Mark one as read
+        conn.execute("UPDATE bbs_messages SET read_at = CURRENT_TIMESTAMP WHERE id = 1")
+        conn.commit()
+        result = asyncio.run(scheduler._get_mesh_info())
+        assert result["bbs_pending_messages"] == 2
+
+    def test_bbs_users_with_pending_counts_distinct_recipients(self):
+        scheduler, _ = self._make_scheduler_with_bbs_db(messages_today=4, pending=4, users_with_pending=2)
+        result = asyncio.run(scheduler._get_mesh_info())
+        # 4 messages spread across 2 recipients (user0, user1)
+        assert result["bbs_users_with_pending"] == 2
+
+    def test_bbs_stats_zero_when_table_absent(self):
+        """When bbs_messages table does not exist, BBS stats default to 0."""
+        scheduler = _make_scheduler()
+        del scheduler.bot.repeater_manager
+        # Default db mock cursor returns None for fetchone → table not found
+        result = asyncio.run(scheduler._get_mesh_info())
+        assert result["bbs_messages_today"] == 0
+        assert result["bbs_pending_messages"] == 0
+        assert result["bbs_users_with_pending"] == 0
+
+    def test_has_mesh_info_placeholders_detects_bbs_keys(self):
+        scheduler = _make_scheduler()
+        assert scheduler._has_mesh_info_placeholders("{bbs_messages_today}") is True
+        assert scheduler._has_mesh_info_placeholders("{bbs_pending_messages}") is True
+        assert scheduler._has_mesh_info_placeholders("{bbs_users_with_pending}") is True
+        assert scheduler._has_mesh_info_placeholders("Hello world") is False

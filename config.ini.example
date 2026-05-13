@@ -461,6 +461,11 @@ category.funfact = fun
 # {new_roomservers_7d} - New roomserver devices first heard in last 7 days
 # {new_sensors_7d} - New sensor devices first heard in last 7 days
 # 
+# BBS statistics:
+# {bbs_messages_today} - Number of BBS messages sent today (UTC calendar day)
+# {bbs_pending_messages} - Total unread BBS messages currently stored
+# {bbs_users_with_pending} - Number of users who have at least one unread BBS message
+# 
 # Legacy placeholders (for backward compatibility):
 # {repeaters} - Same as {total_repeaters}
 # {companions} - Same as {total_companions}
@@ -469,6 +474,8 @@ category.funfact = fun
 # 0800 = Public:Good morning! Network: {total_contacts} total ({total_repeaters} repeaters, {total_companions} companions). {new_repeaters_7d} new repeaters, {new_companions_7d} new companions in last 7d. {recent_activity_24h} active in 24h.
 # Example with 30-day active devices and new devices in 7d:
 # 0900 = Public:{total_contacts_30d} active in last 30d: ({total_repeaters_30d} repeaters, {total_companions_30d} companions). {new_repeaters_7d} new repeaters, {new_companions_7d} new companions in last 7d. {recent_activity_24h} users active in last 24h.
+# Example with BBS stats:
+# 1800 = Public:BBS today: {bbs_messages_today} msgs sent, {bbs_pending_messages} pending for {bbs_users_with_pending} users.
 
 #0800 = Public:Good morning! Bot is online and ready.
 #1200 = Public:Midday status check - all systems operational.
@@ -1338,6 +1345,11 @@ max_messages_per_user = 10
 # Messages older than this (whether read or unread) are purged when the next send occurs.
 # Default: 7
 max_message_age_days = 7
+
+# Maximum number of messages a single sender can send in one calendar day (UTC).
+# Prevents flooding. Set to 0 to disable the daily limit.
+# Default: 20
+max_messages_per_sender_per_day = 20
 
 [Cmd_Command]
 enabled = true
