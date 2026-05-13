@@ -255,7 +255,7 @@
 
 <!-- Network Activity - Three Columns -->
 <div class="row mb-4">
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card h-100">
             <div class="card-header">
                 <i class="fas fa-users"></i> Bot User Statistics
@@ -275,7 +275,7 @@
         </div>
     </div>
     
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card h-100">
             <div class="card-header">
                 <i class="fas fa-comments"></i> Message Activity
@@ -295,7 +295,7 @@
         </div>
     </div>
     
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card h-100">
             <div class="card-header">
                 <i class="fas fa-terminal"></i> Command Activity
@@ -309,6 +309,30 @@
                     <div class="col-6">
                         <h4 id="total-commands" class="text-success">0</h4>
                         <small class="text-muted">Total Commands</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3" id="bbs-stats-card" style="display:none;">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-inbox"></i> BBS Mailbox
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-4">
+                        <h4 id="bbs-pending-messages" class="text-danger">0</h4>
+                        <small class="text-muted">Pending</small>
+                    </div>
+                    <div class="col-4">
+                        <h4 id="bbs-users-with-messages" class="text-warning">0</h4>
+                        <small class="text-muted">Recipients</small>
+                    </div>
+                    <div class="col-4">
+                        <h4 id="bbs-total-messages" class="text-primary">0</h4>
+                        <small class="text-muted">All Time</small>
                     </div>
                 </div>
             </div>
@@ -644,6 +668,15 @@ class ModernDashboard {
         this.updateElement('bot-reply-rate-24h', data.bot_reply_rate_24h !== undefined ? `${data.bot_reply_rate_24h}%` : '0%');
         this.updateElement('bot-reply-rate-7d', data.bot_reply_rate_7d !== undefined ? `${data.bot_reply_rate_7d}%` : '0%');
         this.updateElement('bot-reply-rate-30d', data.bot_reply_rate_30d !== undefined ? `${data.bot_reply_rate_30d}%` : '0%');
+
+        // BBS mailbox statistics (show card only when BBS data is available)
+        const bbsCard = document.getElementById('bbs-stats-card');
+        if (data.bbs_total_messages !== undefined && bbsCard) {
+            bbsCard.style.display = '';
+            this.updateElement('bbs-pending-messages', data.bbs_pending_messages);
+            this.updateElement('bbs-users-with-messages', data.bbs_users_with_messages);
+            this.updateElement('bbs-total-messages', data.bbs_total_messages);
+        }
         
         this.updatePathEncodingPieChart(data);
         this.updateIncomingPacketsPieChart(data);

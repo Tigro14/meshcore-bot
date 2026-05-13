@@ -127,6 +127,7 @@ class BotDataViewer:
         'path_stats',
         'schema_version',
         'greeter_rollout',
+        'bbs_messages',
     }
 
     def __init__(self, db_path="meshcore_bot.db", repeater_db_path=None, config_path="config.ini"):
@@ -5215,6 +5216,19 @@ class BotDataViewer:
                     AND is_currently_tracked = 1
                 """)
                 stats['cities'] = cursor.fetchone()[0]
+
+            # BBS store-and-forward statistics
+            if 'bbs_messages' in tables:
+                cursor.execute(
+                    "SELECT COUNT(*), COUNT(DISTINCT recipient_name) "
+                    "FROM bbs_messages WHERE read_at IS NULL"
+                )
+                row = cursor.fetchone()
+                stats['bbs_pending_messages'] = row[0] if row else 0
+                stats['bbs_users_with_messages'] = row[1] if row else 0
+
+                cursor.execute("SELECT COUNT(*) FROM bbs_messages")
+                stats['bbs_total_messages'] = cursor.fetchone()[0]
 
             return stats
 

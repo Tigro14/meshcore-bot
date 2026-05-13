@@ -526,6 +526,47 @@ class TestGetBasicStatsWithData:
         result = asyncio.run(cmd._get_basic_stats())
         assert isinstance(result, str)
 
+    def test_bbs_stats_appended_when_table_exists(self):
+        """BBS summary is appended when bbs_messages table exists with pending rows."""
+        import asyncio
+        import time
+        bot = _make_bot()
+        cmd = StatsCommand(bot)
+        with bot.db_manager.connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bbs_messages (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sender_id      TEXT NOT NULL,
+                    sender_name    TEXT,
+                    recipient_name TEXT NOT NULL,
+                    message        TEXT NOT NULL,
+                    sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    read_at        TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO bbs_messages (sender_id, sender_name, recipient_name, message) "
+                "VALUES ('A', 'Alice', 'bob', 'hi')"
+            )
+            conn.execute(
+                "INSERT INTO bbs_messages (sender_id, sender_name, recipient_name, message) "
+                "VALUES ('A', 'Alice', 'carol', 'hey')"
+            )
+            conn.commit()
+        result = asyncio.run(cmd._get_basic_stats())
+        # Translation key is returned as-is by mock, so the key itself appears
+        assert "commands.stats.basic.bbs" in result
+
+    def test_bbs_stats_skipped_when_table_missing(self):
+        """No BBS line when bbs_messages table does not exist."""
+        import asyncio
+        bot = _make_bot()
+        cmd = StatsCommand(bot)
+        result = asyncio.run(cmd._get_basic_stats())
+        assert "bbs" not in result.lower()
+
 
 # ---------------------------------------------------------------------------
 # _get_bot_user_leaderboard with data (covers lines 484-486)

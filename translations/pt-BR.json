@@ -266,7 +266,8 @@
                 "commands": "Cmds: {count} | Respostas: {replies}",
                 "top_command": "Top cmd: {command}",
                 "top_user": "Top user: {user}",
-                "none": "Nenhum"
+                "none": "Nenhum",
+                "bbs": "BBS: {msgs} msgs para {users} usuários"
             },
             "users": {
                 "header": "Usuários do Bot (24h):",
