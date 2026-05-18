@@ -1268,15 +1268,25 @@
     "elapsed": {
         "sync_device_clock": "Sync Device Clock"
     },
-    "errors": {
-        "rate_limited": "Rate limited. Wait {seconds:.1f} seconds",
-        "cooldown": "Command '{command}' is on cooldown. Wait {seconds} seconds.",
-        "access_denied": "❌ Access denied: Command '{command}' requires admin privileges",
-        "dm_only": "Command '{command}' can only be used in DMs",
-        "execution_error": "Error executing {command}: {error}",
-        "unknown_command": "Unknown command: {command}",
-        "no_response": "No response",
-        "generic_error": "Error: {error}"
+    "path": {
+      "description": "Decode hex path data to show which repeaters were involved in message routing",
+      "help": "Path: path [hex] - Decode path to show repeaters. Use path alone for current message path, or path [7e,01] for specific path.",
+      "no_valid_hex": "❌ No valid hex values found in path data.",
+      "no_path": "❌ No path information available in current message",
+      "error": "Error processing path: {error}",
+      "error_decoding": "❌ Error decoding path: {error}",
+      "error_extracting": "❌ Error extracting path from current message: {error}",
+      "path_prefix": "📡 Path: {path_string}",
+      "direct_connection": "📡 Direct connection (0 hops)",
+      "node_format": "{node_id}: {name}",
+      "node_unknown": "{node_id}: Unknown",
+      "node_collision": "{node_id}: {matches} repeaters",
+      "node_geographic": "{node_id}: {name} {confidence}",
+      "continuation_start": "...\n{line}",
+      "continuation_end": "\n...",
+      "truncation": "...",
+      "unknown_name": "Unknown",
+      "repeater_resolution_deferred": "Path: {path}\n\n💡 Tip: Repeater identification requires {minimum_path_bytes}-byte paths."
     },
     "messages": {
         "processing": "Processing message: {content}",
