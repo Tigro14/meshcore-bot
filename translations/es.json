@@ -1,33 +1,168 @@
 {
     "keywords": {
-        "help": ["ayuda", "ayudar"],
-        "ping": ["ping"],
-        "test": ["prueba", "pruebas", "t"],
-        "wx": ["clima", "tiempo", "wx", "wxa", "wxalert"],
-        "gwx": ["gwx", "globalweather", "gwxa", "clima", "tiempo"],
-        "aqi": ["aqi", "calidad", "aire", "air", "airquality", "air_quality"],
-        "solar": ["solar"],
-        "sun": ["sol"],
-        "moon": ["luna"],
-        "hfcond": ["hfcond", "hf"],
-        "satpass": ["satpass", "satelite"],
-        "sports": ["deportes", "sports", "score", "scores", "puntaje", "puntajes"],
-        "stats": ["estadisticas", "estadísticas", "stats"],
-        "channels": ["canales", "channels", "channel", "canal"],
-        "path": ["ruta", "path", "decode", "route", "decodificar"],
-        "prefix": ["prefijo", "prefix", "repeater", "lookup", "buscar"],
-        "repeater": ["repetidor", "repeater", "repeaters", "rp", "repetidores"],
-        "solarforecast": ["sf", "solarforecast", "pronostico", "pronóstico"],
-        "dice": ["dados", "dice"],
-        "roll": ["tirar", "roll"],
-        "joke": ["chiste", "joke", "jokes", "chistes"],
-        "dadjoke": ["chiste_papa", "dadjoke", "dad joke", "dadjokes", "dad jokes", "chiste de papa"],
-        "catfact": ["gatofact", "gato", "catfact", "cat", "meow", "purr", "kitten"],
-        "hacker": ["hacker", "sudo", "ps aux", "grep", "ls -l", "ls -la", "echo $PATH"],
-        "hello": ["hola", "hi", "hey", "buenos dias", "buenas tardes", "buenas noches", "saludos", "hello"],
-        "webviewer": ["webviewer", "web", "viewer", "wv", "visualizador"],
-        "cmd": ["cmd", "comandos", "commands"],
-        "advert": ["advert", "anuncio"]
+        "help": [
+            "ayuda",
+            "ayudar"
+        ],
+        "ping": [
+            "ping"
+        ],
+        "test": [
+            "prueba",
+            "pruebas",
+            "t"
+        ],
+        "wx": [
+            "clima",
+            "tiempo",
+            "wx",
+            "wxa",
+            "wxalert"
+        ],
+        "gwx": [
+            "gwx",
+            "globalweather",
+            "gwxa",
+            "clima",
+            "tiempo"
+        ],
+        "aqi": [
+            "aqi",
+            "calidad",
+            "aire",
+            "air",
+            "airquality",
+            "air_quality"
+        ],
+        "solar": [
+            "solar"
+        ],
+        "sun": [
+            "sol"
+        ],
+        "moon": [
+            "luna"
+        ],
+        "hfcond": [
+            "hfcond",
+            "hf"
+        ],
+        "satpass": [
+            "satpass",
+            "satelite"
+        ],
+        "sports": [
+            "deportes",
+            "sports",
+            "score",
+            "scores",
+            "puntaje",
+            "puntajes"
+        ],
+        "stats": [
+            "estadisticas",
+            "estadísticas",
+            "stats"
+        ],
+        "channels": [
+            "canales",
+            "channels",
+            "channel",
+            "canal"
+        ],
+        "path": [
+            "ruta",
+            "path",
+            "decode",
+            "route",
+            "decodificar"
+        ],
+        "prefix": [
+            "prefijo",
+            "prefix",
+            "repeater",
+            "lookup",
+            "buscar"
+        ],
+        "repeater": [
+            "repetidor",
+            "repeater",
+            "repeaters",
+            "rp",
+            "repetidores"
+        ],
+        "solarforecast": [
+            "sf",
+            "solarforecast",
+            "pronostico",
+            "pronóstico"
+        ],
+        "dice": [
+            "dados",
+            "dice"
+        ],
+        "roll": [
+            "tirar",
+            "roll"
+        ],
+        "joke": [
+            "chiste",
+            "joke",
+            "jokes",
+            "chistes"
+        ],
+        "dadjoke": [
+            "chiste_papa",
+            "dadjoke",
+            "dad joke",
+            "dadjokes",
+            "dad jokes",
+            "chiste de papa"
+        ],
+        "catfact": [
+            "gatofact",
+            "gato",
+            "catfact",
+            "cat",
+            "meow",
+            "purr",
+            "kitten"
+        ],
+        "hacker": [
+            "hacker",
+            "sudo",
+            "ps aux",
+            "grep",
+            "ls -l",
+            "ls -la",
+            "echo $PATH"
+        ],
+        "hello": [
+            "hola",
+            "hi",
+            "hey",
+            "buenos dias",
+            "buenas tardes",
+            "buenas noches",
+            "saludos",
+            "hello"
+        ],
+        "webviewer": [
+            "webviewer",
+            "web",
+            "viewer",
+            "wv",
+            "visualizador"
+        ],
+        "cmd": [
+            "cmd",
+            "comandos",
+            "commands"
+        ],
+        "advert": [
+            "advert",
+            "anuncio"
+        ]
     },
     "commands": {
         "help": {
@@ -145,7 +280,8 @@
                 "commands": "Cmds: {count} | Respuestas: {replies}",
                 "top_command": "Cmd principal: {command}",
                 "top_user": "Usuario principal: {user}",
-                "none": "Ninguno"
+                "none": "Ninguno",
+                "bbs": "BBS: {msgs} msgs para {users} usuarios"
             },
             "users": {
                 "header": "Usuarios del Bot (24h):",

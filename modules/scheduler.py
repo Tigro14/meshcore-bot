@@ -314,7 +314,10 @@ class MessageScheduler:
             'total_repeaters_30d': 0,
             'total_companions_30d': 0,
             'total_roomservers_30d': 0,
-            'total_sensors_30d': 0
+            'total_sensors_30d': 0,
+            'bbs_messages_today': 0,
+            'bbs_pending_messages': 0,
+            'bbs_users_with_pending': 0,
         }
 
         try:
@@ -435,6 +438,35 @@ class MessageScheduler:
             except Exception as e:
                 self.logger.debug(f"Error getting new device counts or 30-day activity: {e}")
 
+            # Collect BBS statistics
+            try:
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT 1 FROM sqlite_master "
+                        "WHERE type='table' AND name='bbs_messages'"
+                    )
+                    if cursor.fetchone():
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM bbs_messages "
+                            "WHERE date(sent_at) = date('now')"
+                        )
+                        info['bbs_messages_today'] = cursor.fetchone()[0] or 0
+
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM bbs_messages "
+                            "WHERE read_at IS NULL"
+                        )
+                        info['bbs_pending_messages'] = cursor.fetchone()[0] or 0
+
+                        cursor.execute(
+                            "SELECT COUNT(DISTINCT recipient_name) FROM bbs_messages "
+                            "WHERE read_at IS NULL"
+                        )
+                        info['bbs_users_with_pending'] = cursor.fetchone()[0] or 0
+            except Exception as e:
+                self.logger.debug(f"Error getting BBS stats: {e}")
+
         except Exception as e:
             self.logger.debug(f"Error getting mesh info: {e}")
 
@@ -448,6 +480,7 @@ class MessageScheduler:
             '{new_companions_7d}', '{new_repeaters_7d}', '{new_roomservers_7d}', '{new_sensors_7d}',
             '{total_contacts_30d}', '{total_repeaters_30d}', '{total_companions_30d}',
             '{total_roomservers_30d}', '{total_sensors_30d}',
+            '{bbs_messages_today}', '{bbs_pending_messages}', '{bbs_users_with_pending}',
             # Legacy placeholders for backward compatibility
             '{repeaters}', '{companions}'
         ]

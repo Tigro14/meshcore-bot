@@ -481,6 +481,11 @@ category.funfact = fun
 # {new_roomservers_7d} - New roomserver devices first heard in last 7 days
 # {new_sensors_7d} - New sensor devices first heard in last 7 days
 # 
+# BBS statistics:
+# {bbs_messages_today} - Number of BBS messages sent today (UTC calendar day)
+# {bbs_pending_messages} - Total unread BBS messages currently stored
+# {bbs_users_with_pending} - Number of users who have at least one unread BBS message
+# 
 # Legacy placeholders (for backward compatibility):
 # {repeaters} - Same as {total_repeaters}
 # {companions} - Same as {total_companions}
@@ -1353,6 +1358,29 @@ enabled = true
 [Dice_Command]
 enabled = true
 # channels =
+
+[BBS_Command]
+# Per-user store-and-forward BBS messaging service.
+# Users can leave messages for other nodes that are delivered when the recipient next DMs the bot.
+# Usage: 's <name> <message>' to send, 'bbs r' to read, 'bbs list' to count pending messages.
+# true: Enable BBS service (default)
+# false: Disable BBS service
+enabled = true
+
+# Maximum number of unread messages that can be held for a single recipient.
+# Once the limit is reached, further sends to that recipient are rejected until they read their mail.
+# Default: 10
+max_messages_per_user = 10
+
+# Number of days to retain messages before they are automatically deleted.
+# Messages older than this (whether read or unread) are purged when the next send occurs.
+# Default: 7
+max_message_age_days = 7
+
+# Maximum number of messages a single sender can send in one calendar day (UTC).
+# Prevents flooding. Set to 0 to disable the daily limit.
+# Default: 20
+max_messages_per_sender_per_day = 20
 
 [Cmd_Command]
 enabled = true

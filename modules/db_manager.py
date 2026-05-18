@@ -50,6 +50,7 @@ class DBManager:
         'purging_log',  # Repeater manager
         'mesh_connections',  # Mesh graph for path validation
         'observed_paths',  # Repeater manager - observed paths from adverts and messages
+        'bbs_messages',  # BBS store-and-forward messaging
     }
 
     def __init__(self, bot: Any, db_path: str = "meshcore_bot.db"):

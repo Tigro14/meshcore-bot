@@ -490,6 +490,30 @@ def _m0012_purging_log_details_column(cursor: sqlite3.Cursor) -> None:
         _add_column(cursor, "purging_log", "details", "TEXT")
 
 
+def _m0013_bbs_messages_table(cursor: sqlite3.Cursor) -> None:
+    """Create bbs_messages table for per-user store-and-forward BBS service."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bbs_messages (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_id      TEXT NOT NULL,
+            sender_name    TEXT,
+            recipient_name TEXT NOT NULL,
+            message        TEXT NOT NULL,
+            sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            read_at        TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bbs_recipient "
+        "ON bbs_messages(recipient_name, read_at)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bbs_sent_at ON bbs_messages(sent_at)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -509,6 +533,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (10, "create repeater/graph tables", _m0010_create_repeater_and_graph_tables),
     (11, "repeater/graph indexes", _m0011_repeater_and_graph_indexes),
     (12, "purging_log: add details column", _m0012_purging_log_details_column),
+    (13, "bbs_messages table", _m0013_bbs_messages_table),
 ]
 
 

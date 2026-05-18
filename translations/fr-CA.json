@@ -341,7 +341,8 @@
                 "commands": "Cmds : {count} | Réponses : {replies}",
                 "top_command": "Cmd principale : {command}",
                 "top_user": "Util. principal : {user}",
-                "none": "Aucun"
+                "none": "Aucun",
+                "bbs": "BBS: {msgs} msgs pour {users} utilisateurs"
             },
             "users": {
                 "header": "Utilisateurs du bot (24h) :",

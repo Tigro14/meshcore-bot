@@ -446,6 +446,27 @@ class StatsCommand(BaseCommand):
 {self.translate('commands.stats.basic.top_command', command=top_command)}
 {self.translate('commands.stats.basic.top_user', user=top_user)}"""
 
+                # BBS pending-message summary (only when the table exists)
+                try:
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master "
+                        "WHERE type='table' AND name='bbs_messages'"
+                    )
+                    if cursor.fetchone():
+                        cursor.execute(
+                            "SELECT COUNT(*), COUNT(DISTINCT recipient_name) "
+                            "FROM bbs_messages WHERE read_at IS NULL"
+                        )
+                        bbs_row = cursor.fetchone()
+                        bbs_msgs, bbs_users = bbs_row[0], bbs_row[1]
+                        response += "\n" + self.translate(
+                            'commands.stats.basic.bbs',
+                            msgs=bbs_msgs,
+                            users=bbs_users,
+                        )
+                except Exception:
+                    pass
+
                 return response
 
         except Exception as e:
