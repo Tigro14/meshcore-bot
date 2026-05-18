@@ -483,7 +483,7 @@ Or if installed as a package entry point:
 For a comprehensive list of all available commands with examples and detailed explanations, see [Command reference](docs/command-reference.md).
 
 Quick reference:
- - **Basic:** `test`, `ping`, `version`, `help`, `hello`, `cmd`, `llm`
+- **Basic:** `test`, `ping`, `version`, `help`, `hello`, `cmd`, `llm`
 - **Information:** `wx`, `gwx`, `aqi`, `sun`, `moon`, `solar`, `solarforecast`, `hfcond`, `satpass`, `channels`
 - **Emergency:** `alert`
 - **Gaming:** `dice`, `roll`, `magic8`
