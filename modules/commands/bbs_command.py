@@ -383,7 +383,7 @@ class BBSCommand(BaseCommand):
                     return []
                 cursor.execute(
                     "SELECT DISTINCT name FROM complete_contact_tracking "
-                    "WHERE name LIKE ? COLLATE NOCASE "
+                    "WHERE name LIKE ? COLLATE NOCASE AND role = 'companion' "
                     "ORDER BY last_heard DESC LIMIT 5",
                     (f"%{query}%",),
                 )
