@@ -86,14 +86,19 @@ def _make_db_manager() -> MagicMock:
     return db
 
 
-def _add_contact(db_manager: MagicMock, name: str, public_key: str | None = None) -> None:
+def _add_contact(
+    db_manager: MagicMock,
+    name: str,
+    public_key: str | None = None,
+    role: str = "companion",
+) -> None:
     """Insert a contact into the in-memory complete_contact_tracking table."""
     pk = public_key or f"pk_{name}"
     with db_manager.connection() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO complete_contact_tracking (public_key, name, role) "
-            "VALUES (?, ?, 'CLIENT')",
-            (pk, name),
+            "VALUES (?, ?, ?)",
+            (pk, name, role),
         )
         conn.commit()
 
@@ -454,6 +459,15 @@ class TestBBSContactLookup:
             conn.commit()
         results = self.cmd._lookup_contacts("alice")
         assert results == []
+
+    def test_non_companion_roles_excluded(self):
+        """Repeaters, roomservers and sensors must not appear in BBS recipient results."""
+        _add_contact(self.bot.db_manager, "NodeRepeater", role="repeater")
+        _add_contact(self.bot.db_manager, "NodeRoom", role="roomserver")
+        _add_contact(self.bot.db_manager, "NodeSensor", role="sensor")
+        _add_contact(self.bot.db_manager, "NodeCompanion", role="companion")
+        results = self.cmd._lookup_contacts("node")
+        assert results == ["NodeCompanion"]
 
 
 # ---------------------------------------------------------------------------
