@@ -5,8 +5,9 @@ Sends a short prompt to a local llama.cpp OpenAI-compatible endpoint.
 """
 
 import re
+import time
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, List
 import requests
 from .base_command import BaseCommand
 from ..models import MeshMessage
@@ -78,6 +79,19 @@ class LlmCommand(BaseCommand):
             fallback=True,
             value_type="bool",
         )
+        self.context_window_seconds = max(
+            0,
+            self.get_config_value("Llm_Command", "context_window_seconds", fallback=600, value_type="int"),
+        )
+        self.context_max_turns = max(
+            1,
+            min(
+                20,
+                self.get_config_value("Llm_Command", "context_max_turns", fallback=5, value_type="int"),
+            ),
+        )
+        # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
+        self._context: Dict[str, List[Dict[str, Any]]] = {}
 
     def can_execute(self, message: MeshMessage) -> bool:
         if not self.llm_enabled:
@@ -87,6 +101,40 @@ class LlmCommand(BaseCommand):
     def get_help_text(self) -> str:
         pfx = self._command_prefix
         return f"Usage: {pfx}llm <question> - Ask local llama.cpp for a short reply"
+
+    def _user_key(self, message: MeshMessage) -> str | None:
+        """Return a stable key for per-user context tracking, or None if unavailable."""
+        return message.sender_pubkey or message.sender_id or None
+
+    def _get_context_history(self, user_key: str) -> List[Dict[str, str]]:
+        """Return cleaned conversation history for *user_key*, pruning expired entries."""
+        if self.context_window_seconds <= 0:
+            return []
+
+        entries = self._context.get(user_key, [])
+        if not entries:
+            return []
+
+        cutoff = time.time() - self.context_window_seconds
+        fresh = [e for e in entries if e["ts"] >= cutoff]
+
+        # Keep only the most recent context_max_turns complete turns (2 messages each)
+        max_messages = self.context_max_turns * 2
+        if len(fresh) > max_messages:
+            fresh = fresh[-max_messages:]
+
+        self._context[user_key] = fresh
+        return [{"role": e["role"], "content": e["content"]} for e in fresh]
+
+    def _store_context(self, user_key: str, prompt: str, reply: str) -> None:
+        """Append a new user/assistant turn to the context store."""
+        if self.context_window_seconds <= 0:
+            return
+
+        now = time.time()
+        entries = self._context.setdefault(user_key, [])
+        entries.append({"role": "user", "content": prompt, "ts": now})
+        entries.append({"role": "assistant", "content": reply, "ts": now})
 
     def _extract_prompt(self, message: MeshMessage) -> str:
         content = message.content.strip()
@@ -111,12 +159,13 @@ class LlmCommand(BaseCommand):
 
         return ""
 
-    def _build_payload(self, prompt: str) -> Dict[str, Any]:
+    def _build_payload(self, prompt: str, history: List[Dict[str, str]] | None = None) -> Dict[str, Any]:
+        messages: List[Dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": prompt})
         payload: Dict[str, Any] = {
-            "messages": [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": prompt},
-            ],
+            "messages": messages,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "top_p": self.top_p,
@@ -151,11 +200,14 @@ class LlmCommand(BaseCommand):
             pfx = self._command_prefix
             return await self.send_response(message, f"Usage: {pfx}llm <question>")
 
+        user_key = self._user_key(message)
+        history = self._get_context_history(user_key) if user_key else []
+
         try:
             response = await asyncio.to_thread(
                 requests.post,
                 self.endpoint,
-                json=self._build_payload(prompt),
+                json=self._build_payload(prompt, history),
                 timeout=self.timeout_seconds,
             )
         except requests.RequestException as e:
@@ -179,4 +231,8 @@ class LlmCommand(BaseCommand):
 
         max_length = self.get_max_message_length(message)
         cleaned = self._clean_ai_response(content, max_length)
+
+        if user_key:
+            self._store_context(user_key, prompt, cleaned)
+
         return await self.send_response(message, cleaned)
