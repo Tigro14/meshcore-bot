@@ -1404,6 +1404,10 @@ top_p = 0.9
 timeout_seconds = 20
 # Remove <think> blocks from some reasoning models
 strip_thinking_tags = true
+# Per-user conversation context: 0 to disable, otherwise seconds a conversation is remembered
+context_window_seconds = 600
+# Maximum number of prior exchange turns (user+assistant pairs) to include in context
+context_max_turns = 5
 # channels =
 
 [Channels_Command]
