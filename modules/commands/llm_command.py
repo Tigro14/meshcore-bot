@@ -102,9 +102,9 @@ class LlmCommand(BaseCommand):
         pfx = self._command_prefix
         return f"Usage: {pfx}llm <question> - Ask local llama.cpp for a short reply"
 
-    def _user_key(self, message: MeshMessage) -> str:
-        """Return a stable key for per-user context tracking."""
-        return message.sender_pubkey or message.sender_id or "unknown"
+    def _user_key(self, message: MeshMessage) -> str | None:
+        """Return a stable key for per-user context tracking, or None if unavailable."""
+        return message.sender_pubkey or message.sender_id or None
 
     def _get_context_history(self, user_key: str) -> List[Dict[str, str]]:
         """Return cleaned conversation history for *user_key*, pruning expired entries."""
@@ -201,7 +201,7 @@ class LlmCommand(BaseCommand):
             return await self.send_response(message, f"Usage: {pfx}llm <question>")
 
         user_key = self._user_key(message)
-        history = self._get_context_history(user_key)
+        history = self._get_context_history(user_key) if user_key else []
 
         try:
             response = await asyncio.to_thread(
@@ -232,6 +232,7 @@ class LlmCommand(BaseCommand):
         max_length = self.get_max_message_length(message)
         cleaned = self._clean_ai_response(content, max_length)
 
-        self._store_context(user_key, prompt, cleaned)
+        if user_key:
+            self._store_context(user_key, prompt, cleaned)
 
         return await self.send_response(message, cleaned)
