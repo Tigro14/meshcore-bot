@@ -1,6 +1,5 @@
 """Tests for MessageScheduler pure logic (no threading, no asyncio)."""
 
-import asyncio
 import datetime
 import time
 from configparser import ConfigParser
