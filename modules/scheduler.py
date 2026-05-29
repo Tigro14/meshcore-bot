@@ -215,6 +215,10 @@ class MessageScheduler:
         try:
             contact = meshcore.get_contact_by_name(needle)
             if contact:
+                self.logger.debug(
+                    "Clock_Sync_Admin resolved target %s via contact name lookup",
+                    sanitize_name(needle),
+                )
                 return contact
         except Exception:
             pass
@@ -225,7 +229,16 @@ class MessageScheduler:
             if not public_key:
                 continue
             if public_key == needle or public_key.startswith(needle):
+                self.logger.debug(
+                    "Clock_Sync_Admin resolved target %s via public key lookup (%s...)",
+                    sanitize_name(needle),
+                    public_key[:12],
+                )
                 return contact_data
+        self.logger.debug(
+            "Clock_Sync_Admin could not resolve target %s",
+            sanitize_name(needle),
+        )
         return None
 
     def _get_clock_sync_admin_payload(self) -> str:
@@ -273,6 +286,12 @@ class MessageScheduler:
             self.logger.warning("Clock_Sync_Admin run skipped — command_payload is empty")
             return
 
+        self.logger.debug(
+            "Clock_Sync_Admin run starting: targets=%d payload=%s",
+            len(targets),
+            sanitize_name(payload),
+        )
+
         sent_count = 0
         failed_count = 0
         unknown_count = 0
@@ -280,6 +299,10 @@ class MessageScheduler:
         seen_contacts: set[str] = set()
 
         for target in targets:
+            self.logger.debug(
+                "Clock_Sync_Admin processing target identifier: %s",
+                sanitize_name(target),
+            )
             contact = self._resolve_clock_sync_target_contact(target)
             if not contact:
                 unknown_count += 1
@@ -313,6 +336,11 @@ class MessageScheduler:
                 failed_count += 1
                 self.logger.warning("Clock_Sync_Admin skipping target with empty recipient identifier")
                 continue
+            self.logger.debug(
+                "Clock_Sync_Admin sending payload to %s using recipient=%s",
+                sanitize_name(contact_name),
+                sanitize_name(recipient),
+            )
             try:
                 ok = await command_manager.send_dm(
                     recipient,

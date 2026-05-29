@@ -356,6 +356,14 @@ class TestClockSyncAdminScheduler:
             "unknown target" in str(call).lower()
             for call in scheduler.bot.logger.warning.call_args_list
         )
+        assert any(
+            "run starting" in str(call).lower()
+            for call in scheduler.bot.logger.debug.call_args_list
+        )
+        assert any(
+            "resolved target" in str(call).lower()
+            for call in scheduler.bot.logger.debug.call_args_list
+        )
 
     def test_handler_continues_when_send_raises(self, scheduler):
         scheduler.bot.config.add_section("Clock_Sync_Admin")

@@ -1621,24 +1621,44 @@ long_jokes = false
                 self.logger.warning("Cannot set radio clock - not connected to device")
                 return False
 
+            self.logger.debug(
+                "Clock sync start: direct device protocol get_time(0x05) -> set_time(0x06), last_sync=%s",
+                self.last_clock_sync_time,
+            )
+
             # Get current device time
             self.logger.info("Checking device time...")
             time_result = await self.meshcore.commands.get_time()
+            self.logger.debug(
+                "Clock sync get_time result: type=%s payload=%s",
+                getattr(time_result, "type", None),
+                getattr(time_result, "payload", None),
+            )
             if time_result.type == EventType.ERROR:
                 self.logger.warning("Device does not support time commands")
                 return False
 
             device_time = time_result.payload.get('time', 0)
             current_time = int(time.time())
+            time_diff = current_time - device_time
 
             self.logger.info(f"Device time: {device_time}, System time: {current_time}")
+            self.logger.debug(
+                "Clock sync delta computed: system_minus_device=%d seconds",
+                time_diff,
+            )
 
             # Only set time if device time is earlier than current time
             if device_time < current_time:
-                time_diff = current_time - device_time
                 self.logger.info(f"Device time is {time_diff} seconds behind, updating...")
 
                 result = await self.meshcore.commands.set_time(current_time)
+                self.logger.debug(
+                    "Clock sync set_time result: type=%s payload=%s target_time=%d",
+                    getattr(result, "type", None),
+                    getattr(result, "payload", None),
+                    current_time,
+                )
                 if result.type == EventType.OK:
                     self.logger.info(f"✓ Radio clock updated to: {current_time}")
                     self.last_clock_sync_time = current_time
@@ -1647,6 +1667,10 @@ long_jokes = false
                     self.logger.warning(f"Failed to update radio clock: {result}")
                     return False
             else:
+                self.logger.debug(
+                    "Clock sync skipped because device is not behind: system_minus_device=%d",
+                    time_diff,
+                )
                 self.logger.info("Device time is current or ahead - no update needed")
                 return True
 

@@ -561,6 +561,64 @@ class TestSendStartupAdvertTimeout:
 
         bot._record_send_failure.assert_called_once()
 
+
+class TestSetRadioClock:
+    def _make_bot(self, tmp_path: Path) -> "MeshCoreBot":
+        config_file = tmp_path / "config.ini"
+        db_path = tmp_path / "bot.db"
+        _write_config(config_file, db_path)
+        return MeshCoreBot(config_file=str(config_file))
+
+    def test_updates_clock_and_emits_debug_context(self, tmp_path):
+        from meshcore.events import EventType
+
+        bot = self._make_bot(tmp_path)
+        bot.meshcore = MagicMock()
+        bot.meshcore.is_connected = True
+
+        get_time_event = MagicMock()
+        get_time_event.type = EventType.CURRENT_TIME
+        get_time_event.payload = {"time": 100}
+
+        set_time_event = MagicMock()
+        set_time_event.type = EventType.OK
+        set_time_event.payload = {}
+
+        bot.meshcore.commands.get_time = MagicMock(return_value=_make_coro(get_time_event))
+        bot.meshcore.commands.set_time = MagicMock(return_value=_make_coro(set_time_event))
+
+        with patch("modules.core.time.time", return_value=200), patch.object(bot.logger, "debug") as mock_debug:
+            result = asyncio.run(bot.set_radio_clock())
+
+        assert result is True
+        bot.meshcore.commands.set_time.assert_called_once_with(200)
+        debug_messages = "\n".join(str(call) for call in mock_debug.call_args_list)
+        assert "get_time(0x05) -> set_time(0x06)" in debug_messages
+        assert "system_minus_device=100" in debug_messages
+
+    def test_skips_update_when_device_not_behind_and_logs_delta(self, tmp_path):
+        from meshcore.events import EventType
+
+        bot = self._make_bot(tmp_path)
+        bot.meshcore = MagicMock()
+        bot.meshcore.is_connected = True
+
+        get_time_event = MagicMock()
+        get_time_event.type = EventType.CURRENT_TIME
+        get_time_event.payload = {"time": 250}
+
+        bot.meshcore.commands.get_time = MagicMock(return_value=_make_coro(get_time_event))
+        bot.meshcore.commands.set_time = MagicMock()
+
+        with patch("modules.core.time.time", return_value=200), patch.object(bot.logger, "debug") as mock_debug:
+            result = asyncio.run(bot.set_radio_clock())
+
+        assert result is True
+        bot.meshcore.commands.set_time.assert_not_called()
+        debug_messages = "\n".join(str(call) for call in mock_debug.call_args_list)
+        assert "Clock sync skipped because device is not behind" in debug_messages
+        assert "system_minus_device=-50" in debug_messages
+
 # ---------------------------------------------------------------------------
 # _BotAdminServer — admin HTTP API
 # ---------------------------------------------------------------------------
