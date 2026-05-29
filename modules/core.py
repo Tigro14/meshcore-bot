@@ -7,6 +7,8 @@ Contains the main bot class and message processing logic
 import asyncio
 import atexit
 import configparser
+from datetime import datetime
+from datetime import timezone as _dt_tz
 import json
 import logging
 import signal
@@ -1645,7 +1647,6 @@ long_jokes = false
             # offset so devices expecting local-time clocks accept the sync.
             if self.config.getboolean('Bot', 'radio_clock_use_local_time', fallback=False):
                 try:
-                    from datetime import datetime, timezone as _dt_tz
                     tz, _ = get_config_timezone(self.config, self.logger)
                     utc_offset = tz.utcoffset(datetime.now(_dt_tz.utc))
                     if utc_offset is not None:

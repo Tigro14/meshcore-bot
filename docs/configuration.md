@@ -162,11 +162,13 @@ Use this section to schedule a daily (cron-style) DM payload to repeater targets
 
 If disabled, misconfigured, or missing targets, the scheduler skips cleanly. Unknown targets are skipped individually without aborting the rest of the run.
 
-### Local-time mesh networks
+## Radio clock and local-time mesh networks (`[Bot]`)
 
-Some mesh networks store and compare device clocks in **local time** rather than UTC. If remote devices reject the bot's clock sync with `ERR: clock cannot go backwards`, it usually means the bot's radio is stamping outgoing messages with UTC while the remote devices expect local time.
+By default the bot syncs its radio device clock to the host system's UTC epoch (`time.time()`). Most mesh networks use standard UTC-epoch timestamps and need no extra configuration.
 
-Set the following option in `[Bot]` to apply the configured timezone's UTC offset when syncing the bot's own radio clock:
+Some networks store and compare device clocks in **local time** rather than UTC. On such networks remote devices may reject a clock sync with `ERR: clock cannot go backwards` because the bot's radio stamps outgoing messages with UTC while the remote devices expect local time.
+
+To apply the configured timezone's UTC offset (including daylight-saving adjustments) when syncing the radio clock, set:
 
 ```ini
 [Bot]
@@ -174,5 +176,5 @@ timezone = Europe/Paris
 radio_clock_use_local_time = true
 ```
 
-With `radio_clock_use_local_time = true` the bot adds the current UTC offset of the configured `timezone` (including daylight-saving adjustments) to the epoch value before calling `set_time` on the radio. Leave this `false` (the default) for networks that use standard UTC-epoch timestamps.
+- **`radio_clock_use_local_time`** – `true`/`false` (default `false`). When `true`, the bot adds the current UTC offset of `timezone` to the epoch before calling `set_time` on the radio. The offset is recomputed on every sync, so DST transitions are handled automatically.
 
