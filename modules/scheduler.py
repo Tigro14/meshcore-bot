@@ -307,7 +307,12 @@ class MessageScheduler:
                 continue
             seen_contacts.update(dedup_keys)
 
+            # send_dm supports both public keys and contact names; prefer pubkey when available.
             recipient = public_key if public_key else contact_name
+            if not recipient:
+                failed_count += 1
+                self.logger.warning("Clock_Sync_Admin skipping target with empty recipient identifier")
+                continue
             try:
                 ok = await command_manager.send_dm(
                     recipient,
