@@ -25,7 +25,7 @@ from .scheduled_message_cron import (
     parse_schedule_key,
     parse_scheduled_message_value,
 )
-from .security_utils import validate_external_url
+from .security_utils import sanitize_name, validate_external_url
 from .utils import decode_escape_sequences, format_keyword_response_with_placeholders, get_config_timezone
 
 
@@ -127,6 +127,7 @@ class MessageScheduler:
                 except Exception as e:
                     self.logger.warning(f"Error setting up scheduled message '{schedule_key}': {e}")
 
+        self._setup_clock_sync_admin_job(tz)
         self._apscheduler.start()
         self.logger.info(f"APScheduler started with {len(self.scheduled_messages)} scheduled message(s)")
 
@@ -148,6 +149,231 @@ class MessageScheduler:
                 self.logger.info("Interval-based advertising disabled (advert_interval_hours = 0)")
         except Exception as e:
             self.logger.warning(f"Error setting up interval advertising: {e}")
+
+    def _setup_clock_sync_admin_job(self, tz) -> None:
+        """Register scheduled Clock_Sync_Admin DM job if configured and valid."""
+        if self._apscheduler is None:
+            return
+        if not self.bot.config.has_section("Clock_Sync_Admin"):
+            return
+
+        enabled = self.bot.config.getboolean("Clock_Sync_Admin", "enabled", fallback=False)
+        if not enabled:
+            self.logger.info("Clock_Sync_Admin schedule disabled")
+            return
+
+        schedule_raw = (self.bot.config.get("Clock_Sync_Admin", "schedule", fallback="0 3 * * *") or "").strip()
+        parsed = parse_schedule_key(schedule_raw, tz)
+        if parsed.trigger is None:
+            self.logger.warning("Clock_Sync_Admin invalid schedule %r; job not registered", schedule_raw)
+            return
+
+        targets = self._parse_clock_sync_admin_targets(
+            self.bot.config.get("Clock_Sync_Admin", "targets", fallback="")
+        )
+        if not targets:
+            self.logger.warning("Clock_Sync_Admin has no targets configured; job not registered")
+            return
+
+        self._apscheduler.add_job(
+            self.run_clock_sync_admin_job_sync,
+            parsed.trigger,
+            id="clock_sync_admin_daily",
+            replace_existing=True,
+        )
+        self.logger.info(
+            "Scheduled Clock_Sync_Admin job: %s (%d unique target(s))",
+            parsed.display_label,
+            len(targets),
+        )
+
+    @staticmethod
+    def _parse_clock_sync_admin_targets(raw_targets: str) -> list[str]:
+        """Parse comma-separated targets into a de-duplicated ordered list."""
+        seen: set[str] = set()
+        targets: list[str] = []
+        for token in (raw_targets or "").split(","):
+            candidate = token.strip().strip("\"'")
+            if not candidate:
+                continue
+            dedup_key = candidate.lower()
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            targets.append(candidate)
+        return targets
+
+    def _resolve_clock_sync_target_contact(self, identifier: str) -> dict[str, Any] | None:
+        """Resolve configured identifier to a mesh contact by name or public key/prefix."""
+        meshcore = getattr(self.bot, "meshcore", None)
+        if not meshcore:
+            return None
+        needle = (identifier or "").strip()
+        if not needle:
+            return None
+
+        try:
+            contact = meshcore.get_contact_by_name(needle)
+            if contact:
+                self.logger.debug(
+                    "Clock_Sync_Admin resolved target %s via contact name lookup",
+                    sanitize_name(needle),
+                )
+                return contact
+        except Exception:
+            pass
+
+        contacts = getattr(meshcore, "contacts", {}) or {}
+        for contact_data in contacts.values():
+            public_key = (contact_data.get("public_key", "") or "").strip()
+            if not public_key:
+                continue
+            if public_key == needle or public_key.startswith(needle):
+                self.logger.debug(
+                    "Clock_Sync_Admin resolved target %s via public key lookup (%s...)",
+                    sanitize_name(needle),
+                    public_key[:12],
+                )
+                return contact_data
+        self.logger.debug(
+            "Clock_Sync_Admin could not resolve target %s",
+            sanitize_name(needle),
+        )
+        return None
+
+    def _get_clock_sync_admin_payload(self) -> str:
+        """Return configured Clock_Sync_Admin payload, with a safe default."""
+        payload = self.bot.config.get(
+            "Clock_Sync_Admin",
+            "command_payload",
+            fallback="clock sync admin",
+        )
+        return (payload or "").strip()
+
+    def run_clock_sync_admin_job_sync(self) -> None:
+        """APScheduler sync wrapper for the async Clock_Sync_Admin DM run."""
+        self._run_async_on_main_loop(self._run_clock_sync_admin_job_async(), timeout=300.0)
+
+    async def _run_clock_sync_admin_job_async(self) -> None:
+        """Resolve targets and send configured clock-sync admin payload via DM."""
+        if not self.bot.config.getboolean("Clock_Sync_Admin", "enabled", fallback=False):
+            self.logger.debug("Clock_Sync_Admin run skipped — disabled")
+            return
+        if not self.bot.connected or not getattr(self.bot, "meshcore", None):
+            self.logger.warning("Clock_Sync_Admin run skipped — bot/radio not connected")
+            return
+        if self.bot.is_radio_zombie:
+            self.logger.warning("Clock_Sync_Admin run skipped — radio in zombie state")
+            return
+        if self.bot.is_radio_offline:
+            self.logger.warning("Clock_Sync_Admin run skipped — radio offline")
+            return
+
+        command_manager = getattr(self.bot, "command_manager", None)
+        if command_manager is None or not hasattr(command_manager, "send_dm"):
+            self.logger.warning("Clock_Sync_Admin run skipped — DM pipeline unavailable")
+            return
+
+        targets = self._parse_clock_sync_admin_targets(
+            self.bot.config.get("Clock_Sync_Admin", "targets", fallback="")
+        )
+        if not targets:
+            self.logger.warning("Clock_Sync_Admin run skipped — no targets configured")
+            return
+
+        payload = self._get_clock_sync_admin_payload()
+        if not payload:
+            self.logger.warning("Clock_Sync_Admin run skipped — command_payload is empty")
+            return
+
+        self.logger.debug(
+            "Clock_Sync_Admin run starting: targets=%d payload=%s",
+            len(targets),
+            sanitize_name(payload),
+        )
+
+        sent_count = 0
+        failed_count = 0
+        unknown_count = 0
+        duplicate_count = 0
+        seen_contacts: set[str] = set()
+
+        for target in targets:
+            self.logger.debug(
+                "Clock_Sync_Admin processing target identifier: %s",
+                sanitize_name(target),
+            )
+            contact = self._resolve_clock_sync_target_contact(target)
+            if not contact:
+                unknown_count += 1
+                self.logger.warning(
+                    "Clock_Sync_Admin skipping unknown target: %s",
+                    sanitize_name(target),
+                )
+                continue
+
+            public_key = (contact.get("public_key", "") or "").strip()
+            contact_name = (
+                (contact.get("name", "") or "").strip()
+                or (contact.get("adv_name", "") or "").strip()
+                or target
+            )
+            dedup_keys = {f"name:{(contact_name or '').lower()}"}
+            if public_key:
+                dedup_keys.add(f"pk:{public_key.lower()}")
+            if dedup_keys & seen_contacts:
+                duplicate_count += 1
+                self.logger.info(
+                    "Clock_Sync_Admin skipping duplicate target resolution: %s",
+                    sanitize_name(contact_name),
+                )
+                continue
+            seen_contacts.update(dedup_keys)
+
+            # send_dm supports both public keys and contact names; prefer pubkey when available.
+            recipient = public_key if public_key else contact_name
+            if not recipient:
+                failed_count += 1
+                self.logger.warning("Clock_Sync_Admin skipping target with empty recipient identifier")
+                continue
+            self.logger.debug(
+                "Clock_Sync_Admin sending payload to %s using recipient=%s",
+                sanitize_name(contact_name),
+                sanitize_name(recipient),
+            )
+            try:
+                ok = await command_manager.send_dm(
+                    recipient,
+                    payload,
+                    skip_user_rate_limit=True,
+                )
+                if ok:
+                    sent_count += 1
+                    self.logger.info(
+                        "Clock_Sync_Admin sent to %s",
+                        sanitize_name(contact_name),
+                    )
+                else:
+                    failed_count += 1
+                    self.logger.warning(
+                        "Clock_Sync_Admin send failed for %s",
+                        sanitize_name(contact_name),
+                    )
+            except Exception as e:
+                failed_count += 1
+                self.logger.warning(
+                    "Clock_Sync_Admin send error for %s: %s",
+                    sanitize_name(contact_name),
+                    e,
+                )
+
+        self.logger.info(
+            "Clock_Sync_Admin summary: sent=%d failed=%d unknown=%d duplicates_skipped=%d",
+            sent_count,
+            failed_count,
+            unknown_count,
+            duplicate_count,
+        )
 
     def _setup_device_mode_scheduler_jobs(self) -> None:
         """One-shot jobs for auto_manage_contacts=device: firmware autoadd + favourite hygiene."""
@@ -1533,4 +1759,3 @@ class MessageScheduler:
             self.bot.logger.error(f"Failed to send radio-offline alert email: {e}")
 
     # ── Maintenance helpers ──────────────────────────────────────────────────
-
