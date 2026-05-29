@@ -295,17 +295,19 @@ class MessageScheduler:
                 or (contact.get("adv_name", "") or "").strip()
                 or target
             )
-            dedup_key = (public_key or contact_name).lower()
-            if dedup_key in seen_contacts:
+            dedup_keys = {(contact_name or "").lower()}
+            if public_key:
+                dedup_keys.add(public_key.lower())
+            if dedup_keys & seen_contacts:
                 duplicate_count += 1
                 self.logger.info(
                     "Clock_Sync_Admin skipping duplicate target resolution: %s",
                     sanitize_name(contact_name),
                 )
                 continue
-            seen_contacts.add(dedup_key)
+            seen_contacts.update(dedup_keys)
 
-            recipient = public_key or contact_name
+            recipient = public_key if public_key else contact_name
             try:
                 ok = await command_manager.send_dm(
                     recipient,
