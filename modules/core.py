@@ -39,7 +39,7 @@ from .scheduler import MessageScheduler
 from .service_plugin_loader import ServicePluginLoader
 from .solar_conditions import set_config
 from .transmission_tracker import TransmissionTracker
-from .utils import resolve_path
+from .utils import get_config_timezone, resolve_path
 from .web_viewer.integration import WebViewerIntegration
 
 
@@ -1640,6 +1640,25 @@ long_jokes = false
 
             device_time = time_result.payload.get('time', 0)
             current_time = int(time.time())
+
+            # If radio_clock_use_local_time is enabled, apply the configured timezone
+            # offset so devices expecting local-time clocks accept the sync.
+            if self.config.getboolean('Bot', 'radio_clock_use_local_time', fallback=False):
+                try:
+                    from datetime import datetime, timezone as _dt_tz
+                    tz, _ = get_config_timezone(self.config, self.logger)
+                    utc_offset = tz.utcoffset(datetime.now(_dt_tz.utc))
+                    if utc_offset is not None:
+                        offset_seconds = int(utc_offset.total_seconds())
+                        current_time += offset_seconds
+                        self.logger.debug(
+                            "Clock sync local time offset applied: %+d seconds (tz=%s)",
+                            offset_seconds,
+                            tz,
+                        )
+                except Exception as exc:
+                    self.logger.warning("Clock sync could not apply local time offset: %s", exc)
+
             time_diff = current_time - device_time
 
             self.logger.info(f"Device time: {device_time}, System time: {current_time}")

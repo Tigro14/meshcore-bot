@@ -152,6 +152,13 @@ dm_flood_after = 2
 # Leave empty to use system timezone
 timezone = 
 
+# Set the radio device clock to local time instead of UTC when syncing.
+# Enable this when your mesh network devices use local time rather than UTC
+# (e.g., Europe/Paris devices that display and compare local timestamps).
+# Requires a valid timezone setting above (or falls back to system timezone).
+# Default: false (radio clock is set to UTC)
+radio_clock_use_local_time = false
+
 # Bot location for geographic proximity calculations and astronomical data
 # Default latitude for bot location (decimal degrees)
 # Example: 40.7128 for New York City, 48.50 for Victoria BC

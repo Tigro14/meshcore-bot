@@ -161,3 +161,18 @@ Use this section to schedule a daily (cron-style) DM payload to repeater targets
 - **`command_payload`** – DM payload sent to each resolved target (`clock sync admin` by default).
 
 If disabled, misconfigured, or missing targets, the scheduler skips cleanly. Unknown targets are skipped individually without aborting the rest of the run.
+
+### Local-time mesh networks
+
+Some mesh networks store and compare device clocks in **local time** rather than UTC. If remote devices reject the bot's clock sync with `ERR: clock cannot go backwards`, it usually means the bot's radio is stamping outgoing messages with UTC while the remote devices expect local time.
+
+Set the following option in `[Bot]` to apply the configured timezone's UTC offset when syncing the bot's own radio clock:
+
+```ini
+[Bot]
+timezone = Europe/Paris
+radio_clock_use_local_time = true
+```
+
+With `radio_clock_use_local_time = true` the bot adds the current UTC offset of the configured `timezone` (including daylight-saving adjustments) to the epoch value before calling `set_time` on the radio. Leave this `false` (the default) for networks that use standard UTC-epoch timestamps.
+
