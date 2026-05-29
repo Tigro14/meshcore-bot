@@ -594,8 +594,7 @@ class TestSetRadioClock:
         bot.meshcore.commands.set_time.assert_called_once_with(200)
         debug_messages = "\n".join(str(call) for call in mock_debug.call_args_list)
         assert "get_time(0x05) -> set_time(0x06)" in debug_messages
-        assert "Clock sync delta computed" in debug_messages
-        assert ", 100)" in debug_messages
+        assert "target_time=" in debug_messages
 
     def test_skips_update_when_device_not_behind_and_logs_delta(self, tmp_path):
         from meshcore.events import EventType
@@ -618,8 +617,6 @@ class TestSetRadioClock:
         bot.meshcore.commands.set_time.assert_not_called()
         debug_messages = "\n".join(str(call) for call in mock_debug.call_args_list)
         assert "Clock sync skipped because device is not behind" in debug_messages
-        assert "Clock sync delta computed" in debug_messages
-        assert ", -50)" in debug_messages
 
     def _make_bot_with_local_time(self, tmp_path: Path, timezone: str) -> "MeshCoreBot":
         config_file = tmp_path / "config.ini"

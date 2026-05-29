@@ -3266,6 +3266,19 @@ class MessageHandler:
             f"Processing message: '{message.content}' from {message.sender_id} in {'DM' if message.is_dm else message.channel}"
         )
 
+        # Log extra context when the message looks like a MeshCore firmware error response.
+        if message.content.strip().startswith("ERR:"):
+            last_sync = getattr(self.bot, "last_clock_sync_time", None)
+            self.logger.debug(
+                "Received MeshCore error response from %s: '%s' "
+                "(bot last_clock_sync_time=%s, radio_clock_use_local_time=%s, timezone=%s)",
+                message.sender_id,
+                message.content.strip(),
+                last_sync,
+                self.bot.config.get("Bot", "radio_clock_use_local_time", fallback="false"),
+                self.bot.config.get("Bot", "timezone", fallback="(not set)"),
+            )
+
         # Check for advert command (DM only)
         if message.is_dm and message.content.strip().lower() == "advert":
             await self.bot.command_manager.handle_advert_command(message)
