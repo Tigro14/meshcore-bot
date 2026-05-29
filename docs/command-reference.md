@@ -97,7 +97,6 @@ cmd
 
 ---
 
-<<<<<<< HEAD
 ### `contact`
 
 Share the bot's own contact card so you can add it and send DMs without waiting for an advert.

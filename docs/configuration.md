@@ -278,3 +278,14 @@ Schedule keys are parsed by **APScheduler** `CronTrigger.from_crontab` (plus `@`
 Prefer **`mon`–`sun`** names in the DOW field so expressions stay unambiguous. Example: Monday 12:30 is `30 12 * * mon` or `30 12 * * 0` — **not** Vixie’s `30 12 * * 1` (that is Tuesday here).
 
 Preset aliases expand to those same APScheduler forms. In particular **`@weekly`** is Monday 00:00 (`0 0 * * 0`), not Sunday midnight as on many Unix crons.
+
+## Clock sync admin scheduler (`[Clock_Sync_Admin]`)
+
+Use this section to schedule a daily (cron-style) DM payload to repeater targets for admin clock sync workflows.
+
+- **`enabled`** – `true`/`false` toggle for the job.
+- **`schedule`** – Cron expression using the same parser/timezone behavior as `[Scheduled_Messages]`.
+- **`targets`** – Comma-separated repeater identifiers (contact name, full pubkey, or pubkey prefix). Empty entries are ignored and duplicates are de-duplicated per run.
+- **`command_payload`** – DM payload sent to each resolved target (`clock sync admin` by default).
+
+If disabled, misconfigured, or missing targets, the scheduler skips cleanly. Unknown targets are skipped individually without aborting the rest of the run.
