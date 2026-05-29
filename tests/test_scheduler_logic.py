@@ -1,5 +1,6 @@
 """Tests for MessageScheduler pure logic (no threading, no asyncio)."""
 
+import asyncio
 import datetime
 import time
 from configparser import ConfigParser
@@ -271,6 +272,122 @@ class TestSetupScheduledMessages:
         self._setup_and_call(scheduler)  # second call — should replace, not add
         assert len(scheduler._apscheduler.get_jobs()) == 1
         self._teardown(scheduler)
+
+    def test_clock_sync_admin_job_registered_when_enabled(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "enabled", "true")
+        scheduler.bot.config.set("Clock_Sync_Admin", "schedule", "0 3 * * *")
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", "rep-1,rep-2")
+        self._setup_and_call(scheduler)
+        job_ids = {job.id for job in scheduler._apscheduler.get_jobs()}
+        assert "clock_sync_admin_daily" in job_ids
+        self._teardown(scheduler)
+
+    def test_clock_sync_admin_job_not_registered_when_disabled(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "enabled", "false")
+        scheduler.bot.config.set("Clock_Sync_Admin", "schedule", "0 3 * * *")
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", "rep-1")
+        self._setup_and_call(scheduler)
+        job_ids = {job.id for job in scheduler._apscheduler.get_jobs()}
+        assert "clock_sync_admin_daily" not in job_ids
+        self._teardown(scheduler)
+
+    def test_clock_sync_admin_job_not_registered_when_schedule_invalid(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "enabled", "true")
+        scheduler.bot.config.set("Clock_Sync_Admin", "schedule", "invalid schedule")
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", "rep-1")
+        self._setup_and_call(scheduler)
+        job_ids = {job.id for job in scheduler._apscheduler.get_jobs()}
+        assert "clock_sync_admin_daily" not in job_ids
+        self._teardown(scheduler)
+
+
+class TestClockSyncAdminScheduler:
+    def test_parse_targets_deduplicates_and_strips(self, scheduler):
+        raw = " repeater-a ,repeater-a,,ABCD,abcd ,  , repeater-b "
+        assert scheduler._parse_clock_sync_admin_targets(raw) == [
+            "repeater-a",
+            "ABCD",
+            "repeater-b",
+        ]
+
+    def test_handler_sends_to_resolved_unique_targets_and_skips_unknown(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "enabled", "true")
+        scheduler.bot.config.set(
+            "Clock_Sync_Admin",
+            "targets",
+            "repA, repa, abcdef12, unknown",
+        )
+        scheduler.bot.config.set("Clock_Sync_Admin", "command_payload", "clock sync admin")
+        scheduler.bot.connected = True
+        scheduler.bot.is_radio_zombie = False
+        scheduler.bot.is_radio_offline = False
+
+        scheduler.bot.meshcore = Mock()
+        scheduler.bot.meshcore.get_contact_by_name = Mock(
+            side_effect=lambda value: {
+                "repA": {"name": "repA", "public_key": "deadbeef0011"},
+                "repa": {"name": "repA", "public_key": "deadbeef0011"},
+            }.get(value)
+        )
+        scheduler.bot.meshcore.contacts = {
+            "b": {"name": "repB", "public_key": "abcdef123456"},
+        }
+
+        scheduler.bot.command_manager = Mock()
+        scheduler.bot.command_manager.send_dm = AsyncMock(side_effect=[True, False])
+
+        asyncio.run(scheduler._run_clock_sync_admin_job_async())
+
+        assert scheduler.bot.command_manager.send_dm.await_count == 2
+        scheduler.bot.command_manager.send_dm.assert_any_await(
+            "deadbeef0011",
+            "clock sync admin",
+            skip_user_rate_limit=True,
+        )
+        scheduler.bot.command_manager.send_dm.assert_any_await(
+            "abcdef123456",
+            "clock sync admin",
+            skip_user_rate_limit=True,
+        )
+        assert any(
+            "unknown target" in str(call).lower()
+            for call in scheduler.bot.logger.warning.call_args_list
+        )
+
+    def test_handler_continues_when_send_raises(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "enabled", "true")
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", "repA,repB")
+        scheduler.bot.config.set("Clock_Sync_Admin", "command_payload", "clock sync admin")
+        scheduler.bot.connected = True
+        scheduler.bot.is_radio_zombie = False
+        scheduler.bot.is_radio_offline = False
+
+        scheduler.bot.meshcore = Mock()
+        scheduler.bot.meshcore.get_contact_by_name = Mock(
+            side_effect=lambda value: {
+                "repA": {"name": "repA", "public_key": "1111"},
+                "repB": {"name": "repB", "public_key": "2222"},
+            }.get(value)
+        )
+        scheduler.bot.meshcore.contacts = {}
+
+        scheduler.bot.command_manager = Mock()
+        scheduler.bot.command_manager.send_dm = AsyncMock(
+            side_effect=[RuntimeError("send boom"), True]
+        )
+
+        asyncio.run(scheduler._run_clock_sync_admin_job_async())
+
+        assert scheduler.bot.command_manager.send_dm.await_count == 2
+        assert any(
+            "send error" in str(call).lower()
+            for call in scheduler.bot.logger.warning.call_args_list
+        )
 
 
 # ---------------------------------------------------------------------------

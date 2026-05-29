@@ -150,3 +150,14 @@ Admins can DM **`channelpause`** or **`channelresume`** (see `[Admin_ACL]` in `c
 ## Scheduled messages (`[Scheduled_Messages]`)
 
 Each entry is `<schedule_key> = <value>` where the value is normally **`channel:message`** (first colon separates channel from body). For **regional flood scope** on that send only, use **`channel:#scope:message`**: the middle segment must start with `#` (same convention as `flood_scopes` / `outgoing_flood_scope_override`). The message body may contain more colons. Omit the middle field for classic global flood. See `config.ini.example` under `[Scheduled_Messages]` for examples. The **`schedule`** command lists each job with `(#scope)` when set.
+
+## Clock sync admin scheduler (`[Clock_Sync_Admin]`)
+
+Use this section to schedule a daily (cron-style) DM payload to repeater targets for admin clock sync workflows.
+
+- **`enabled`** – `true`/`false` toggle for the job.
+- **`schedule`** – Cron expression using the same parser/timezone behavior as `[Scheduled_Messages]`.
+- **`targets`** – Comma-separated repeater identifiers (contact name, full pubkey, or pubkey prefix). Empty entries are ignored and duplicates are de-duplicated per run.
+- **`command_payload`** – DM payload sent to each resolved target (`clock sync admin` by default).
+
+If disabled, misconfigured, or missing targets, the scheduler skips cleanly. Unknown targets are skipped individually without aborting the rest of the run.

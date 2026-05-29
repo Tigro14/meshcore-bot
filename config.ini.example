@@ -500,6 +500,26 @@ category.funfact = fun
 #0 18 * * * = Public:Evening update - bot status: Good
 # @hourly = Public:Hourly ping (preset example; comment out if unused)
 
+[Clock_Sync_Admin]
+# Schedule a direct-message admin clock sync command to one or more repeater targets.
+# This is useful for daily maintenance syncs on known repeater nodes.
+#
+# Enable or disable this scheduled job
+enabled = false
+#
+# Cron-style schedule (same parser/timezone behavior as [Scheduled_Messages])
+# Default shown: daily at 03:00 in [Bot] timezone.
+schedule = 0 3 * * *
+#
+# Comma-separated repeater identifiers to target.
+# Each entry may be a contact name, full public key, or public key prefix.
+# Duplicate entries are ignored per run.
+targets =
+#
+# DM payload to send to each resolved target.
+# Leave as default unless your mesh uses a different admin clock-sync trigger.
+command_payload = clock sync admin
+
 [Schedule_Command]
 # Show scheduled messages and advert interval via the 'schedule' command
 # Responds with a compact list of scheduled times, channels, and message previews

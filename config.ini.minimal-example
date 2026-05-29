@@ -172,6 +172,16 @@ enabled = false
 port = 5001
 token =
 
+[Clock_Sync_Admin]
+# Optional scheduled admin clock-sync DM job for repeaters
+enabled = false
+# Daily cron schedule in [Bot] timezone
+schedule = 0 3 * * *
+# Comma-separated repeater identifiers (name/pubkey/prefix)
+targets =
+# DM payload sent to each resolved target
+command_payload = clock sync admin
+
 [Localization]
 # Language code for bot responses (en, es, es-MX, es-ES, fr, de, ja, etc.)
 # Default: en (English)
