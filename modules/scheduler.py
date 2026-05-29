@@ -193,7 +193,7 @@ class MessageScheduler:
         seen: set[str] = set()
         targets: list[str] = []
         for token in (raw_targets or "").split(","):
-            candidate = token.strip()
+            candidate = token.strip().strip("\"'")
             if not candidate:
                 continue
             dedup_key = candidate.lower()

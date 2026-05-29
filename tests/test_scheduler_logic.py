@@ -312,6 +312,19 @@ class TestClockSyncAdminScheduler:
             "repeater-b",
         ]
 
+    def test_parse_targets_strips_surrounding_quotes(self, scheduler):
+        """configparser does not strip quotes; ensure they are removed from tokens."""
+        pubkey = "62010a0a61b29fc8ede63c88a4e826b8a46199eafac674cdcc0fda4eb4475007"
+        raw = f'"{pubkey}"'
+        assert scheduler._parse_clock_sync_admin_targets(raw) == [pubkey]
+
+    def test_parse_targets_strips_single_quotes(self, scheduler):
+        raw = "'repeater-a', 'repeater-b'"
+        assert scheduler._parse_clock_sync_admin_targets(raw) == [
+            "repeater-a",
+            "repeater-b",
+        ]
+
     def test_handler_sends_to_resolved_unique_targets_and_skips_unknown(self, scheduler):
         scheduler.bot.config.add_section("Clock_Sync_Admin")
         scheduler.bot.config.set("Clock_Sync_Admin", "enabled", "true")
