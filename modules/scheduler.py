@@ -295,9 +295,9 @@ class MessageScheduler:
                 or (contact.get("adv_name", "") or "").strip()
                 or target
             )
-            dedup_keys = {(contact_name or "").lower()}
+            dedup_keys = {f"name:{(contact_name or '').lower()}"}
             if public_key:
-                dedup_keys.add(public_key.lower())
+                dedup_keys.add(f"pk:{public_key.lower()}")
             if dedup_keys & seen_contacts:
                 duplicate_count += 1
                 self.logger.info(
