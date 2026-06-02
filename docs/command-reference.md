@@ -1042,6 +1042,10 @@ schedule
 
 **Response:** Lists configured scheduled posts (each line shows the cron or preset schedule, or legacy `HH:MM` if you still use deprecated HHMM keys) plus current advert timing.
 
+Related scheduler config:
+- `[Scheduled_Messages]` for channel posts (`<schedule> = channel[:#scope]:message`)
+- `[Clock_Sync_Admin]` for repeater-targeted admin DMs (`targets = name,pubkey,prefix` with `schedule = <cron>` and optional `command_payload`)
+
 **Note:** DM-only command by default.
 
 ---

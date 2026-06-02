@@ -7,6 +7,8 @@ Contains the main bot class and message processing logic
 import asyncio
 import atexit
 import configparser
+from datetime import datetime
+from datetime import timezone as _dt_tz
 import json
 import logging
 import signal
@@ -39,7 +41,7 @@ from .scheduler import MessageScheduler
 from .service_plugin_loader import ServicePluginLoader
 from .solar_conditions import set_config
 from .transmission_tracker import TransmissionTracker
-from .utils import resolve_path
+from .utils import get_config_timezone, resolve_path
 from .web_viewer.integration import WebViewerIntegration
 
 
@@ -1621,32 +1623,100 @@ long_jokes = false
                 self.logger.warning("Cannot set radio clock - not connected to device")
                 return False
 
+            self.logger.debug(
+                "Clock sync start: direct device protocol get_time(0x05) -> set_time(0x06), last_sync=%s",
+                self.last_clock_sync_time,
+            )
+
             # Get current device time
             self.logger.info("Checking device time...")
             time_result = await self.meshcore.commands.get_time()
+            self.logger.debug(
+                "Clock sync get_time result: type=%s payload=%s",
+                getattr(time_result, "type", None),
+                getattr(time_result, "payload", None),
+            )
             if time_result.type == EventType.ERROR:
                 self.logger.warning("Device does not support time commands")
                 return False
 
             device_time = time_result.payload.get('time', 0)
-            current_time = int(time.time())
+            utc_system_time = int(time.time())
+            current_time = utc_system_time
 
-            self.logger.info(f"Device time: {device_time}, System time: {current_time}")
+            def _fmt_ts(ts: int) -> str:
+                try:
+                    return datetime.fromtimestamp(ts, tz=_dt_tz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                except Exception:
+                    return str(ts)
+
+            # If radio_clock_use_local_time is enabled, apply the configured timezone
+            # offset so devices expecting local-time clocks accept the sync.
+            tz_name = "UTC"
+            offset_seconds = 0
+            if self.config.getboolean('Bot', 'radio_clock_use_local_time', fallback=False):
+                try:
+                    tz, tz_key = get_config_timezone(self.config, self.logger)
+                    tz_name = tz_key or str(tz)
+                    utc_offset = tz.utcoffset(datetime.now(_dt_tz.utc))
+                    if utc_offset is not None:
+                        offset_seconds = int(utc_offset.total_seconds())
+                        current_time += offset_seconds
+                        self.logger.debug(
+                            "Clock sync local time offset applied: %+d seconds (tz=%s / %s)",
+                            offset_seconds,
+                            tz_name,
+                            tz,
+                        )
+                except Exception as exc:
+                    self.logger.warning("Clock sync could not apply local time offset: %s", exc)
+
+            time_diff = current_time - device_time
+
+            self.logger.info(
+                "Clock sync values — device: %d (%s) | system UTC: %d (%s) | "
+                "sending: %d (%s)%s | delta: %+d s",
+                device_time,
+                _fmt_ts(device_time),
+                utc_system_time,
+                _fmt_ts(utc_system_time),
+                current_time,
+                _fmt_ts(current_time),
+                f" [local-time tz={tz_name} offset={offset_seconds:+d}s]" if offset_seconds else " [UTC]",
+                time_diff,
+            )
 
             # Only set time if device time is earlier than current time
             if device_time < current_time:
-                time_diff = current_time - device_time
                 self.logger.info(f"Device time is {time_diff} seconds behind, updating...")
 
                 result = await self.meshcore.commands.set_time(current_time)
+                self.logger.debug(
+                    "Clock sync set_time result: type=%s payload=%s target_time=%d (%s)",
+                    getattr(result, "type", None),
+                    getattr(result, "payload", None),
+                    current_time,
+                    _fmt_ts(current_time),
+                )
                 if result.type == EventType.OK:
-                    self.logger.info(f"✓ Radio clock updated to: {current_time}")
+                    self.logger.info(
+                        "✓ Radio clock updated to: %d (%s)", current_time, _fmt_ts(current_time)
+                    )
                     self.last_clock_sync_time = current_time
                     return True
                 else:
-                    self.logger.warning(f"Failed to update radio clock: {result}")
+                    self.logger.warning(
+                        "Failed to update radio clock: %s (tried to set %d / %s)",
+                        result,
+                        current_time,
+                        _fmt_ts(current_time),
+                    )
                     return False
             else:
+                self.logger.debug(
+                    "Clock sync skipped because device is not behind: system_minus_device=%d",
+                    time_diff,
+                )
                 self.logger.info("Device time is current or ahead - no update needed")
                 return True
 
