@@ -4,7 +4,7 @@ import json
 import sqlite3
 import time
 from configparser import ConfigParser
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -205,9 +205,26 @@ class TestGetDatabaseStats:
 
     def test_clock_sync_dashboard_flags_out_of_sync_repeaters(self, viewer_with_db):
         now_epoch = int(time.time())
-        now_sql = datetime.utcfromtimestamp(now_epoch).strftime("%Y-%m-%d %H:%M:%S")
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
             cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    channel TEXT,
+                    content TEXT NOT NULL,
+                    is_dm BOOLEAN NOT NULL,
+                    hops INTEGER,
+                    snr REAL,
+                    rssi INTEGER,
+                    path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
             cursor.execute(
                 """
                 INSERT INTO complete_contact_tracking
