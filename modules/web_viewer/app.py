@@ -4849,16 +4849,16 @@ class BotDataViewer:
                 """)
                 stats['unique_device_types'] = cursor.fetchone()[0]
 
-                # Clock drift status for repeaters/roomservers in configurable hop radius.
+                # Clock drift status for all nodes in configurable hop radius.
                 stats['clock_sync_dashboard'] = {
                     'enabled': True,
                     'max_hops': 5,
                     'check_window_hours': 24,
                     'drift_threshold_seconds': 300,
-                    'scanned_repeaters': 0,
-                    'checked_repeaters': 0,
+                    'scanned_nodes': 0,
+                    'checked_nodes': 0,
                     'out_of_sync_count': 0,
-                    'out_of_sync_repeaters': [],
+                    'out_of_sync_nodes': [],
                     'generated_at': time.time(),
                 }
                 if 'message_stats' in tables:
@@ -4917,8 +4917,7 @@ class BotDataViewer:
                             ON lm.sender_id = c.name
                         LEFT JOIN message_stats m
                             ON m.id = lm.latest_id
-                        WHERE c.role IN ('repeater', 'roomserver')
-                            AND c.hop_count IS NOT NULL
+                        WHERE c.hop_count IS NOT NULL
                             AND c.hop_count >= 0
                             AND c.hop_count <= ?
                             AND c.last_heard > datetime('now', ?)
@@ -4926,16 +4925,16 @@ class BotDataViewer:
                         """,
                         (max_hops, f'-{check_window_hours} hours'),
                     )
-                    repeater_rows = cursor.fetchall()
-                    out_of_sync_repeaters: list[dict[str, Any]] = []
-                    checked_repeaters = 0
-                    for row in repeater_rows:
+                    node_rows = cursor.fetchall()
+                    out_of_sync_nodes: list[dict[str, Any]] = []
+                    checked_nodes = 0
+                    for row in node_rows:
                         drift_seconds = row['drift_seconds']
                         if drift_seconds is None:
                             continue
-                        checked_repeaters += 1
+                        checked_nodes += 1
                         if drift_seconds > drift_threshold_seconds:
-                            out_of_sync_repeaters.append({
+                            out_of_sync_nodes.append({
                                 'name': row['name'],
                                 'public_key': row['public_key'],
                                 'role': row['role'],
@@ -4946,10 +4945,10 @@ class BotDataViewer:
                             })
 
                     stats['clock_sync_dashboard'].update({
-                        'scanned_repeaters': len(repeater_rows),
-                        'checked_repeaters': checked_repeaters,
-                        'out_of_sync_count': len(out_of_sync_repeaters),
-                        'out_of_sync_repeaters': out_of_sync_repeaters,
+                        'scanned_nodes': len(node_rows),
+                        'checked_nodes': checked_nodes,
+                        'out_of_sync_count': len(out_of_sync_nodes),
+                        'out_of_sync_nodes': out_of_sync_nodes,
                     })
 
             # Incoming packets (packet_stream): multibyte path share, last 7 days (decoded bytes_per_hop)

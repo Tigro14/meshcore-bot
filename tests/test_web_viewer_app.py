@@ -203,7 +203,7 @@ class TestGetDatabaseStats:
         table_stats = stats.get('table_stats', {})
         assert 'malicious_table' not in table_stats
 
-    def test_clock_sync_dashboard_flags_out_of_sync_repeaters(self, viewer_with_db):
+    def test_clock_sync_dashboard_flags_out_of_sync_nodes(self, viewer_with_db):
         now_epoch = int(time.time())
         now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
@@ -241,6 +241,15 @@ class TestGetDatabaseStats:
                 """,
                 ("bb22", "Repeater-B", "repeater", "repeater", 4, now_sql),
             )
+            # Add a non-repeater node to verify all nodes are checked
+            cursor.execute(
+                """
+                INSERT INTO complete_contact_tracking
+                (public_key, name, role, device_type, hop_count, last_heard)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("cc33", "Client-C", "client", "mobile", 3, now_sql),
+            )
             cursor.execute(
                 """
                 INSERT INTO message_stats
@@ -257,14 +266,23 @@ class TestGetDatabaseStats:
                 """,
                 (now_epoch - 60, "Repeater-B", "Public", "clock check", 0, 4, now_sql),
             )
+            cursor.execute(
+                """
+                INSERT INTO message_stats
+                (timestamp, sender_id, channel, content, is_dm, hops, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (now_epoch - 100, "Client-C", "Public", "hello", 0, 3, now_sql),
+            )
             conn.commit()
 
         stats = viewer_with_db._get_database_stats()
         clock_stats = stats.get("clock_sync_dashboard", {})
         assert clock_stats.get("max_hops") == 5
-        assert clock_stats.get("checked_repeaters") == 2
+        # Should now check 3 nodes (2 repeaters + 1 client)
+        assert clock_stats.get("checked_nodes") == 3
         assert clock_stats.get("out_of_sync_count") == 1
-        assert clock_stats.get("out_of_sync_repeaters")[0]["name"] == "Repeater-A"
+        assert clock_stats.get("out_of_sync_nodes")[0]["name"] == "Repeater-A"
 
 
 # ---------------------------------------------------------------------------

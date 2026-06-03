@@ -253,12 +253,12 @@
     </div>
 </div>
 
-<!-- Repeater Clock Drift -->
+<!-- Node Clock Drift -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="card h-100">
             <div class="card-header">
-                <i class="fas fa-clock"></i> Repeater Clock Drift (daily window)
+                <i class="fas fa-clock"></i> Node Clock Drift (daily window)
             </div>
             <div class="card-body">
                 <div class="row text-center mb-3">
@@ -268,7 +268,7 @@
                     </div>
                     <div class="col-md-3">
                         <h4 id="clock-drift-checked" class="text-primary">0</h4>
-                        <small class="text-muted">Checked repeaters</small>
+                        <small class="text-muted">Checked nodes</small>
                     </div>
                     <div class="col-md-3">
                         <h4 id="clock-drift-radius" class="text-info">5</h4>
@@ -282,7 +282,7 @@
                 <div>
                     <small class="text-muted d-block mb-2">Nodes with drift above threshold:</small>
                     <ul id="clock-drift-list" class="mb-0 ps-3">
-                        <li class="text-muted">No out-of-sync repeaters detected.</li>
+                        <li class="text-muted">No out-of-sync nodes detected.</li>
                     </ul>
                 </div>
             </div>
@@ -988,15 +988,15 @@ class ModernDashboard {
     updateClockDriftStatus(clockData) {
         const fallback = {
             out_of_sync_count: 0,
-            checked_repeaters: 0,
+            checked_nodes: 0,
             max_hops: 5,
             drift_threshold_seconds: 300,
-            out_of_sync_repeaters: [],
+            out_of_sync_nodes: [],
         };
         const data = clockData || fallback;
 
         this.updateElement('clock-drift-count', data.out_of_sync_count || 0);
-        this.updateElement('clock-drift-checked', data.checked_repeaters || 0);
+        this.updateElement('clock-drift-checked', data.checked_nodes || 0);
         this.updateElement('clock-drift-radius', data.max_hops ?? 5);
         this.updateElement(
             'clock-drift-threshold',
@@ -1008,13 +1008,13 @@ class ModernDashboard {
             return;
         }
         list.innerHTML = '';
-        const outOfSync = Array.isArray(data.out_of_sync_repeaters)
-            ? data.out_of_sync_repeaters
+        const outOfSync = Array.isArray(data.out_of_sync_nodes)
+            ? data.out_of_sync_nodes
             : [];
         if (outOfSync.length === 0) {
             const item = document.createElement('li');
             item.className = 'text-muted';
-            item.textContent = 'No out-of-sync repeaters detected.';
+            item.textContent = 'No out-of-sync nodes detected.';
             list.appendChild(item);
             return;
         }
