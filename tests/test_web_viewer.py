@@ -269,7 +269,7 @@ class TestPageRoutes:
         assert resp.status_code == 200
         html = resp.data.decode()
         assert 'href="https://meshcore.io"' in html
-        assert "meshcore.co.uk" not in html
+        assert "meshcore.io" not in html
 
     def test_base_footer_uses_meshcore_io_url(self, client):
         """The base footer should link to meshcore.io on all pages."""
@@ -277,7 +277,7 @@ class TestPageRoutes:
         assert resp.status_code == 200
         html = resp.data.decode()
         assert 'href="https://meshcore.io"' in html
-        assert "meshcore.co.uk" not in html
+        assert "meshcore.io" not in html
 
     def test_infos_disabled_command_filtered(self, tmp_path_factory):
         """A command disabled in config must not appear on the /infos page."""
@@ -316,6 +316,9 @@ class TestPageRoutes:
             resp = c.get("/infos")
         assert resp.status_code == 200
         html = resp.data.decode()
+        # "ping" command should not appear in the command table when disabled
+        # We check there is no badge with 'ping' as a trigger keyword
+        # The command name cell uses <strong>ping</strong>
         assert "<strong>ping</strong>" not in html
 
     def test_mesh(self, client):

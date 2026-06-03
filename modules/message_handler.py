@@ -3325,11 +3325,15 @@ class MessageHandler:
                 command_id = f"keyword_{keyword}_{message.sender_id}_{int(time.time())}"
 
                 try:
-                    success = await self.bot.command_manager.send_response(
-                        message,
-                        response,
-                        command_id=command_id,
-                    )
+                    rate_limit_key = self.bot.command_manager.get_rate_limit_key(message)
+                    if message.is_dm:
+                        success = await self.bot.command_manager.send_dm(
+                            message.sender_pubkey or message.sender_id, response, command_id, rate_limit_key=rate_limit_key
+                        )
+                    else:
+                        success = await self.bot.command_manager.send_channel_message(
+                            message.channel, response, command_id, rate_limit_key=rate_limit_key
+                        )
 
                     if not success:
                         self.logger.warning(
@@ -3366,11 +3370,15 @@ class MessageHandler:
                 command_id = f"randomline_{key}_{message.sender_id}_{int(time.time())}"
 
                 try:
-                    success = await self.bot.command_manager.send_response(
-                        message,
-                        response,
-                        command_id=command_id,
-                    )
+                    rate_limit_key = self.bot.command_manager.get_rate_limit_key(message)
+                    if message.is_dm:
+                        success = await self.bot.command_manager.send_dm(
+                            message.sender_pubkey or message.sender_id, response, command_id, rate_limit_key=rate_limit_key
+                        )
+                    else:
+                        success = await self.bot.command_manager.send_channel_message(
+                            message.channel, response, command_id, rate_limit_key=rate_limit_key
+                        )
 
                     if not success:
                         self.logger.warning(
