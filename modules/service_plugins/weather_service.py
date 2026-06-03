@@ -64,6 +64,7 @@ class WeatherService(BaseServicePlugin):
         # Polling intervals (in milliseconds, converted to seconds)
         self.blitz_collection_interval = self.bot.config.getint('Weather_Service', 'blitz_collection_interval', fallback=600000) / 1000.0
         self.poll_weather_alerts_interval = self.bot.config.getint('Weather_Service', 'poll_weather_alerts_interval', fallback=600000) / 1000.0
+        self.blitz_alert_threshold = self.bot.config.getint('Weather_Service', 'blitz_alert_threshold', fallback=10)
 
         # Storm detection area (optional)
         self.blitz_area = None
@@ -950,14 +951,14 @@ class WeatherService(BaseServicePlugin):
 
         # Check each bucket
         for key, count in counter.items():
-            # Only alert if 10+ strikes in bucket and we haven't seen this bucket before
-            if count >= 10 and key not in self.seen_blitz_keys:
-                # Find a representative strike from this bucket
+            # Only alert if threshold is met and we haven't seen this bucket in the current cycle
+            if count >= self.blitz_alert_threshold and key not in self.seen_blitz_keys:
+                # Find the closest strike from this bucket
                 bucket_strikes = [b for b in self.blitz_buffer if b['key'] == key]
                 if not bucket_strikes:
                     continue
 
-                data = bucket_strikes[0]
+                data = min(bucket_strikes, key=lambda b: b['distance'])
                 heading = data['heading']
                 distance = data['distance']
 
@@ -986,12 +987,9 @@ class WeatherService(BaseServicePlugin):
                 # Small delay between alerts
                 await asyncio.sleep(2)
 
-        # Clear buffer
+        # Clear buffer and reset seen keys so each new interval starts fresh
         self.blitz_buffer = []
-
-        # Clean up old seen keys (keep last 1000)
-        if len(self.seen_blitz_keys) > 1000:
-            self.seen_blitz_keys = set(list(self.seen_blitz_keys)[-1000:])
+        self.seen_blitz_keys = set()
 
     def _heading_to_compass(self, heading: int) -> str:
         """Convert heading in degrees to compass direction name.

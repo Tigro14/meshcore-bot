@@ -1803,6 +1803,11 @@ poll_weather_alerts_interval = 600000
 # Note: Storm detection area must be configured for this to work
 blitz_collection_interval = 600000
 
+# Minimum number of lightning strikes in a location bucket required to trigger an alert
+# Stats (strike counter and closest position) are reset after each collection interval
+# Default: 10
+# blitz_alert_threshold = 10
+
 # Storm detection area (optional)
 # Only report storms detected within this area
 # Leave empty to disable area filtering
