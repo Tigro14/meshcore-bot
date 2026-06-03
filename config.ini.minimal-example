@@ -186,6 +186,10 @@ schedule = 0 3 * * *
 targets =
 # DM payload sent to each resolved target
 command_payload = clock sync admin
+# Dashboard clock drift monitor for repeaters near the bot
+dashboard_hop_radius = 5
+dashboard_check_window_hours = 24
+dashboard_max_clock_drift_seconds = 300
 
 [Localization]
 # Language code for bot responses (en, es, es-MX, es-ES, fr, de, ja, etc.)

@@ -4851,6 +4851,109 @@ class BotDataViewer:
                 """)
                 stats['unique_device_types'] = cursor.fetchone()[0]
 
+                # Clock drift status for repeaters/roomservers in configurable hop radius.
+                stats['clock_sync_dashboard'] = {
+                    'enabled': True,
+                    'max_hops': 5,
+                    'check_window_hours': 24,
+                    'drift_threshold_seconds': 300,
+                    'scanned_repeaters': 0,
+                    'checked_repeaters': 0,
+                    'out_of_sync_count': 0,
+                    'out_of_sync_repeaters': [],
+                    'generated_at': time.time(),
+                }
+                if 'message_stats' in tables:
+                    max_hops = self.config.getint(
+                        'Clock_Sync_Admin',
+                        'dashboard_hop_radius',
+                        fallback=5,
+                    )
+                    check_window_hours = self.config.getint(
+                        'Clock_Sync_Admin',
+                        'dashboard_check_window_hours',
+                        fallback=24,
+                    )
+                    drift_threshold_seconds = self.config.getint(
+                        'Clock_Sync_Admin',
+                        'dashboard_max_clock_drift_seconds',
+                        fallback=300,
+                    )
+
+                    # Clamp to safe ranges in case of invalid config values.
+                    max_hops = max(0, min(max_hops, 32))
+                    check_window_hours = max(1, min(check_window_hours, 168))
+                    drift_threshold_seconds = max(30, min(drift_threshold_seconds, 86400))
+
+                    stats['clock_sync_dashboard'].update({
+                        'max_hops': max_hops,
+                        'check_window_hours': check_window_hours,
+                        'drift_threshold_seconds': drift_threshold_seconds,
+                    })
+
+                    cursor.execute(
+                        """
+                        WITH latest_message_per_sender AS (
+                            SELECT sender_id, MAX(id) AS latest_id
+                            FROM message_stats
+                            GROUP BY sender_id
+                        )
+                        SELECT
+                            c.name,
+                            c.public_key,
+                            c.hop_count,
+                            c.role,
+                            m.timestamp AS sender_timestamp,
+                            m.created_at AS received_at,
+                            CASE
+                                WHEN m.id IS NULL THEN NULL
+                                WHEN m.timestamp IS NULL THEN NULL
+                                WHEN CAST(m.timestamp AS INTEGER) <= 0 THEN NULL
+                                ELSE ABS(
+                                    CAST(strftime('%s', m.created_at) AS INTEGER)
+                                    - CAST(m.timestamp AS INTEGER)
+                                )
+                            END AS drift_seconds
+                        FROM complete_contact_tracking c
+                        LEFT JOIN latest_message_per_sender lm
+                            ON lm.sender_id = c.name
+                        LEFT JOIN message_stats m
+                            ON m.id = lm.latest_id
+                        WHERE c.role IN ('repeater', 'roomserver')
+                            AND c.hop_count IS NOT NULL
+                            AND c.hop_count >= 0
+                            AND c.hop_count <= ?
+                            AND c.last_heard > datetime('now', ?)
+                        ORDER BY c.hop_count ASC, c.name COLLATE NOCASE ASC
+                        """,
+                        (max_hops, f'-{check_window_hours} hours'),
+                    )
+                    repeater_rows = cursor.fetchall()
+                    out_of_sync_repeaters: list[dict[str, Any]] = []
+                    checked_repeaters = 0
+                    for row in repeater_rows:
+                        drift_seconds = row['drift_seconds']
+                        if drift_seconds is None:
+                            continue
+                        checked_repeaters += 1
+                        if drift_seconds > drift_threshold_seconds:
+                            out_of_sync_repeaters.append({
+                                'name': row['name'],
+                                'public_key': row['public_key'],
+                                'role': row['role'],
+                                'hop_count': row['hop_count'],
+                                'drift_seconds': int(drift_seconds),
+                                'received_at': row['received_at'],
+                                'sender_timestamp': int(row['sender_timestamp']),
+                            })
+
+                    stats['clock_sync_dashboard'].update({
+                        'scanned_repeaters': len(repeater_rows),
+                        'checked_repeaters': checked_repeaters,
+                        'out_of_sync_count': len(out_of_sync_repeaters),
+                        'out_of_sync_repeaters': out_of_sync_repeaters,
+                    })
+
             # Incoming packets (packet_stream): multibyte path share, last 7 days (decoded bytes_per_hop)
             stats['incoming_packets_7d'] = 0
             stats['incoming_packets_7d_multibyte_path'] = 0
