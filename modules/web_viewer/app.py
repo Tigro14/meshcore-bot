@@ -3317,6 +3317,85 @@ class BotDataViewer:
                 if conn:
                     conn.close()
 
+        @self.app.route('/api/contacts/local-hop-collisions')
+        def api_contacts_local_hop_collisions():
+            """Return local (0-hop) repeaters/roomservers sharing a 1-byte public-key prefix.
+
+            Query params:
+              days (int, default 30): activity window; 0 = all time.
+            """
+            days = request.args.get('days', 30, type=int)
+            if days < 0:
+                return jsonify({'error': 'days must be >= 0'}), 400
+            conn = None
+            try:
+                conn = self._get_db_connection()
+                cursor = conn.cursor()
+
+                time_clause = ""
+                params: list = []
+                if days > 0:
+                    time_clause = "AND last_heard >= datetime('now', ?)"
+                    params = [f'-{days} days']
+
+                # params appears twice: once for the outer WHERE and once for the inner subquery
+                cursor.execute(f'''
+                    SELECT
+                        SUBSTR(public_key, 1, 2) AS prefix_1b,
+                        public_key,
+                        name,
+                        role,
+                        hop_count,
+                        last_heard
+                    FROM complete_contact_tracking
+                    WHERE role IN ('repeater', 'roomserver')
+                      AND out_path_len = 0
+                      {time_clause}
+                      AND SUBSTR(public_key, 1, 2) IN (
+                          SELECT SUBSTR(public_key, 1, 2)
+                          FROM complete_contact_tracking
+                          WHERE role IN ('repeater', 'roomserver')
+                            AND out_path_len = 0
+                            {time_clause}
+                          GROUP BY SUBSTR(public_key, 1, 2)
+                          HAVING COUNT(*) > 1
+                      )
+                    ORDER BY SUBSTR(public_key, 1, 2), name COLLATE NOCASE
+                ''', params * 2)
+
+                rows = cursor.fetchall()
+                groups: dict = {}
+                for row in rows:
+                    prefix = row['prefix_1b']
+                    if prefix not in groups:
+                        groups[prefix] = []
+                    groups[prefix].append({
+                        'name': row['name'],
+                        'public_key': row['public_key'],
+                        'role': row['role'],
+                        'hop_count': row['hop_count'],
+                        'last_heard': row['last_heard'],
+                    })
+
+                collisions = [
+                    {'prefix': prefix, 'repeaters': repeaters}
+                    for prefix, repeaters in sorted(groups.items())
+                ]
+                total_affected = sum(len(g['repeaters']) for g in collisions)
+
+                return jsonify({
+                    'collisions': collisions,
+                    'total_collision_groups': len(collisions),
+                    'total_affected_repeaters': total_affected,
+                    'days': days,
+                })
+            except Exception as e:
+                self.logger.error(f"Error fetching local hop collisions: {e}", exc_info=True)
+                return jsonify({'error': 'Internal server error'}), 500
+            finally:
+                if conn:
+                    conn.close()
+
         @self.app.route('/api/greeter')
         def api_greeter():
             """Get greeter data including rollout status, settings, and greeted users"""
@@ -5329,6 +5408,24 @@ class BotDataViewer:
 
                 cursor.execute("SELECT COUNT(*) FROM bbs_messages")
                 stats['bbs_total_messages'] = cursor.fetchone()[0]
+
+            # Local (0-hop) repeater hop-prefix collision groups
+            stats['local_hop_collision_groups'] = 0
+            if 'complete_contact_tracking' in tables:
+                try:
+                    cursor.execute('''
+                        SELECT COUNT(*) FROM (
+                            SELECT SUBSTR(public_key, 1, 2)
+                            FROM complete_contact_tracking
+                            WHERE role IN ('repeater', 'roomserver')
+                              AND out_path_len = 0
+                            GROUP BY SUBSTR(public_key, 1, 2)
+                            HAVING COUNT(*) > 1
+                        )
+                    ''')
+                    stats['local_hop_collision_groups'] = cursor.fetchone()[0] or 0
+                except Exception as e:
+                    self.logger.debug(f"Could not compute local hop collision groups: {e}")
 
             return stats
 
