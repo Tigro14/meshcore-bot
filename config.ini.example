@@ -526,6 +526,14 @@ targets =
 # DM payload to send to each resolved target.
 # Leave as default unless your mesh uses a different admin clock-sync trigger.
 command_payload = clock sync admin
+#
+# Dashboard clock-drift monitor settings:
+# - dashboard_hop_radius: only evaluate repeaters/roomservers within this hop count
+# - dashboard_check_window_hours: only include repeaters seen in this recent window
+# - dashboard_max_clock_drift_seconds: mark node out-of-sync when drift exceeds threshold
+dashboard_hop_radius = 5
+dashboard_check_window_hours = 24
+dashboard_max_clock_drift_seconds = 300
 
 [Schedule_Command]
 # Show scheduled messages and advert interval via the 'schedule' command

@@ -4,6 +4,7 @@ import json
 import sqlite3
 import time
 from configparser import ConfigParser
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -201,6 +202,69 @@ class TestGetDatabaseStats:
         # Should not include stats for malicious table
         table_stats = stats.get('table_stats', {})
         assert 'malicious_table' not in table_stats
+
+    def test_clock_sync_dashboard_flags_out_of_sync_repeaters(self, viewer_with_db):
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    channel TEXT,
+                    content TEXT NOT NULL,
+                    is_dm BOOLEAN NOT NULL,
+                    hops INTEGER,
+                    snr REAL,
+                    rssi INTEGER,
+                    path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                INSERT INTO complete_contact_tracking
+                (public_key, name, role, device_type, hop_count, last_heard)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("aa11", "Repeater-A", "repeater", "repeater", 2, now_sql),
+            )
+            cursor.execute(
+                """
+                INSERT INTO complete_contact_tracking
+                (public_key, name, role, device_type, hop_count, last_heard)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("bb22", "Repeater-B", "repeater", "repeater", 4, now_sql),
+            )
+            cursor.execute(
+                """
+                INSERT INTO message_stats
+                (timestamp, sender_id, channel, content, is_dm, hops, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (now_epoch - 1200, "Repeater-A", "Public", "clock check", 0, 2, now_sql),
+            )
+            cursor.execute(
+                """
+                INSERT INTO message_stats
+                (timestamp, sender_id, channel, content, is_dm, hops, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (now_epoch - 60, "Repeater-B", "Public", "clock check", 0, 4, now_sql),
+            )
+            conn.commit()
+
+        stats = viewer_with_db._get_database_stats()
+        clock_stats = stats.get("clock_sync_dashboard", {})
+        assert clock_stats.get("max_hops") == 5
+        assert clock_stats.get("checked_repeaters") == 2
+        assert clock_stats.get("out_of_sync_count") == 1
+        assert clock_stats.get("out_of_sync_repeaters")[0]["name"] == "Repeater-A"
 
 
 # ---------------------------------------------------------------------------

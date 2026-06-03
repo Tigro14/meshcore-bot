@@ -159,6 +159,9 @@ Use this section to schedule a daily (cron-style) DM payload to repeater targets
 - **`schedule`** – Cron expression using the same parser/timezone behavior as `[Scheduled_Messages]`.
 - **`targets`** – Comma-separated repeater identifiers (contact name, full pubkey, or pubkey prefix). Empty entries are ignored and duplicates are de-duplicated per run.
 - **`command_payload`** – DM payload sent to each resolved target (`clock sync admin` by default).
+- **`dashboard_hop_radius`** – Max hop distance for repeaters included in dashboard clock checks (default `5`).
+- **`dashboard_check_window_hours`** – Only include repeaters seen in this recent window (default `24`).
+- **`dashboard_max_clock_drift_seconds`** – Drift threshold used to flag out-of-sync repeaters in the dashboard (default `300`).
 
 If disabled, misconfigured, or missing targets, the scheduler skips cleanly. Unknown targets are skipped individually without aborting the rest of the run.
 
@@ -177,4 +180,3 @@ radio_clock_use_local_time = true
 ```
 
 - **`radio_clock_use_local_time`** – `true`/`false` (default `false`). When `true`, the bot adds the current UTC offset of `timezone` to the epoch before calling `set_time` on the radio. The offset is recomputed on every sync, so DST transitions are handled automatically.
-
