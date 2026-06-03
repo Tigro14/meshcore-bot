@@ -322,7 +322,36 @@
         </div>
     </div>
         </div>
-        
+
+<!-- Local Repeater Hop-Prefix Collision Panel -->
+<div class="row mb-4" id="local-hop-collision-row" style="display:none;">
+    <div class="col-12">
+        <div class="card border-warning">
+            <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
+                <span>
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Local Repeater Short-ID Collisions
+                </span>
+                <button type="button" class="btn btn-sm btn-outline-dark"
+                        id="local-hop-collision-refresh"
+                        title="Refresh collision list">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div class="card-body">
+                <p class="mb-2 text-muted small">
+                    The following directly-heard repeaters/room-servers share the same
+                    <strong>1-byte hop ID</strong> (first byte of public key).
+                    This creates routing ambiguity for nodes using single-byte hop addressing.
+                    Each affected operator should enable
+                    <strong>Multi-Byte Hop Support</strong> on their repeater.
+                </p>
+                <div id="local-hop-collision-list"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Tracking Table -->
 <div class="row">
     <div class="col-12">
@@ -2552,7 +2581,69 @@ document.addEventListener('DOMContentLoaded', () => {
     window.contactsManager = new ModernContactsManager();
     window.contactsManager.setupPurgeModal();
     initContactsMultibyteBadgeTooltip();
+    loadLocalHopCollisions();
+    const refreshBtn = document.getElementById('local-hop-collision-refresh');
+    if (refreshBtn) refreshBtn.addEventListener('click', loadLocalHopCollisions);
 });
+
+// ── Local Repeater Hop-Prefix Collision Panel ──────────────────────────────
+
+function escHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadLocalHopCollisions() {
+    const row  = document.getElementById('local-hop-collision-row');
+    const list = document.getElementById('local-hop-collision-list');
+    if (!row || !list) return;
+    try {
+        const resp = await fetch('/api/contacts/local-hop-collisions?days=30');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        if (!data.collisions || data.collisions.length === 0) {
+            row.style.display = 'none';
+            return;
+        }
+
+        row.style.display = '';
+
+        let html = '<div class="row g-3">';
+        for (const group of data.collisions) {
+            html += `<div class="col-md-6 col-lg-4">
+  <div class="border border-warning rounded p-3 h-100">
+    <div class="d-flex align-items-center mb-2 gap-2">
+      <span class="badge bg-warning text-dark font-monospace fs-6" title="1-byte hop prefix">0x${escHtml(group.prefix)}</span>
+      <small class="text-muted">${group.repeaters.length} repeaters share this ID</small>
+    </div>
+    <ul class="list-unstyled mb-0">`;
+            for (const rep of group.repeaters) {
+                const shortKey = rep.public_key ? escHtml(rep.public_key.substring(0, 12)) + '…' : '?';
+                const role = rep.role === 'roomserver' ? 'Room Server' : 'Repeater';
+                const lh = rep.last_heard ? escHtml(rep.last_heard) : '—';
+                html += `<li class="mb-1">
+        <span class="fw-semibold">${escHtml(rep.name) || '<em>unnamed</em>'}</span>
+        <br>
+        <small class="text-muted font-monospace">${shortKey}</small>
+        <span class="badge bg-secondary ms-1" style="font-size:0.7em;">${role}</span>
+        <br>
+        <small class="text-muted">Last heard: ${lh}</small>
+      </li>`;
+            }
+            html += `</ul>
+  </div>
+</div>`;
+        }
+        html += '</div>';
+        list.innerHTML = html;
+    } catch (err) {
+        console.error('Error loading local hop collisions:', err);
+        row.style.display = 'none';
+    }
+}
+
 </script>
 
 <style>
