@@ -2623,8 +2623,9 @@ async function loadLocalHopCollisions() {
                 const shortKey = rep.public_key ? escHtml(rep.public_key.substring(0, 12)) + '…' : '?';
                 const role = rep.role === 'roomserver' ? 'Room Server' : 'Repeater';
                 const lh = rep.last_heard ? escHtml(rep.last_heard) : '—';
+                const displayName = rep.name ? escHtml(rep.name) : '<em>unnamed</em>';
                 html += `<li class="mb-1">
-        <span class="fw-semibold">${escHtml(rep.name) || '<em>unnamed</em>'}</span>
+        <span class="fw-semibold">${displayName}</span>
         <br>
         <small class="text-muted font-monospace">${shortKey}</small>
         <span class="badge bg-secondary ms-1" style="font-size:0.7em;">${role}</span>

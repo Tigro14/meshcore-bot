@@ -3338,6 +3338,7 @@ class BotDataViewer:
                     time_clause = "AND last_heard >= datetime('now', ?)"
                     params = [f'-{days} days']
 
+                # params appears twice: once for the outer WHERE and once for the inner subquery
                 cursor.execute(f'''
                     SELECT
                         SUBSTR(public_key, 1, 2) AS prefix_1b,
@@ -3360,7 +3361,7 @@ class BotDataViewer:
                           HAVING COUNT(*) > 1
                       )
                     ORDER BY SUBSTR(public_key, 1, 2), name COLLATE NOCASE
-                ''', params + params)
+                ''', params * 2)
 
                 rows = cursor.fetchall()
                 groups: dict = {}
@@ -3390,7 +3391,7 @@ class BotDataViewer:
                 })
             except Exception as e:
                 self.logger.error(f"Error fetching local hop collisions: {e}", exc_info=True)
-                return jsonify({'error': str(e)}), 500
+                return jsonify({'error': 'Internal server error'}), 500
             finally:
                 if conn:
                     conn.close()
