@@ -643,6 +643,7 @@ monitor_channels = #general
     def test_applies_utc_offset_when_radio_clock_use_local_time_enabled(self, tmp_path):
         """radio_clock_use_local_time=true adds the timezone UTC offset to the target time."""
         from datetime import timedelta
+
         from meshcore.events import EventType
 
         bot = self._make_bot_with_local_time(tmp_path, "UTC")  # UTC offset is 0 — predictable

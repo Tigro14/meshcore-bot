@@ -7,8 +7,6 @@ Contains the main bot class and message processing logic
 import asyncio
 import atexit
 import configparser
-from datetime import datetime
-from datetime import timezone as _dt_tz
 import json
 import logging
 import signal
@@ -17,6 +15,8 @@ import struct
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime
+from datetime import timezone as _dt_tz
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
