@@ -159,6 +159,13 @@ timezone =
 # Default: false (radio clock is set to UTC)
 radio_clock_use_local_time = false
 
+# Automatically synchronize the USB-connected device's clock at bot startup
+# When enabled, the bot will check if the device's time is behind the system time
+# and update it if needed. This ensures the device clock stays synchronized.
+# Set to false if your device doesn't support time commands or to disable auto-sync.
+# Default: true (clock sync enabled)
+enable_clock_sync = true
+
 # Bot location for geographic proximity calculations and astronomical data
 # Default latitude for bot location (decimal degrees)
 # Example: 40.7128 for New York City, 48.50 for Victoria BC

@@ -703,6 +703,25 @@ monitor_channels = #general
         assert result is True
         bot.meshcore.commands.set_time.assert_called_once_with(1000)  # no offset
 
+    def test_skips_sync_when_enable_clock_sync_disabled(self, tmp_path):
+        """enable_clock_sync=false should skip clock sync entirely."""
+        bot = self._make_bot(tmp_path)
+        # Override the config to disable clock sync
+        bot.config.set("Bot", "enable_clock_sync", "false")
+        bot.meshcore = MagicMock()
+        bot.meshcore.is_connected = True
+        bot.meshcore.commands.get_time = MagicMock()
+
+        with patch.object(bot.logger, "debug") as mock_debug:
+            result = asyncio.run(bot.set_radio_clock())
+
+        assert result is True
+        # Should not call get_time when disabled
+        bot.meshcore.commands.get_time.assert_not_called()
+        # Should log that clock sync is disabled
+        debug_messages = "\n".join(str(call) for call in mock_debug.call_args_list)
+        assert "Clock sync disabled via configuration" in debug_messages
+
 # ---------------------------------------------------------------------------
 # _BotAdminServer — admin HTTP API
 # ---------------------------------------------------------------------------

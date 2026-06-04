@@ -1354,11 +1354,17 @@ long_jokes = false
                 # Setup message event handlers
                 await self.setup_message_handlers()
 
-                # Set radio clock if needed
-                await self.set_radio_clock()
+                # Set radio clock if needed (ensure USB companion clock is synced at startup)
+                clock_sync_result = await self.set_radio_clock()
+                if clock_sync_result:
+                    self.logger.info("✓ Clock sync completed successfully")
+                else:
+                    self.logger.warning("✗ Clock sync failed — device may not support time commands or sync failed")
 
                 # Set device name to match config if needed
-                await self.set_device_name()
+                name_update_result = await self.set_device_name()
+                if not name_update_result:
+                    self.logger.warning("✗ Device name update failed — proceeding with connection")
 
                 return True
             else:
@@ -1619,6 +1625,12 @@ long_jokes = false
             bool: True if check/update was successful (or not needed), False on error.
         """
         try:
+            # Check if clock sync is enabled
+            enable_clock_sync = self.config.getboolean('Bot', 'enable_clock_sync', fallback=True)
+            if not enable_clock_sync:
+                self.logger.debug("Clock sync disabled via configuration (enable_clock_sync=false)")
+                return True
+
             if not self.meshcore or not self.meshcore.is_connected:
                 self.logger.warning("Cannot set radio clock - not connected to device")
                 return False
