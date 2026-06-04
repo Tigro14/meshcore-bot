@@ -1363,7 +1363,9 @@ long_jokes = false
 
                 # Set device name to match config if needed
                 name_update_result = await self.set_device_name()
-                if not name_update_result:
+                if name_update_result:
+                    self.logger.info("✓ Device name update completed successfully")
+                else:
                     self.logger.warning("✗ Device name update failed — proceeding with connection")
 
                 return True
