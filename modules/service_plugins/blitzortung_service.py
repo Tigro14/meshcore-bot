@@ -61,12 +61,27 @@ class BlitzortungService(BaseServicePlugin):
         self.channel: str = self.bot.config.get(section, "channel", fallback="general")
 
         # --- thresholds -------------------------------------------------------
+        # Try Blitzortung_Service first, then fall back to Weather_Service (legacy)
         self.alert_threshold: int = self.bot.config.getint(
-            section, "alert_threshold", fallback=10
+            section, "alert_threshold", fallback=None
         )
-        window_minutes: int = self.bot.config.getint(
-            section, "window_minutes", fallback=10
-        )
+        if self.alert_threshold is None:
+            self.alert_threshold = self.bot.config.getint(
+                "Weather_Service", "blitz_alert_threshold", fallback=10
+            )
+
+        # Try Blitzortung_Service window_minutes first
+        window_minutes: Optional[int] = None
+        if self.bot.config.has_option(section, "window_minutes"):
+            window_minutes = self.bot.config.getint(section, "window_minutes")
+        # Fall back to Weather_Service blitz_collection_interval (in milliseconds)
+        elif self.bot.config.has_option("Weather_Service", "blitz_collection_interval"):
+            blitz_collection_interval_ms = self.bot.config.getint(
+                "Weather_Service", "blitz_collection_interval", fallback=600000
+            )
+            window_minutes = int(blitz_collection_interval_ms / 60000.0)
+        else:
+            window_minutes = 10
         self.window_seconds: float = window_minutes * 60.0
 
         # --- mesh silence (send only to external webhooks/Telegram) ----------
@@ -74,7 +89,7 @@ class BlitzortungService(BaseServicePlugin):
             section, "silence_mesh_output", fallback=False
         )
 
-        # --- bot position (own section → Weather_Service fallback) -----------
+        # --- bot position (try Blitzortung_Service → Weather_Service fallback) ---
         self.my_position_lat: Optional[float] = self.bot.config.getfloat(
             section, "my_position_lat", fallback=None
         )
@@ -98,8 +113,9 @@ class BlitzortungService(BaseServicePlugin):
             self.enabled = False
             return
 
-        # --- bounding box (required) -----------------------------------------
+        # --- bounding box (try Blitzortung_Service → Weather_Service fallback) ---
         self.blitz_area: Optional[dict[str, float]] = None
+        # Try Blitzortung_Service first
         if self.bot.config.has_option(section, "blitz_area_min_lat"):
             self.blitz_area = {
                 "min_lat": self.bot.config.getfloat(section, "blitz_area_min_lat"),
@@ -107,10 +123,19 @@ class BlitzortungService(BaseServicePlugin):
                 "max_lat": self.bot.config.getfloat(section, "blitz_area_max_lat"),
                 "max_lon": self.bot.config.getfloat(section, "blitz_area_max_lon"),
             }
+        # Fall back to Weather_Service
+        elif self.bot.config.has_option("Weather_Service", "blitz_area_min_lat"):
+            self.blitz_area = {
+                "min_lat": self.bot.config.getfloat("Weather_Service", "blitz_area_min_lat"),
+                "min_lon": self.bot.config.getfloat("Weather_Service", "blitz_area_min_lon"),
+                "max_lat": self.bot.config.getfloat("Weather_Service", "blitz_area_max_lat"),
+                "max_lon": self.bot.config.getfloat("Weather_Service", "blitz_area_max_lon"),
+            }
 
         if not self.blitz_area:
             self.logger.warning(
-                "Blitzortung service disabled: blitz_area_min/max_lat/lon not configured"
+                "Blitzortung service disabled: blitz_area_min/max_lat/lon not configured "
+                "(set in [Blitzortung_Service] or [Weather_Service])"
             )
             self.enabled = False
             return

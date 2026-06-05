@@ -189,13 +189,6 @@ dm_flood_after = 2
 # Leave empty to use system timezone
 timezone =
 
-# Set the radio device clock to local time instead of UTC when syncing.
-# Enable this when your mesh network devices use local time rather than UTC
-# (e.g., Europe/Paris devices that display and compare local timestamps).
-# Requires a valid timezone setting above (or falls back to system timezone).
-# Default: false (radio clock is set to UTC)
-radio_clock_use_local_time = false
-
 # Bot location for geographic proximity calculations and astronomical data
 # Default latitude for bot location (decimal degrees)
 # Example: 40.7128 for New York City, 48.50 for Victoria BC
@@ -569,10 +562,10 @@ test = "ack @[{sender}]{phrase_part} | {connection_info} | Received at: {timesta
 ping = "Pong!"
 pong = "Ping!"
 # Override 'help' command output
-# help = "Bot Help: test (or t), ping, version, help, hello, cmd, llm, advert, wx, aqi, sun, moon, solar, hfcond, satpass, prefix, path, sports, dice, roll, stats | More: 'help <command>'"
+# help = "Bot Help: test (or t), ping, version, help, hello, cmd, advert, wx, aqi, sun, moon, solar, hfcond, satpass, prefix, path, sports, dice, roll, stats | More: 'help <command>'"
 
 # Override 'cmd' command output
-# cmd = "Available commands: test (or t), ping, version, help, hello, cmd, llm, advert, wx, aqi, sun, moon, solar, hfcond, satpass, prefix, path, sports, dice, roll, stats"
+# cmd = "Available commands: test (or t), ping, version, help, hello, cmd, advert, wx, aqi, sun, moon, solar, hfcond, satpass, prefix, path, sports, dice, roll, stats"
 [Custom_Syntax]
 # Custom syntax patterns (regex) with formatted responses
 # Format: pattern = response_format
@@ -705,35 +698,6 @@ category.funfact = fun
 #0 12 * * * = Public:Midday status check - all systems operational.
 #0 18 * * * = Public:Evening update - bot status: Good
 # @hourly = Public:Hourly ping (preset example; comment out if unused)
-
-[Clock_Sync_Admin]
-# Schedule a direct-message admin clock sync command to one or more repeater targets.
-# This is useful for daily maintenance syncs on known repeater nodes.
-#
-# Enable or disable this scheduled job
-enabled = false
-#
-# Cron-style schedule (same parser/timezone behavior as [Scheduled_Messages])
-# Default shown: daily at 03:00 in [Bot] timezone.
-schedule = 0 3 * * *
-#
-# Comma-separated repeater identifiers to target.
-# Each entry may be a contact name, full public key, or public key prefix.
-# Duplicate entries are ignored per run.
-targets =
-#
-# DM payload to send to each resolved target.
-# Leave as default unless your mesh uses a different admin clock-sync trigger.
-command_payload = clock sync admin
-#
-# Dashboard clock-drift monitor settings:
-# - dashboard_hop_radius: only evaluate repeaters/roomservers within this hop count
-# - dashboard_check_window_hours: only include repeaters seen in this recent window
-# - dashboard_max_clock_drift_seconds: mark node out-of-sync when drift exceeds threshold
-dashboard_hop_radius = 5
-dashboard_check_window_hours = 24
-dashboard_max_clock_drift_seconds = 300
-
 [Schedule_Command]
 # Show scheduled messages and advert interval via the 'schedule' command
 # Responds with a compact list of scheduled times, channels, and message previews
@@ -1684,28 +1648,6 @@ enabled = true
 # Optional: override `cmd` output with a link to your full docs page
 # cmd_reference_url = https://example.com/command-reference
 # channels =
-
-[Llm_Command]
-# Local llama.cpp AI chat command (aliases: llm, ia, ai, chat)
-enabled = true
-# OpenAI-compatible llama.cpp endpoint
-endpoint = http://127.0.0.1:8080/v1/chat/completions
-# Optional model name (leave blank to use server default)
-model =
-# Keep this short for mesh bandwidth
-system_prompt = You are a helpful assistant on a low-bandwidth mesh network. Reply briefly in one short sentence.
-# Generation settings
-max_tokens = 80
-temperature = 0.4
-top_p = 0.9
-timeout_seconds = 20
-# Remove <think> blocks from some reasoning models
-strip_thinking_tags = true
-# Per-user conversation context: 0 to disable, otherwise seconds a conversation is remembered
-context_window_seconds = 600
-# Maximum number of prior exchange turns (user+assistant pairs) to include in context
-context_max_turns = 5
-# channels =
 [Channels_Command]
 enabled = true
 # channels =
@@ -2336,11 +2278,6 @@ rain_nowcast_cache_seconds = 300
 # Note: Storm detection area must be configured for this to work
 blitz_collection_interval = 600000
 
-# Minimum number of lightning strikes in a location bucket required to trigger an alert
-# Stats (strike counter and closest position) are reset after each collection interval
-# Default: 10
-# blitz_alert_threshold = 10
-
 # Storm detection area (optional)
 # Only report storms detected within this area
 # Leave empty to disable area filtering
@@ -2349,46 +2286,6 @@ blitz_collection_interval = 600000
 # blitz_area_min_lon = 15.54
 # blitz_area_max_lat = 48.76
 # blitz_area_max_lon = 18.62
-
-[Blitzortung_Service]
-# Dedicated Blitzortung lightning detection service.
-# When enabled, the built-in lightning detection inside [Weather_Service] is
-# automatically disabled to prevent duplicate alerts.
-# Requires paho-mqtt: pip install paho-mqtt
-enabled = false
-
-# Optional regional TC_FLOOD scope for mesh channel posts from this service.
-# flood_scope = #west
-
-# Channel to post lightning alerts to
-channel = #bot
-
-# Minimum number of strikes per (heading, 10 km distance) bucket within the
-# collection window required to trigger an alert.
-# Default: 10
-alert_threshold = 10
-
-# Collection window in minutes. Strikes are grouped and counted over this period,
-# then the buffer is reset. Replaces the millisecond-based blitz_collection_interval
-# key used in [Weather_Service].
-# Default: 10
-window_minutes = 10
-
-# Bot position for heading/distance calculation.
-# Can be omitted here if already set in [Weather_Service] (will fall back automatically).
-# my_position_lat = 47.51
-# my_position_lon = 15.54
-
-# Bounding box – only strikes within this rectangle are processed.
-# All four values are required to enable strike monitoring.
-# blitz_area_min_lat = 47.0
-# blitz_area_min_lon = 15.0
-# blitz_area_max_lat = 48.0
-# blitz_area_max_lon = 16.5
-
-# When true, mesh channel alerts are suppressed; only external webhooks / Telegram receive them.
-# silence_mesh_output = false
-
 [MqttWeather]
 # MQTT subscriber for custom.mqtt_weather.* topics (requires paho-mqtt). Service plugin: mqtt_weather_service.
 # Topic strings belong under [Weather]: custom.mqtt_weather.default and custom.mqtt_weather.<name> (see that section).

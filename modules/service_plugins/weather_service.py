@@ -133,7 +133,6 @@ class WeatherService(BaseServicePlugin):
         # Polling intervals (in milliseconds, converted to seconds)
         self.blitz_collection_interval = self.bot.config.getint('Weather_Service', 'blitz_collection_interval', fallback=600000) / 1000.0
         self.poll_weather_alerts_interval = self.bot.config.getint('Weather_Service', 'poll_weather_alerts_interval', fallback=600000) / 1000.0
-        self.blitz_alert_threshold = self.bot.config.getint('Weather_Service', 'blitz_alert_threshold', fallback=10)
 
         # Storm detection area (optional)
         self.blitz_area = None
@@ -388,20 +387,8 @@ class WeatherService(BaseServicePlugin):
         else:
             self._rain_task = None
 
-        # Start lightning detection if area is configured.
-        # Skip if the dedicated Blitzortung_Service is enabled to avoid duplicate alerts.
-        blitzortung_service_enabled = (
-            self.bot.config.has_section("Blitzortung_Service")
-            and self.bot.config.getboolean("Blitzortung_Service", "enabled", fallback=False)
-        )
-        if blitzortung_service_enabled and self.blitz_area:
-            self.logger.info(
-                "Blitzortung_Service is enabled — skipping built-in lightning detection "
-                "in Weather_Service to avoid duplicate alerts"
-            )
-            self._lightning_task = None
-            self.mqtt_task = None
-        elif self.blitz_area and MQTT_AVAILABLE:
+        # Start lightning detection if area is configured
+        if self.blitz_area and MQTT_AVAILABLE:
             self._lightning_task = asyncio.create_task(self._poll_lightning_loop())
             self.mqtt_task = asyncio.create_task(self._connect_blitzortung_mqtt())
         else:
@@ -1466,14 +1453,14 @@ class WeatherService(BaseServicePlugin):
 
         # Check each bucket
         for key, count in counter.items():
-            # Only alert if threshold is met and we haven't seen this bucket in the current cycle
-            if count >= self.blitz_alert_threshold and key not in self.seen_blitz_keys:
-                # Find the closest strike from this bucket
+            # Only alert if 10+ strikes in bucket and we haven't seen this bucket before
+            if count >= 10 and key not in self.seen_blitz_keys:
+                # Find a representative strike from this bucket
                 bucket_strikes = [b for b in self.blitz_buffer if b['key'] == key]
                 if not bucket_strikes:
                     continue
 
-                data = min(bucket_strikes, key=lambda b: b['distance'])
+                data = bucket_strikes[0]
                 heading = data['heading']
                 distance = data['distance']
 
@@ -1502,9 +1489,12 @@ class WeatherService(BaseServicePlugin):
                 # Small delay between alerts
                 await asyncio.sleep(2)
 
-        # Clear buffer and reset seen keys so each new interval starts fresh
+        # Clear buffer
         self.blitz_buffer = []
-        self.seen_blitz_keys = set()
+
+        # Clean up old seen keys (keep last 1000)
+        if len(self.seen_blitz_keys) > 1000:
+            self.seen_blitz_keys = set(list(self.seen_blitz_keys)[-1000:])
 
     def _heading_to_compass(self, heading: int) -> str:
         """Convert heading in degrees to compass direction name.
