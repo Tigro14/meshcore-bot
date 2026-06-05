@@ -1817,6 +1817,45 @@ blitz_collection_interval = 600000
 # blitz_area_max_lat = 48.76
 # blitz_area_max_lon = 18.62
 
+[Blitzortung_Service]
+# Dedicated Blitzortung lightning detection service.
+# When enabled, the built-in lightning detection inside [Weather_Service] is
+# automatically disabled to prevent duplicate alerts.
+# Requires paho-mqtt: pip install paho-mqtt
+enabled = false
+
+# Optional regional TC_FLOOD scope for mesh channel posts from this service.
+# flood_scope = #west
+
+# Channel to post lightning alerts to
+channel = #bot
+
+# Minimum number of strikes per (heading, 10 km distance) bucket within the
+# collection window required to trigger an alert.
+# Default: 10
+alert_threshold = 10
+
+# Collection window in minutes. Strikes are grouped and counted over this period,
+# then the buffer is reset. Replaces the millisecond-based blitz_collection_interval
+# key used in [Weather_Service].
+# Default: 10
+window_minutes = 10
+
+# Bot position for heading/distance calculation.
+# Can be omitted here if already set in [Weather_Service] (will fall back automatically).
+# my_position_lat = 47.51
+# my_position_lon = 15.54
+
+# Bounding box – only strikes within this rectangle are processed.
+# All four values are required to enable strike monitoring.
+# blitz_area_min_lat = 47.0
+# blitz_area_min_lon = 15.0
+# blitz_area_max_lat = 48.0
+# blitz_area_max_lon = 16.5
+
+# When true, mesh channel alerts are suppressed; only external webhooks / Telegram receive them.
+# silence_mesh_output = false
+
 [MqttWeather]
 # MQTT subscriber for custom.mqtt_weather.* topics (requires paho-mqtt). Service plugin: mqtt_weather_service.
 # Topic strings belong under [Weather]: custom.mqtt_weather.default and custom.mqtt_weather.<name> (see that section).

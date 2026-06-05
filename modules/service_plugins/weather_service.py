@@ -217,8 +217,20 @@ class WeatherService(BaseServicePlugin):
         # Start background tasks
         self._alerts_task = asyncio.create_task(self._poll_weather_alerts_loop())
 
-        # Start lightning detection if area is configured
-        if self.blitz_area and MQTT_AVAILABLE:
+        # Start lightning detection if area is configured.
+        # Skip if the dedicated Blitzortung_Service is enabled to avoid duplicate alerts.
+        blitzortung_service_enabled = (
+            self.bot.config.has_section("Blitzortung_Service")
+            and self.bot.config.getboolean("Blitzortung_Service", "enabled", fallback=False)
+        )
+        if blitzortung_service_enabled and self.blitz_area:
+            self.logger.info(
+                "Blitzortung_Service is enabled — skipping built-in lightning detection "
+                "in Weather_Service to avoid duplicate alerts"
+            )
+            self._lightning_task = None
+            self.mqtt_task = None
+        elif self.blitz_area and MQTT_AVAILABLE:
             self._lightning_task = asyncio.create_task(self._poll_lightning_loop())
             self.mqtt_task = asyncio.create_task(self._connect_blitzortung_mqtt())
         else:
