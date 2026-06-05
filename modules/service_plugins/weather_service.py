@@ -5,8 +5,7 @@ Provides scheduled weather forecasts and alert monitoring
 """
 
 import asyncio
-import json
-import math
+import contextlib
 import re
 import time
 import xml.dom.minidom
@@ -20,16 +19,6 @@ from apscheduler.triggers.cron import CronTrigger
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# Try to import MQTT client (use paho-mqtt like packet capture service)
-try:
-    import paho.mqtt.client as mqtt
-    MQTT_AVAILABLE = True
-except ImportError:
-    MQTT_AVAILABLE = False
-    mqtt = None
-
-import contextlib
-
 from ..url_shortener import shorten_url
 from ..utils import format_temperature_high_low, get_config_timezone
 from .base_service import BaseServicePlugin
@@ -38,8 +27,8 @@ from .base_service import BaseServicePlugin
 class WeatherService(BaseServicePlugin):
     """Weather service providing scheduled forecasts and alert monitoring.
 
-    Manages daily weather forecasts, polls for NOAA weather alerts, and
-    monitors lightning strikes via MQTT (Blitzortung).
+    Manages daily weather forecasts and polls for NOAA weather alerts.
+    Lightning strike monitoring is handled by BlitzortungService.
     """
 
     config_section = 'Weather_Service'
@@ -62,19 +51,7 @@ class WeatherService(BaseServicePlugin):
         self.weather_model = self._load_weather_model()
 
         # Polling intervals (in milliseconds, converted to seconds)
-        self.blitz_collection_interval = self.bot.config.getint('Weather_Service', 'blitz_collection_interval', fallback=600000) / 1000.0
         self.poll_weather_alerts_interval = self.bot.config.getint('Weather_Service', 'poll_weather_alerts_interval', fallback=600000) / 1000.0
-        self.blitz_alert_threshold = self.bot.config.getint('Weather_Service', 'blitz_alert_threshold', fallback=10)
-
-        # Storm detection area (optional)
-        self.blitz_area = None
-        if self.bot.config.has_option('Weather_Service', 'blitz_area_min_lat'):
-            self.blitz_area = {
-                'min_lat': self.bot.config.getfloat('Weather_Service', 'blitz_area_min_lat'),
-                'min_lon': self.bot.config.getfloat('Weather_Service', 'blitz_area_min_lon'),
-                'max_lat': self.bot.config.getfloat('Weather_Service', 'blitz_area_max_lat'),
-                'max_lon': self.bot.config.getfloat('Weather_Service', 'blitz_area_max_lon'),
-            }
 
         # Validate position
         if self.my_position_lat is None or self.my_position_lon is None:
@@ -99,18 +76,8 @@ class WeatherService(BaseServicePlugin):
         # Background tasks
         self._alerts_task: Optional[asyncio.Task] = None
         self._forecast_task: Optional[asyncio.Task] = None
-        self._lightning_task: Optional[asyncio.Task] = None
         self._forecast_scheduler: Optional[BackgroundScheduler] = None
         self._running = False
-
-        # Track recent lightning strikes to avoid duplicates
-        self.recent_lightning_strikes: set[str] = set()
-
-        # Lightning detection via MQTT
-        self.blitz_buffer: list[dict[str, Any]] = []
-        self.seen_blitz_keys: set[str] = set()
-        self.mqtt_client: Optional[Any] = None  # paho.mqtt.client.Client
-        self.mqtt_task: Optional[asyncio.Task] = None
 
         # Check if using sunrise/sunset
         self.use_sunrise_sunset = self.weather_alarm_time.lower() in ['sunrise', 'sunset']
@@ -217,28 +184,6 @@ class WeatherService(BaseServicePlugin):
         # Start background tasks
         self._alerts_task = asyncio.create_task(self._poll_weather_alerts_loop())
 
-        # Start lightning detection if area is configured.
-        # Skip if the dedicated Blitzortung_Service is enabled to avoid duplicate alerts.
-        blitzortung_service_enabled = (
-            self.bot.config.has_section("Blitzortung_Service")
-            and self.bot.config.getboolean("Blitzortung_Service", "enabled", fallback=False)
-        )
-        if blitzortung_service_enabled and self.blitz_area:
-            self.logger.info(
-                "Blitzortung_Service is enabled — skipping built-in lightning detection "
-                "in Weather_Service to avoid duplicate alerts"
-            )
-            self._lightning_task = None
-            self.mqtt_task = None
-        elif self.blitz_area and MQTT_AVAILABLE:
-            self._lightning_task = asyncio.create_task(self._poll_lightning_loop())
-            self.mqtt_task = asyncio.create_task(self._connect_blitzortung_mqtt())
-        else:
-            self._lightning_task = None
-            self.mqtt_task = None
-            if self.blitz_area and not MQTT_AVAILABLE:
-                self.logger.warning("Lightning detection configured but paho-mqtt not available")
-
         self.logger.info("Weather service started")
 
     async def stop(self) -> None:
@@ -259,23 +204,6 @@ class WeatherService(BaseServicePlugin):
             self._forecast_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._forecast_task
-
-        if self._lightning_task:
-            self._lightning_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._lightning_task
-
-        if self.mqtt_task:
-            self.mqtt_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.mqtt_task
-
-        if self.mqtt_client:
-            try:
-                self.mqtt_client.loop_stop()
-                self.mqtt_client.disconnect()
-            except Exception:
-                pass
 
         if self._forecast_scheduler is not None:
             try:
@@ -778,269 +706,6 @@ class WeatherService(BaseServicePlugin):
 
         except Exception as e:
             self.logger.error(f"Error checking weather alerts: {e}")
-
-    async def _connect_blitzortung_mqtt(self) -> None:
-        """Connect to Blitzortung MQTT broker and subscribe to lightning data.
-
-        Maintains a connection to the MQTT broker for real-time lightning strikes.
-        """
-        if not self.blitz_area or not MQTT_AVAILABLE:
-            return
-
-        broker_host = "blitzortung.ha.sed.pl"
-        broker_port = 1883
-        topic = "blitzortung/1.1/#"
-
-        self.logger.info(f"Connecting to Blitzortung MQTT broker: {broker_host}:{broker_port}")
-
-        while self._running:
-            try:
-                # Create paho-mqtt client
-                client_id = f"meshcore_weather_{int(time.time())}"
-                client = mqtt.Client(client_id=client_id)
-                self.mqtt_client = client
-
-                # Set up message callback
-                def on_message(client, userdata, msg):
-                    try:
-                        # Decode message
-                        payload = msg.payload.decode('utf-8')
-                        blitz_data = json.loads(payload)
-
-                        # Check if strike is within our area
-                        lat = blitz_data.get('lat')
-                        lon = blitz_data.get('lon')
-
-                        if lat is None or lon is None:
-                            return
-
-                        if (self.blitz_area['min_lat'] <= lat <= self.blitz_area['max_lat'] and
-                            self.blitz_area['min_lon'] <= lon <= self.blitz_area['max_lon']):
-                            # Schedule async processing
-                            asyncio.create_task(self._handle_lightning_strike(blitz_data))
-
-                    except json.JSONDecodeError:
-                        self.logger.debug("Invalid JSON in lightning MQTT message")
-                    except Exception as e:
-                        self.logger.debug(f"Error processing lightning MQTT message: {e}")
-
-                client.on_message = on_message
-
-                # Connect and subscribe (non-blocking to avoid blocking event loop)
-                loop = asyncio.get_event_loop()
-                try:
-                    await loop.run_in_executor(None, client.connect, broker_host, broker_port, 60)
-                except Exception as connect_error:
-                    # Connection failed, but don't block - will retry on next cycle
-                    self.logger.debug(f"Initial connect() call failed (non-blocking): {connect_error}")
-                    raise  # Re-raise to trigger retry logic
-
-                # Subscribe is non-blocking, but wrap it anyway for consistency
-                try:
-                    client.subscribe(topic)
-                except Exception as subscribe_error:
-                    self.logger.debug(f"Subscribe() call failed: {subscribe_error}")
-                    raise
-
-                client.loop_start()
-
-                self.logger.info(f"Connected to Blitzortung MQTT, subscribed to {topic}")
-
-                # Keep connection alive
-                while self._running:
-                    await asyncio.sleep(1)
-                    if not client.is_connected():
-                        self.logger.warning("Blitzortung MQTT disconnected, reconnecting...")
-                        break
-
-                client.loop_stop()
-                client.disconnect()
-
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error(f"Error in Blitzortung MQTT connection: {e}")
-                if self._running:
-                    self.logger.info("Reconnecting to Blitzortung MQTT in 30 seconds...")
-                    await asyncio.sleep(30)
-
-    async def _handle_lightning_strike(self, blitz_data: dict[str, Any]) -> None:
-        """Handle a single lightning strike from MQTT.
-
-        Calculates distance and adds to buffer if within range.
-
-        Args:
-            blitz_data: Dictionary containing lightning strike data.
-        """
-        lat = blitz_data.get('lat')
-        lon = blitz_data.get('lon')
-
-        if lat is None or lon is None:
-            return
-
-        # Calculate heading and distance from bot position
-        heading, distance = self._calculate_heading_and_distance(
-            self.my_position_lat, self.my_position_lon, lat, lon
-        )
-
-        # Create bucket key (same as original: heading|distance/10)
-        distance_bucket = int(distance / 10)
-        key = f"{heading}|{distance_bucket}"
-
-        # Add to buffer
-        self.blitz_buffer.append({
-            'key': key,
-            'heading': heading,
-            'distance': distance,
-            'lat': lat,
-            'lon': lon,
-            'timestamp': blitz_data.get('time', time.time())
-        })
-
-    def _calculate_heading_and_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> tuple:
-        """Calculate heading and distance between two points (same as original implementation).
-
-        Args:
-            lat1: Latitude of point 1.
-            lon1: Longitude of point 1.
-            lat2: Latitude of point 2.
-            lon2: Longitude of point 2.
-
-        Returns:
-            tuple: (heading_degrees, distance_km)
-        """
-        # Convert to radians
-        lat1_rad = math.radians(lat1)
-        lat2_rad = math.radians(lat2)
-        dlon_rad = math.radians(lon2 - lon1)
-
-        # Calculate distance using Haversine formula
-        a = math.sin((lat2_rad - lat1_rad) / 2)**2 + \
-            math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon_rad / 2)**2
-        c = 2 * math.asin(math.sqrt(a))
-        distance_km = 6371 * c  # Earth radius in km
-
-        # Calculate bearing/heading
-        y = math.sin(dlon_rad) * math.cos(lat2_rad)
-        x = math.cos(lat1_rad) * math.sin(lat2_rad) - \
-            math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon_rad)
-        heading_rad = math.atan2(y, x)
-        heading_deg = (math.degrees(heading_rad) + 360) % 360
-
-        return (int(heading_deg), distance_km)
-
-    async def _poll_lightning_loop(self) -> None:
-        """Background task to aggregate and report lightning strikes.
-
-        Periodically processes the lightning buffer and sends alerts.
-        """
-        self.logger.info(f"Starting lightning aggregation (interval: {self.blitz_collection_interval}s)")
-
-        while self._running:
-            try:
-                await self._process_lightning_buffer()
-                await asyncio.sleep(self.blitz_collection_interval)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error(f"Error in lightning aggregation loop: {e}")
-                await asyncio.sleep(60)  # Wait 1 minute on error before retrying
-
-    async def _process_lightning_buffer(self) -> None:
-        """Process buffered lightning strikes and send alerts if threshold met.
-
-        Groups strikes by location bucket and sends alerts if count exceeds threshold.
-        """
-        if not self.blitz_buffer:
-            return
-
-        # Count strikes by bucket key
-        counter: dict[str, int] = {}
-        for blitz in self.blitz_buffer:
-            key = blitz['key']
-            counter[key] = counter.get(key, 0) + 1
-
-        # Check each bucket
-        for key, count in counter.items():
-            # Only alert if threshold is met and we haven't seen this bucket in the current cycle
-            if count >= self.blitz_alert_threshold and key not in self.seen_blitz_keys:
-                # Find the closest strike from this bucket
-                bucket_strikes = [b for b in self.blitz_buffer if b['key'] == key]
-                if not bucket_strikes:
-                    continue
-
-                data = min(bucket_strikes, key=lambda b: b['distance'])
-                heading = data['heading']
-                distance = data['distance']
-
-                # Get compass direction name
-                compass_name = self._heading_to_compass(heading)
-
-                # Try to geocode location (optional, may fail)
-                location_name = await self._geocode_location(data['lat'], data['lon'])
-
-                # Format message
-                if location_name:
-                    message = f"🌩️ {location_name} ({int(distance)}km {compass_name})"
-                else:
-                    message = f"🌩️ Lightning activity ({int(distance)}km {compass_name})"
-
-                await self.bot.command_manager.send_channel_message(
-                    self.alerts_channel,
-                    message,
-                    scope=self.get_mesh_flood_scope(),
-                )
-                self.logger.info(f"Lightning alert sent: {message}")
-
-                # Mark this bucket as seen
-                self.seen_blitz_keys.add(key)
-
-                # Small delay between alerts
-                await asyncio.sleep(2)
-
-        # Clear buffer and reset seen keys so each new interval starts fresh
-        self.blitz_buffer = []
-        self.seen_blitz_keys = set()
-
-    def _heading_to_compass(self, heading: int) -> str:
-        """Convert heading in degrees to compass direction name.
-
-        Args:
-            heading: Heading in degrees.
-
-        Returns:
-            str: Compass direction abbreviation (e.g., 'N', 'NW').
-        """
-        compass_points = [
-            'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
-            'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'
-        ]
-        index = int((heading + 11.25) / 22.5) % 16
-        return compass_points[index]
-
-    async def _geocode_location(self, lat: float, lon: float) -> Optional[str]:
-        """Geocode coordinates to location name (optional, may return None).
-
-        Args:
-            lat: Latitude.
-            lon: Longitude.
-
-        Returns:
-            Optional[str]: City/town name or None if lookup fails.
-        """
-        try:
-            # Use reverse geocoding if available in utils
-            from ..utils import rate_limited_nominatim_reverse_sync
-            location = rate_limited_nominatim_reverse_sync(self.bot, f"{lat}, {lon}", timeout=5)
-            if location:
-                # Extract city/town name
-                if isinstance(location, dict):
-                    return location.get('city') or location.get('town') or location.get('village') or None
-                return str(location)
-        except Exception:
-            pass
-        return None
 
     def _parse_alert_entry(self, entry: Any, alert_id: str) -> Optional[dict[str, Any]]:
         """Parse alert XML entry and extract full metadata (same logic as wx_command).

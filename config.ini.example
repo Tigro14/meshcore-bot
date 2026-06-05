@@ -1797,18 +1797,27 @@ alerts_channel = #weather
 # Default: 600000 (10 minutes)
 poll_weather_alerts_interval = 600000
 
+# DEPRECATED: Lightning detection has been moved to [Blitzortung_Service]
+# The settings below are kept for backward compatibility only.
+# Please use [Blitzortung_Service] for new configurations.
+# If you have blitz_collection_interval or blitz_area settings below,
+# Blitzortung_Service will automatically detect and use them.
+
 # Thunder/storm data collection interval (milliseconds)
+# DEPRECATED: Use [Blitzortung_Service] window_minutes instead
 # How often to aggregate thunder data for evaluation
 # Default: 600000 (10 minutes)
 # Note: Storm detection area must be configured for this to work
-blitz_collection_interval = 600000
+# blitz_collection_interval = 600000
 
 # Minimum number of lightning strikes in a location bucket required to trigger an alert
+# DEPRECATED: Use [Blitzortung_Service] alert_threshold instead
 # Stats (strike counter and closest position) are reset after each collection interval
 # Default: 10
 # blitz_alert_threshold = 10
 
-# Storm detection area (optional)
+# Storm detection area (optional, DEPRECATED)
+# DEPRECATED: Use [Blitzortung_Service] blitz_area_* settings instead
 # Only report storms detected within this area
 # Leave empty to disable area filtering
 # Format: decimal degrees
@@ -1819,9 +1828,19 @@ blitz_collection_interval = 600000
 
 [Blitzortung_Service]
 # Dedicated Blitzortung lightning detection service.
-# When enabled, the built-in lightning detection inside [Weather_Service] is
-# automatically disabled to prevent duplicate alerts.
+# Consolidates all lightning detection functionality (previously split between
+# Blitzortung_Service and Weather_Service). When enabled, the Weather_Service
+# will automatically skip its built-in lightning detection to prevent duplicates.
 # Requires paho-mqtt: pip install paho-mqtt
+#
+# Configuration Fallback Chain:
+# - alert_threshold: [Blitzortung_Service] → [Weather_Service] blitz_alert_threshold
+# - window_minutes: [Blitzortung_Service] → (1000 * [Weather_Service] blitz_collection_interval)
+# - position (my_position_lat/lon): [Blitzortung_Service] → [Weather_Service]
+# - blitz_area_*: [Blitzortung_Service] → [Weather_Service]
+#
+# This enables painless migration: existing Weather_Service config will work, but
+# new configs should use [Blitzortung_Service].
 enabled = false
 
 # Optional regional TC_FLOOD scope for mesh channel posts from this service.
@@ -1832,14 +1851,13 @@ channel = #bot
 
 # Minimum number of strikes per (heading, 10 km distance) bucket within the
 # collection window required to trigger an alert.
-# Default: 10
-alert_threshold = 10
+# Default: 10 (falls back to [Weather_Service] blitz_alert_threshold if not set)
+# alert_threshold = 10
 
 # Collection window in minutes. Strikes are grouped and counted over this period,
-# then the buffer is reset. Replaces the millisecond-based blitz_collection_interval
-# key used in [Weather_Service].
-# Default: 10
-window_minutes = 10
+# then the buffer is reset.
+# Default: 10 minutes (falls back to [Weather_Service] blitz_collection_interval in ms if not set)
+# window_minutes = 10
 
 # Bot position for heading/distance calculation.
 # Can be omitted here if already set in [Weather_Service] (will fall back automatically).
@@ -1848,6 +1866,7 @@ window_minutes = 10
 
 # Bounding box – only strikes within this rectangle are processed.
 # All four values are required to enable strike monitoring.
+# Falls back to [Weather_Service] blitz_area_* if not set here.
 # blitz_area_min_lat = 47.0
 # blitz_area_min_lon = 15.0
 # blitz_area_max_lat = 48.0
