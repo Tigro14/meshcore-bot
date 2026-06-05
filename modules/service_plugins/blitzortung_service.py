@@ -26,6 +26,7 @@ import contextlib
 import json
 import math
 import time
+import uuid
 from typing import Any, Optional
 
 try:
@@ -191,7 +192,7 @@ class BlitzortungService(BaseServicePlugin):
 
         while self._running:
             try:
-                client_id = f"meshcore_blitzortung_{int(time.time())}"
+                client_id = f"meshcore_blitzortung_{uuid.uuid4().hex[:8]}"
                 client = mqtt.Client(client_id=client_id)
                 self.mqtt_client = client
 
