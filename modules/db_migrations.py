@@ -514,6 +514,30 @@ def _m0013_bbs_messages_table(cursor: sqlite3.Cursor) -> None:
     )
 
 
+def _m0014_clock_sync_admin_log(cursor: sqlite3.Cursor) -> None:
+    """Create clock_sync_admin_log table for tracking sync job success."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS clock_sync_admin_log (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            public_key     TEXT NOT NULL,
+            target_name    TEXT NOT NULL,
+            success        BOOLEAN NOT NULL,
+            error_message  TEXT,
+            sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_clock_sync_admin_log_pubkey "
+        "ON clock_sync_admin_log(public_key, sent_at DESC)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_clock_sync_admin_log_sent_at "
+        "ON clock_sync_admin_log(sent_at)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -534,6 +558,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (11, "repeater/graph indexes", _m0011_repeater_and_graph_indexes),
     (12, "purging_log: add details column", _m0012_purging_log_details_column),
     (13, "bbs_messages table", _m0013_bbs_messages_table),
+    (14, "clock_sync_admin_log table", _m0014_clock_sync_admin_log),
 ]
 
 

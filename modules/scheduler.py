@@ -250,6 +250,33 @@ class MessageScheduler:
         )
         return (payload or "").strip()
 
+    def _log_clock_sync_admin_attempt(
+        self, public_key: str, target_name: str, success: bool, error_message: Optional[str] = None
+    ) -> None:
+        """Record a Clock_Sync_Admin send attempt in the database."""
+        db_manager = getattr(self.bot, "db_manager", None)
+        if not db_manager:
+            return
+
+        try:
+            with db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO clock_sync_admin_log
+                    (public_key, target_name, success, error_message)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (public_key, target_name, success, error_message),
+                )
+                conn.commit()
+        except Exception as e:
+            self.logger.warning(
+                "Failed to log clock_sync_admin attempt for %s: %s",
+                sanitize_name(target_name),
+                e,
+            )
+
     def run_clock_sync_admin_job_sync(self) -> None:
         """APScheduler sync wrapper for the async Clock_Sync_Admin DM run."""
         self._run_async_on_main_loop(self._run_clock_sync_admin_job_async(), timeout=300.0)
@@ -353,11 +380,17 @@ class MessageScheduler:
                         "Clock_Sync_Admin sent to %s",
                         sanitize_name(contact_name),
                     )
+                    # Log successful send
+                    self._log_clock_sync_admin_attempt(public_key, contact_name, True)
                 else:
                     failed_count += 1
                     self.logger.warning(
                         "Clock_Sync_Admin send failed for %s",
                         sanitize_name(contact_name),
+                    )
+                    # Log failed send
+                    self._log_clock_sync_admin_attempt(
+                        public_key, contact_name, False, "Send returned False"
                     )
             except Exception as e:
                 failed_count += 1
@@ -365,6 +398,10 @@ class MessageScheduler:
                     "Clock_Sync_Admin send error for %s: %s",
                     sanitize_name(contact_name),
                     e,
+                )
+                # Log error
+                self._log_clock_sync_admin_attempt(
+                    public_key, contact_name, False, str(e)
                 )
 
         self.logger.info(

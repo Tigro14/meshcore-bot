@@ -1493,6 +1493,11 @@ class BotDataViewer:
             """Radio settings page"""
             return render_template('radio.html')
 
+        @self.app.route('/time')
+        def time_page():
+            """Time synchronization page"""
+            return render_template('time.html')
+
         @self.app.route('/config')
         def config_page():
             """Bot configuration page"""
@@ -2474,6 +2479,16 @@ class BotDataViewer:
             except Exception as e:
                 self.logger.error(f"Error getting stats: {e}")
                 return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/clock-sync-targets')
+        def api_clock_sync_targets():
+            """Get Clock_Sync_Admin targets with their synchronization status"""
+            try:
+                targets_data = self._get_clock_sync_targets_status()
+                return jsonify(targets_data)
+            except Exception as e:
+                self.logger.error(f"Error getting clock sync targets: {e}")
+                return jsonify({'error': 'Failed to retrieve clock sync targets'}), 500
 
 
 
@@ -8080,6 +8095,226 @@ class BotDataViewer:
             return []
 
         return decoded_path
+
+    def _get_clock_sync_targets_status(self):
+        """Get Clock_Sync_Admin targets with their synchronization status"""
+        try:
+            # Get configuration
+            enabled = self.config.getboolean('Clock_Sync_Admin', 'enabled', fallback=False)
+            schedule = self.config.get('Clock_Sync_Admin', 'schedule', fallback='0 3 * * *')
+            command_payload = self.config.get('Clock_Sync_Admin', 'command_payload', fallback='clock sync admin')
+            targets_raw = self.config.get('Clock_Sync_Admin', 'targets', fallback='')
+
+            # Parse targets
+            targets = []
+            seen = set()
+            for token in (targets_raw or "").split(","):
+                candidate = token.strip().strip("\"'")
+                if not candidate:
+                    continue
+                dedup_key = candidate.lower()
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+                targets.append(candidate)
+
+            # Get clock drift settings
+            drift_threshold_seconds = self.config.getint(
+                'Clock_Sync_Admin',
+                'dashboard_max_clock_drift_seconds',
+                fallback=300,
+            )
+            check_window_hours = self.config.getint(
+                'Clock_Sync_Admin',
+                'dashboard_check_window_hours',
+                fallback=24,
+            )
+
+            # Resolve targets and get their status
+            targets_status = []
+            bot = getattr(self, 'bot', None)
+
+            if bot and hasattr(bot, 'meshcore') and bot.meshcore:
+                meshcore = bot.meshcore
+                contacts = getattr(meshcore, 'contacts', {}) or {}
+
+                # Build public key lookup dictionary for O(1) access
+                pubkey_to_contact = {}
+                for contact_data in contacts.values():
+                    public_key = (contact_data.get("public_key", "") or "").strip()
+                    if public_key:
+                        pubkey_to_contact[public_key] = contact_data
+
+                # Get clock drift data from database
+                drift_data = {}
+                conn = None
+                try:
+                    conn = self._get_db_connection()
+                    cursor = conn.cursor()
+
+                    # Get message stats with clock drift information
+                    cutoff_time = time.time() - (check_window_hours * 3600)
+                    cursor.execute(
+                        """
+                        WITH latest_message_per_sender AS (
+                            SELECT sender_id, MAX(id) AS latest_id
+                            FROM message_stats
+                            GROUP BY sender_id
+                        )
+                        SELECT
+                            c.name,
+                            c.public_key,
+                            c.role,
+                            c.hop_count,
+                            m.received_at,
+                            m.sender_timestamp,
+                            ABS(m.received_at - m.sender_timestamp) AS drift_seconds
+                        FROM complete_contact_tracking c
+                        JOIN latest_message_per_sender lm ON c.public_key = lm.sender_id
+                        JOIN message_stats m ON m.id = lm.latest_id
+                        WHERE m.received_at >= ?
+                        AND m.sender_timestamp IS NOT NULL
+                        """,
+                        (cutoff_time,)
+                    )
+
+                    for row in cursor.fetchall():
+                        drift_data[row[1]] = {  # public_key as key
+                            'name': row[0],
+                            'role': row[2],
+                            'hop_count': row[3],
+                            'received_at': row[4],
+                            'sender_timestamp': row[5],
+                            'drift_seconds': int(row[6]) if row[6] is not None else None,
+                        }
+
+                    # Get latest Clock_Sync_Admin log entries for each public key
+                    cursor.execute(
+                        """
+                        SELECT public_key, success, sent_at, error_message
+                        FROM clock_sync_admin_log
+                        WHERE id IN (
+                            SELECT MAX(id)
+                            FROM clock_sync_admin_log
+                            GROUP BY public_key
+                        )
+                        """
+                    )
+                    clock_sync_log = {}
+                    for row in cursor.fetchall():
+                        clock_sync_log[row[0]] = {  # public_key as key
+                            'success': bool(row[1]),
+                            'sent_at': row[2],
+                            'error_message': row[3],
+                        }
+                finally:
+                    if conn:
+                        conn.close()
+
+                # Process each target
+                for target_identifier in targets:
+                    target_info = {
+                        'identifier': target_identifier,
+                        'name': target_identifier,
+                        'public_key': None,
+                        'role': None,
+                        'hop_count': None,
+                        'drift_seconds': None,
+                        'last_seen': None,
+                        'status': 'Not Found'
+                    }
+
+                    # Try to resolve contact by name
+                    contact = None
+                    try:
+                        contact = meshcore.get_contact_by_name(target_identifier)
+                    except Exception:
+                        pass
+
+                    # If not found by name, try by exact public key or prefix match
+                    if not contact:
+                        # First try exact match
+                        if target_identifier in pubkey_to_contact:
+                            contact = pubkey_to_contact[target_identifier]
+                        else:
+                            # Then try prefix match (only if not found by exact match)
+                            for public_key, contact_data in pubkey_to_contact.items():
+                                if public_key.startswith(target_identifier):
+                                    contact = contact_data
+                                    break
+
+                    if contact:
+                        public_key = (contact.get('public_key', '') or '').strip()
+                        contact_name = (
+                            (contact.get('name', '') or '').strip()
+                            or (contact.get('adv_name', '') or '').strip()
+                            or target_identifier
+                        )
+
+                        target_info['name'] = contact_name
+                        target_info['public_key'] = public_key
+                        target_info['role'] = contact.get('role', 'unknown')
+                        target_info['hop_count'] = contact.get('hop_count')
+
+                        # Get Clock_Sync_Admin log data if available
+                        if public_key in clock_sync_log:
+                            log = clock_sync_log[public_key]
+                            target_info['last_sync_success'] = log['success']
+                            target_info['last_sync_at'] = log['sent_at']
+                            target_info['last_sync_error'] = log['error_message']
+                        else:
+                            target_info['last_sync_success'] = None
+                            target_info['last_sync_at'] = None
+                            target_info['last_sync_error'] = None
+
+                        # Get drift data if available
+                        if public_key in drift_data:
+                            drift = drift_data[public_key]
+                            target_info['drift_seconds'] = drift['drift_seconds']
+                            target_info['last_seen'] = drift['received_at']
+
+                            if drift['drift_seconds'] is not None:
+                                if drift['drift_seconds'] <= drift_threshold_seconds:
+                                    target_info['status'] = 'In Sync'
+                                else:
+                                    target_info['status'] = 'Out of Sync'
+                            else:
+                                target_info['status'] = 'No Data'
+                        else:
+                            target_info['status'] = 'Unknown'
+
+                    targets_status.append(target_info)
+            else:
+                # Bot not available, just return targets with unknown status
+                for target_identifier in targets:
+                    targets_status.append({
+                        'identifier': target_identifier,
+                        'name': target_identifier,
+                        'public_key': None,
+                        'role': None,
+                        'hop_count': None,
+                        'drift_seconds': None,
+                        'last_seen': None,
+                        'status': 'Unknown'
+                    })
+
+            return {
+                'enabled': enabled,
+                'schedule': schedule,
+                'command_payload': command_payload,
+                'targets': targets_status,
+                'drift_threshold_seconds': drift_threshold_seconds,
+                'check_window_hours': check_window_hours,
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error getting clock sync targets status: {e}", exc_info=True)
+            return {
+                'enabled': False,
+                'schedule': '',
+                'command_payload': '',
+                'targets': []
+            }
 
     def run(self, host='127.0.0.1', port=8080, debug=False):
         """Run the modern web viewer"""
