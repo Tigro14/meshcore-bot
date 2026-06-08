@@ -253,6 +253,7 @@
                 const statusClass = this.getStatusClass(target.status);
                 const statusIcon = this.getStatusIcon(target.status);
                 const driftInfo = this.getDriftInfo(target);
+                const syncStatusInfo = this.getSyncStatusInfo(target);
                 
                 html += `
                     <div class="col-md-6 col-lg-4">
@@ -265,8 +266,14 @@
                                     </span>
                                 </div>
                                 <div class="text-muted small">
-                                    <div><strong>Identifier:</strong> ${this.escapeHtml(target.identifier)}</div>
-                                    ${target.public_key ? `<div><strong>Public Key:</strong> <code class="small">${this.escapeHtml(target.public_key.substring(0, 12))}...</code></div>` : ''}
+                                    ${target.public_key ? `
+                                        <div class="mb-1">
+                                            <strong>Public Key:</strong><br>
+                                            <code class="small">${this.escapeHtml(target.public_key.substring(0, 16))}...</code><br>
+                                            <span class="text-secondary">${this.escapeHtml(target.name)}</span>
+                                        </div>
+                                    ` : `<div><strong>Identifier:</strong> ${this.escapeHtml(target.identifier)}</div>`}
+                                    ${syncStatusInfo}
                                     ${target.role ? `<div><strong>Role:</strong> ${this.escapeHtml(target.role)}</div>` : ''}
                                     ${target.hop_count !== null ? `<div><strong>Hops:</strong> ${target.hop_count}</div>` : ''}
                                     ${driftInfo}
@@ -279,6 +286,38 @@
             });
             html += '</div>';
             container.innerHTML = html;
+        }
+
+        getSyncStatusInfo(target) {
+            if (target.last_sync_at === null || target.last_sync_at === undefined) {
+                return '';
+            }
+            
+            const timestamp = this.formatTimestamp(target.last_sync_at);
+            if (target.last_sync_success) {
+                return `
+                    <div class="mb-1">
+                        <strong>Daily Sync:</strong> 
+                        <span class="text-success">
+                            <i class="fas fa-check-circle"></i> Success
+                        </span>
+                        <br>
+                        <small>${timestamp}</small>
+                    </div>
+                `;
+            } else {
+                const errorMsg = target.last_sync_error ? ` (${this.escapeHtml(target.last_sync_error)})` : '';
+                return `
+                    <div class="mb-1">
+                        <strong>Daily Sync:</strong> 
+                        <span class="text-danger">
+                            <i class="fas fa-times-circle"></i> Failed
+                        </span>${errorMsg}
+                        <br>
+                        <small>${timestamp}</small>
+                    </div>
+                `;
+            }
         }
 
         getStatusClass(status) {
