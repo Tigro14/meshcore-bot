@@ -9419,7 +9419,7 @@ class BotDataViewer:
             schedule = self.config.get('Clock_Sync_Admin', 'schedule', fallback='0 3 * * *')
             command_payload = self.config.get('Clock_Sync_Admin', 'command_payload', fallback='clock sync admin')
             targets_raw = self.config.get('Clock_Sync_Admin', 'targets', fallback='')
-            
+
             # Parse targets
             targets = []
             seen = set()
@@ -9432,7 +9432,7 @@ class BotDataViewer:
                     continue
                 seen.add(dedup_key)
                 targets.append(candidate)
-            
+
             # Get clock drift settings
             drift_threshold_seconds = self.config.getint(
                 'Clock_Sync_Admin',
@@ -9444,22 +9444,22 @@ class BotDataViewer:
                 'dashboard_check_window_hours',
                 fallback=24,
             )
-            
+
             # Resolve targets and get their status
             targets_status = []
             bot = getattr(self, 'bot', None)
-            
+
             if bot and hasattr(bot, 'meshcore') and bot.meshcore:
                 meshcore = bot.meshcore
                 contacts = getattr(meshcore, 'contacts', {}) or {}
-                
+
                 # Get clock drift data from database
                 drift_data = {}
                 conn = None
                 try:
                     conn = self._get_db_connection()
                     cursor = conn.cursor()
-                    
+
                     # Get message stats with clock drift information
                     cutoff_time = time.time() - (check_window_hours * 3600)
                     cursor.execute(
@@ -9485,7 +9485,7 @@ class BotDataViewer:
                         """,
                         (cutoff_time,)
                     )
-                    
+
                     for row in cursor.fetchall():
                         drift_data[row[1]] = {  # public_key as key
                             'name': row[0],
@@ -9498,7 +9498,7 @@ class BotDataViewer:
                 finally:
                     if conn:
                         conn.close()
-                
+
                 # Process each target
                 for target_identifier in targets:
                     target_info = {
@@ -9511,14 +9511,14 @@ class BotDataViewer:
                         'last_seen': None,
                         'status': 'Not Found'
                     }
-                    
+
                     # Try to resolve contact by name
                     contact = None
                     try:
                         contact = meshcore.get_contact_by_name(target_identifier)
                     except Exception:
                         pass
-                    
+
                     # If not found by name, try by public key or prefix
                     if not contact:
                         for contact_data in contacts.values():
@@ -9528,7 +9528,7 @@ class BotDataViewer:
                             if public_key == target_identifier or public_key.startswith(target_identifier):
                                 contact = contact_data
                                 break
-                    
+
                     if contact:
                         public_key = (contact.get('public_key', '') or '').strip()
                         contact_name = (
@@ -9536,18 +9536,18 @@ class BotDataViewer:
                             or (contact.get('adv_name', '') or '').strip()
                             or target_identifier
                         )
-                        
+
                         target_info['name'] = contact_name
                         target_info['public_key'] = public_key
                         target_info['role'] = contact.get('role', 'unknown')
                         target_info['hop_count'] = contact.get('hop_count')
-                        
+
                         # Get drift data if available
                         if public_key in drift_data:
                             drift = drift_data[public_key]
                             target_info['drift_seconds'] = drift['drift_seconds']
                             target_info['last_seen'] = drift['received_at']
-                            
+
                             if drift['drift_seconds'] is not None:
                                 if drift['drift_seconds'] <= drift_threshold_seconds:
                                     target_info['status'] = 'In Sync'
@@ -9557,7 +9557,7 @@ class BotDataViewer:
                                 target_info['status'] = 'No Data'
                         else:
                             target_info['status'] = 'Unknown'
-                    
+
                     targets_status.append(target_info)
             else:
                 # Bot not available, just return targets with unknown status
@@ -9572,7 +9572,7 @@ class BotDataViewer:
                         'last_seen': None,
                         'status': 'Unknown'
                     })
-            
+
             return {
                 'enabled': enabled,
                 'schedule': schedule,
@@ -9581,7 +9581,7 @@ class BotDataViewer:
                 'drift_threshold_seconds': drift_threshold_seconds,
                 'check_window_hours': check_window_hours,
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error getting clock sync targets status: {e}", exc_info=True)
             return {
