@@ -8282,8 +8282,7 @@ class BotDataViewer:
                 'enabled': False,
                 'schedule': '',
                 'command_payload': '',
-                'targets': [],
-                'error': str(e)
+                'targets': []
             }
 
     def run(self, host='127.0.0.1', port=8080, debug=False):
