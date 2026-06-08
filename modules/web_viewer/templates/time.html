@@ -119,16 +119,16 @@
     class TimeViewer {
         constructor() {
             this.socket = null;
+            this.refreshInterval = null;
             this.init();
         }
 
         init() {
             // Initialize WebSocket connection
             this.socket = io();
-            
+
             this.socket.on('connect', () => {
                 console.log('WebSocket connected');
-                this.loadData();
             });
 
             this.socket.on('disconnect', () => {
@@ -141,9 +141,16 @@
 
             // Initial load
             this.loadData();
-            
+
             // Refresh data every 10 seconds
-            setInterval(() => this.loadData(), 10000);
+            this.refreshInterval = setInterval(() => this.loadData(), 10000);
+        }
+
+        cleanup() {
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+                this.refreshInterval = null;
+            }
         }
 
         async loadData() {

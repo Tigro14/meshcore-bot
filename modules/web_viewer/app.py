@@ -2488,7 +2488,7 @@ class BotDataViewer:
                 return jsonify(targets_data)
             except Exception as e:
                 self.logger.error(f"Error getting clock sync targets: {e}")
-                return jsonify({'error': str(e)}), 500
+                return jsonify({'error': 'Failed to retrieve clock sync targets'}), 500
 
 
 
@@ -8138,6 +8138,13 @@ class BotDataViewer:
                 meshcore = bot.meshcore
                 contacts = getattr(meshcore, 'contacts', {}) or {}
 
+                # Build public key lookup dictionary for O(1) access
+                pubkey_to_contact = {}
+                for contact_data in contacts.values():
+                    public_key = (contact_data.get("public_key", "") or "").strip()
+                    if public_key:
+                        pubkey_to_contact[public_key] = contact_data
+
                 # Get clock drift data from database
                 drift_data = {}
                 conn = None
@@ -8204,15 +8211,17 @@ class BotDataViewer:
                     except Exception:
                         pass
 
-                    # If not found by name, try by public key or prefix
+                    # If not found by name, try by exact public key or prefix match
                     if not contact:
-                        for contact_data in contacts.values():
-                            public_key = (contact_data.get("public_key", "") or "").strip()
-                            if not public_key:
-                                continue
-                            if public_key == target_identifier or public_key.startswith(target_identifier):
-                                contact = contact_data
-                                break
+                        # First try exact match
+                        if target_identifier in pubkey_to_contact:
+                            contact = pubkey_to_contact[target_identifier]
+                        else:
+                            # Then try prefix match (only if not found by exact match)
+                            for public_key, contact_data in pubkey_to_contact.items():
+                                if public_key.startswith(target_identifier):
+                                    contact = contact_data
+                                    break
 
                     if contact:
                         public_key = (contact.get('public_key', '') or '').strip()
