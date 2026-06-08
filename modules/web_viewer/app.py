@@ -8187,6 +8187,26 @@ class BotDataViewer:
                             'sender_timestamp': row[5],
                             'drift_seconds': int(row[6]) if row[6] is not None else None,
                         }
+
+                    # Get latest Clock_Sync_Admin log entries for each public key
+                    cursor.execute(
+                        """
+                        SELECT public_key, success, sent_at, error_message
+                        FROM clock_sync_admin_log
+                        WHERE id IN (
+                            SELECT MAX(id)
+                            FROM clock_sync_admin_log
+                            GROUP BY public_key
+                        )
+                        """
+                    )
+                    clock_sync_log = {}
+                    for row in cursor.fetchall():
+                        clock_sync_log[row[0]] = {  # public_key as key
+                            'success': bool(row[1]),
+                            'sent_at': row[2],
+                            'error_message': row[3],
+                        }
                 finally:
                     if conn:
                         conn.close()
@@ -8235,6 +8255,17 @@ class BotDataViewer:
                         target_info['public_key'] = public_key
                         target_info['role'] = contact.get('role', 'unknown')
                         target_info['hop_count'] = contact.get('hop_count')
+
+                        # Get Clock_Sync_Admin log data if available
+                        if public_key in clock_sync_log:
+                            log = clock_sync_log[public_key]
+                            target_info['last_sync_success'] = log['success']
+                            target_info['last_sync_at'] = log['sent_at']
+                            target_info['last_sync_error'] = log['error_message']
+                        else:
+                            target_info['last_sync_success'] = None
+                            target_info['last_sync_at'] = None
+                            target_info['last_sync_error'] = None
 
                         # Get drift data if available
                         if public_key in drift_data:
