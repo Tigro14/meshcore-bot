@@ -5,9 +5,12 @@ Sends a short prompt to a local llama.cpp OpenAI-compatible endpoint.
 """
 
 import asyncio
+import json
 import re
 import time
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -122,6 +125,20 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "cpu_temp_threshold", fallback=60.0, value_type="float"),
             ),
         )
+        # Enable tools/function calling
+        self.tools_enabled = self.get_config_value(
+            "Llm_Command",
+            "tools_enabled",
+            fallback=True,
+            value_type="bool",
+        )
+        # Timezone for time-related queries (default: Europe/Paris)
+        self.timezone = self.get_config_value(
+            "Llm_Command",
+            "timezone",
+            fallback="Europe/Paris",
+            value_type="str",
+        )
         # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
         self._context: dict[str, list[dict[str, Any]]] = {}
 
@@ -201,6 +218,39 @@ class LlmCommand(BaseCommand):
 
         return ""
 
+    def _get_tools_definition(self) -> list[dict[str, Any]]:
+        """Return the tools/functions available to the LLM."""
+        if not self.tools_enabled:
+            return []
+
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_current_time",
+                    "description": f"Get the current local time in {self.timezone} timezone. Use this when the user asks about the current time or needs time-based calculations.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                },
+            }
+        ]
+
+    def _execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        """Execute a tool/function call and return the result."""
+        if tool_name == "get_current_time":
+            try:
+                tz = ZoneInfo(self.timezone)
+                now = datetime.now(tz)
+                return now.strftime("%Y-%m-%d %H:%M:%S %Z")
+            except Exception as e:
+                self.logger.warning(f"Error getting current time: {e}")
+                return f"Error: {e}"
+        
+        return f"Unknown tool: {tool_name}"
+
     def _build_payload(self, prompt: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
         messages: list[dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
         if history:
@@ -214,6 +264,13 @@ class LlmCommand(BaseCommand):
         }
         if self.model:
             payload["model"] = self.model
+        
+        # Add tools if enabled
+        tools = self._get_tools_definition()
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        
         return payload
 
     def _clean_ai_response(self, content: str, max_length: int) -> str:
@@ -299,31 +356,104 @@ class LlmCommand(BaseCommand):
         user_key = self._user_key(message)
         history = self._get_context_history(user_key) if user_key else []
 
-        try:
-            response = await asyncio.to_thread(
-                requests.post,
-                self.endpoint,
-                json=self._build_payload(prompt, history),
-                timeout=self.timeout_seconds,
-            )
-        except requests.RequestException as e:
-            self.logger.warning(f"LLM command connection error: {e}")
-            return await self.send_response(message, "LLM unavailable: local llama.cpp is unreachable.")
+        # Main conversation loop to handle tool calls
+        max_iterations = 3  # Prevent infinite loops
+        iteration = 0
+        messages_for_context = history.copy()
+        messages_for_context.insert(0, {"role": "system", "content": self.system_prompt})
+        messages_for_context.append({"role": "user", "content": prompt})
 
-        if response.status_code != 200:
-            self.logger.warning(f"LLM command error status: {response.status_code}")
-            return await self.send_response(message, "LLM error: llama.cpp returned an invalid response.")
+        while iteration < max_iterations:
+            iteration += 1
 
-        try:
-            data = response.json()
-            choices = data.get("choices")
-            if isinstance(choices, list) and choices:
-                content = choices[0].get("message", {}).get("content", "")
-            else:
-                content = ""
-        except (ValueError, TypeError, IndexError, AttributeError) as e:
-            self.logger.warning(f"LLM command parse error: {e}")
-            return await self.send_response(message, "LLM error: could not parse response.")
+            # Build payload with current conversation state
+            payload: dict[str, Any] = {
+                "messages": messages_for_context,
+                "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+            }
+            if self.model:
+                payload["model"] = self.model
+            
+            # Add tools if enabled
+            tools = self._get_tools_definition()
+            if tools:
+                payload["tools"] = tools
+                payload["tool_choice"] = "auto"
+
+            try:
+                response = await asyncio.to_thread(
+                    requests.post,
+                    self.endpoint,
+                    json=payload,
+                    timeout=self.timeout_seconds,
+                )
+            except requests.RequestException as e:
+                self.logger.warning(f"LLM command connection error: {e}")
+                return await self.send_response(message, "LLM unavailable: local llama.cpp is unreachable.")
+
+            if response.status_code != 200:
+                self.logger.warning(f"LLM command error status: {response.status_code}")
+                return await self.send_response(message, "LLM error: llama.cpp returned an invalid response.")
+
+            try:
+                data = response.json()
+                choices = data.get("choices")
+                if not isinstance(choices, list) or not choices:
+                    return await self.send_response(message, "LLM error: no response from model.")
+                
+                choice = choices[0]
+                assistant_message = choice.get("message", {})
+                finish_reason = choice.get("finish_reason")
+
+                # Check if the model wants to call a tool
+                tool_calls = assistant_message.get("tool_calls")
+                
+                if tool_calls and finish_reason == "tool_calls":
+                    # Model wants to use a tool
+                    # Add assistant's tool call request to conversation
+                    messages_for_context.append(assistant_message)
+                    
+                    # Execute each tool call
+                    for tool_call in tool_calls:
+                        tool_id = tool_call.get("id", "")
+                        function_data = tool_call.get("function", {})
+                        function_name = function_data.get("name", "")
+                        function_args_str = function_data.get("arguments", "{}")
+                        
+                        try:
+                            function_args = json.loads(function_args_str) if function_args_str else {}
+                        except json.JSONDecodeError:
+                            function_args = {}
+                        
+                        # Execute the tool
+                        tool_result = self._execute_tool(function_name, function_args)
+                        
+                        # Add tool result to conversation
+                        messages_for_context.append({
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "name": function_name,
+                            "content": tool_result,
+                        })
+                    
+                    # Continue loop to get final response with tool results
+                    continue
+                
+                # No tool calls, we have the final response
+                content = assistant_message.get("content", "")
+                break
+
+            except (ValueError, TypeError, IndexError, AttributeError, KeyError) as e:
+                self.logger.warning(f"LLM command parse error: {e}")
+                return await self.send_response(message, "LLM error: could not parse response.")
+
+        # If we exhausted iterations, use whatever content we have
+        if iteration >= max_iterations:
+            self.logger.warning("LLM command reached maximum iteration limit")
+            if not content:
+                content = "Response processing exceeded iteration limit."
 
         # Clean the response first
         if self.pagination_enabled:

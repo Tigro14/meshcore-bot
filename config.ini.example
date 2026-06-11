@@ -1453,6 +1453,11 @@ chars_per_page = 160
 # Before accepting an LLM query, the CPU temperature must be below this threshold
 # Useful for Raspberry Pi systems to prevent overheating during AI inference
 cpu_temp_threshold = 60.0
+# Enable tools/function calling (requires model with function calling support)
+tools_enabled = true
+# Timezone for time-related queries (default: Europe/Paris)
+# Use IANA timezone names like America/New_York, Asia/Tokyo, UTC, etc.
+timezone = Europe/Paris
 # channels =
 
 [Channels_Command]
