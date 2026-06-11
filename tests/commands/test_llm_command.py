@@ -1,11 +1,12 @@
 """Tests for modules.commands.llm_command."""
 
 from unittest.mock import AsyncMock, Mock, patch
-import requests
+
 import pytest
+import requests
 
 from modules.commands.llm_command import LlmCommand
-from tests.conftest import command_mock_bot, mock_message
+from tests.conftest import mock_message
 
 
 class TestLlmCommand:
@@ -147,7 +148,6 @@ class TestLlmCommand:
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Llm_Command", "context_window_seconds", "0")
         cmd = LlmCommand(command_mock_bot)
-        msg = mock_message(sender_id="Alice", is_dm=True)
         cmd._store_context("Alice", "hello", "hi")
         assert cmd._get_context_history("Alice") == []
 
