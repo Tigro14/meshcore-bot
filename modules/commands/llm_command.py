@@ -248,7 +248,7 @@ class LlmCommand(BaseCommand):
             except Exception as e:
                 self.logger.warning(f"Error getting current time: {e}")
                 return f"Error: {e}"
-        
+
         return f"Unknown tool: {tool_name}"
 
     def _build_payload(self, prompt: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
@@ -264,13 +264,13 @@ class LlmCommand(BaseCommand):
         }
         if self.model:
             payload["model"] = self.model
-        
+
         # Add tools if enabled
         tools = self._get_tools_definition()
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        
+
         return payload
 
     def _clean_ai_response(self, content: str, max_length: int) -> str:
@@ -359,6 +359,7 @@ class LlmCommand(BaseCommand):
         # Main conversation loop to handle tool calls
         max_iterations = 3  # Prevent infinite loops
         iteration = 0
+        content = ""  # Initialize content variable
         messages_for_context = history.copy()
         messages_for_context.insert(0, {"role": "system", "content": self.system_prompt})
         messages_for_context.append({"role": "user", "content": prompt})
@@ -375,7 +376,7 @@ class LlmCommand(BaseCommand):
             }
             if self.model:
                 payload["model"] = self.model
-            
+
             # Add tools if enabled
             tools = self._get_tools_definition()
             if tools:
@@ -402,34 +403,34 @@ class LlmCommand(BaseCommand):
                 choices = data.get("choices")
                 if not isinstance(choices, list) or not choices:
                     return await self.send_response(message, "LLM error: no response from model.")
-                
+
                 choice = choices[0]
                 assistant_message = choice.get("message", {})
                 finish_reason = choice.get("finish_reason")
 
                 # Check if the model wants to call a tool
                 tool_calls = assistant_message.get("tool_calls")
-                
+
                 if tool_calls and finish_reason == "tool_calls":
                     # Model wants to use a tool
                     # Add assistant's tool call request to conversation
                     messages_for_context.append(assistant_message)
-                    
+
                     # Execute each tool call
                     for tool_call in tool_calls:
                         tool_id = tool_call.get("id", "")
                         function_data = tool_call.get("function", {})
                         function_name = function_data.get("name", "")
                         function_args_str = function_data.get("arguments", "{}")
-                        
+
                         try:
                             function_args = json.loads(function_args_str) if function_args_str else {}
                         except json.JSONDecodeError:
                             function_args = {}
-                        
+
                         # Execute the tool
                         tool_result = self._execute_tool(function_name, function_args)
-                        
+
                         # Add tool result to conversation
                         messages_for_context.append({
                             "role": "tool",
@@ -437,10 +438,10 @@ class LlmCommand(BaseCommand):
                             "name": function_name,
                             "content": tool_result,
                         })
-                    
+
                     # Continue loop to get final response with tool results
                     continue
-                
+
                 # No tool calls, we have the final response
                 content = assistant_message.get("content", "")
                 break
