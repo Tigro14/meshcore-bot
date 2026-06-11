@@ -550,6 +550,7 @@ class TestGetBasicStatsWithData:
         assert isinstance(result, str)
 
 
+
 # ---------------------------------------------------------------------------
 # _get_bot_user_leaderboard with data (covers lines 484-486)
 # ---------------------------------------------------------------------------
