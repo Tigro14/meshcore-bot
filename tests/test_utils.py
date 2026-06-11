@@ -877,3 +877,64 @@ class TestCalculatePacketHashEdgeCases:
         h = calculate_packet_hash("0800000000" + "00" + "ff")
         assert h != "0000000000000000"
 
+
+class TestGetCpuTemperature:
+    """Tests for get_cpu_temperature utility function."""
+
+    def test_get_cpu_temperature_reads_valid_file(self, tmp_path):
+        """get_cpu_temperature should read and convert temperature from thermal zone file."""
+        from modules.utils import get_cpu_temperature
+        
+        # Create a fake thermal zone file
+        thermal_file = tmp_path / "temp"
+        thermal_file.write_text("65432\n")  # 65.432°C in millidegrees
+        
+        with patch("builtins.open", return_value=thermal_file.open()):
+            temp = get_cpu_temperature()
+            assert temp == 65.432
+
+    def test_get_cpu_temperature_returns_none_when_file_not_found(self):
+        """get_cpu_temperature should return None when thermal zone file doesn't exist."""
+        from modules.utils import get_cpu_temperature
+        
+        with patch("builtins.open", side_effect=FileNotFoundError):
+            temp = get_cpu_temperature()
+            assert temp is None
+
+    def test_get_cpu_temperature_returns_none_on_permission_error(self):
+        """get_cpu_temperature should return None when lacking permissions to read file."""
+        from modules.utils import get_cpu_temperature
+        
+        with patch("builtins.open", side_effect=PermissionError):
+            temp = get_cpu_temperature()
+            assert temp is None
+
+    def test_get_cpu_temperature_returns_none_on_value_error(self):
+        """get_cpu_temperature should return None when file contains invalid data."""
+        from modules.utils import get_cpu_temperature
+        from io import StringIO
+        
+        fake_file = StringIO("not-a-number\n")
+        with patch("builtins.open", return_value=fake_file):
+            temp = get_cpu_temperature()
+            assert temp is None
+
+    def test_get_cpu_temperature_converts_millidegrees_to_celsius(self):
+        """get_cpu_temperature should convert millidegrees Celsius to degrees Celsius."""
+        from modules.utils import get_cpu_temperature
+        from io import StringIO
+        
+        # Test various temperature values
+        test_cases = [
+            ("60000", 60.0),     # 60°C
+            ("45500", 45.5),     # 45.5°C
+            ("80250", 80.25),    # 80.25°C
+            ("0", 0.0),          # 0°C
+        ]
+        
+        for millidegrees, expected_celsius in test_cases:
+            fake_file = StringIO(millidegrees)
+            with patch("builtins.open", return_value=fake_file):
+                temp = get_cpu_temperature()
+                assert temp == expected_celsius
+
