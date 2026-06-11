@@ -1449,6 +1449,10 @@ pagination_enabled = false
 page_count = 2
 # Maximum characters per page (50-500)
 chars_per_page = 160
+# CPU temperature cooling threshold in degrees Celsius (0 to disable, default 60)
+# Before accepting an LLM query, the CPU temperature must be below this threshold
+# Useful for Raspberry Pi systems to prevent overheating during AI inference
+cpu_temp_threshold = 60.0
 # channels =
 
 [Channels_Command]

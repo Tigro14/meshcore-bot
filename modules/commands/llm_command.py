@@ -12,6 +12,7 @@ from typing import Any
 import requests
 
 from ..models import MeshMessage
+from ..utils import get_cpu_temperature
 from .base_command import BaseCommand
 
 
@@ -113,12 +114,30 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "chars_per_page", fallback=160, value_type="int"),
             ),
         )
+        # CPU temperature cooling threshold (in degrees Celsius)
+        self.cpu_temp_threshold = max(
+            0.0,
+            min(
+                100.0,
+                self.get_config_value("Llm_Command", "cpu_temp_threshold", fallback=60.0, value_type="float"),
+            ),
+        )
         # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
         self._context: dict[str, list[dict[str, Any]]] = {}
 
     def can_execute(self, message: MeshMessage) -> bool:
         if not self.llm_enabled:
             return False
+        
+        # Check CPU temperature threshold if configured
+        if self.cpu_temp_threshold > 0:
+            cpu_temp = get_cpu_temperature()
+            if cpu_temp is not None and cpu_temp >= self.cpu_temp_threshold:
+                self.logger.info(
+                    f"LLM command blocked: CPU temperature {cpu_temp:.1f}°C exceeds threshold {self.cpu_temp_threshold}°C"
+                )
+                return False
+        
         return super().can_execute(message)
 
     def get_help_text(self) -> str:

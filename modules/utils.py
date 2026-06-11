@@ -262,6 +262,24 @@ def decode_escape_sequences(text: str) -> str:
     return text
 
 
+def get_cpu_temperature() -> Optional[float]:
+    """Read CPU temperature from Raspberry Pi thermal zone.
+
+    Reads temperature from /sys/class/thermal/thermal_zone0/temp (Raspberry Pi standard location).
+    The value is in millidegrees Celsius and is converted to degrees Celsius.
+
+    Returns:
+        Optional[float]: CPU temperature in degrees Celsius, or None if reading fails.
+    """
+    try:
+        with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+            temp_millidegrees = int(f.read().strip())
+            return temp_millidegrees / 1000.0
+    except (FileNotFoundError, ValueError, PermissionError, IOError):
+        # Not on a Raspberry Pi or unable to read temperature
+        return None
+
+
 def format_location_for_display(city: Optional[str], state: Optional[str] = None,
                                country: Optional[str] = None, max_length: int = 20) -> Optional[str]:
     """Format location data for display with intelligent abbreviation.
