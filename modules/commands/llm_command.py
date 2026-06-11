@@ -90,6 +90,27 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "context_max_turns", fallback=5, value_type="int"),
             ),
         )
+        # Pagination settings
+        self.pagination_enabled = self.get_config_value(
+            "Llm_Command",
+            "pagination_enabled",
+            fallback=False,
+            value_type="bool",
+        )
+        self.page_count = max(
+            1,
+            min(
+                10,
+                self.get_config_value("Llm_Command", "page_count", fallback=2, value_type="int"),
+            ),
+        )
+        self.chars_per_page = max(
+            50,
+            min(
+                500,
+                self.get_config_value("Llm_Command", "chars_per_page", fallback=160, value_type="int"),
+            ),
+        )
         # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
         self._context: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -194,6 +215,53 @@ class LlmCommand(BaseCommand):
 
         return cleaned
 
+    def _split_response_into_pages(self, content: str) -> List[str]:
+        """Split a long response into multiple pages based on pagination settings.
+        
+        Args:
+            content: The full response text to split.
+            
+        Returns:
+            List of page strings, each respecting chars_per_page limit.
+        """
+        if not self.pagination_enabled or len(content) <= self.chars_per_page:
+            return [content]
+        
+        pages = []
+        words = content.split()
+        current_page = ""
+        
+        for word in words:
+            # Check if adding this word would exceed the page limit
+            test_page = (current_page + " " + word).strip() if current_page else word
+            
+            if len(test_page) <= self.chars_per_page:
+                current_page = test_page
+            else:
+                # Current page is full, save it and start a new one
+                if current_page:
+                    pages.append(current_page)
+                    current_page = word
+                else:
+                    # Single word exceeds limit, truncate it
+                    pages.append(word[:self.chars_per_page - 3] + "...")
+                    current_page = ""
+                
+                # Check if we've reached the maximum page count
+                if len(pages) >= self.page_count:
+                    # Add remaining content indication
+                    if current_page or words[words.index(word) + 1:]:
+                        remaining = " ".join([current_page] + words[words.index(word) + 1:]).strip()
+                        if remaining:
+                            pages[-1] = pages[-1][:self.chars_per_page - 6].rstrip() + " [...]"
+                    return pages
+        
+        # Add the last page if there's content remaining
+        if current_page:
+            pages.append(current_page)
+        
+        return pages if pages else [content]
+
     async def execute(self, message: MeshMessage) -> bool:
         prompt = self._extract_prompt(message)
         if not prompt:
@@ -229,10 +297,22 @@ class LlmCommand(BaseCommand):
             self.logger.warning(f"LLM command parse error: {e}")
             return await self.send_response(message, "LLM error: could not parse response.")
 
+        # Clean the response first
         max_length = self.get_max_message_length(message)
-        cleaned = self._clean_ai_response(content, max_length)
+        if self.pagination_enabled:
+            # Use pagination: don't truncate before splitting
+            cleaned = self._clean_ai_response(content, max_length * self.page_count)
+        else:
+            # No pagination: truncate to max_length
+            cleaned = self._clean_ai_response(content, max_length)
 
         if user_key:
             self._store_context(user_key, prompt, cleaned)
 
+        # Split response into pages if pagination is enabled
+        if self.pagination_enabled:
+            pages = self._split_response_into_pages(cleaned)
+            if len(pages) > 1:
+                return await self.send_response_chunked(message, pages)
+        
         return await self.send_response(message, cleaned)
