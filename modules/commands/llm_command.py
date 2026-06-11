@@ -256,7 +256,13 @@ class LlmCommand(BaseCommand):
                 if len(pages) >= self.page_count:
                     # Add remaining content indication if there are more words
                     if word_idx < len(words):
-                        pages[-1] = pages[-1][:self.chars_per_page - 6].rstrip() + " [...]"
+                        # Only truncate if needed to fit the marker
+                        last_page = pages[-1]
+                        marker = " [...]"
+                        if len(last_page) + len(marker) > self.chars_per_page:
+                            pages[-1] = last_page[:self.chars_per_page - len(marker)].rstrip() + marker
+                        else:
+                            pages[-1] = last_page + marker
                     return pages
 
         # Add the last page if there's content remaining
@@ -301,12 +307,13 @@ class LlmCommand(BaseCommand):
             return await self.send_response(message, "LLM error: could not parse response.")
 
         # Clean the response first
-        max_length = self.get_max_message_length(message)
         if self.pagination_enabled:
-            # Use pagination: don't truncate before splitting
-            cleaned = self._clean_ai_response(content, max_length * self.page_count)
+            # Use pagination: allow response up to total paginated capacity
+            max_total_length = self.chars_per_page * self.page_count
+            cleaned = self._clean_ai_response(content, max_total_length)
         else:
-            # No pagination: truncate to max_length
+            # No pagination: truncate to single message max_length
+            max_length = self.get_max_message_length(message)
             cleaned = self._clean_ai_response(content, max_length)
 
         if user_key:
