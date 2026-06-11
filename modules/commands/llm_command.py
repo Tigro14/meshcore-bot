@@ -251,11 +251,22 @@ class LlmCommand(BaseCommand):
 
         return f"Unknown tool: {tool_name}"
 
-    def _build_payload(self, prompt: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
-        messages: list[dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
-        if history:
-            messages.extend(history)
-        messages.append({"role": "user", "content": prompt})
+    def _build_payload(self, prompt: str = "", history: list[dict[str, str]] | None = None, messages: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Build the API payload for the LLM request.
+
+        Args:
+            prompt: User prompt (used with history to build messages)
+            history: Conversation history
+            messages: Pre-built messages list (takes precedence over prompt/history)
+        """
+        if messages is None:
+            # Build messages from prompt and history
+            messages = [{"role": "system", "content": self.system_prompt}]
+            if history:
+                messages.extend(history)
+            if prompt:
+                messages.append({"role": "user", "content": prompt})
+
         payload: dict[str, Any] = {
             "messages": messages,
             "max_tokens": self.max_tokens,
@@ -357,7 +368,8 @@ class LlmCommand(BaseCommand):
         history = self._get_context_history(user_key) if user_key else []
 
         # Main conversation loop to handle tool calls
-        max_iterations = 3  # Prevent infinite loops
+        # Allow initial query + tool call + final response
+        max_iterations = 3
         iteration = 0
         content = ""  # Initialize content variable
         messages_for_context = history.copy()
@@ -368,20 +380,7 @@ class LlmCommand(BaseCommand):
             iteration += 1
 
             # Build payload with current conversation state
-            payload: dict[str, Any] = {
-                "messages": messages_for_context,
-                "max_tokens": self.max_tokens,
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-            }
-            if self.model:
-                payload["model"] = self.model
-
-            # Add tools if enabled
-            tools = self._get_tools_definition()
-            if tools:
-                payload["tools"] = tools
-                payload["tool_choice"] = "auto"
+            payload = self._build_payload(messages=messages_for_context)
 
             try:
                 response = await asyncio.to_thread(
@@ -454,7 +453,7 @@ class LlmCommand(BaseCommand):
         if iteration >= max_iterations:
             self.logger.warning("LLM command reached maximum iteration limit")
             if not content:
-                content = "Response processing exceeded iteration limit."
+                content = "Unable to complete your request. Please try again."
 
         # Clean the response first
         if self.pagination_enabled:
