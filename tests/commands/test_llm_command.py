@@ -1,11 +1,12 @@
 """Tests for modules.commands.llm_command."""
 
-from unittest.mock import Mock, patch
-import requests
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
+import requests
 
 from modules.commands.llm_command import LlmCommand
-from tests.conftest import command_mock_bot, mock_message
+from tests.conftest import mock_message
 
 
 class TestLlmCommand:
@@ -147,7 +148,6 @@ class TestLlmCommand:
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Llm_Command", "context_window_seconds", "0")
         cmd = LlmCommand(command_mock_bot)
-        msg = mock_message(sender_id="Alice", is_dm=True)
         cmd._store_context("Alice", "hello", "hi")
         assert cmd._get_context_history("Alice") == []
 
@@ -264,3 +264,103 @@ class TestLlmCommand:
             await cmd.execute(msg)
 
         assert cmd._get_context_history("TestUser") == []
+
+    # ── Pagination tests ──────────────────────────────────────────────────────
+
+    def test_pagination_disabled_returns_single_page(self, command_mock_bot):
+        """When pagination is disabled, entire response is returned as one string."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Llm_Command", "pagination_enabled", "false")
+        cmd = LlmCommand(command_mock_bot)
+        content = "This is a test response that could be split but won't be."
+        pages = cmd._split_response_into_pages(content)
+        assert len(pages) == 1
+        assert pages[0] == content
+
+    def test_pagination_enabled_splits_long_response(self, command_mock_bot):
+        """When pagination is enabled, long responses are split into multiple pages."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Llm_Command", "pagination_enabled", "true")
+        command_mock_bot.config.set("Llm_Command", "chars_per_page", "50")
+        command_mock_bot.config.set("Llm_Command", "page_count", "3")
+        cmd = LlmCommand(command_mock_bot)
+        content = "This is a very long response that should be split into multiple pages based on the character limit we have configured for pagination."
+        pages = cmd._split_response_into_pages(content)
+        assert len(pages) > 1
+        for page in pages:
+            assert len(page) <= 50
+
+    def test_pagination_respects_page_count_limit(self, command_mock_bot):
+        """Pagination should not exceed the configured page_count limit."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Llm_Command", "pagination_enabled", "true")
+        command_mock_bot.config.set("Llm_Command", "chars_per_page", "50")
+        command_mock_bot.config.set("Llm_Command", "page_count", "2")
+        cmd = LlmCommand(command_mock_bot)
+        # Very long content that would need more than 2 pages
+        content = "This is an extremely long response with many words that would normally require multiple pages to display properly and completely."
+        pages = cmd._split_response_into_pages(content)
+        assert len(pages) <= 2
+        assert len(pages) == 2  # Should use both pages
+        # Last page should indicate truncation
+        assert "[...]" in pages[-1]
+
+    def test_pagination_splits_at_word_boundaries(self, command_mock_bot):
+        """Pagination should split at word boundaries, not mid-word."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Llm_Command", "pagination_enabled", "true")
+        command_mock_bot.config.set("Llm_Command", "chars_per_page", "50")
+        command_mock_bot.config.set("Llm_Command", "page_count", "5")
+        cmd = LlmCommand(command_mock_bot)
+        content = "Hello world this is a test of the pagination system that should be split into multiple pages"
+        pages = cmd._split_response_into_pages(content)
+        for page in pages:
+            # Each page should contain complete words (no mid-word splits)
+            # and respect the page limit
+            assert len(page) <= 50
+
+    def test_pagination_short_response_no_split(self, command_mock_bot):
+        """Short responses should not be split even when pagination is enabled."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Llm_Command", "pagination_enabled", "true")
+        command_mock_bot.config.set("Llm_Command", "chars_per_page", "100")
+        cmd = LlmCommand(command_mock_bot)
+        content = "Short response"
+        pages = cmd._split_response_into_pages(content)
+        assert len(pages) == 1
+        assert pages[0] == content
+
+    @pytest.mark.asyncio
+    async def test_execute_with_pagination_sends_multiple_messages(self, command_mock_bot):
+        """When pagination is enabled and response is long, multiple messages are sent."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        command_mock_bot.config.set("Llm_Command", "pagination_enabled", "true")
+        command_mock_bot.config.set("Llm_Command", "chars_per_page", "50")
+        command_mock_bot.config.set("Llm_Command", "page_count", "3")
+        # Add mock for send_response_chunked
+        command_mock_bot.command_manager.send_response_chunked = AsyncMock(return_value=True)
+        cmd = LlmCommand(command_mock_bot)
+        msg = mock_message(content="llm explain mesh networking", is_dm=True)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": "Mesh networking is a decentralized network topology where each node relays data for the network, creating a robust and self-healing infrastructure."
+                }
+            }]
+        }
+
+        with patch("modules.commands.llm_command.requests.post", return_value=mock_response):
+            result = await cmd.execute(msg)
+
+        assert result is True
+        # Check if chunked response was called
+        if command_mock_bot.command_manager.send_response_chunked.call_count > 0:
+            chunks = command_mock_bot.command_manager.send_response_chunked.call_args[0][1]
+            assert isinstance(chunks, list)
+            assert len(chunks) > 1
+            for chunk in chunks:
+                assert len(chunk) <= 50

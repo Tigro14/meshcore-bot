@@ -4,13 +4,15 @@ LLM command for the MeshCore Bot.
 Sends a short prompt to a local llama.cpp OpenAI-compatible endpoint.
 """
 
+import asyncio
 import re
 import time
-import asyncio
-from typing import Dict, Any, List
+from typing import Any
+
 import requests
-from .base_command import BaseCommand
+
 from ..models import MeshMessage
+from .base_command import BaseCommand
 
 
 class LlmCommand(BaseCommand):
@@ -90,8 +92,29 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "context_max_turns", fallback=5, value_type="int"),
             ),
         )
+        # Pagination settings
+        self.pagination_enabled = self.get_config_value(
+            "Llm_Command",
+            "pagination_enabled",
+            fallback=False,
+            value_type="bool",
+        )
+        self.page_count = max(
+            1,
+            min(
+                10,
+                self.get_config_value("Llm_Command", "page_count", fallback=2, value_type="int"),
+            ),
+        )
+        self.chars_per_page = max(
+            50,
+            min(
+                500,
+                self.get_config_value("Llm_Command", "chars_per_page", fallback=160, value_type="int"),
+            ),
+        )
         # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
-        self._context: Dict[str, List[Dict[str, Any]]] = {}
+        self._context: dict[str, list[dict[str, Any]]] = {}
 
     def can_execute(self, message: MeshMessage) -> bool:
         if not self.llm_enabled:
@@ -106,7 +129,7 @@ class LlmCommand(BaseCommand):
         """Return a stable key for per-user context tracking, or None if unavailable."""
         return message.sender_pubkey or message.sender_id or None
 
-    def _get_context_history(self, user_key: str) -> List[Dict[str, str]]:
+    def _get_context_history(self, user_key: str) -> list[dict[str, str]]:
         """Return cleaned conversation history for *user_key*, pruning expired entries."""
         if self.context_window_seconds <= 0:
             return []
@@ -159,12 +182,12 @@ class LlmCommand(BaseCommand):
 
         return ""
 
-    def _build_payload(self, prompt: str, history: List[Dict[str, str]] | None = None) -> Dict[str, Any]:
-        messages: List[Dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
+    def _build_payload(self, prompt: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
+        messages: list[dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": prompt})
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "messages": messages,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
@@ -193,6 +216,60 @@ class LlmCommand(BaseCommand):
             cleaned = (cleaned + "...") if cleaned else "..."
 
         return cleaned
+
+    def _split_response_into_pages(self, content: str) -> list[str]:
+        """Split a long response into multiple pages based on pagination settings.
+
+        Args:
+            content: The full response text to split.
+
+        Returns:
+            List of page strings, each respecting chars_per_page limit.
+        """
+        if not self.pagination_enabled or len(content) <= self.chars_per_page:
+            return [content]
+
+        pages = []
+        words = content.split()
+        current_page = ""
+        word_idx = 0
+
+        while word_idx < len(words):
+            word = words[word_idx]
+            # Check if adding this word would exceed the page limit
+            test_page = (current_page + " " + word).strip() if current_page else word
+
+            if len(test_page) <= self.chars_per_page:
+                current_page = test_page
+                word_idx += 1
+            else:
+                # Current page is full, save it and start a new one
+                if current_page:
+                    pages.append(current_page)
+                    current_page = ""
+                else:
+                    # Single word exceeds limit, truncate it
+                    pages.append(word[:self.chars_per_page - 3] + "...")
+                    word_idx += 1
+
+                # Check if we've reached the maximum page count
+                if len(pages) >= self.page_count:
+                    # Add remaining content indication if there are more words
+                    if word_idx < len(words):
+                        # Only truncate if needed to fit the marker
+                        last_page = pages[-1]
+                        marker = " [...]"
+                        if len(last_page) + len(marker) > self.chars_per_page:
+                            pages[-1] = last_page[:self.chars_per_page - len(marker)].rstrip() + marker
+                        else:
+                            pages[-1] = last_page + marker
+                    return pages
+
+        # Add the last page if there's content remaining
+        if current_page:
+            pages.append(current_page)
+
+        return pages if pages else [content]
 
     async def execute(self, message: MeshMessage) -> bool:
         prompt = self._extract_prompt(message)
@@ -229,10 +306,23 @@ class LlmCommand(BaseCommand):
             self.logger.warning(f"LLM command parse error: {e}")
             return await self.send_response(message, "LLM error: could not parse response.")
 
-        max_length = self.get_max_message_length(message)
-        cleaned = self._clean_ai_response(content, max_length)
+        # Clean the response first
+        if self.pagination_enabled:
+            # Use pagination: allow response up to total paginated capacity
+            max_total_length = self.chars_per_page * self.page_count
+            cleaned = self._clean_ai_response(content, max_total_length)
+        else:
+            # No pagination: truncate to single message max_length
+            max_length = self.get_max_message_length(message)
+            cleaned = self._clean_ai_response(content, max_length)
 
         if user_key:
             self._store_context(user_key, prompt, cleaned)
+
+        # Split response into pages if pagination is enabled
+        if self.pagination_enabled:
+            pages = self._split_response_into_pages(cleaned)
+            if len(pages) > 1:
+                return await self.send_response_chunked(message, pages)
 
         return await self.send_response(message, cleaned)

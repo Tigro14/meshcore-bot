@@ -117,6 +117,16 @@ llm summarize mesh routing in one sentence
 ```
 
 **Response:** Short AI-generated response from your locally configured llama.cpp endpoint.
+
+**Configuration:** The LLM command supports optional pagination for long responses. Enable it in `config.ini` under `[Llm_Command]`:
+- `pagination_enabled` - Enable/disable pagination (default: false)
+- `page_count` - Maximum number of message pages (1-10, default: 2)
+- `chars_per_page` - Maximum characters per page (50-500, default: 160)
+
+When pagination is enabled and a response exceeds `chars_per_page`, it will be split across multiple messages.
+
+---
+
 ### `version`
 
 Show the bot's current software version.
