@@ -125,10 +125,10 @@ class LlmCommand(BaseCommand):
         # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
         self._context: dict[str, list[dict[str, Any]]] = {}
 
-    def can_execute(self, message: MeshMessage) -> bool:
+    def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
         if not self.llm_enabled:
             return False
-        
+
         # Check CPU temperature threshold if configured
         if self.cpu_temp_threshold > 0:
             cpu_temp = get_cpu_temperature()
@@ -137,8 +137,8 @@ class LlmCommand(BaseCommand):
                     f"LLM command blocked: CPU temperature {cpu_temp:.1f}°C exceeds threshold {self.cpu_temp_threshold}°C"
                 )
                 return False
-        
-        return super().can_execute(message)
+
+        return super().can_execute(message, skip_channel_check)
 
     def get_help_text(self) -> str:
         pfx = self._command_prefix

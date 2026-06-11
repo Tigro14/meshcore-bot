@@ -272,10 +272,10 @@ def get_cpu_temperature() -> Optional[float]:
         Optional[float]: CPU temperature in degrees Celsius, or None if reading fails.
     """
     try:
-        with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+        with open('/sys/class/thermal/thermal_zone0/temp') as f:
             temp_millidegrees = int(f.read().strip())
             return temp_millidegrees / 1000.0
-    except (FileNotFoundError, ValueError, PermissionError, IOError):
+    except (OSError, FileNotFoundError, ValueError, PermissionError):
         # Not on a Raspberry Pi or unable to read temperature
         return None
 

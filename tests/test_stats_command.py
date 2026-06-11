@@ -529,7 +529,6 @@ class TestGetBasicStatsWithData:
     def test_bbs_stats_appended_when_table_exists(self):
         """BBS summary is appended when bbs_messages table exists with pending rows."""
         import asyncio
-        import time
         bot = _make_bot()
         cmd = StatsCommand(bot)
         with bot.db_manager.connection() as conn:
