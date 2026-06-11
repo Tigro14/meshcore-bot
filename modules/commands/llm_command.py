@@ -230,30 +230,31 @@ class LlmCommand(BaseCommand):
         pages = []
         words = content.split()
         current_page = ""
+        word_idx = 0
         
-        for word in words:
+        while word_idx < len(words):
+            word = words[word_idx]
             # Check if adding this word would exceed the page limit
             test_page = (current_page + " " + word).strip() if current_page else word
             
             if len(test_page) <= self.chars_per_page:
                 current_page = test_page
+                word_idx += 1
             else:
                 # Current page is full, save it and start a new one
                 if current_page:
                     pages.append(current_page)
-                    current_page = word
+                    current_page = ""
                 else:
                     # Single word exceeds limit, truncate it
                     pages.append(word[:self.chars_per_page - 3] + "...")
-                    current_page = ""
+                    word_idx += 1
                 
                 # Check if we've reached the maximum page count
                 if len(pages) >= self.page_count:
-                    # Add remaining content indication
-                    if current_page or words[words.index(word) + 1:]:
-                        remaining = " ".join([current_page] + words[words.index(word) + 1:]).strip()
-                        if remaining:
-                            pages[-1] = pages[-1][:self.chars_per_page - 6].rstrip() + " [...]"
+                    # Add remaining content indication if there are more words
+                    if word_idx < len(words):
+                        pages[-1] = pages[-1][:self.chars_per_page - 6].rstrip() + " [...]"
                     return pages
         
         # Add the last page if there's content remaining
