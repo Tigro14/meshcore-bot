@@ -9,9 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import pytest
 
 from modules.commands.bbs_command import (
-    BBSCommand,
     NOTIFICATION_COOLDOWN_SECONDS,
-    _PENDING_SELECTION_TTL,
+    BBSCommand,
 )
 from tests.conftest import mock_message
 
