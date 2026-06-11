@@ -294,15 +294,16 @@ class TestLlmCommand:
         """Pagination should not exceed the configured page_count limit."""
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Llm_Command", "pagination_enabled", "true")
-        command_mock_bot.config.set("Llm_Command", "chars_per_page", "30")
+        command_mock_bot.config.set("Llm_Command", "chars_per_page", "50")
         command_mock_bot.config.set("Llm_Command", "page_count", "2")
         cmd = LlmCommand(command_mock_bot)
         # Very long content that would need more than 2 pages
         content = "This is an extremely long response with many words that would normally require multiple pages to display properly and completely."
         pages = cmd._split_response_into_pages(content)
         assert len(pages) <= 2
+        assert len(pages) == 2  # Should use both pages
         # Last page should indicate truncation
-        assert "[...]" in pages[-1] or len(pages) == 1
+        assert "[...]" in pages[-1]
 
     def test_pagination_splits_at_word_boundaries(self, command_mock_bot):
         """Pagination should split at word boundaries, not mid-word."""
