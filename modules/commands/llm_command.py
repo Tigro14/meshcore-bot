@@ -318,13 +318,13 @@ class LlmCommand(BaseCommand):
         }
         if self.model:
             payload["model"] = self.model
-        
+
         # Add tools if enabled
         tools = self._get_tools_definition()
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        
+
         return payload
 
     def _clean_ai_response(self, content: str, max_length: int) -> str:
