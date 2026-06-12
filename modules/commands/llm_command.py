@@ -123,6 +123,8 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "cpu_temp_threshold", fallback=60.0, value_type="float"),
             ),
         )
+        # Datetime format for current time injection
+        self.datetime_format = "%Y-%m-%d %H:%M:%S"
         # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
         self._context: dict[str, list[dict[str, Any]]] = {}
 
@@ -202,6 +204,15 @@ class LlmCommand(BaseCommand):
 
         return ""
 
+    def _inject_current_time_into_prompt(self, prompt: str) -> str:
+        """Inject the current time into a system prompt."""
+        try:
+            current_time = datetime.now().strftime(self.datetime_format)
+            return f"{prompt}\n[Current time: {current_time}]"
+        except Exception as e:
+            self.logger.warning(f"Error injecting current time: {e}")
+            return prompt
+
     def _build_payload(self, prompt: str = "", history: list[dict[str, str]] | None = None, messages: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """Build the API payload for the LLM request.
 
@@ -211,15 +222,8 @@ class LlmCommand(BaseCommand):
             messages: Pre-built messages list (takes precedence over prompt/history)
         """
         if messages is None:
-            # Inject current time into system prompt
-            system_prompt = self.system_prompt
-            try:
-                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                system_prompt = f"{system_prompt}\n[Current time: {current_time}]"
-            except Exception as e:
-                self.logger.warning(f"Error injecting current time: {e}")
-
             # Build messages from prompt and history
+            system_prompt = self._inject_current_time_into_prompt(self.system_prompt)
             messages = [{"role": "system", "content": system_prompt}]
             if history:
                 messages.extend(history)
@@ -322,15 +326,7 @@ class LlmCommand(BaseCommand):
 
         # Build the conversation with current time injected in system prompt
         messages_for_context = history.copy()
-
-        # Inject current time into system prompt
-        system_prompt = self.system_prompt
-        try:
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            system_prompt = f"{system_prompt}\n[Current time: {current_time}]"
-        except Exception as e:
-            self.logger.warning(f"Error injecting current time: {e}")
-
+        system_prompt = self._inject_current_time_into_prompt(self.system_prompt)
         messages_for_context.insert(0, {"role": "system", "content": system_prompt})
         messages_for_context.append({"role": "user", "content": prompt})
 

@@ -125,12 +125,6 @@ llm summarize mesh routing in one sentence
 
 When pagination is enabled and a response exceeds `chars_per_page`, it will be split across multiple messages.
 
-**Tools/Function Calling:** The LLM command supports OpenAI-compatible function calling to provide additional capabilities:
-- `tools_enabled` - Enable/disable function calling (default: true)
-- `timezone` - Timezone for time-related queries (default: Europe/Paris)
-
-When enabled, the model can access a `get_current_time` tool to answer time-based questions accurately. This requires a model that supports function calling (e.g., Qwen, Functionary, Llama-3-Instruct with appropriate fine-tuning).
-
 ---
 
 ### `version`
