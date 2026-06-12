@@ -244,24 +244,24 @@ class LlmCommand(BaseCommand):
 
     def _get_enabled_commands_list(self) -> list[dict[str, Any]]:
         """Get list of enabled bot commands with their keywords and descriptions.
-        
+
         Returns:
             List of command dicts with 'name', 'keywords', and 'description' keys.
         """
         if self._cached_commands_list is not None:
             return self._cached_commands_list
-        
+
         try:
             from modules.plugin_loader import PluginLoader  # noqa: PLC0415
-            
+
             # Load all plugins using the bot's plugin loader
             plugin_loader = PluginLoader(self.bot)
             commands = plugin_loader.load_all_plugins()
-            
+
             # Get admin commands to exclude them
             admin_commands_str = self.bot.config.get('Admin_ACL', 'admin_commands', fallback='')
             admin_commands = {c.strip() for c in admin_commands_str.split(',') if c.strip()}
-            
+
             # Filter to only enabled, non-admin commands
             enabled_commands = []
             for cmd_name, cmd_instance in commands.items():
@@ -271,30 +271,30 @@ class LlmCommand(BaseCommand):
                     continue
                 if hasattr(cmd_instance, 'requires_admin_access') and cmd_instance.requires_admin_access():
                     continue
-                
+
                 # Check if command is enabled
                 if not self._is_command_enabled(cmd_instance):
                     continue
-                
+
                 # Get command info
                 keywords = getattr(cmd_instance, 'keywords', [])
                 if not keywords:
                     continue
-                
+
                 enabled_commands.append({
                     'name': primary_name,
                     'keywords': keywords,
                     'description': getattr(cmd_instance, 'short_description', None) or getattr(cmd_instance, 'description', ''),
                 })
-            
+
             # Sort by name
-            enabled_commands.sort(key=lambda c: c['name'])
+            enabled_commands.sort(key=lambda c: str(c['name']))
             self._cached_commands_list = enabled_commands
             return enabled_commands
         except Exception as e:
             self.logger.warning(f"Failed to load commands list for LLM context: {e}")
             return []
-    
+
     @staticmethod
     def _is_command_enabled(cmd_instance: Any) -> bool:
         """Return True if the command is currently enabled in configuration."""
@@ -386,7 +386,7 @@ class LlmCommand(BaseCommand):
                 if commands:
                     # Get command prefix for display
                     command_prefix = self.bot.config.get('Bot', 'command_prefix', fallback='').strip()
-                    
+
                     # Build commands list string
                     commands_list = []
                     for cmd in commands:
@@ -394,7 +394,7 @@ class LlmCommand(BaseCommand):
                         keywords = cmd['keywords'][:3]
                         keyword_examples = ', '.join([f"{command_prefix}{kw}" for kw in keywords])
                         commands_list.append(f"  - {cmd['name']}: {cmd['description']} (e.g., {keyword_examples})")
-                    
+
                     commands_str = "Available Commands:\n" + "\n".join(commands_list)
                     context_parts.append(commands_str)
             except Exception as e:
