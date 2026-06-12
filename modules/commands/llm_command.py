@@ -7,12 +7,13 @@ Sends a short prompt to a local llama.cpp OpenAI-compatible endpoint.
 import asyncio
 import re
 import time
+from datetime import datetime
 from typing import Any
 
 import requests
 
 from ..models import MeshMessage
-from ..utils import get_cpu_temperature
+from ..utils import get_config_timezone, get_cpu_temperature
 from .base_command import BaseCommand
 
 
@@ -114,6 +115,26 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "chars_per_page", fallback=160, value_type="int"),
             ),
         )
+
+        # Context settings
+        self.include_local_context = self.get_config_value(
+            "Llm_Command", "include_local_context", fallback=True, value_type="bool"
+        )
+        self.context_include_weather = self.get_config_value(
+            "Llm_Command", "context_include_weather", fallback=True, value_type="bool"
+        )
+        self.context_include_repeaters = self.get_config_value(
+            "Llm_Command", "context_include_repeaters", fallback=True, value_type="bool"
+        )
+        self.context_include_network_status = self.get_config_value(
+            "Llm_Command", "context_include_network_status", fallback=True, value_type="bool"
+        )
+        self.context_cache_seconds = self.get_config_value(
+            "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
+        )
+        self._cached_context_str = ""
+        self._cached_context_time = 0.0
+
         # CPU temperature cooling threshold (in degrees Celsius)
         self.cpu_temp_threshold = max(
             0.0,
@@ -201,8 +222,75 @@ class LlmCommand(BaseCommand):
 
         return ""
 
-    def _build_payload(self, prompt: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
-        messages: list[dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
+    async def _build_context_summary(self) -> str:
+        """Build a compact string containing local bot context (time, weather, repeaters)."""
+        if not self.include_local_context:
+            return ""
+
+        now = time.time()
+        if self._cached_context_str and (now - self._cached_context_time) < self.context_cache_seconds:
+            return self._cached_context_str
+
+        parts = []
+
+        # Time context
+        tz, _ = get_config_timezone(self.bot.config, self.logger)
+        current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M %Z")
+        parts.append(f"Time: {current_time}")
+
+        # Weather & Lightning context
+        if self.context_include_weather and hasattr(self.bot, 'services'):
+            weather_service = self.bot.services.get('weatherservice')
+            if weather_service and getattr(weather_service, 'enabled', False):
+                try:
+                    forecast = await weather_service._get_weather_forecast()
+                    if forecast and "Error" not in forecast:
+                        parts.append(f"Weather: {forecast}")
+                except Exception as e:
+                    self.logger.debug(f"Error fetching weather context: {e}")
+
+            blitz_service = self.bot.services.get('blitzortungservice')
+            if blitz_service and getattr(blitz_service, 'enabled', False):
+                try:
+                    strikes = len(getattr(blitz_service, 'blitz_buffer', []))
+                    if strikes > 0:
+                        window_mins = int(getattr(blitz_service, 'window_seconds', 600) / 60)
+                        parts.append(f"Lightning: {strikes} strikes near you in last {window_mins}min")
+                except Exception as e:
+                    self.logger.debug(f"Error fetching blitzortung context: {e}")
+
+        # Network/Repeater context
+        if (self.context_include_repeaters or self.context_include_network_status) and hasattr(self.bot, 'repeater_manager'):
+            try:
+                stats = await self.bot.repeater_manager.get_contact_statistics()
+
+                if self.context_include_network_status:
+                    total = stats.get('total_heard', 0)
+                    active = stats.get('recent_activity', 0)
+                    parts.append(f"Network: {total} nodes known, {active} active last 24h")
+
+                if self.context_include_repeaters:
+                    repeater_count = stats.get('by_role', {}).get('repeater', 0)
+                    parts.append(f"Repeaters: {repeater_count} heard")
+            except Exception as e:
+                self.logger.debug(f"Error fetching network context: {e}")
+
+        if not parts:
+            return ""
+
+        context_str = " | ".join(parts)
+        self._cached_context_str = context_str
+        self._cached_context_time = now
+        return context_str
+
+    async def _build_payload(self, prompt: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
+        system_prompt = self.system_prompt
+
+        context_str = await self._build_context_summary()
+        if context_str:
+            system_prompt += f"\n[System Context: {context_str}]"
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": prompt})
@@ -300,10 +388,11 @@ class LlmCommand(BaseCommand):
         history = self._get_context_history(user_key) if user_key else []
 
         try:
+            payload = await self._build_payload(prompt, history)
             response = await asyncio.to_thread(
                 requests.post,
                 self.endpoint,
-                json=self._build_payload(prompt, history),
+                json=payload,
                 timeout=self.timeout_seconds,
             )
         except requests.RequestException as e:
