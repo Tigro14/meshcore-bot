@@ -324,13 +324,8 @@ class LlmCommand(BaseCommand):
         user_key = self._user_key(message)
         history = self._get_context_history(user_key) if user_key else []
 
-        # Build the conversation with current time injected in system prompt
-        messages_for_context = history.copy()
-        system_prompt = self._inject_current_time_into_prompt(self.system_prompt)
-        messages_for_context.insert(0, {"role": "system", "content": system_prompt})
-        messages_for_context.append({"role": "user", "content": prompt})
-
-        payload = self._build_payload(messages=messages_for_context)
+        # Build the payload with current time injected in system prompt
+        payload = self._build_payload(prompt=prompt, history=history)
 
         try:
             response = await asyncio.to_thread(
