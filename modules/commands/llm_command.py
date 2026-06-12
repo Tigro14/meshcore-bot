@@ -13,7 +13,8 @@ from typing import Any
 import requests
 
 from ..models import MeshMessage
-from ..utils import get_config_timezone, get_cpu_temperature
+from ..solar_conditions import get_moon, get_sun
+from ..utils import get_config_timezone, get_cpu_temperature, geocode_city_sync
 from .base_command import BaseCommand
 
 
@@ -129,8 +130,21 @@ class LlmCommand(BaseCommand):
         self.context_include_network_status = self.get_config_value(
             "Llm_Command", "context_include_network_status", fallback=True, value_type="bool"
         )
+        self.context_include_contacts = self.get_config_value(
+            "Llm_Command", "context_include_contacts", fallback=True, value_type="bool"
+        )
+        self.context_include_moon = self.get_config_value(
+            "Llm_Command", "context_include_moon", fallback=True, value_type="bool"
+        )
+        self.context_include_sun = self.get_config_value(
+            "Llm_Command", "context_include_sun", fallback=True, value_type="bool"
+        )
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
+        )
+        # Weather location for LLM context (defaults to Paris, France)
+        self.context_weather_location = self.get_config_value(
+            "Llm_Command", "context_weather_location", fallback="Paris, France", value_type="str"
         )
         self._cached_context_str = ""
         self._cached_context_time = 0.0
@@ -224,17 +238,166 @@ class LlmCommand(BaseCommand):
 
         return ""
 
+    def _build_local_context(self) -> str:
+        """Build a local context string with contacts, moon, sun, and weather info.
+        
+        Returns:
+            String containing formatted local context, or empty string if disabled or cached.
+        """
+        if not self.include_local_context:
+            return ""
+        
+        # Check cache
+        now = time.time()
+        if self._cached_context_str and (now - self._cached_context_time) < self.context_cache_seconds:
+            return self._cached_context_str
+        
+        context_parts = []
+        
+        # Add contacts statistics
+        if self.context_include_contacts:
+            try:
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    # Count total contacts
+                    cursor.execute("SELECT COUNT(*) FROM contacts")
+                    total_contacts = cursor.fetchone()[0]
+                    # Count contacts seen in last 24 hours
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM contacts WHERE last_seen >= ?",
+                        (int(time.time()) - 86400,)
+                    )
+                    recent_contacts = cursor.fetchone()[0]
+                    if total_contacts > 0:
+                        context_parts.append(f"Contacts: {total_contacts} total, {recent_contacts} active (24h)")
+            except Exception as e:
+                self.logger.warning(f"Failed to get contacts stats: {e}")
+        
+        # Add moon information
+        if self.context_include_moon:
+            try:
+                moon_info = get_moon()
+                if moon_info and "Error" not in moon_info:
+                    # Extract just the phase and illumination
+                    lines = moon_info.split('\n')
+                    for line in lines:
+                        if line.startswith("Phase:"):
+                            phase_info = line.replace("Phase:", "").strip()
+                            context_parts.append(f"Moon: {phase_info}")
+                            break
+            except Exception as e:
+                self.logger.warning(f"Failed to get moon info: {e}")
+        
+        # Add sun information
+        if self.context_include_sun:
+            try:
+                sun_info = get_sun()
+                if sun_info and "Error" not in sun_info:
+                    # Extract sunrise/sunset
+                    lines = sun_info.split('\n')
+                    if len(lines) > 0:
+                        context_parts.append(f"Sun: {lines[0]}")
+            except Exception as e:
+                self.logger.warning(f"Failed to get sun info: {e}")
+        
+        # Add weather for configured location
+        if self.context_include_weather and self.context_weather_location:
+            try:
+                # Try to get weather using the wx command logic
+                weather_info = self._get_weather_for_location(self.context_weather_location)
+                if weather_info:
+                    context_parts.append(f"Weather ({self.context_weather_location}): {weather_info}")
+            except Exception as e:
+                self.logger.warning(f"Failed to get weather info: {e}")
+        
+        # Build final context string
+        if context_parts:
+            self._cached_context_str = "\n".join(context_parts)
+            self._cached_context_time = now
+            return self._cached_context_str
+        
+        return ""
+    
+    def _get_weather_for_location(self, location: str) -> str:
+        """Get weather information for a specific location.
+        
+        Args:
+            location: City name or location string (e.g., "Paris, France")
+            
+        Returns:
+            Formatted weather string, or empty string if unavailable
+        """
+        try:
+            # Try to geocode the location
+            lat, lon = geocode_city_sync(self.bot.db_manager, location, default_country="FR")
+            if lat is None or lon is None:
+                return ""
+            
+            # Use Open-Meteo API for international weather
+            url = "https://api.open-meteo.com/v1/forecast"
+            params = {
+                "latitude": lat,
+                "longitude": lon,
+                "current": "temperature_2m,weather_code,wind_speed_10m",
+                "temperature_unit": "celsius",
+                "wind_speed_unit": "kmh",
+                "timezone": "auto"
+            }
+            
+            response = requests.get(url, params=params, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                current = data.get("current", {})
+                temp = current.get("temperature_2m")
+                wind = current.get("wind_speed_10m")
+                weather_code = current.get("weather_code", 0)
+                
+                # Simple weather code description mapping
+                weather_desc = self._get_weather_description(weather_code)
+                
+                if temp is not None:
+                    return f"{temp}°C, {weather_desc}, Wind: {wind}km/h"
+            
+            return ""
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch weather for {location}: {e}")
+            return ""
+    
+    def _get_weather_description(self, code: int) -> str:
+        """Convert WMO weather code to simple description."""
+        if code == 0:
+            return "Clear"
+        elif code in [1, 2, 3]:
+            return "Partly Cloudy"
+        elif code in [45, 48]:
+            return "Foggy"
+        elif code in [51, 53, 55, 61, 63, 65, 80, 81, 82]:
+            return "Rainy"
+        elif code in [71, 73, 75, 77, 85, 86]:
+            return "Snowy"
+        elif code in [95, 96, 99]:
+            return "Thunderstorm"
+        else:
+            return "Variable"
+
     def _inject_current_time_into_prompt(self, prompt: str) -> str:
-        """Inject the current system time into a system prompt.
+        """Inject the current system time and local context into a system prompt.
 
         Uses the server's local time zone without explicit timezone conversion,
         as the timezone config option was removed for simplification.
         """
         try:
             current_time = datetime.now().strftime(self.datetime_format)
-            return f"{prompt}\n[Current time: {current_time}]"
+            result = f"{prompt}\n[Current time: {current_time}]"
+            
+            # Add local context if enabled
+            local_context = self._build_local_context()
+            if local_context:
+                result += f"\n[Local Context:\n{local_context}]"
+            
+            return result
         except Exception as e:
-            self.logger.warning(f"Error injecting current time: {e}")
+            self.logger.warning(f"Error injecting current time/context: {e}")
             return prompt
 
     def _build_payload(self, prompt: str = "", history: list[dict[str, str]] | None = None, messages: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -359,11 +522,10 @@ class LlmCommand(BaseCommand):
         user_key = self._user_key(message)
         history = self._get_context_history(user_key) if user_key else []
 
-        # Build the payload with current time injected in system prompt
+        # Build the payload with current time and context injected in system prompt
         payload = self._build_payload(prompt=prompt, history=history)
 
         try:
-            payload = await self._build_payload(prompt, history)
             response = await asyncio.to_thread(
                 requests.post,
                 self.endpoint,

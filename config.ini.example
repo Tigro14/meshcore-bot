@@ -1448,6 +1448,11 @@ include_local_context = true
 context_include_weather = true
 context_include_repeaters = true
 context_include_network_status = true
+context_include_contacts = true
+context_include_moon = true
+context_include_sun = true
+# Weather location for LLM context (city name)
+context_weather_location = Paris, France
 context_cache_seconds = 60
 # Pagination settings: split long responses into multiple messages
 pagination_enabled = false
