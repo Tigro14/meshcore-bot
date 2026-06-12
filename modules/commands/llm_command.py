@@ -205,7 +205,11 @@ class LlmCommand(BaseCommand):
         return ""
 
     def _inject_current_time_into_prompt(self, prompt: str) -> str:
-        """Inject the current time into a system prompt."""
+        """Inject the current system time into a system prompt.
+
+        Uses the server's local time zone without explicit timezone conversion,
+        as the timezone config option was removed for simplification.
+        """
         try:
             current_time = datetime.now().strftime(self.datetime_format)
             return f"{prompt}\n[Current time: {current_time}]"
@@ -216,11 +220,22 @@ class LlmCommand(BaseCommand):
     def _build_payload(self, prompt: str = "", history: list[dict[str, str]] | None = None, messages: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """Build the API payload for the LLM request.
 
+        This method supports two modes:
+        1. Build from prompt + history: Call with prompt and optional history
+        2. Use pre-built messages: Call with messages only (ignores prompt/history)
+
         Args:
-            prompt: User prompt (used with history to build messages)
-            history: Conversation history
+            prompt: User prompt (used with history to build messages, ignored if messages provided)
+            history: Conversation history (ignored if messages provided)
             messages: Pre-built messages list (takes precedence over prompt/history)
+
+        Raises:
+            ValueError: If called with messages parameter alongside non-empty prompt/history
         """
+        # Validate that conflicting parameters aren't provided
+        if messages is not None and (prompt or history):
+            self.logger.warning("_build_payload: messages parameter provided with prompt/history; ignoring prompt/history")
+
         if messages is None:
             # Build messages from prompt and history
             system_prompt = self._inject_current_time_into_prompt(self.system_prompt)
