@@ -7,6 +7,7 @@ Sends a short prompt to a local llama.cpp OpenAI-compatible endpoint.
 import asyncio
 import re
 import time
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -122,6 +123,8 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "cpu_temp_threshold", fallback=60.0, value_type="float"),
             ),
         )
+        # Datetime format for current time injection
+        self.datetime_format = "%Y-%m-%d %H:%M:%S"
         # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
         self._context: dict[str, list[dict[str, Any]]] = {}
 
@@ -201,11 +204,47 @@ class LlmCommand(BaseCommand):
 
         return ""
 
-    def _build_payload(self, prompt: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
-        messages: list[dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
-        if history:
-            messages.extend(history)
-        messages.append({"role": "user", "content": prompt})
+    def _inject_current_time_into_prompt(self, prompt: str) -> str:
+        """Inject the current system time into a system prompt.
+
+        Uses the server's local time zone without explicit timezone conversion,
+        as the timezone config option was removed for simplification.
+        """
+        try:
+            current_time = datetime.now().strftime(self.datetime_format)
+            return f"{prompt}\n[Current time: {current_time}]"
+        except Exception as e:
+            self.logger.warning(f"Error injecting current time: {e}")
+            return prompt
+
+    def _build_payload(self, prompt: str = "", history: list[dict[str, str]] | None = None, messages: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Build the API payload for the LLM request.
+
+        This method supports two modes:
+        1. Build from prompt + history: Call with prompt and optional history
+        2. Use pre-built messages: Call with messages only (ignores prompt/history)
+
+        Args:
+            prompt: User prompt (used with history to build messages, ignored if messages provided)
+            history: Conversation history (ignored if messages provided)
+            messages: Pre-built messages list (takes precedence over prompt/history)
+
+        Raises:
+            ValueError: If called with messages parameter alongside non-empty prompt/history
+        """
+        # Validate that conflicting parameters aren't provided
+        if messages is not None and (prompt or history):
+            self.logger.warning("_build_payload: messages parameter provided with prompt/history; ignoring prompt/history")
+
+        if messages is None:
+            # Build messages from prompt and history
+            system_prompt = self._inject_current_time_into_prompt(self.system_prompt)
+            messages = [{"role": "system", "content": system_prompt}]
+            if history:
+                messages.extend(history)
+            if prompt:
+                messages.append({"role": "user", "content": prompt})
+
         payload: dict[str, Any] = {
             "messages": messages,
             "max_tokens": self.max_tokens,
@@ -214,6 +253,7 @@ class LlmCommand(BaseCommand):
         }
         if self.model:
             payload["model"] = self.model
+
         return payload
 
     def _clean_ai_response(self, content: str, max_length: int) -> str:
@@ -299,11 +339,14 @@ class LlmCommand(BaseCommand):
         user_key = self._user_key(message)
         history = self._get_context_history(user_key) if user_key else []
 
+        # Build the payload with current time injected in system prompt
+        payload = self._build_payload(prompt=prompt, history=history)
+
         try:
             response = await asyncio.to_thread(
                 requests.post,
                 self.endpoint,
-                json=self._build_payload(prompt, history),
+                json=payload,
                 timeout=self.timeout_seconds,
             )
         except requests.RequestException as e:
@@ -317,11 +360,14 @@ class LlmCommand(BaseCommand):
         try:
             data = response.json()
             choices = data.get("choices")
-            if isinstance(choices, list) and choices:
-                content = choices[0].get("message", {}).get("content", "")
-            else:
-                content = ""
-        except (ValueError, TypeError, IndexError, AttributeError) as e:
+            if not isinstance(choices, list) or not choices:
+                return await self.send_response(message, "LLM error: no response from model.")
+
+            choice = choices[0]
+            assistant_message = choice.get("message", {})
+            content = assistant_message.get("content", "")
+
+        except (ValueError, TypeError, IndexError, AttributeError, KeyError) as e:
             self.logger.warning(f"LLM command parse error: {e}")
             return await self.send_response(message, "LLM error: could not parse response.")
 
