@@ -295,7 +295,7 @@ class LlmCommand(BaseCommand):
                 if sun_info and "Error" not in sun_info:
                     # Extract sunrise/sunset
                     lines = sun_info.split('\n')
-                    if len(lines) > 0:
+                    if lines:
                         context_parts.append(f"Sun: {lines[0]}")
             except Exception as e:
                 self.logger.warning(f"Failed to get sun info: {e}")
@@ -329,7 +329,8 @@ class LlmCommand(BaseCommand):
         """
         try:
             # Try to geocode the location
-            lat, lon, _ = geocode_city_sync(self.bot, location, default_country="FR")
+            # Let geocode_city_sync handle country detection from the location string
+            lat, lon, _ = geocode_city_sync(self.bot, location)
             if lat is None or lon is None:
                 return ""
 
