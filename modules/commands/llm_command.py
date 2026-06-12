@@ -143,6 +143,8 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "cpu_temp_threshold", fallback=60.0, value_type="float"),
             ),
         )
+        # Datetime format for current time injection
+        self.datetime_format = "%Y-%m-%d %H:%M:%S"
         # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
         self._context: dict[str, list[dict[str, Any]]] = {}
 
