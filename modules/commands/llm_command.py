@@ -13,7 +13,7 @@ from typing import Any
 import requests
 
 from ..models import MeshMessage
-from ..utils import get_cpu_temperature
+from ..utils import get_config_timezone, get_cpu_temperature
 from .base_command import BaseCommand
 
 
@@ -115,6 +115,26 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "chars_per_page", fallback=160, value_type="int"),
             ),
         )
+
+        # Context settings
+        self.include_local_context = self.get_config_value(
+            "Llm_Command", "include_local_context", fallback=True, value_type="bool"
+        )
+        self.context_include_weather = self.get_config_value(
+            "Llm_Command", "context_include_weather", fallback=True, value_type="bool"
+        )
+        self.context_include_repeaters = self.get_config_value(
+            "Llm_Command", "context_include_repeaters", fallback=True, value_type="bool"
+        )
+        self.context_include_network_status = self.get_config_value(
+            "Llm_Command", "context_include_network_status", fallback=True, value_type="bool"
+        )
+        self.context_cache_seconds = self.get_config_value(
+            "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
+        )
+        self._cached_context_str = ""
+        self._cached_context_time = 0.0
+
         # CPU temperature cooling threshold (in degrees Celsius)
         self.cpu_temp_threshold = max(
             0.0,
@@ -343,6 +363,7 @@ class LlmCommand(BaseCommand):
         payload = self._build_payload(prompt=prompt, history=history)
 
         try:
+            payload = await self._build_payload(prompt, history)
             response = await asyncio.to_thread(
                 requests.post,
                 self.endpoint,

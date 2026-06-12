@@ -463,6 +463,12 @@ temperature = 0.4
 top_p = 0.9
 timeout_seconds = 20
 strip_thinking_tags = true
+# Context settings for local data injection
+include_local_context = true
+context_include_weather = true
+context_include_repeaters = true
+context_include_network_status = true
+context_cache_seconds = 60
 
 [Joke_Command]
 enabled = false
