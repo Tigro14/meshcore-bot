@@ -139,6 +139,9 @@ class LlmCommand(BaseCommand):
         self.context_include_sun = self.get_config_value(
             "Llm_Command", "context_include_sun", fallback=True, value_type="bool"
         )
+        self.context_include_commands = self.get_config_value(
+            "Llm_Command", "context_include_commands", fallback=True, value_type="bool"
+        )
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
         )
@@ -148,6 +151,7 @@ class LlmCommand(BaseCommand):
         )
         self._cached_context_str = ""
         self._cached_context_time = 0.0
+        self._cached_commands_list = None
 
         # CPU temperature cooling threshold (in degrees Celsius)
         self.cpu_temp_threshold = max(
@@ -202,6 +206,44 @@ class LlmCommand(BaseCommand):
         if len(fresh) > max_messages:
             fresh = fresh[-max_messages:]
 
+        self._context[user_key] = fresh
+        return [{"role": e["role"], "content": e["content"]} for e in fresh]
+
+    def _store_context(self, user_key: str, prompt: str, reply: str) -> None:
+        """Append a new user/assistant turn to the context store."""
+        if self.context_window_seconds <= 0:
+            return
+
+        now = time.time()
+        entries = self._context.setdefault(user_key, [])
+        entries.append({"role": "user", "content": prompt, "ts": now})
+        entries.append({"role": "assistant", "content": reply, "ts": now})
+
+    def _extract_prompt(self, message: MeshMessage) -> str:
+        content = message.content.strip()
+
+        if self._command_prefix:
+            if content.startswith(self._command_prefix):
+                content = content[len(self._command_prefix):].strip()
+        elif content.startswith("!"):
+            # Backward-compatibility: base_command.matches_keyword also strips a leading
+            # "!" when no command_prefix is configured, so we do the same here.
+            content = content[1:].strip()
+
+        content = self._strip_mentions(content)
+        lowered = content.lower()
+
+        for keyword in sorted(self.keywords, key=len, reverse=True):
+            kw = keyword.lower()
+            if lowered == kw:
+                return ""
+            if lowered.startswith(kw) and len(lowered) > len(kw) and lowered[len(kw)] == " ":
+                return content[len(keyword):].strip()
+
+        return ""
+
+    async def _build_context_summary(self) -> str:
+        """Build a compact string containing local bot context (time, weather, repeaters)."""
         self._context[user_key] = fresh
         return [{"role": e["role"], "content": e["content"]} for e in fresh]
 
