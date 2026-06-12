@@ -1448,7 +1448,6 @@ include_local_context = true
 context_include_weather = true
 context_include_repeaters = true
 context_include_network_status = true
-context_include_alerts_only = true
 context_cache_seconds = 60
 # Pagination settings: split long responses into multiple messages
 pagination_enabled = false
