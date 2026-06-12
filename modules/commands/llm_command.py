@@ -143,6 +143,8 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "cpu_temp_threshold", fallback=60.0, value_type="float"),
             ),
         )
+        # Datetime format for current time injection
+        self.datetime_format = "%Y-%m-%d %H:%M:%S"
         # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
         self._context: dict[str, list[dict[str, Any]]] = {}
 
@@ -222,78 +224,47 @@ class LlmCommand(BaseCommand):
 
         return ""
 
-    async def _build_context_summary(self) -> str:
-        """Build a compact string containing local bot context (time, weather, repeaters)."""
-        if not self.include_local_context:
-            return ""
+    def _inject_current_time_into_prompt(self, prompt: str) -> str:
+        """Inject the current system time into a system prompt.
 
-        now = time.time()
-        if self._cached_context_str and (now - self._cached_context_time) < self.context_cache_seconds:
-            return self._cached_context_str
+        Uses the server's local time zone without explicit timezone conversion,
+        as the timezone config option was removed for simplification.
+        """
+        try:
+            current_time = datetime.now().strftime(self.datetime_format)
+            return f"{prompt}\n[Current time: {current_time}]"
+        except Exception as e:
+            self.logger.warning(f"Error injecting current time: {e}")
+            return prompt
 
-        parts = []
+    def _build_payload(self, prompt: str = "", history: list[dict[str, str]] | None = None, messages: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Build the API payload for the LLM request.
 
-        # Time context
-        tz, _ = get_config_timezone(self.bot.config, self.logger)
-        current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M %Z")
-        parts.append(f"Time: {current_time}")
+        This method supports two modes:
+        1. Build from prompt + history: Call with prompt and optional history
+        2. Use pre-built messages: Call with messages only (ignores prompt/history)
 
-        # Weather & Lightning context
-        if self.context_include_weather and hasattr(self.bot, 'services'):
-            weather_service = self.bot.services.get('weatherservice')
-            if weather_service and getattr(weather_service, 'enabled', False):
-                try:
-                    forecast = await weather_service._get_weather_forecast()
-                    if forecast and "Error" not in forecast:
-                        parts.append(f"Weather: {forecast}")
-                except Exception as e:
-                    self.logger.debug(f"Error fetching weather context: {e}")
+        Args:
+            prompt: User prompt (used with history to build messages, ignored if messages provided)
+            history: Conversation history (ignored if messages provided)
+            messages: Pre-built messages list (takes precedence over prompt/history)
 
-            blitz_service = self.bot.services.get('blitzortungservice')
-            if blitz_service and getattr(blitz_service, 'enabled', False):
-                try:
-                    strikes = len(getattr(blitz_service, 'blitz_buffer', []))
-                    if strikes > 0:
-                        window_mins = int(getattr(blitz_service, 'window_seconds', 600) / 60)
-                        parts.append(f"Lightning: {strikes} strikes near you in last {window_mins}min")
-                except Exception as e:
-                    self.logger.debug(f"Error fetching blitzortung context: {e}")
+        Raises:
+            ValueError: If called with messages parameter alongside non-empty prompt/history
+        """
+        # Validate that conflicting parameters aren't provided
+        if messages is not None and (prompt or history):
+            self.logger.warning("_build_payload: messages parameter provided with prompt/history; ignoring prompt/history")
 
-        # Network/Repeater context
-        if (self.context_include_repeaters or self.context_include_network_status) and hasattr(self.bot, 'repeater_manager'):
-            try:
-                stats = await self.bot.repeater_manager.get_contact_statistics()
+        if messages is None:
+            # Build messages from prompt and history
+            system_prompt = self._inject_current_time_into_prompt(self.system_prompt)
+            messages = [{"role": "system", "content": system_prompt}]
+            if history:
+                messages.extend(history)
+            if prompt:
+                messages.append({"role": "user", "content": prompt})
 
-                if self.context_include_network_status:
-                    total = stats.get('total_heard', 0)
-                    active = stats.get('recent_activity', 0)
-                    parts.append(f"Network: {total} nodes known, {active} active last 24h")
-
-                if self.context_include_repeaters:
-                    repeater_count = stats.get('by_role', {}).get('repeater', 0)
-                    parts.append(f"Repeaters: {repeater_count} heard")
-            except Exception as e:
-                self.logger.debug(f"Error fetching network context: {e}")
-
-        if not parts:
-            return ""
-
-        context_str = " | ".join(parts)
-        self._cached_context_str = context_str
-        self._cached_context_time = now
-        return context_str
-
-    async def _build_payload(self, prompt: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
-        system_prompt = self.system_prompt
-
-        context_str = await self._build_context_summary()
-        if context_str:
-            system_prompt += f"\n[System Context: {context_str}]"
-
-        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
-        if history:
-            messages.extend(history)
-        messages.append({"role": "user", "content": prompt})
         payload: dict[str, Any] = {
             "messages": messages,
             "max_tokens": self.max_tokens,
@@ -302,6 +273,7 @@ class LlmCommand(BaseCommand):
         }
         if self.model:
             payload["model"] = self.model
+
         return payload
 
     def _clean_ai_response(self, content: str, max_length: int) -> str:
@@ -387,6 +359,9 @@ class LlmCommand(BaseCommand):
         user_key = self._user_key(message)
         history = self._get_context_history(user_key) if user_key else []
 
+        # Build the payload with current time injected in system prompt
+        payload = self._build_payload(prompt=prompt, history=history)
+
         try:
             payload = await self._build_payload(prompt, history)
             response = await asyncio.to_thread(
@@ -406,11 +381,14 @@ class LlmCommand(BaseCommand):
         try:
             data = response.json()
             choices = data.get("choices")
-            if isinstance(choices, list) and choices:
-                content = choices[0].get("message", {}).get("content", "")
-            else:
-                content = ""
-        except (ValueError, TypeError, IndexError, AttributeError) as e:
+            if not isinstance(choices, list) or not choices:
+                return await self.send_response(message, "LLM error: no response from model.")
+
+            choice = choices[0]
+            assistant_message = choice.get("message", {})
+            content = assistant_message.get("content", "")
+
+        except (ValueError, TypeError, IndexError, AttributeError, KeyError) as e:
             self.logger.warning(f"LLM command parse error: {e}")
             return await self.send_response(message, "LLM error: could not parse response.")
 
