@@ -14,7 +14,7 @@ import requests
 
 from ..models import MeshMessage
 from ..solar_conditions import get_moon, get_sun
-from ..utils import get_config_timezone, get_cpu_temperature, geocode_city_sync
+from ..utils import geocode_city_sync, get_cpu_temperature
 from .base_command import BaseCommand
 
 
@@ -242,7 +242,6 @@ class LlmCommand(BaseCommand):
         """Build a compact string containing local bot context (time, weather, repeaters)."""
         if not self.include_local_context:
             return ""
-
         now = time.time()
         if self._cached_context_str and (now - self._cached_context_time) < self.context_cache_seconds:
             return self._cached_context_str
