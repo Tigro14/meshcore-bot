@@ -1451,6 +1451,7 @@ context_include_network_status = true
 context_include_contacts = true
 context_include_moon = true
 context_include_sun = true
+context_include_commands = true
 # Weather location for LLM context (city name)
 context_weather_location = Paris, France
 context_cache_seconds = 60

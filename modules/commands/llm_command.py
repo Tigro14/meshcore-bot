@@ -139,6 +139,9 @@ class LlmCommand(BaseCommand):
         self.context_include_sun = self.get_config_value(
             "Llm_Command", "context_include_sun", fallback=True, value_type="bool"
         )
+        self.context_include_commands = self.get_config_value(
+            "Llm_Command", "context_include_commands", fallback=True, value_type="bool"
+        )
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
         )
@@ -148,6 +151,7 @@ class LlmCommand(BaseCommand):
         )
         self._cached_context_str = ""
         self._cached_context_time = 0.0
+        self._cached_commands_list = None
 
         # CPU temperature cooling threshold (in degrees Celsius)
         self.cpu_temp_threshold = max(
@@ -238,6 +242,71 @@ class LlmCommand(BaseCommand):
 
         return ""
 
+    def _get_enabled_commands_list(self) -> list[dict[str, Any]]:
+        """Get list of enabled bot commands with their keywords and descriptions.
+        
+        Returns:
+            List of command dicts with 'name', 'keywords', and 'description' keys.
+        """
+        if self._cached_commands_list is not None:
+            return self._cached_commands_list
+        
+        try:
+            from modules.plugin_loader import PluginLoader  # noqa: PLC0415
+            
+            # Load all plugins using the bot's plugin loader
+            plugin_loader = PluginLoader(self.bot)
+            commands = plugin_loader.load_all_plugins()
+            
+            # Get admin commands to exclude them
+            admin_commands_str = self.bot.config.get('Admin_ACL', 'admin_commands', fallback='')
+            admin_commands = {c.strip() for c in admin_commands_str.split(',') if c.strip()}
+            
+            # Filter to only enabled, non-admin commands
+            enabled_commands = []
+            for cmd_name, cmd_instance in commands.items():
+                # Skip admin commands
+                primary_name = getattr(cmd_instance, 'name', cmd_name)
+                if cmd_name in admin_commands or primary_name in admin_commands:
+                    continue
+                if hasattr(cmd_instance, 'requires_admin_access') and cmd_instance.requires_admin_access():
+                    continue
+                
+                # Check if command is enabled
+                if not self._is_command_enabled(cmd_instance):
+                    continue
+                
+                # Get command info
+                keywords = getattr(cmd_instance, 'keywords', [])
+                if not keywords:
+                    continue
+                
+                enabled_commands.append({
+                    'name': primary_name,
+                    'keywords': keywords,
+                    'description': getattr(cmd_instance, 'short_description', None) or getattr(cmd_instance, 'description', ''),
+                })
+            
+            # Sort by name
+            enabled_commands.sort(key=lambda c: c['name'])
+            self._cached_commands_list = enabled_commands
+            return enabled_commands
+        except Exception as e:
+            self.logger.warning(f"Failed to load commands list for LLM context: {e}")
+            return []
+    
+    @staticmethod
+    def _is_command_enabled(cmd_instance: Any) -> bool:
+        """Return True if the command is currently enabled in configuration."""
+        name = getattr(cmd_instance, 'name', '')
+        if name:
+            named_attr = f"{name}_enabled"
+            if hasattr(cmd_instance, named_attr):
+                return bool(getattr(cmd_instance, named_attr))
+        if hasattr(cmd_instance, 'enabled'):
+            return bool(cmd_instance.enabled)
+        return True
+
     def _build_local_context(self) -> str:
         """Build a local context string with contacts, moon, sun, and weather info.
 
@@ -309,6 +378,27 @@ class LlmCommand(BaseCommand):
                     context_parts.append(f"Weather ({self.context_weather_location}): {weather_info}")
             except Exception as e:
                 self.logger.warning(f"Failed to get weather info: {e}")
+
+        # Add available bot commands
+        if self.context_include_commands:
+            try:
+                commands = self._get_enabled_commands_list()
+                if commands:
+                    # Get command prefix for display
+                    command_prefix = self.bot.config.get('Bot', 'command_prefix', fallback='').strip()
+                    
+                    # Build commands list string
+                    commands_list = []
+                    for cmd in commands:
+                        # Show first 3 keywords as examples
+                        keywords = cmd['keywords'][:3]
+                        keyword_examples = ', '.join([f"{command_prefix}{kw}" for kw in keywords])
+                        commands_list.append(f"  - {cmd['name']}: {cmd['description']} (e.g., {keyword_examples})")
+                    
+                    commands_str = "Available Commands:\n" + "\n".join(commands_list)
+                    context_parts.append(commands_str)
+            except Exception as e:
+                self.logger.warning(f"Failed to get commands list: {e}")
 
         # Build final context string
         if context_parts:
