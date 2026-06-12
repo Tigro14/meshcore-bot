@@ -329,11 +329,11 @@ class LlmCommand(BaseCommand):
                 with self.bot.db_manager.connection() as conn:
                     cursor = conn.cursor()
                     # Count total contacts
-                    cursor.execute("SELECT COUNT(*) FROM contacts")
+                    cursor.execute("SELECT COUNT(*) FROM complete_contact_tracking")
                     total_contacts = cursor.fetchone()[0]
                     # Count contacts seen in last 24 hours
                     cursor.execute(
-                        "SELECT COUNT(*) FROM contacts WHERE last_seen >= ?",
+                        "SELECT COUNT(*) FROM complete_contact_tracking WHERE last_heard >= ?",
                         (int(time.time()) - 86400,)
                     )
                     recent_contacts = cursor.fetchone()[0]
