@@ -13,7 +13,8 @@ from typing import Any
 import requests
 
 from ..models import MeshMessage
-from ..utils import get_config_timezone, get_cpu_temperature
+from ..solar_conditions import get_moon, get_sun
+from ..utils import get_config_timezone, get_cpu_temperature, geocode_city_sync
 from .base_command import BaseCommand
 
 
@@ -129,8 +130,21 @@ class LlmCommand(BaseCommand):
         self.context_include_network_status = self.get_config_value(
             "Llm_Command", "context_include_network_status", fallback=True, value_type="bool"
         )
+        self.context_include_contacts = self.get_config_value(
+            "Llm_Command", "context_include_contacts", fallback=True, value_type="bool"
+        )
+        self.context_include_moon = self.get_config_value(
+            "Llm_Command", "context_include_moon", fallback=True, value_type="bool"
+        )
+        self.context_include_sun = self.get_config_value(
+            "Llm_Command", "context_include_sun", fallback=True, value_type="bool"
+        )
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
+        )
+        # Weather location for LLM context (defaults to Paris, France)
+        self.context_weather_location = self.get_config_value(
+            "Llm_Command", "context_weather_location", fallback="Paris, France", value_type="str"
         )
         self._cached_context_str = ""
         self._cached_context_time = 0.0
