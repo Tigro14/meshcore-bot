@@ -5,12 +5,10 @@ Sends a short prompt to a local llama.cpp OpenAI-compatible endpoint.
 """
 
 import asyncio
-import json
 import re
 import time
 from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import requests
 
@@ -144,20 +142,6 @@ class LlmCommand(BaseCommand):
                 100.0,
                 self.get_config_value("Llm_Command", "cpu_temp_threshold", fallback=60.0, value_type="float"),
             ),
-        )
-        # Enable tools/function calling
-        self.tools_enabled = self.get_config_value(
-            "Llm_Command",
-            "tools_enabled",
-            fallback=True,
-            value_type="bool",
-        )
-        # Timezone for time-related queries (default: Europe/Paris)
-        self.timezone = self.get_config_value(
-            "Llm_Command",
-            "timezone",
-            fallback="Europe/Paris",
-            value_type="str",
         )
         # Per-user conversation history: {user_key: [{"role": str, "content": str, "ts": float}]}
         self._context: dict[str, list[dict[str, Any]]] = {}
@@ -318,12 +302,6 @@ class LlmCommand(BaseCommand):
         }
         if self.model:
             payload["model"] = self.model
-
-        # Add tools if enabled
-        tools = self._get_tools_definition()
-        if tools:
-            payload["tools"] = tools
-            payload["tool_choice"] = "auto"
 
         return payload
 
