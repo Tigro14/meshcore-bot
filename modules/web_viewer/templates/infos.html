@@ -101,7 +101,7 @@
                     </dd>
 
                     <dt class="text-muted">Command Prefix</dt>
-                    <dd class="mb-0">
+                    <dd class="mb-2">
                         {% if command_prefix %}
                             <code class="usage">{{ command_prefix }}</code>
                             <small class="text-muted ms-1">e.g. <code>{{ command_prefix }}ping</code></small>
@@ -109,6 +109,54 @@
                             <span class="text-muted">None (commands without prefix)</span>
                         {% endif %}
                     </dd>
+
+                    {% if version_info %}
+                    <dt class="text-muted">Version</dt>
+                    <dd class="mb-2">
+                        {% if version_info.tag %}
+                            <code class="usage">{{ version_info.tag }}</code>
+                        {% endif %}
+                        {% if version_info.branch %}
+                            <small class="text-muted">{{ version_info.branch }}</small>
+                        {% endif %}
+                    </dd>
+                    {% if version_info.commit %}
+                    <dt class="text-muted">Commit</dt>
+                    <dd class="mb-2">
+                        <code class="usage" style="font-size:0.75rem;">{{ version_info.commit[:8] }}</code>
+                        {% if version_info.date %}
+                            <small class="text-muted ms-1">{{ version_info.date }}</small>
+                        {% endif %}
+                    </dd>
+                    {% endif %}
+                    {% endif %}
+
+                    <dt class="text-muted">Radio Status</dt>
+                    <dd class="mb-2">
+                        {% if radio_offline %}
+                            <span class="text-danger"><i class="fas fa-times-circle me-1"></i>Offline</span>
+                            {% if radio_offline_since %}
+                                <small class="text-muted ms-1">since {{ radio_offline_since }}</small>
+                            {% endif %}
+                        {% elif radio_zombie %}
+                            <span class="text-warning"><i class="fas fa-warning me-1"></i>Zombie</span>
+                            {% if radio_zombie_since %}
+                                <small class="text-muted ms-1">since {{ radio_zombie_since }}</small>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-success"><i class="fas fa-check-circle me-1"></i>Online</span>
+                        {% endif %}
+                    </dd>
+
+                    <dt class="text-muted">Bot Status</dt>
+                    <dd class="mb-2">
+                        {% if bot_initializing %}
+                            <span class="text-info"><i class="fas fa-spinner me-1"></i>Initializing</span>
+                        {% else %}
+                            <span class="text-success"><i class="fas fa-check-circle me-1"></i>Ready</span>
+                        {% endif %}
+                    </dd>
+
                     <dt class="text-muted">TigroBot Hardware</dt>
                     <dd class="mb-0">
                             <span class="text-muted">TigroBot is a small Xiao Seeed nRF52 serially connected to a Raspberry Pi 5 16GB+NVMe that runs a Qwen3-30b-a3b-instruct-2507-q4_k_m LLM model fully powered by a 100W PV panel, a 40Ah 12V LiFePO4 DIY battery and a Victron 75/10 MPPT. The setup also power the Repeater (MQTT observer Tigro G2PV) using a Station G2 and a Sysmocomm cavity filter, on a 8dBi colinear 75m ASL</span>
