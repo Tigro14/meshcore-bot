@@ -328,12 +328,15 @@ class LlmCommand(BaseCommand):
             try:
                 with self.bot.db_manager.connection() as conn:
                     cursor = conn.cursor()
-                    # Count total contacts
-                    cursor.execute("SELECT COUNT(*) FROM complete_contact_tracking")
-                    total_contacts = cursor.fetchone()[0]
-                    # Count contacts seen in last 24 hours
+                    # Count total unique contacts (currently tracked)
                     cursor.execute(
-                        "SELECT COUNT(*) FROM complete_contact_tracking WHERE last_heard >= ?",
+                        "SELECT COUNT(DISTINCT public_key) FROM complete_contact_tracking WHERE is_currently_tracked = 1"
+                    )
+                    total_contacts = cursor.fetchone()[0]
+                    # Count contacts heard in last 24 hours
+                    cursor.execute(
+                        "SELECT COUNT(DISTINCT public_key) FROM complete_contact_tracking "
+                        "WHERE is_currently_tracked = 1 AND last_heard >= ?",
                         (int(time.time()) - 86400,)
                     )
                     recent_contacts = cursor.fetchone()[0]
@@ -392,7 +395,7 @@ class LlmCommand(BaseCommand):
                     for cmd in commands:
                         # Show first 3 keywords as examples
                         keywords = cmd['keywords'][:3]
-                        keyword_examples = ', '.join([f"{command_prefix}{kw}" for kw in keywords])
+                        keyword_examples = ' '.join(keywords)
                         commands_list.append(f"  - {cmd['name']}: {cmd['description']} (e.g., {keyword_examples})")
 
                     commands_str = "Available Commands:\n" + "\n".join(commands_list)
