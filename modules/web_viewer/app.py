@@ -1533,6 +1533,22 @@ class BotDataViewer:
                         cmd_reference_url = cmd_reference_url_raw
                 except Exception:
                     pass
+
+            from modules.commands.llm_command import LlmCommand
+            class _MinimalBot:
+                def __init__(self, config: Any, logger: Any, db_manager: Any = None) -> None:
+                    self.config = config
+                    self.logger = logger
+                    self.db_manager = db_manager
+
+            llm_context = ""
+            try:
+                minimal_bot = _MinimalBot(self.config, self.logger, getattr(self, 'db_manager', None))
+                llm_cmd = LlmCommand(minimal_bot)
+                llm_context = llm_cmd._inject_current_time_into_prompt(llm_cmd.system_prompt)
+            except Exception as e:
+                self.logger.warning("Failed to load LLM context for /infos page: %s", e)
+
             return render_template(
                 'infos.html',
                 command_groups=command_groups,
@@ -1541,6 +1557,7 @@ class BotDataViewer:
                 monitor_channels=monitor_channels,
                 respond_to_dms=respond_to_dms,
                 cmd_reference_url=cmd_reference_url,
+                llm_context=llm_context,
             )
 
         @self.app.route('/api/config/notifications')
