@@ -425,7 +425,7 @@ class LlmCommand(BaseCommand):
                 ram_info = get_ram_usage()
                 if ram_info is not None:
                     used_pct, available_gb = ram_info
-                    system_info.append(f"RAM: {used_pct:.0f}% ({available_gb:.1f}GB available)")
+                    system_info.append(f"RAM: {used_pct:.0f}% used")
                 
                 # llama.cpp model info
                 model_info = self._get_llama_model_info()
@@ -453,18 +453,23 @@ class LlmCommand(BaseCommand):
         """
         try:
             # Try to get model info from llama.cpp endpoint
-            response = requests.get(
-                self.endpoint.replace('/v1/chat/completions', '/models'),
-                timeout=2.0
-            )
+            # Replace the chat completions endpoint with the models endpoint
+            base_url = self.endpoint
+            if base_url.endswith('/v1/chat/completions'):
+                models_url = base_url[:-len('/v1/chat/completions')] + '/v1/models'
+            else:
+                # Fallback: assume base URL and append models endpoint
+                models_url = self.endpoint.rstrip('/') + '/v1/models'
+            
+            response = requests.get(models_url, timeout=2.0)
             if response.status_code == 200:
                 data = response.json()
                 if 'data' in data and len(data['data']) > 0:
-                    model = data['data'][0]
-                    model_name = model.get('id', 'unknown')
                     # Use configured model name if available, otherwise use endpoint response
                     if self.model:
                         return self.model
+                    model = data['data'][0]
+                    model_name = model.get('id', 'unknown')
                     return model_name
             # Fallback to configured model name
             if self.model:
