@@ -388,14 +388,14 @@ class TestLlmCommand:
         assert cmd.cpu_temp_threshold == 0.0
 
     def test_can_execute_blocked_when_cpu_temp_exceeds_threshold(self, command_mock_bot):
-        """can_execute should return False when CPU temperature exceeds threshold."""
+        """can_execute should return True when CPU temperature exceeds threshold (check moved to execute)."""
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Llm_Command", "cpu_temp_threshold", "60.0")
         cmd = LlmCommand(command_mock_bot)
         msg = mock_message(content="llm hello", is_dm=True)
 
         with patch("modules.commands.llm_command.get_cpu_temperature", return_value=65.0):
-            assert cmd.can_execute(msg) is False
+            assert cmd.can_execute(msg) is True
 
     def test_can_execute_allowed_when_cpu_temp_below_threshold(self, command_mock_bot):
         """can_execute should return True when CPU temperature is below threshold."""
@@ -408,14 +408,14 @@ class TestLlmCommand:
             assert cmd.can_execute(msg) is True
 
     def test_can_execute_allowed_when_cpu_temp_equals_threshold(self, command_mock_bot):
-        """can_execute should return False when CPU temperature equals threshold."""
+        """can_execute should return True when CPU temperature equals threshold (check moved to execute)."""
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Llm_Command", "cpu_temp_threshold", "60.0")
         cmd = LlmCommand(command_mock_bot)
         msg = mock_message(content="llm hello", is_dm=True)
 
         with patch("modules.commands.llm_command.get_cpu_temperature", return_value=60.0):
-            assert cmd.can_execute(msg) is False
+            assert cmd.can_execute(msg) is True
 
     def test_can_execute_allowed_when_cpu_temp_reading_fails(self, command_mock_bot):
         """can_execute should allow execution when CPU temperature cannot be read (returns None)."""
@@ -437,3 +437,30 @@ class TestLlmCommand:
         with patch("modules.commands.llm_command.get_cpu_temperature", return_value=80.0):
             # Even with high temperature, should be allowed when threshold is disabled
             assert cmd.can_execute(msg) is True
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_trop_chaud_when_cpu_temp_exceeds_threshold(self, command_mock_bot):
+        """execute should return 'trop chaud:' when CPU temperature exceeds threshold."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Llm_Command", "cpu_temp_threshold", "60.0")
+        cmd = LlmCommand(command_mock_bot)
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        with patch("modules.commands.llm_command.get_cpu_temperature", return_value=65.0):
+            result = await cmd.execute(msg)
+            assert result is True
+            assert command_mock_bot.command_manager.send_response.call_args[0][1] == "trop chaud:"
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_trop_chaud_when_cpu_temp_equals_threshold(self, command_mock_bot):
+        """execute should return 'trop chaud:' when CPU temperature equals threshold."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Llm_Command", "cpu_temp_threshold", "60.0")
+        cmd = LlmCommand(command_mock_bot)
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        with patch("modules.commands.llm_command.get_cpu_temperature", return_value=60.0):
+            result = await cmd.execute(msg)
+            assert result is True
+            assert command_mock_bot.command_manager.send_response.call_args[0][1] == "trop chaud:"
+
