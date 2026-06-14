@@ -677,7 +677,7 @@ class LlmCommand(BaseCommand):
                 self.logger.info(
                     f"LLM command blocked: CPU temperature {cpu_temp:.1f}°C exceeds threshold {self.cpu_temp_threshold}°C"
                 )
-                return await self.send_response(message, "trop chaud:")
+                return await self.send_response(message, "trop chaud: {cpu_temp:.1f}°C")
 
         prompt = self._extract_prompt(message)
         if not prompt:
