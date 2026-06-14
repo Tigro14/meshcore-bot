@@ -9,6 +9,7 @@ import re
 import time
 from datetime import datetime
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import requests
 
