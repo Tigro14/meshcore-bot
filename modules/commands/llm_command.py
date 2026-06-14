@@ -411,15 +411,15 @@ class LlmCommand(BaseCommand):
             try:
                 system_info = []
                 
-                # CPU temperature
+                # CPU temperature and usage
                 cpu_temp = get_cpu_temperature()
-                if cpu_temp is not None:
-                    system_info.append(f"CPU: {cpu_temp:.1f}°C")
-                
-                # CPU usage
                 cpu_usage = get_cpu_usage()
-                if cpu_usage is not None:
-                    system_info.append(f"{cpu_usage:.1f}%")
+                if cpu_temp is not None and cpu_usage is not None:
+                    system_info.append(f"CPU: {cpu_temp:.1f}°C, {cpu_usage:.1f}%")
+                elif cpu_temp is not None:
+                    system_info.append(f"CPU: {cpu_temp:.1f}°C")
+                elif cpu_usage is not None:
+                    system_info.append(f"CPU: {cpu_usage:.1f}%")
                 
                 # RAM usage
                 ram_info = get_ram_usage()
