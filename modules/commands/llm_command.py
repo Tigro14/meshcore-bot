@@ -14,7 +14,7 @@ import requests
 
 from ..models import MeshMessage
 from ..solar_conditions import get_moon, get_sun
-from ..utils import geocode_city_sync, get_cpu_temperature
+from ..utils import geocode_city_sync, get_cpu_temperature, get_cpu_usage, get_ram_usage
 from .base_command import BaseCommand
 
 
@@ -141,6 +141,9 @@ class LlmCommand(BaseCommand):
         )
         self.context_include_commands = self.get_config_value(
             "Llm_Command", "context_include_commands", fallback=True, value_type="bool"
+        )
+        self.context_include_system_metrics = self.get_config_value(
+            "Llm_Command", "context_include_system_metrics", fallback=True, value_type="bool"
         )
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
