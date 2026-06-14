@@ -9,6 +9,7 @@ import re
 import time
 from datetime import datetime
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -414,12 +415,15 @@ class LlmCommand(BaseCommand):
                 # CPU temperature and usage
                 cpu_temp = get_cpu_temperature()
                 cpu_usage = get_cpu_usage()
-                if cpu_temp is not None and cpu_usage is not None:
-                    system_info.append(f"CPU: {cpu_temp:.1f}°C, {cpu_usage:.1f}%")
-                elif cpu_temp is not None:
-                    system_info.append(f"CPU: {cpu_temp:.1f}°C")
-                elif cpu_usage is not None:
-                    system_info.append(f"CPU: {cpu_usage:.1f}%")
+                cpu_info = "CPU:"
+                if cpu_temp is not None:
+                    cpu_info += f" {cpu_temp:.1f}°C"
+                if cpu_usage is not None:
+                    if cpu_temp is not None:
+                        cpu_info += ","
+                    cpu_info += f" {cpu_usage:.1f}%"
+                if cpu_temp is not None or cpu_usage is not None:
+                    system_info.append(cpu_info)
                 
                 # RAM usage
                 ram_info = get_ram_usage()
@@ -453,24 +457,21 @@ class LlmCommand(BaseCommand):
         """
         try:
             # Try to get model info from llama.cpp endpoint
-            # Replace the chat completions endpoint with the models endpoint
-            base_url = self.endpoint
-            if base_url.endswith('/v1/chat/completions'):
-                models_url = base_url[:-len('/v1/chat/completions')] + '/v1/models'
-            else:
-                # Fallback: assume base URL and append models endpoint
-                models_url = self.endpoint.rstrip('/') + '/v1/models'
+            # Parse the endpoint URL and construct the models endpoint
+            parsed = urlparse(self.endpoint)
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+            models_url = urljoin(base_url, '/v1/models')
             
             response = requests.get(models_url, timeout=2.0)
             if response.status_code == 200:
                 data = response.json()
                 if 'data' in data and len(data['data']) > 0:
-                    # Use configured model name if available, otherwise use endpoint response
-                    if self.model:
-                        return self.model
+                    # Try to get model from API first, then fall back to config
                     model = data['data'][0]
-                    model_name = model.get('id', 'unknown')
-                    return model_name
+                    model_name = model.get('id', '')
+                    if model_name:
+                        return model_name
+            
             # Fallback to configured model name
             if self.model:
                 return self.model
