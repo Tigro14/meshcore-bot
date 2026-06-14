@@ -174,15 +174,6 @@ class LlmCommand(BaseCommand):
         if not self.llm_enabled:
             return False
 
-        # Check CPU temperature threshold if configured
-        if self.cpu_temp_threshold > 0:
-            cpu_temp = get_cpu_temperature()
-            if cpu_temp is not None and cpu_temp >= self.cpu_temp_threshold:
-                self.logger.info(
-                    f"LLM command blocked: CPU temperature {cpu_temp:.1f}°C exceeds threshold {self.cpu_temp_threshold}°C"
-                )
-                return False
-
         return super().can_execute(message, skip_channel_check)
 
     def get_help_text(self) -> str:
@@ -679,6 +670,15 @@ class LlmCommand(BaseCommand):
         return pages if pages else [content]
 
     async def execute(self, message: MeshMessage) -> bool:
+        # Check CPU temperature threshold if configured
+        if self.cpu_temp_threshold > 0:
+            cpu_temp = get_cpu_temperature()
+            if cpu_temp is not None and cpu_temp >= self.cpu_temp_threshold:
+                self.logger.info(
+                    f"LLM command blocked: CPU temperature {cpu_temp:.1f}°C exceeds threshold {self.cpu_temp_threshold}°C"
+                )
+                return await self.send_response(message, "trop chaud:")
+
         prompt = self._extract_prompt(message)
         if not prompt:
             pfx = self._command_prefix
