@@ -280,6 +280,37 @@ def get_cpu_temperature() -> Optional[float]:
         return None
 
 
+def get_cpu_usage() -> Optional[float]:
+    """Get current CPU usage percentage.
+
+    Uses /proc/stat to calculate CPU usage over the last second.
+
+    Returns:
+        Optional[float]: CPU usage as percentage (0-100), or None if reading fails.
+    """
+    try:
+        import psutil
+        return psutil.cpu_percent(interval=0.1)
+    except Exception:
+        # psutil not available or error reading CPU usage
+        return None
+
+
+def get_ram_usage() -> Optional[tuple[float, float]]:
+    """Get current RAM usage.
+
+    Returns:
+        Optional[tuple[float, float]]: Tuple of (used_percent, available_gb), or None if reading fails.
+    """
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        return (mem.percent, mem.available / (1024**3))
+    except Exception:
+        # psutil not available or error reading RAM usage
+        return None
+
+
 def format_location_for_display(city: Optional[str], state: Optional[str] = None,
                                country: Optional[str] = None, max_length: int = 20) -> Optional[str]:
     """Format location data for display with intelligent abbreviation.

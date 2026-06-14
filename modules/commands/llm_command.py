@@ -14,7 +14,7 @@ import requests
 
 from ..models import MeshMessage
 from ..solar_conditions import get_moon, get_sun
-from ..utils import geocode_city_sync, get_cpu_temperature
+from ..utils import geocode_city_sync, get_cpu_temperature, get_cpu_usage, get_ram_usage
 from .base_command import BaseCommand
 
 
@@ -141,6 +141,9 @@ class LlmCommand(BaseCommand):
         )
         self.context_include_commands = self.get_config_value(
             "Llm_Command", "context_include_commands", fallback=True, value_type="bool"
+        )
+        self.context_include_system_metrics = self.get_config_value(
+            "Llm_Command", "context_include_system_metrics", fallback=True, value_type="bool"
         )
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
@@ -403,6 +406,37 @@ class LlmCommand(BaseCommand):
             except Exception as e:
                 self.logger.warning(f"Failed to get commands list: {e}")
 
+        # Add system metrics
+        if self.context_include_system_metrics:
+            try:
+                system_info = []
+                
+                # CPU temperature
+                cpu_temp = get_cpu_temperature()
+                if cpu_temp is not None:
+                    system_info.append(f"CPU: {cpu_temp:.1f}°C")
+                
+                # CPU usage
+                cpu_usage = get_cpu_usage()
+                if cpu_usage is not None:
+                    system_info.append(f"{cpu_usage:.1f}%")
+                
+                # RAM usage
+                ram_info = get_ram_usage()
+                if ram_info is not None:
+                    used_pct, available_gb = ram_info
+                    system_info.append(f"RAM: {used_pct:.0f}% ({available_gb:.1f}GB available)")
+                
+                # llama.cpp model info
+                model_info = self._get_llama_model_info()
+                if model_info:
+                    system_info.append(f"Model: {model_info}")
+                
+                if system_info:
+                    context_parts.append("System: " + ", ".join(system_info))
+            except Exception as e:
+                self.logger.warning(f"Failed to get system metrics: {e}")
+
         # Build final context string
         if context_parts:
             self._cached_context_str = "\n".join(context_parts)
@@ -410,6 +444,37 @@ class LlmCommand(BaseCommand):
             return self._cached_context_str
 
         return ""
+
+    def _get_llama_model_info(self) -> str:
+        """Get information about the running llama.cpp model.
+
+        Returns:
+            String with model information, or empty string if unavailable.
+        """
+        try:
+            # Try to get model info from llama.cpp endpoint
+            response = requests.get(
+                self.endpoint.replace('/v1/chat/completions', '/models'),
+                timeout=2.0
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if 'data' in data and len(data['data']) > 0:
+                    model = data['data'][0]
+                    model_name = model.get('id', 'unknown')
+                    # Use configured model name if available, otherwise use endpoint response
+                    if self.model:
+                        return self.model
+                    return model_name
+            # Fallback to configured model name
+            if self.model:
+                return self.model
+            return ""
+        except Exception:
+            # Fallback to configured model name
+            if self.model:
+                return self.model
+            return ""
 
     def _get_weather_for_location(self, location: str) -> str:
         """Get weather information for a specific location.
