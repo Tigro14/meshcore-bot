@@ -8216,7 +8216,7 @@ class BotDataViewer:
                     # Get latest Clock_Sync_Admin log entries for each public key
                     cursor.execute(
                         """
-                        SELECT public_key, success, sent_at, error_message
+                        SELECT public_key, success, CAST(strftime('%s', sent_at) AS INTEGER), error_message
                         FROM clock_sync_admin_log
                         WHERE id IN (
                             SELECT MAX(id)
