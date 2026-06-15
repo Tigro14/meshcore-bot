@@ -8247,7 +8247,10 @@ class BotDataViewer:
                         'drift_seconds': None,
                         'message_timestamp': None,
                         'last_seen': None,
-                        'status': 'Not Found'
+                        'status': 'Not Found',
+                        'last_sync_success': None,
+                        'last_sync_at': None,
+                        'last_sync_error': None
                     }
 
                     # Try to resolve contact by name
@@ -8323,7 +8326,10 @@ class BotDataViewer:
                         'drift_seconds': None,
                         'message_timestamp': None,
                         'last_seen': None,
-                        'status': 'Unknown'
+                        'status': 'Unknown',
+                        'last_sync_success': None,
+                        'last_sync_at': None,
+                        'last_sync_error': None
                     })
 
             return {
