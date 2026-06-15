@@ -9560,6 +9560,7 @@ class BotDataViewer:
                         'role': None,
                         'hop_count': None,
                         'drift_seconds': None,
+                        'message_timestamp': None,
                         'last_seen': None,
                         'status': 'Not Found'
                     }
@@ -9612,6 +9613,7 @@ class BotDataViewer:
                             drift = drift_data[public_key]
                             target_info['drift_seconds'] = drift['drift_seconds']
                             target_info['last_seen'] = drift['received_at']
+                            target_info['message_timestamp'] = drift['sender_timestamp']
 
                             if drift['drift_seconds'] is not None:
                                 if drift['drift_seconds'] <= drift_threshold_seconds:
@@ -9634,6 +9636,7 @@ class BotDataViewer:
                         'role': None,
                         'hop_count': None,
                         'drift_seconds': None,
+                        'message_timestamp': None,
                         'last_seen': None,
                         'status': 'Unknown'
                     })
