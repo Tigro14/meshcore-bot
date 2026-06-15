@@ -8183,14 +8183,22 @@ class BotDataViewer:
                             c.public_key,
                             c.role,
                             c.hop_count,
-                            m.received_at,
-                            m.sender_timestamp,
-                            ABS(m.received_at - m.sender_timestamp) AS drift_seconds
+                            CAST(strftime('%s', m.created_at) AS INTEGER) AS received_at,
+                            m.timestamp AS sender_timestamp,
+                            CASE
+                                WHEN m.timestamp IS NULL THEN NULL
+                                WHEN CAST(m.timestamp AS INTEGER) <= 0 THEN NULL
+                                ELSE ABS(
+                                    CAST(strftime('%s', m.created_at) AS INTEGER)
+                                    - CAST(m.timestamp AS INTEGER)
+                                )
+                            END AS drift_seconds
                         FROM complete_contact_tracking c
-                        JOIN latest_message_per_sender lm ON c.public_key = lm.sender_id
+                        JOIN latest_message_per_sender lm ON c.name = lm.sender_id
                         JOIN message_stats m ON m.id = lm.latest_id
-                        WHERE m.received_at >= ?
-                        AND m.sender_timestamp IS NOT NULL
+                        WHERE CAST(strftime('%s', m.created_at) AS INTEGER) >= ?
+                        AND m.timestamp IS NOT NULL
+                        AND CAST(m.timestamp AS INTEGER) > 0
                         """,
                         (cutoff_time,)
                     )
@@ -8208,7 +8216,7 @@ class BotDataViewer:
                     # Get latest Clock_Sync_Admin log entries for each public key
                     cursor.execute(
                         """
-                        SELECT public_key, success, sent_at, error_message
+                        SELECT public_key, success, CAST(strftime('%s', sent_at) AS INTEGER), error_message
                         FROM clock_sync_admin_log
                         WHERE id IN (
                             SELECT MAX(id)
@@ -8237,6 +8245,7 @@ class BotDataViewer:
                         'role': None,
                         'hop_count': None,
                         'drift_seconds': None,
+                        'message_timestamp': None,
                         'last_seen': None,
                         'status': 'Not Found'
                     }
@@ -8289,6 +8298,7 @@ class BotDataViewer:
                             drift = drift_data[public_key]
                             target_info['drift_seconds'] = drift['drift_seconds']
                             target_info['last_seen'] = drift['received_at']
+                            target_info['message_timestamp'] = drift['sender_timestamp']
 
                             if drift['drift_seconds'] is not None:
                                 if drift['drift_seconds'] <= drift_threshold_seconds:
@@ -8311,6 +8321,7 @@ class BotDataViewer:
                         'role': None,
                         'hop_count': None,
                         'drift_seconds': None,
+                        'message_timestamp': None,
                         'last_seen': None,
                         'status': 'Unknown'
                     })
