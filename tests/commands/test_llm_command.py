@@ -440,7 +440,7 @@ class TestLlmCommand:
 
     @pytest.mark.asyncio
     async def test_execute_returns_trop_chaud_when_cpu_temp_exceeds_threshold(self, command_mock_bot):
-        """execute should return 'trop chaud:' when CPU temperature exceeds threshold."""
+        """execute should return the trop chaud template when CPU temperature exceeds threshold."""
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Llm_Command", "cpu_temp_threshold", "60.0")
         cmd = LlmCommand(command_mock_bot)
@@ -449,11 +449,11 @@ class TestLlmCommand:
         with patch("modules.commands.llm_command.get_cpu_temperature", return_value=65.0):
             result = await cmd.execute(msg)
             assert result is True
-            assert command_mock_bot.command_manager.send_response.call_args[0][1] == "trop chaud:"
+            assert command_mock_bot.command_manager.send_response.call_args[0][1] == "trop chaud: {cpu_temp:.1f}°C"
 
     @pytest.mark.asyncio
     async def test_execute_returns_trop_chaud_when_cpu_temp_equals_threshold(self, command_mock_bot):
-        """execute should return 'trop chaud:' when CPU temperature equals threshold."""
+        """execute should return the trop chaud template when CPU temperature equals threshold."""
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Llm_Command", "cpu_temp_threshold", "60.0")
         cmd = LlmCommand(command_mock_bot)
@@ -462,5 +462,5 @@ class TestLlmCommand:
         with patch("modules.commands.llm_command.get_cpu_temperature", return_value=60.0):
             result = await cmd.execute(msg)
             assert result is True
-            assert command_mock_bot.command_manager.send_response.call_args[0][1] == "trop chaud:"
+            assert command_mock_bot.command_manager.send_response.call_args[0][1] == "trop chaud: {cpu_temp:.1f}°C"
 
