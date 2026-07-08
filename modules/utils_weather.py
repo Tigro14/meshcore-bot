@@ -71,8 +71,8 @@ def get_weather_openmeteo(
     
     Uses a two-tier caching strategy:
     - Fresh data (< 5 minutes): Return immediately
-    - Stale data (5 min - 1 hour): Return cached data, trigger background refresh
-    - Very stale data (> 1 hour): Force refresh
+    - Stale data (5 min - 1 hour): Return cached data immediately
+    - Very stale data (> 1 hour): Fetch fresh data from API
     
     Args:
         lat: Latitude coordinate.
@@ -103,8 +103,8 @@ def get_weather_openmeteo(
             logger.debug(f"Using fresh cached weather data (age: {cache_age:.0f}s)")
             return cached_data.get('data'), None
         
-        # Stale data (5-60 minutes) - return it but we'll refresh in background
-        # For now, just return stale data since background refresh is complex
+        # Stale data (5-60 minutes) - return it immediately
+        # Note: Background refresh could be added in the future if needed
         if cache_age < 3600:  # 1 hour
             logger.debug(f"Using stale cached weather data (age: {cache_age:.0f}s)")
             return cached_data.get('data'), None
