@@ -727,8 +727,8 @@ weather_provider = noaa
 # Enable/disable Open-Meteo weather API
 #weather_use_openmeteo = true
 
-# Forecast duration in hours (default: 48)
-#weather_forecast_hours = 48
+# Forecast duration in days (default: 2, max: 16)
+#weather_forecast_days = 2
 
 # Default city name for empty "wx" / "gwx" commands when companion location is unavailable
 # Use English city names (examples: Seattle or Seattle, WA)

@@ -90,7 +90,8 @@ class TestGetWeatherOpenMeteo:
             data, error = get_weather_openmeteo(
                 lat=48.8566,
                 lon=2.3522,
-                persistence=persistence
+                persistence=persistence,
+                forecast_days=2
             )
         
         assert error is None
@@ -124,7 +125,8 @@ class TestGetWeatherOpenMeteo:
             data, error = get_weather_openmeteo(
                 lat=48.8566,
                 lon=2.3522,
-                persistence=persistence
+                persistence=persistence,
+                forecast_days=2
             )
             
             # API should not be called
@@ -164,7 +166,8 @@ class TestGetWeatherOpenMeteo:
             data, error = get_weather_openmeteo(
                 lat=48.8566,
                 lon=2.3522,
-                persistence=persistence
+                persistence=persistence,
+                forecast_days=2
             )
         
         # Should return stale cache as fallback
@@ -194,7 +197,8 @@ class TestGetWeatherOpenMeteo:
             data, error = get_weather_openmeteo(
                 lat=48.8566,
                 lon=2.3522,
-                persistence=persistence
+                persistence=persistence,
+                forecast_days=2
             )
         
         # Should return cached data despite timeout
@@ -215,7 +219,8 @@ class TestGetWeatherOpenMeteo:
             data, error = get_weather_openmeteo(
                 lat=48.8566,
                 lon=2.3522,
-                persistence=persistence
+                persistence=persistence,
+                forecast_days=2
             )
         
         assert data is None
@@ -235,6 +240,7 @@ class TestGetWeatherOpenMeteo:
                 lat=48.8566,
                 lon=2.3522,
                 persistence=persistence,
+                forecast_days=2,
                 model="meteofrance_arome_france_hd"
             )
             
@@ -256,6 +262,7 @@ class TestGetWeatherOpenMeteo:
                 lat=48.8566,
                 lon=2.3522,
                 persistence=persistence,
+                forecast_days=2,
                 model=""  # Empty model should be omitted
             )
             
