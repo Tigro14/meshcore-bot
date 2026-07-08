@@ -59,7 +59,8 @@ log_file = meshcore_bot.log
 # Weather (for wx command) - set default_city and country to your location
 [Weather]
 default_city = Paris
-default_state = 
+# Leave empty for cities without states (e.g., Paris doesn't have a state)
+default_state =
 default_country = FR
 
 # Path command - "p" shortcut for quick path decoding
