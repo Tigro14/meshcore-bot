@@ -63,7 +63,7 @@ def get_weather_openmeteo(
     lon: float,
     persistence: Any,
     config: Optional[Any] = None,
-    forecast_hours: int = 48,
+    forecast_days: int = 2,
     model: str = "meteofrance_arome_france_hd",
     timezone: str = "Europe/Paris"
 ) -> Tuple[Optional[dict], Optional[str]]:
@@ -79,7 +79,7 @@ def get_weather_openmeteo(
         lon: Longitude coordinate.
         persistence: DBManager instance for caching.
         config: Optional config parser for additional settings.
-        forecast_hours: Number of forecast hours (default: 48).
+        forecast_days: Number of forecast days (default: 2, max: 16).
         model: Weather model to use (default: meteofrance_arome_france_hd).
         timezone: Timezone for forecast (default: Europe/Paris).
         
@@ -103,9 +103,9 @@ def get_weather_openmeteo(
             logger.debug(f"Using fresh cached weather data (age: {cache_age:.0f}s)")
             return cached_data.get('data'), None
         
-        # Stale data (5-60 minutes) - return it immediately
+        # Stale data (5 minutes - 1 hour) - return it immediately
         # Note: Background refresh could be added in the future if needed
-        if cache_age < 3600:  # 1 hour
+        if cache_age < 3600:  # 1 hour (3600 seconds)
             logger.debug(f"Using stale cached weather data (age: {cache_age:.0f}s)")
             return cached_data.get('data'), None
     
@@ -117,7 +117,7 @@ def get_weather_openmeteo(
         "longitude": lon,
         "hourly": "temperature_2m,precipitation,precipitation_probability,wind_speed_10m,weather_code",
         "timezone": timezone,
-        "forecast_hours": forecast_hours,
+        "forecast_days": forecast_days,
     }
     
     # Add model if specified (empty string means auto-select)
