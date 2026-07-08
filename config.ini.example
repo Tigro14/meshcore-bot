@@ -715,20 +715,35 @@ weather_provider = noaa
 # Leave unset to default to "best_match"
 # Supported model names: https://open-meteo.com/en/docs
 # Set to an empty value (weather_model =) to omit model selection and let Open-Meteo auto-select
-#weather_model =
+# For France, use meteofrance_arome_france_hd for high-resolution French weather
+# Or use arpege_europe for the ARPEGE model (Météo-France) covering France and Europe
+weather_model = arpege_europe
+
+# Open-Meteo weather settings (for utils_weather.py integration)
+# Coordinates for weather data (0.0 = auto-detect from GPS if available)
+# Default: Paris, France (48.8566, 2.3522)
+#weather_latitude = 48.8566
+#weather_longitude = 2.3522
+
+# Enable/disable Open-Meteo weather API
+#weather_use_openmeteo = true
+
+# Forecast duration in days (default: 2, max: 16)
+#weather_forecast_days = 2
 
 # Default city name for empty "wx" / "gwx" commands when companion location is unavailable
 # Use English city names (examples: Seattle or Seattle, WA)
-#default_city =
+default_city = Paris
 
 # Default state for city name disambiguation
 # When users type "wx seattle", it will search for "seattle, WA, USA"
 # Use 2-letter state abbreviation (e.g., WA, CA, NY, TX)
-default_state = WA
+# Leave empty for cities without states (e.g., Paris, France)
+default_state =
 
 # Default country for city name disambiguation (for international weather plugin)
-# Use 2-letter country code (e.g., US, CA, GB, AU)
-default_country = US
+# Use 2-letter country code (e.g., US, CA, GB, AU, FR)
+default_country = FR
 
 # When true, a bare "wx" or "gwx" (no location) uses bot_latitude/bot_longitude from [Bot]
 # if there is no default WXSIM source and no companion location in the database.
@@ -1332,7 +1347,8 @@ url_timeout = 10
 [Wx_Command]
 enabled = true
 # channels =
-# aliases = comma-separated additional trigger words, e.g.: aliases = weather, w
+# aliases = comma-separated additional trigger words, e.g.: aliases = weather, w, meteo
+aliases = weather, meteo
 
 [WebViewer_Command]
 enabled = true

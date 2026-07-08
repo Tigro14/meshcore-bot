@@ -56,10 +56,12 @@ log_level = INFO
 # Rotates at 5 MB, keeps 3 backups (e.g. meshcore_bot.log.1, .2, .3)
 log_file = meshcore_bot.log
 
-# Weather (for wx command) - set default_state to your region
+# Weather (for wx command) - set default_city and country to your location
 [Weather]
-default_state = WA
-default_country = US
+default_city = Paris
+# Leave empty for cities without states (e.g., Paris doesn't have a state)
+default_state =
+default_country = FR
 
 # Path command - "p" shortcut for quick path decoding
 [Path_Command]

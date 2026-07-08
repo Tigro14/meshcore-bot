@@ -505,6 +505,7 @@ enabled = false
 [Wx_Command]
 # Enable or disable the weather command
 enabled = false
+# aliases = comma-separated additional trigger words, e.g.: aliases = weather, w, meteo
 
 [Aqi_Command]
 # Enable or disable the AQI command
