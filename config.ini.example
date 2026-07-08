@@ -716,7 +716,8 @@ weather_provider = noaa
 # Supported model names: https://open-meteo.com/en/docs
 # Set to an empty value (weather_model =) to omit model selection and let Open-Meteo auto-select
 # For France, use meteofrance_arome_france_hd for high-resolution French weather
-#weather_model = meteofrance_arome_france_hd
+# Or use arpege_europe for the ARPEGE model (Météo-France) covering France and Europe
+weather_model = arpege_europe
 
 # Open-Meteo weather settings (for utils_weather.py integration)
 # Coordinates for weather data (0.0 = auto-detect from GPS if available)
@@ -1346,7 +1347,8 @@ url_timeout = 10
 [Wx_Command]
 enabled = true
 # channels =
-# aliases = comma-separated additional trigger words, e.g.: aliases = weather, w
+# aliases = comma-separated additional trigger words, e.g.: aliases = weather, w, meteo
+aliases = weather, meteo
 
 [WebViewer_Command]
 enabled = true
