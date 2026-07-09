@@ -535,6 +535,14 @@ dashboard_hop_radius = 5
 dashboard_check_window_hours = 24
 dashboard_max_clock_drift_seconds = 300
 
+[Clock_Command]
+# Admin-only DM command that triggers an immediate radio clock sync on the
+# receiving bot.  This is the handler invoked when a remote bot (or a human
+# admin) sends the DM payload configured in [Clock_Sync_Admin] command_payload.
+#
+# Enable or disable the clock command handler on this bot
+enabled = true
+
 [Schedule_Command]
 # Show scheduled messages and advert interval via the 'schedule' command
 # Responds with a compact list of scheduled times, channels, and message previews

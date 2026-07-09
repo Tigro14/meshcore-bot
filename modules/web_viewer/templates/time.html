@@ -348,7 +348,19 @@
             }
             const driftMinutes = Math.round(target.drift_seconds / 60);
             const driftClass = target.status === 'Out of Sync' ? 'text-danger' : 'text-success';
-            return `<div><strong>Drift:</strong> <span class="${driftClass}">${driftMinutes}m (${target.drift_seconds}s)</span></div>`;
+            
+            let html = '';
+            
+            // Show message timestamp if available
+            if (target.message_timestamp !== null && target.message_timestamp !== undefined && target.message_timestamp > 0) {
+                const msgDate = new Date(target.message_timestamp * 1000);
+                html += `<div><strong>Message Timestamp:</strong> ${msgDate.toLocaleString()}</div>`;
+            }
+            
+            // Show drift information
+            html += `<div><strong>Drift:</strong> <span class="${driftClass}">${driftMinutes}m (${target.drift_seconds}s)</span></div>`;
+            
+            return html;
         }
 
         formatTimestamp(timestamp) {

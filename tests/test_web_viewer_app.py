@@ -1207,3 +1207,149 @@ class TestFaviconRoutes:
 
     def test_favicon_ico(self, viewer_with_db):
         self._check_route(viewer_with_db, '/favicon.ico')
+
+
+# ---------------------------------------------------------------------------
+# _get_clock_sync_targets_status  (SQL join / column name regression)
+# ---------------------------------------------------------------------------
+
+
+class TestGetClockSyncTargetsStatus:
+    """Verify that the drift query uses correct column names and join condition."""
+
+    def _setup_db(self, db_path, now_epoch, now_sql, contact_name, public_key, drift_offset):
+        """Populate the minimum tables required by _get_clock_sync_targets_status."""
+        with sqlite3.connect(db_path, timeout=60) as conn:
+            cursor = conn.cursor()
+            # message_stats table mirrors the real schema
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    channel TEXT,
+                    content TEXT NOT NULL,
+                    is_dm BOOLEAN NOT NULL,
+                    hops INTEGER,
+                    snr REAL,
+                    rssi INTEGER,
+                    path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                INSERT INTO complete_contact_tracking
+                (public_key, name, role, device_type, hop_count, last_heard)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (public_key, contact_name, "repeater", "repeater", 1, now_sql),
+            )
+            # sender_id stores the contact *name* (not the public key)
+            cursor.execute(
+                """
+                INSERT INTO message_stats
+                (timestamp, sender_id, channel, content, is_dm, hops, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (now_epoch - drift_offset, contact_name, "Public", "hello", 0, 1, now_sql),
+            )
+            conn.commit()
+
+    def _make_viewer_with_target(self, tmp_path, target_identifier):
+        from configparser import ConfigParser
+        from unittest.mock import MagicMock, patch
+
+        from modules.web_viewer.app import BotDataViewer
+
+        config = ConfigParser()
+        config.add_section("Bot")
+        config.set("Bot", "db_path", str(tmp_path / "meshcore_bot.db"))
+        config.add_section("Web_Viewer")
+        config.set("Web_Viewer", "host", "127.0.0.1")
+        config.set("Web_Viewer", "port", "8080")
+        config.set("Web_Viewer", "enabled", "false")
+        config.set("Web_Viewer", "auto_start", "false")
+        config.set("Web_Viewer", "debug", "false")
+        config.set("Web_Viewer", "cors_allowed_origins", "*")
+        config.set("Web_Viewer", "web_viewer_password", "")
+        config.add_section("Clock_Sync_Admin")
+        config.set("Clock_Sync_Admin", "enabled", "true")
+        config.set("Clock_Sync_Admin", "schedule", "0 3 * * *")
+        config.set("Clock_Sync_Admin", "targets", target_identifier)
+        config.set("Clock_Sync_Admin", "command_payload", "clock sync admin")
+
+        config_path = str(tmp_path / "config.ini")
+        with open(config_path, "w") as f:
+            config.write(f)
+
+        db_path = str(tmp_path / "meshcore_bot.db")
+
+        with patch.object(BotDataViewer, "_start_database_polling"), \
+             patch.object(BotDataViewer, "_start_log_tailing"), \
+             patch.object(BotDataViewer, "_start_cleanup_scheduler"), \
+             patch.object(BotDataViewer, "_setup_socketio_handlers"), \
+             patch("modules.web_viewer.app.RepeaterManager"):
+            viewer = BotDataViewer(db_path=db_path, config_path=config_path)
+
+        viewer.db_path = db_path
+        viewer.config_path = config_path
+
+        # Attach a mock bot with a meshcore that has the contact
+        bot = MagicMock()
+        meshcore = MagicMock()
+        contact_data = {
+            "public_key": "deadbeef0011",
+            "name": "Rep-1",
+            "adv_name": "Rep-1",
+            "role": "repeater",
+            "hop_count": 1,
+        }
+        meshcore.contacts = {"Rep-1": contact_data}
+        meshcore.get_contact_by_name = lambda name: contact_data if name == "Rep-1" else None
+        bot.meshcore = meshcore
+        viewer.bot = bot
+
+        return viewer, db_path
+
+    def test_drift_data_resolved_by_name_join(self, tmp_path):
+        """Drift data must be populated when the join uses c.name = lm.sender_id."""
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        viewer, db_path = self._make_viewer_with_target(tmp_path, "Rep-1")
+        self._setup_db(db_path, now_epoch, now_sql, "Rep-1", "deadbeef0011", 600)
+
+        result = viewer._get_clock_sync_targets_status()
+
+        targets = result.get("targets", [])
+        assert len(targets) == 1
+        rep = targets[0]
+        assert rep["name"] == "Rep-1"
+        # drift_seconds should be ~600; before the fix the JOIN was wrong and
+        # drift_seconds would be None (no rows found)
+        assert rep["drift_seconds"] is not None
+        assert 590 <= rep["drift_seconds"] <= 610
+
+    def test_status_out_of_sync_when_drift_exceeds_threshold(self, tmp_path):
+        """Status 'Out of Sync' is set when drift > dashboard_max_clock_drift_seconds."""
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        viewer, db_path = self._make_viewer_with_target(tmp_path, "Rep-1")
+        # 600 s drift > 300 s threshold → Out of Sync
+        self._setup_db(db_path, now_epoch, now_sql, "Rep-1", "deadbeef0011", 600)
+
+        result = viewer._get_clock_sync_targets_status()
+        assert result["targets"][0]["status"] == "Out of Sync"
+
+    def test_status_in_sync_when_drift_below_threshold(self, tmp_path):
+        """Status 'In Sync' is set when drift <= dashboard_max_clock_drift_seconds."""
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        viewer, db_path = self._make_viewer_with_target(tmp_path, "Rep-1")
+        # 60 s drift < 300 s threshold → In Sync
+        self._setup_db(db_path, now_epoch, now_sql, "Rep-1", "deadbeef0011", 60)
+
+        result = viewer._get_clock_sync_targets_status()
+        assert result["targets"][0]["status"] == "In Sync"
