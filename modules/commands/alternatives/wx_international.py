@@ -973,13 +973,25 @@ class GlobalWxCommand(BaseCommand):
             data.get('hourly', {})
 
             # Current conditions - API should return in Fahrenheit when requested
-            temp = int(current.get('temperature_2m', 0))
-            feels_like = int(current.get('apparent_temperature', temp))
+            temp_val = current.get('temperature_2m', 0)
+            temp = int(temp_val) if temp_val is not None else 0
+            
+            feels_like_val = current.get('apparent_temperature', temp)
+            feels_like = int(feels_like_val) if feels_like_val is not None else temp
+            
             dewpoint = current.get('dewpoint_2m')
-            humidity = int(current.get('relative_humidity_2m', 0))
-            wind_speed = int(current.get('wind_speed_10m', 0))
+            
+            humidity_val = current.get('relative_humidity_2m', 0)
+            humidity = int(humidity_val) if humidity_val is not None else 0
+            
+            wind_speed_val = current.get('wind_speed_10m', 0)
+            wind_speed = int(wind_speed_val) if wind_speed_val is not None else 0
+            
             wind_direction = self._degrees_to_direction(current.get('wind_direction_10m', 0))
-            wind_gusts = int(current.get('wind_gusts_10m', 0))
+            
+            wind_gusts_val = current.get('wind_gusts_10m', 0)
+            wind_gusts = int(wind_gusts_val) if wind_gusts_val is not None else 0
+            
             visibility = current.get('visibility')
             pressure = current.get('surface_pressure')
             weather_code = current.get('weather_code', 0)
@@ -1023,13 +1035,13 @@ class GlobalWxCommand(BaseCommand):
             weather = f"{period_name}: {weather_emoji}{weather_desc} {temp}{temp_symbol}"
 
             # Add feels like if significantly different
-            if abs(feels_like - temp) >= 5:
+            if feels_like is not None and temp is not None and abs(feels_like - temp) >= 5:
                 weather += f" (feels {feels_like}{temp_symbol})"
 
             # Add wind info (always show if >= 3 mph, show gusts if significant)
-            if wind_speed >= 3:
+            if wind_speed is not None and wind_speed >= 3:
                 weather += f" {wind_direction}{wind_speed}"
-                if wind_gusts > wind_speed + 3:
+                if wind_gusts is not None and wind_gusts > wind_speed + 3:
                     weather += f"G{wind_gusts}"
 
             # Add humidity
@@ -1090,7 +1102,7 @@ class GlobalWxCommand(BaseCommand):
                         # Add precipitation probability and amount if significant and space allows
                         if len(daily.get('precipitation_probability_max', [])) > 1:
                             precip_prob = daily['precipitation_probability_max'][1]
-                            if precip_prob >= 30:
+                            if precip_prob is not None and precip_prob >= 30:
                                 # Get precipitation amount if available
                                 precip_amount = None
                                 if len(daily.get('precipitation_sum', [])) > 1:
@@ -1131,8 +1143,10 @@ class GlobalWxCommand(BaseCommand):
                 return self.translate('commands.gwx.tomorrow_not_available')
 
             temp_symbol = "°F" if self.temperature_unit == 'fahrenheit' else "°C"
-            tomorrow_high = int(daily['temperature_2m_max'][1])
-            tomorrow_low = int(daily['temperature_2m_min'][1])
+            tomorrow_high_val = daily['temperature_2m_max'][1]
+            tomorrow_high = int(tomorrow_high_val) if tomorrow_high_val is not None else 0
+            tomorrow_low_val = daily['temperature_2m_min'][1]
+            tomorrow_low = int(tomorrow_low_val) if tomorrow_low_val is not None else 0
             tomorrow_code = daily['weather_code'][1]
             tomorrow_emoji = self._get_weather_emoji(tomorrow_code)
             tomorrow_desc = self._get_weather_description(tomorrow_code)
@@ -1140,19 +1154,23 @@ class GlobalWxCommand(BaseCommand):
             # Get wind info if available
             wind_info = ""
             if len(daily.get('wind_speed_10m_max', [])) > 1:
-                wind_speed = int(daily['wind_speed_10m_max'][1])
-                if wind_speed >= 3:
-                    wind_info = f" {wind_speed}"
-                    if len(daily.get('wind_gusts_10m_max', [])) > 1:
-                        wind_gusts = int(daily['wind_gusts_10m_max'][1])
-                        if wind_gusts > wind_speed + 3:
-                            wind_info += f"G{wind_gusts}"
+                wind_speed_val = daily['wind_speed_10m_max'][1]
+                if wind_speed_val is not None:
+                    wind_speed = int(wind_speed_val)
+                    if wind_speed >= 3:
+                        wind_info = f" {wind_speed}"
+                        if len(daily.get('wind_gusts_10m_max', [])) > 1:
+                            wind_gusts_val = daily['wind_gusts_10m_max'][1]
+                            if wind_gusts_val is not None:
+                                wind_gusts = int(wind_gusts_val)
+                                if wind_gusts > wind_speed + 3:
+                                    wind_info += f"G{wind_gusts}"
 
             # Get precipitation probability and amount
             precip_info = ""
             if len(daily.get('precipitation_probability_max', [])) > 1:
                 precip_prob = daily['precipitation_probability_max'][1]
-                if precip_prob >= 30:
+                if precip_prob is not None and precip_prob >= 30:
                     # Get precipitation amount if available
                     precip_amount = None
                     if len(daily.get('precipitation_sum', [])) > 1:
@@ -1218,8 +1236,10 @@ class GlobalWxCommand(BaseCommand):
                 day_name = day_date.strftime('%A')
                 day_abbrev = day_abbrev_map.get(day_name, day_name[:2])
 
-                high = int(temps_max[i])
-                low = int(temps_min[i])
+                high_val = temps_max[i]
+                high = int(high_val) if high_val is not None else 0
+                low_val = temps_min[i]
+                low = int(low_val) if low_val is not None else 0
                 code = weather_codes[i] if i < len(weather_codes) else 0
                 emoji = self._get_weather_emoji(code)
                 desc = self._get_weather_description(code)
