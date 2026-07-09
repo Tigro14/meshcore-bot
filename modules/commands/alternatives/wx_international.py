@@ -1088,8 +1088,7 @@ class GlobalWxCommand(BaseCommand):
                     tomorrow_low = int(daily['temperature_2m_min'][1])
 
                     tomorrow_code = daily['weather_code'][1] if len(daily.get('weather_code', [])) > 1 else 0
-                    tomorrow_code = tomorrow_code if isinstance(tomorrow_code, (int, float)) else 0
-                    tomorrow_code = int(tomorrow_code) if tomorrow_code is not None else 0
+                    tomorrow_code = self._normalize_weather_code(tomorrow_code)
                     tomorrow_emoji = self._get_weather_emoji(tomorrow_code)
 
                     # Get tomorrow's period name
@@ -1150,7 +1149,7 @@ class GlobalWxCommand(BaseCommand):
             tomorrow_low_val = daily['temperature_2m_min'][1]
             tomorrow_low = int(tomorrow_low_val) if tomorrow_low_val is not None else 0
             tomorrow_code = daily['weather_code'][1] if len(daily.get('weather_code', [])) > 1 else 0
-            tomorrow_code = int(tomorrow_code) if tomorrow_code is not None else 0
+            tomorrow_code = self._normalize_weather_code(tomorrow_code)
             tomorrow_emoji = self._get_weather_emoji(tomorrow_code)
             tomorrow_desc = self._get_weather_description(tomorrow_code)
 
@@ -1366,6 +1365,30 @@ class GlobalWxCommand(BaseCommand):
                 return directions[i][1]
 
         return "⬆️N"  # Default to North
+
+    def _normalize_weather_code(self, code: Any) -> int:
+        """Normalize weather code to a valid integer, with fallback to 0.
+        
+        Args:
+            code: Weather code (int, float, str, or None).
+            
+        Returns:
+            int: Normalized weather code (0 if invalid).
+        """
+        if code is None:
+            return 0
+        
+        # Try to convert to integer
+        try:
+            if isinstance(code, (int, float)):
+                return int(code)
+            elif isinstance(code, str):
+                return int(code)
+        except (ValueError, TypeError):
+            pass
+        
+        # Return default if conversion fails
+        return 0
 
     def _get_weather_description(self, code: int) -> str:
         """Convert WMO weather code to description.
