@@ -1087,7 +1087,9 @@ class GlobalWxCommand(BaseCommand):
                     tomorrow_high = int(daily['temperature_2m_max'][1])
                     tomorrow_low = int(daily['temperature_2m_min'][1])
 
-                    tomorrow_code = daily['weather_code'][1]
+                    tomorrow_code = daily['weather_code'][1] if len(daily.get('weather_code', [])) > 1 else 0
+                    tomorrow_code = tomorrow_code if isinstance(tomorrow_code, (int, float)) else 0
+                    tomorrow_code = int(tomorrow_code) if tomorrow_code is not None else 0
                     tomorrow_emoji = self._get_weather_emoji(tomorrow_code)
 
                     # Get tomorrow's period name
@@ -1147,7 +1149,8 @@ class GlobalWxCommand(BaseCommand):
             tomorrow_high = int(tomorrow_high_val) if tomorrow_high_val is not None else 0
             tomorrow_low_val = daily['temperature_2m_min'][1]
             tomorrow_low = int(tomorrow_low_val) if tomorrow_low_val is not None else 0
-            tomorrow_code = daily['weather_code'][1]
+            tomorrow_code = daily['weather_code'][1] if len(daily.get('weather_code', [])) > 1 else 0
+            tomorrow_code = int(tomorrow_code) if tomorrow_code is not None else 0
             tomorrow_emoji = self._get_weather_emoji(tomorrow_code)
             tomorrow_desc = self._get_weather_description(tomorrow_code)
 
@@ -1373,6 +1376,16 @@ class GlobalWxCommand(BaseCommand):
         Returns:
             str: Weather description.
         """
+        # Handle None or invalid code values
+        if code is None:
+            return self.translate('commands.gwx.weather_descriptions.unknown')
+        
+        # Ensure code is an integer
+        try:
+            code = int(code) if not isinstance(code, int) else code
+        except (ValueError, TypeError):
+            return self.translate('commands.gwx.weather_descriptions.unknown')
+        
         # Try to get from translations first
         key = f"commands.gwx.weather_descriptions.{code}"
         description = self.translate(key)
@@ -1423,6 +1436,16 @@ class GlobalWxCommand(BaseCommand):
         Returns:
             str: Weather emoji.
         """
+        # Handle None or invalid code values
+        if code is None:
+            return "🌤️"  # Default emoji
+        
+        # Ensure code is an integer
+        try:
+            code = int(code) if not isinstance(code, int) else code
+        except (ValueError, TypeError):
+            return "🌤️"  # Default emoji
+        
         emoji_map = {
             0: "☀️",      # Clear
             1: "🌤️",     # Mostly Clear
