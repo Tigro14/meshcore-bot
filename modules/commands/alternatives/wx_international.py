@@ -1380,15 +1380,9 @@ class GlobalWxCommand(BaseCommand):
         
         # Try to convert to integer
         try:
-            if isinstance(code, (int, float)):
-                return int(code)
-            elif isinstance(code, str):
-                return int(code)
+            return int(code)
         except (ValueError, TypeError):
-            pass
-        
-        # Return default if conversion fails
-        return 0
+            return 0
 
     def _get_weather_description(self, code: int) -> str:
         """Convert WMO weather code to description.
@@ -1399,15 +1393,8 @@ class GlobalWxCommand(BaseCommand):
         Returns:
             str: Weather description.
         """
-        # Handle None or invalid code values
-        if code is None:
-            return self.translate('commands.gwx.weather_descriptions.unknown')
-        
-        # Ensure code is an integer
-        try:
-            code = int(code) if not isinstance(code, int) else code
-        except (ValueError, TypeError):
-            return self.translate('commands.gwx.weather_descriptions.unknown')
+        # Normalize code to valid integer
+        code = self._normalize_weather_code(code)
         
         # Try to get from translations first
         key = f"commands.gwx.weather_descriptions.{code}"
@@ -1459,15 +1446,8 @@ class GlobalWxCommand(BaseCommand):
         Returns:
             str: Weather emoji.
         """
-        # Handle None or invalid code values
-        if code is None:
-            return "🌤️"  # Default emoji
-        
-        # Ensure code is an integer
-        try:
-            code = int(code) if not isinstance(code, int) else code
-        except (ValueError, TypeError):
-            return "🌤️"  # Default emoji
+        # Normalize code to valid integer
+        code = self._normalize_weather_code(code)
         
         emoji_map = {
             0: "☀️",      # Clear
