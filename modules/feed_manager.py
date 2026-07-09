@@ -1014,7 +1014,6 @@ class FeedManager:
         # Process format string with placeholders and functions
         # Pattern: {field|function} or {field} or {raw.field.path}
         def replace_placeholder(match):
-            match.group(0)
             content = match.group(1)  # Content inside {}
 
             if '|' in content:
