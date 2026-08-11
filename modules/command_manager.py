@@ -7,6 +7,7 @@ Handles all bot commands, keyword matching, and response generation
 import asyncio
 import random
 import time
+import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -2177,7 +2178,7 @@ class CommandManager:
                     # str(e) so no filesystem path or extra airtime goes out over the mesh.
                     self.logger.exception(f"Error executing command '{command_name}': {e}")
                     # Send error message to user
-                    error_msg = command.translate('errors.execution_error', command=command_name, error=str(e))
+                    error_msg = command.translate('errors.execution_error', command=command_name, error=err_desc)
                     await self.send_response(message, error_msg)
 
                     # Record command execution in stats database (error response was sent)
