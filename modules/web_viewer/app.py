@@ -8164,6 +8164,7 @@ class BotDataViewer:
 
                 # Get clock drift data from database
                 drift_data = {}
+                last_heard_data = {}
                 conn = None
                 try:
                     conn = self._get_db_connection()
@@ -8183,14 +8184,22 @@ class BotDataViewer:
                             c.public_key,
                             c.role,
                             c.hop_count,
-                            m.received_at,
-                            m.sender_timestamp,
-                            ABS(m.received_at - m.sender_timestamp) AS drift_seconds
+                            CAST(strftime('%s', m.created_at) AS INTEGER) AS received_at,
+                            m.timestamp AS sender_timestamp,
+                            CASE
+                                WHEN m.timestamp IS NULL THEN NULL
+                                WHEN CAST(m.timestamp AS INTEGER) <= 0 THEN NULL
+                                ELSE ABS(
+                                    CAST(strftime('%s', m.created_at) AS INTEGER)
+                                    - CAST(m.timestamp AS INTEGER)
+                                )
+                            END AS drift_seconds
                         FROM complete_contact_tracking c
-                        JOIN latest_message_per_sender lm ON c.public_key = lm.sender_id
+                        JOIN latest_message_per_sender lm ON c.name = lm.sender_id
                         JOIN message_stats m ON m.id = lm.latest_id
-                        WHERE m.received_at >= ?
-                        AND m.sender_timestamp IS NOT NULL
+                        WHERE CAST(strftime('%s', m.created_at) AS INTEGER) >= ?
+                        AND m.timestamp IS NOT NULL
+                        AND CAST(m.timestamp AS INTEGER) > 0
                         """,
                         (cutoff_time,)
                     )
@@ -8205,10 +8214,21 @@ class BotDataViewer:
                             'drift_seconds': int(row[6]) if row[6] is not None else None,
                         }
 
+                    # Get last_heard timestamps for all contacts
+                    cursor.execute(
+                        """
+                        SELECT public_key, CAST(strftime('%s', last_heard) AS INTEGER) AS last_heard_ts
+                        FROM complete_contact_tracking
+                        WHERE last_heard IS NOT NULL
+                        """
+                    )
+                    for row in cursor.fetchall():
+                        last_heard_data[row[0]] = row[1]  # public_key -> last_heard timestamp
+
                     # Get latest Clock_Sync_Admin log entries for each public key
                     cursor.execute(
                         """
-                        SELECT public_key, success, sent_at, error_message
+                        SELECT public_key, success, CAST(strftime('%s', sent_at) AS INTEGER), error_message
                         FROM clock_sync_admin_log
                         WHERE id IN (
                             SELECT MAX(id)
@@ -8237,8 +8257,12 @@ class BotDataViewer:
                         'role': None,
                         'hop_count': None,
                         'drift_seconds': None,
+                        'message_timestamp': None,
                         'last_seen': None,
-                        'status': 'Not Found'
+                        'status': 'Not Found',
+                        'last_sync_success': None,
+                        'last_sync_at': None,
+                        'last_sync_error': None
                     }
 
                     # Try to resolve contact by name
@@ -8289,6 +8313,7 @@ class BotDataViewer:
                             drift = drift_data[public_key]
                             target_info['drift_seconds'] = drift['drift_seconds']
                             target_info['last_seen'] = drift['received_at']
+                            target_info['message_timestamp'] = drift['sender_timestamp']
 
                             if drift['drift_seconds'] is not None:
                                 if drift['drift_seconds'] <= drift_threshold_seconds:
@@ -8298,6 +8323,9 @@ class BotDataViewer:
                             else:
                                 target_info['status'] = 'No Data'
                         else:
+                            # No recent drift data, but still show last_heard if available
+                            if public_key in last_heard_data:
+                                target_info['last_seen'] = last_heard_data[public_key]
                             target_info['status'] = 'Unknown'
 
                     targets_status.append(target_info)
@@ -8311,8 +8339,12 @@ class BotDataViewer:
                         'role': None,
                         'hop_count': None,
                         'drift_seconds': None,
+                        'message_timestamp': None,
                         'last_seen': None,
-                        'status': 'Unknown'
+                        'status': 'Unknown',
+                        'last_sync_success': None,
+                        'last_sync_at': None,
+                        'last_sync_error': None
                     })
 
             return {
