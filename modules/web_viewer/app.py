@@ -5580,9 +5580,6 @@ class BotDataViewer:
                 self.logger.error(f"Error queuing announcement: {e}")
                 return jsonify({'error': str(e)}), 500
 
-                    if not (5 <= cr <= 8):
-                        return jsonify({'error': 'cr must be 5–8'}), 400
-                    payload['cr'] = cr
                 if 'tx_power' in payload:
                     tx = int(payload['tx_power'])
                     if not (1 <= tx <= 30):
