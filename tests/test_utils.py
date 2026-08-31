@@ -21,7 +21,9 @@ from modules.utils import (
     format_location_for_display,
     get_config_timezone,
     get_major_city_queries,
+    get_packet_hash_placeholder,
     is_valid_timezone,
+    message_hop_count,
     node_ids_from_path_string,
     parse_location_string,
     parse_path_string,
@@ -669,6 +671,7 @@ class TestFormatKeywordResponseWithPlaceholders:
         msg.rssi = kwargs.get("rssi", -80)
         msg.timestamp = kwargs.get("timestamp")
         msg.hops = kwargs.get("hops")
+        msg.routing_info = kwargs.get("routing_info")
         return msg
 
     def test_sender_placeholder(self):
@@ -709,6 +712,54 @@ class TestFormatKeywordResponseWithPlaceholders:
             result = format_keyword_response_with_placeholders("{hops_label}", msg, bot)
         assert result == "3 hops"
 
+    def test_hops_prefers_routing_info_over_the_path_string(self):
+        """The keyword formatter used to parse only the path string, so it reported a
+        different hop count than the command formatter for the same packet."""
+        bot = self._bot()
+        msg = self._msg(hops=None, path="01 (1 hop)", routing_info={"path_length": 2})
+        with patch("modules.utils.calculate_path_distances", return_value=("", "")):
+            result = format_keyword_response_with_placeholders("{hops}|{hops_label}", msg, bot)
+        assert result == "2|2 hops"
+
+    def test_hops_falls_back_to_counting_routing_path_nodes(self):
+        bot = self._bot()
+        msg = self._msg(hops=None, routing_info={"path_nodes": ["01", "02", "03"]})
+        with patch("modules.utils.calculate_path_distances", return_value=("", "")):
+            result = format_keyword_response_with_placeholders("{hops}", msg, bot)
+        assert result == "3"
+
+    def test_hops_still_parses_the_path_string_without_routing_info(self):
+        bot = self._bot()
+        msg = self._msg(hops=None, path="01,5f (2 hops)")
+        with patch("modules.utils.calculate_path_distances", return_value=("", "")):
+            result = format_keyword_response_with_placeholders("{hops}|{hops_label}", msg, bot)
+        assert result == "2|2 hops"
+
+    def test_hops_is_unknown_only_when_nothing_can_be_determined(self):
+        bot = self._bot()
+        msg = self._msg(hops=None, path=None, routing_info=None)
+        with patch("modules.utils.calculate_path_distances", return_value=("", "")):
+            result = format_keyword_response_with_placeholders("{hops}|{hops_label}", msg, bot)
+        assert result == "?|?"
+
+    def test_hops_matches_the_command_formatter_for_the_same_message(self):
+        """One implementation, so a keyword reply and a command reply cannot disagree."""
+        from modules.commands.base_command import BaseCommand
+
+        bot = self._bot()
+        for kwargs in (
+            {"hops": 3},
+            {"hops": None, "routing_info": {"path_length": 2}},
+            {"hops": None, "path": "Direct"},
+            {"hops": None, "path": "01,5f (2 hops)"},
+            {"hops": None},
+        ):
+            msg = self._msg(**kwargs)
+            with patch("modules.utils.calculate_path_distances", return_value=("", "")):
+                keyword_hops = format_keyword_response_with_placeholders("{hops}", msg, bot)
+            command_hops, _ = BaseCommand.get_hops_display_values(Mock(), msg)
+            assert keyword_hops == command_hops, kwargs
+
     def test_connection_info_contains_snr_rssi(self):
         bot = self._bot()
         msg = self._msg(snr=12, rssi=-75)
@@ -716,6 +767,64 @@ class TestFormatKeywordResponseWithPlaceholders:
             result = format_keyword_response_with_placeholders("{connection_info}", msg, bot)
         assert "SNR" in result
         assert "RSSI" in result
+
+    def test_packet_hash_from_routing_info(self):
+        bot = self._bot()
+        msg = self._msg(routing_info={"packet_hash": "ABCDEF0123456789"})
+        with patch("modules.utils.calculate_path_distances", return_value=("", "")):
+            result = format_keyword_response_with_placeholders("{packet_hash}", msg, bot)
+        assert result == "ABCDEF0123456789"
+
+    def test_packet_hash_omitted_when_missing(self):
+        bot = self._bot()
+        msg = self._msg()
+        with patch("modules.utils.calculate_path_distances", return_value=("", "")):
+            result = format_keyword_response_with_placeholders("hash={packet_hash}.", msg, bot)
+        assert result == "hash=."
+
+    def test_packet_hash_omitted_for_zero_hash(self):
+        bot = self._bot()
+        msg = self._msg(routing_info={"packet_hash": "0000000000000000"})
+        with patch("modules.utils.calculate_path_distances", return_value=("", "")):
+            result = format_keyword_response_with_placeholders("hash={packet_hash}.", msg, bot)
+        assert result == "hash=."
+
+    def test_packet_hash_omitted_when_no_message(self):
+        bot = self._bot()
+        result = format_keyword_response_with_placeholders("hash={packet_hash}.", None, bot)
+        assert result == "hash=."
+
+
+class TestGetPacketHashPlaceholder:
+    """Tests for get_packet_hash_placeholder()."""
+
+    def test_returns_hash_from_routing_info(self):
+        msg = Mock()
+        msg.routing_info = {"packet_hash": "DEADBEEFCAFEBABE"}
+        assert get_packet_hash_placeholder(msg) == "DEADBEEFCAFEBABE"
+
+    def test_empty_when_message_is_none(self):
+        assert get_packet_hash_placeholder(None) == ""
+
+    def test_empty_when_routing_info_missing(self):
+        msg = Mock(spec=[])
+        assert get_packet_hash_placeholder(msg) == ""
+
+    def test_empty_when_routing_info_is_not_a_dict(self):
+        msg = Mock()
+        msg.routing_info = "01,5f (2 hops)"
+        assert get_packet_hash_placeholder(msg) == ""
+
+    def test_empty_when_hash_is_zero_sentinel(self):
+        msg = Mock()
+        msg.routing_info = {"packet_hash": "0000000000000000"}
+        assert get_packet_hash_placeholder(msg) == ""
+
+    def test_empty_when_hash_is_empty_string(self):
+        msg = Mock()
+        msg.routing_info = {"packet_hash": ""}
+        assert get_packet_hash_placeholder(msg) == ""
+
 
 class TestVerifyMeshcoreAdvertEd25519:
     """Tests for verify_meshcore_advert_ed25519() matching MeshCore createAdvert signing."""
@@ -878,65 +987,41 @@ class TestCalculatePacketHashEdgeCases:
         assert h != "0000000000000000"
 
 
-class TestGetCpuTemperature:
-    """Tests for get_cpu_temperature utility function."""
 
-    def test_get_cpu_temperature_reads_valid_file(self, tmp_path):
-        """get_cpu_temperature should read and convert temperature from thermal zone file."""
-        from modules.utils import get_cpu_temperature
+class TestMessageHopCount:
+    """Tests for message_hop_count()."""
 
-        # Create a fake thermal zone file
-        thermal_file = tmp_path / "temp"
-        thermal_file.write_text("65432\n")  # 65.432°C in millidegrees
+    @staticmethod
+    def _msg(**kw):
+        m = Mock()
+        m.hops = kw.get("hops")
+        m.path = kw.get("path")
+        m.routing_info = kw.get("routing_info")
+        return m
 
-        with patch("builtins.open", return_value=thermal_file.open()):
-            temp = get_cpu_temperature()
-            assert temp == 65.432
+    def test_prefers_message_hops(self):
+        assert message_hop_count(self._msg(hops=3, path="01,02 (2 hops)")) == 3
 
-    def test_get_cpu_temperature_returns_none_when_file_not_found(self):
-        """get_cpu_temperature should return None when thermal zone file doesn't exist."""
-        from modules.utils import get_cpu_temperature
+    def test_falls_back_to_routing_path_length(self):
+        assert message_hop_count(self._msg(routing_info={"path_length": 2})) == 2
 
-        with patch("builtins.open", side_effect=FileNotFoundError):
-            temp = get_cpu_temperature()
-            assert temp is None
+    def test_falls_back_to_counting_path_nodes(self):
+        msg = self._msg(routing_info={"path_nodes": ["01", "02", "03"]})
+        assert message_hop_count(msg) == 3
 
-    def test_get_cpu_temperature_returns_none_on_permission_error(self):
-        """get_cpu_temperature should return None when lacking permissions to read file."""
-        from modules.utils import get_cpu_temperature
+    def test_falls_back_to_parsing_the_path_string(self):
+        assert message_hop_count(self._msg(path="01,5f (2 hops)")) == 2
+        assert message_hop_count(self._msg(path="0a (1 hop)")) == 1
 
-        with patch("builtins.open", side_effect=PermissionError):
-            temp = get_cpu_temperature()
-            assert temp is None
+    def test_direct_path_string_is_zero_hops(self):
+        assert message_hop_count(self._msg(path="Direct")) == 0
+        assert message_hop_count(self._msg(path="Direct via ROUTE_TYPE_FLOOD")) == 0
+        assert message_hop_count(self._msg(path="0 hops")) == 0
 
-    def test_get_cpu_temperature_returns_none_on_value_error(self):
-        """get_cpu_temperature should return None when file contains invalid data."""
-        from io import StringIO
+    def test_unknown_is_none_not_zero(self):
+        """None means "cannot confirm", which callers must not read as direct."""
+        assert message_hop_count(self._msg()) is None
+        assert message_hop_count(self._msg(path="Unknown routing")) is None
 
-        from modules.utils import get_cpu_temperature
-
-        fake_file = StringIO("not-a-number\n")
-        with patch("builtins.open", return_value=fake_file):
-            temp = get_cpu_temperature()
-            assert temp is None
-
-    def test_get_cpu_temperature_converts_millidegrees_to_celsius(self):
-        """get_cpu_temperature should convert millidegrees Celsius to degrees Celsius."""
-        from io import StringIO
-
-        from modules.utils import get_cpu_temperature
-
-        # Test various temperature values
-        test_cases = [
-            ("60000", 60.0),     # 60°C
-            ("45500", 45.5),     # 45.5°C
-            ("80250", 80.25),    # 80.25°C
-            ("0", 0.0),          # 0°C
-        ]
-
-        for millidegrees, expected_celsius in test_cases:
-            fake_file = StringIO(millidegrees)
-            with patch("builtins.open", return_value=fake_file):
-                temp = get_cpu_temperature()
-                assert temp == expected_celsius
-
+    def test_non_dict_routing_info_is_ignored(self):
+        assert message_hop_count(self._msg(routing_info="01,5f", path="Direct")) == 0

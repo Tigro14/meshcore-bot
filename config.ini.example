@@ -3,22 +3,33 @@
 # serial: Connect via USB serial port
 # ble: Connect via Bluetooth Low Energy
 # tcp: Connect via TCP/IP
+#
+# Precedence: only the keys for the active connection_type are used. Other keys in
+# this section are ignored — safe to leave empty or at defaults.
+#   serial -> serial_port (required)
+#   ble    -> ble_device_name (optional; empty = auto-detect)
+#   tcp    -> hostname (required), tcp_port (optional, default 5000)
+#
+# Note: [Connection] uses hostname and tcp_port, not host/port (those are for
+# [Web_Viewer] and [Webhook] bind addresses).
 connection_type = serial
 
-# Serial port (for serial connection)
+# --- serial (when connection_type = serial) ---
 # Common ports: /dev/ttyUSB0, /dev/tty.usbserial-*, COM3 (Windows)
 serial_port = /dev/ttyUSB0
 
-# BLE device name (for BLE connection)
-# Leave commented out for auto-detection, or specify exact device name
-#ble_device_name = MeshCore
+# --- ble (when connection_type = ble) ---
+# BLE device name (leave empty for auto-detection)
+ble_device_name =
 
-# TCP hostname or IP address (for TCP connection)
-#hostname = 192.168.1.60
-# TCP port (for TCP connection)
-#tcp_port = 5000
+# --- tcp (when connection_type = tcp) ---
+# Remote radio IP or hostname (not 0.0.0.0 — that is a bind address for Web_Viewer)
+hostname =
 
-# Connection timeout in seconds
+# TCP port on the remote radio (default 5000 if omitted)
+tcp_port = 5000
+
+# --- all connection types ---
 timeout = 30
 
 # Automatic reconnection settings
@@ -30,7 +41,10 @@ reconnect_max_retries = 0
 
 # Initial delay in seconds between reconnect attempts
 # Doubles after each failed attempt (exponential backoff) up to reconnect_max_delay_seconds
-reconnect_delay_seconds = 5
+# Each reconnect re-runs the full init sequence (contacts, channel scan, clock,
+# name); a longer initial delay avoids hammering a flapping radio with repeated
+# command bursts. 10s is a good balance between recovery speed and gentleness.
+reconnect_delay_seconds = 10
 
 # Maximum delay in seconds between reconnect attempts (cap on exponential backoff)
 reconnect_max_delay_seconds = 60
@@ -59,6 +73,20 @@ radio_offline_alert_enabled = false
 # Optional radio-offline alert recipients (comma-separated; empty = nightly recipients)
 radio_offline_alert_email =
 
+# Minimum gap in milliseconds between consecutive commands sent to the radio.
+# The companion firmware handles one host serial frame per main-loop iteration
+# and cannot resync a corrupted/partial frame; bursting commands can overrun the
+# radio's USB-CDC RX buffer, drop a byte, and desync its parser (symptom: the
+# radio keeps feeding received packets to the host but stops acting on commands).
+# All host->radio commands are serialized to one in-flight frame at a time
+# regardless of this value; this only controls the spacing between them.
+# 0 disables pacing. Default 30.
+command_min_interval_ms = 30
+
+# Delay in milliseconds between each per-channel read during the connect-time
+# channel scan. Keeps the connect/reconnect init burst gentle on the firmware.
+# Default 300.
+channel_fetch_interval_ms = 300
 [Bot]
 # Bot name for identification and logging
 bot_name = MeshCoreBot
@@ -85,11 +113,15 @@ enable_enhanced_correlation = true
 # Bot node ID (leave empty for auto-assignment)
 node_id = 
 
-# Command prefix (optional)
-# If set, all commands must start with this prefix (e.g., "!", ".", "b", "abc")
+# Command prefix (optional). Single prefix (!), multiple decorative (!~.),
+# or comma-separated (!, ~, .). First is shown in help/docs.
 # Examples: "!" for !ping, "." for .ping, "b" for bping, "abc" for abcping
-# Leave empty or unset to allow commands without prefix (backward compatible)
 #command_prefix =
+
+# When true (default): messages must start with a configured prefix.
+# When false: configured prefix(es) are stripped when present, but bare commands also work.
+# Ignored when command_prefix is empty (bare + legacy "!" still work).
+#require_command_prefix = true
 
 # Respond to channel messages when the bot is mentioned via @[bot_name]
 # Controls how the bot handles @[bot_name] mentions in channel messages:
@@ -120,6 +152,11 @@ rate_limit_seconds = 10
 # Set to 0 to disable stagger only. Scheduled sends skip global rate_limit_seconds;
 # per-channel limits and bot_tx_rate_limit_seconds still apply.
 scheduled_message_max_stagger_seconds = 1.5
+
+# Seconds a {cmd:...} placeholder in a [Scheduled_Messages] entry may take to render
+# before it is abandoned and substituted with nothing. Commands that reach the network
+# (wx, aqi) need headroom; the scheduled send itself is still bounded by send_timeout_seconds.
+scheduled_command_timeout_seconds = 30
 
 # Bot transmission rate limit in seconds between bot messages
 # Prevents bot from overwhelming the mesh network
@@ -152,13 +189,6 @@ dm_flood_after = 2
 # Leave empty to use system timezone
 timezone = 
 
-# Set the radio device clock to local time instead of UTC when syncing.
-# Enable this when your mesh network devices use local time rather than UTC
-# (e.g., Europe/Paris devices that display and compare local timestamps).
-# Requires a valid timezone setting above (or falls back to system timezone).
-# Default: false (radio clock is set to UTC)
-radio_clock_use_local_time = false
-
 # Bot location for geographic proximity calculations and astronomical data
 # Default latitude for bot location (decimal degrees)
 # Example: 40.7128 for New York City, 48.50 for Victoria BC
@@ -186,10 +216,10 @@ advert_interval_hours = 0
 startup_advert = false
 
 # Auto-manage contact list when new contacts are discovered
-# device: Device handles auto-addition using standard auto-discovery mode, bot manages contact list capacity (purge old contacts when near limits)
+# device: Device handles auto-addition using standard auto-discovery mode, bot manages contact list capacity (purge old contacts when near limits) (default)
 # bot: Bot automatically adds new companion contacts to device, bot manages contact list capacity (purge old contacts when near limits)
-# false: Manual mode - no automatic actions, use !repeater commands to manage contacts (default)
-auto_manage_contacts = bot
+# false: Manual mode - no automatic actions, use !repeater commands to manage contacts
+auto_manage_contacts = device
 
 # When auto_manage_contacts = device, the bot schedules one-shot jobs after connect:
 #   - Firmware: manual per-type contact adds + overwrite oldest non-favourite on full + auto-add chat (companions) only (bitmask 0x03)
@@ -216,13 +246,18 @@ service_restart_backoff_seconds = 300
 # Max seconds to wait for a channel message send before timing out (default: 30)
 send_timeout_seconds = 30
 
+# Set a custom prefix length for the public keys to identify repeaters
+# 1 = 2 hex chars (e.g. 7E), 2 = 4 hex chars (e.g. 7E42). Also used as the mesh
+# graph key length; if the mesh often uses 2-byte paths, set to 2 to avoid
+# conflating distinct links (see Path Command / path-command-config.md).
+# Does not control radio advert path-hash mode (firmware path.hash.mode).
+prefix_bytes = 3
 [Admin]
 # Local admin API (binds to 127.0.0.1)
 enabled = false
 port = 5001
 # Required when enabled
 token =
-
 [Channels]
 # Channels to monitor (comma-separated)
 # Bot will only respond to messages on these channels
@@ -247,15 +282,9 @@ respond_to_dms = true
 
 # Maximum number of hops on an incoming message, any higher and it will be ignored.
 # Messages received with a high number of hops are rarely intended for the local
-# mesh and are not likely to get recieve a response.
-# Default: 64 - to not change behavior on existing installations
+# mesh and are not likely to receive a response.
+# Code default when omitted: 64. This example uses 7 for a tighter local mesh.
 max_response_hops = 7
-
-# Set a custom prefix length for the public keys to identify repeaters
-# 1 = 2 hex chars (e.g. 7E), 2 = 4 hex chars (e.g. 7E42). Also used as the mesh
-# graph key length; if the mesh often uses 2-byte paths, set to 2 to avoid
-# conflating distinct links (see Path Command / path-command-config.md).
-prefix_bytes = 1
 
 # List of region scopes (comma-separated) that the bot will reply to when messages arrive on those scopes.
 # Replies mirror scope via RF correlation (TC_FLOOD / GRP_TXT); stale ADVERT/other packets are not used for scope.
@@ -272,11 +301,18 @@ prefix_bytes = 1
 # You can use "region" or "#region" (the # is added if missing).
 # outgoing_flood_scope_override = #west
 
+# Optional per-channel outgoing flood scope defaults.
+# Keys are case-insensitive and may include or omit the leading # in the channel name.
+# Values may be region, #region, *, 0, None, or empty for global flood.
+# Precedence: explicit send scope, mirrored reply scope, plugin/service flood_scope,
+# per-channel flood_scope.<channel>, outgoing_flood_scope_override, then global flood.
+# flood_scope.general = #west
+# flood_scope.weather = #sea
+# flood_scope.#local = *
 [Banned_Users]
 # List of banned sender names (comma-separated). Matching is prefix (starts-with):
 # "Awful Username" also matches "Awful Username 🍆". No bot responses in channels or DMs.
-banned_users = 
-
+banned_users =
 [Localization]
 # Language code for bot responses (en, es, es-MX, es-ES, fr, de, ja, etc.)
 # Default: en (English)
@@ -291,6 +327,13 @@ language = en
 # Path to translation files directory (relative to bot root)
 # Default: translations/
 translation_path = translations/
+
+# Automatically reply in the language of the incoming message.
+# When enabled, greeting-style commands detect the sender's language (from a
+# built-in keyword list, plus the optional langdetect package for longer text:
+# pip install meshcore-bot[lang]) and respond using the matching translation
+# file, falling back to `language` above when unsure.  Default: false
+auto_detect_language = false
 
 [Admin_ACL]
 # Admin Access Control List (ACL) for restricted commands
@@ -312,8 +355,8 @@ admin_pubkeys =
 # These commands will only work for users in the admin_pubkeys list
 # reload: Reload configuration without restarting (radio settings cannot be changed)
 # channelpause: DM-only; channelpause / channelresume — pause or resume bot responses on channels (not persisted)
-admin_commands = repeater,webviewer,reload,channelpause
-
+# neighbors: DM-only; runs a zero-hop neighbour discovery cycle (spends airtime — admin-gate this)
+admin_commands = repeater,webviewer,reload,channelpause,neighbors
 [Plugin_Overrides]
 # Plugin Overrides - Use alternative plugin implementations
 # Format: command_name = alternative_file_name
@@ -332,7 +375,16 @@ admin_commands = repeater,webviewer,reload,channelpause
 # Local plugins: You can add your own command and service plugins without editing
 # bot code. Put command plugins in local/commands/ and service plugins in
 # local/service_plugins/. Use local/config.ini for their settings. See docs/local-plugins.md.
-
+[Service_Overrides]
+# Service Overrides - Use alternative service plugin implementations
+# Format: service_name = alternative_file_name
+# The alternative_file_name should be the name of a Python file (without .py extension)
+# in the modules/service_plugins/alternatives/ directory
+#
+# Example: To use an alternative packet capture implementation:
+# packet_capture = packet_capture_custom
+#
+# Local plugins: Put service plugins in local/service_plugins/. See docs/local-plugins.md.
 [Companion_Purge]
 # Enable companion contact purging
 # true: Purge inactive companions when contact list is full
@@ -351,7 +403,6 @@ companion_advert_threshold_days = 30
 # Minimum days since last activity (DM or advert) before purge
 # Companions must be inactive for at least this many days
 companion_min_inactive_days = 30
-
 [Keywords]
 # Available placeholders (message-based):
 # {sender} - Name/ID of message sender
@@ -365,6 +416,7 @@ companion_min_inactive_days = 30
 # {path_distance} - Total distance between all hops in path with locations (e.g., "123.4km (3 segs, 1 no-loc)")
 # {firstlast_distance} - Distance between first and last repeater in path (e.g., "45.6km" or empty if locations missing)
 # {elapsed} - Elapsed time (e.g. 1234ms) or "Sync Device Clock" when device clock is invalid (use {elapsed} only; do not append ms)
+# {packet_hash} - 16-char MeshCore packet identity hash (uppercase hex); renders empty when RF correlation did not attach routing info
 #
 # To add newlines in responses, use \n (single backslash + n):
 # Example: test = "Line 1\nLine 2\nLine 3"
@@ -407,11 +459,18 @@ test = "ack @[{sender}]{phrase_part} | {connection_info} | Received at: {timesta
 ping = "Pong!"
 pong = "Ping!"
 # Override 'help' command output
-# help = "Bot Help: test (or t), ping, version, help, hello, cmd, llm, advert, wx, aqi, sun, moon, solar, hfcond, satpass, prefix, path, sports, dice, roll, stats | More: 'help <command>'"
+# help = "Bot Help: test (or t), ping, version, help, hello, cmd, advert, wx, aqi, sun, moon, solar, hfcond, satpass, prefix, path, sports, dice, roll, stats | More: 'help <command>'"
 
 # Override 'cmd' command output
-# cmd = "Available commands: test (or t), ping, version, help, hello, cmd, llm, advert, wx, aqi, sun, moon, solar, hfcond, satpass, prefix, path, sports, dice, roll, stats"
-
+# cmd = "Available commands: test (or t), ping, version, help, hello, cmd, advert, wx, aqi, sun, moon, solar, hfcond, satpass, prefix, path, sports, dice, roll, stats"
+[Custom_Syntax]
+# Custom syntax patterns (regex) with formatted responses
+# Format: pattern = response_format
+# Patterns are matched case-insensitively against incoming message text.
+# Use the same placeholders as [Keywords] (e.g. {sender}, {connection_info}).
+# Example: ^weather$ = Current conditions: {weather}
+#
+# Leave this section empty or omit it to disable custom syntax handling.
 [RandomLine]
 # Configurable command to act on a trigger word and respond with a random line from its file
 # triggers.<key> = csv list of trigger words
@@ -441,7 +500,6 @@ category.funfact = fun
 #file.fortune = data/randomlines/fortunes.txt
 #prefix.fortune = 🥠
 #category.fortune = fun
-
 [Scheduled_Messages]
 # Scheduled message format:
 #   <schedule> = channel:message
@@ -454,15 +512,51 @@ category.funfact = fun
 # <schedule> is one of:
 #   - 5-field crontab (minute hour day-of-month month day-of-week), e.g.
 #       0 8 * * *     = every day at 08:00 (in [Bot] timezone)
-#       30 12 * * 1   = every Monday at 12:30
-#   - Preset aliases (same semantics as common cron @macros):
-#       @yearly @annually  @monthly  @weekly  @daily  @midnight  @hourly
+#       30 12 * * mon = every Monday at 12:30
+#       30 12 * * 0   = same (Monday) — see APScheduler note below
+#   - Preset aliases (@yearly @annually @monthly @weekly @daily @midnight @hourly).
+#     These expand to the 5-field forms above; @weekly is Monday 00:00 (not Sunday).
 #   - Deprecated (still accepted, logs a warning): HHMM = daily at that 24h clock time
 #       0800          = same as 0 8 * * *   — migrate to cron; HHMM will be removed later.
+#
+# APScheduler day-of-week (not Vixie cron):
+#   Numeric DOW is 0=Monday … 6=Sunday. Vixie cron uses 0=Sunday (and often allows 7=Sunday);
+#   APScheduler rejects 7. Prefer mon–sun names to avoid mixing conventions.
+#   Example trap: Vixie `0 12 * * 1` is Monday; here `0 12 * * 1` is Tuesday.
 #
 # Newlines: use \n in the message for a line break (e.g. general:Line one\nLine two).
 # Literal backslash: use \\n for backslash+n; \\t for tab.
 # 
+# Command output placeholder:
+#
+# {cmd:<command> [args]} runs a bot command and substitutes its reply text, so any
+# command can be broadcast on a schedule without that command needing its own
+# scheduling settings. The command runs for its text only and transmits nothing
+# itself; the scheduled message carries the result.
+#
+#   0 6,12,18 * * * = Public:{cmd:wx Seattle}
+#       Forecast for Seattle at 06:00, 12:00 and 18:00.
+#   */30 * * * *    = Public:Conditions: {cmd:wx 98101}
+#       Every 30 minutes, with surrounding text.
+#   @hourly         = Public:{cmd:aqi Tacoma}
+#
+# The command name is matched against command names and their keywords, so
+# {cmd:weather Seattle} and {cmd:wx Seattle} are equivalent. Arguments are passed
+# exactly as a user would type them after the keyword.
+#
+# A placeholder expands to nothing (and logs a warning) when the command is unknown,
+# disabled, admin-only, times out, or produces no output — the raw {cmd:...} text is
+# never put on the air. If expansion leaves the message empty, nothing is sent.
+# Command output is not re-scanned, so a reply containing {cmd:...} cannot recurse.
+#
+# Airtime guards (both deliberate, neither configurable):
+#   - A schedule containing {cmd:...} must not fire more often than every 15 minutes.
+#     An entry that does is rejected at startup with an error and is not scheduled.
+#     Measured by the tightest gap, so "0,1 * * * *" counts as every 60 seconds.
+#     Schedules without a command placeholder are unaffected.
+#   - The command's own cooldown still applies. If it is on cooldown when the schedule
+#     fires, the placeholder expands to nothing that round.
+#
 # Available placeholders for mesh network information:
 # 
 # Total counts (ever heard):
@@ -488,11 +582,6 @@ category.funfact = fun
 # {new_roomservers_7d} - New roomserver devices first heard in last 7 days
 # {new_sensors_7d} - New sensor devices first heard in last 7 days
 # 
-# BBS statistics:
-# {bbs_messages_today} - Number of BBS messages sent today (UTC calendar day)
-# {bbs_pending_messages} - Total unread BBS messages currently stored
-# {bbs_users_with_pending} - Number of users who have at least one unread BBS message
-# 
 # Legacy placeholders (for backward compatibility):
 # {repeaters} - Same as {total_repeaters}
 # {companions} - Same as {total_companions}
@@ -506,43 +595,6 @@ category.funfact = fun
 #0 12 * * * = Public:Midday status check - all systems operational.
 #0 18 * * * = Public:Evening update - bot status: Good
 # @hourly = Public:Hourly ping (preset example; comment out if unused)
-
-[Clock_Sync_Admin]
-# Schedule a direct-message admin clock sync command to one or more repeater targets.
-# This is useful for daily maintenance syncs on known repeater nodes.
-#
-# Enable or disable this scheduled job
-enabled = false
-#
-# Cron-style schedule (same parser/timezone behavior as [Scheduled_Messages])
-# Default shown: daily at 03:00 in [Bot] timezone.
-schedule = 0 3 * * *
-#
-# Comma-separated repeater identifiers to target.
-# Each entry may be a contact name, full public key, or public key prefix.
-# Duplicate entries are ignored per run.
-targets =
-#
-# DM payload to send to each resolved target.
-# Leave as default unless your mesh uses a different admin clock-sync trigger.
-command_payload = clock sync admin
-#
-# Dashboard clock-drift monitor settings:
-# - dashboard_hop_radius: only evaluate repeaters/roomservers within this hop count
-# - dashboard_check_window_hours: only include repeaters seen in this recent window
-# - dashboard_max_clock_drift_seconds: mark node out-of-sync when drift exceeds threshold
-dashboard_hop_radius = 5
-dashboard_check_window_hours = 24
-dashboard_max_clock_drift_seconds = 300
-
-[Clock_Command]
-# Admin-only DM command that triggers an immediate radio clock sync on the
-# receiving bot.  This is the handler invoked when a remote bot (or a human
-# admin) sends the DM payload configured in [Clock_Sync_Admin] command_payload.
-#
-# Enable or disable the clock command handler on this bot
-enabled = true
-
 [Schedule_Command]
 # Show scheduled messages and advert interval via the 'schedule' command
 # Responds with a compact list of scheduled times, channels, and message previews
@@ -553,8 +605,6 @@ enabled = true
 dm_only = true
 # aliases = comma-separated list of additional trigger words for this command
 # aliases = s, sched
-
-
 [Logging]
 # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 # DEBUG: Most verbose, shows all details
@@ -564,9 +614,12 @@ dm_only = true
 # CRITICAL: Only critical errors
 log_level = INFO
 
-# Log file path (leave empty for console only)
-# Bot will write logs to this file in addition to console
+# Log file path (leave empty for console/journald only)
+# Bot and web viewer write to this file in addition to console when set.
+# Empty: console only (captured by journald under systemd — preferred for services).
+# systemd service installs use: /var/log/meshcore-bot/meshcore_bot.log
 # Logs rotate at 5 MB with up to 3 backup files (e.g. meshcore_bot.log.1, .2, .3)
+# Web viewer file logs (when set) go beside this path as web_viewer.log
 log_file = meshcore_bot.log
 
 # Enable colored console output
@@ -590,19 +643,6 @@ json_logging = false
 log_max_bytes = 5242880
 # log_backup_count: number of rotated backup files to keep (e.g. meshcore_bot.log.1 … .3)
 log_backup_count = 3
-
-[Custom_Syntax]
-# Custom syntax patterns for special message formats
-# Format: pattern = "response_format"
-# Available fields: {sender}, {phrase}, {connection_info}, {snr}, {timestamp}, {path}, {path_distance}, {firstlast_distance}
-# {phrase}: The text after the trigger (for custom syntax patterns)
-# {path_distance}: Total distance between all hops in path with locations (e.g., "123.4km (3 segs, 1 no-loc)")
-# {firstlast_distance}: Distance between first and last repeater in path (e.g., "45.6km" or empty if locations missing)
-# 
-# Note: The "t" command is now handled by the test command as an alias
-# "t phrase" works the same as "test phrase" - both use the test response format
-# Example: "t hello world" -> "ack {sender}: hello world | {connection_info}"
-
 [External_Data]
 # URL shortener API base (v.gd / is.gd-compatible create.php). Default: https://v.gd
 # See https://v.gd/apishorteningreference.php
@@ -636,16 +676,25 @@ airnow_api_key =
 # Paid tier (14 EUR/year): 3-6 day forecast, 15-30 minute resolution
 forecast_solar_api_key = 
 
-# Repeater prefix API URL for prefix command
-# Leave empty to disable prefix command functionality
-# Configure your own regional API endpoint
+# Optional external repeater-prefix API for the prefix command.
+#
+# LEAVE THIS EMPTY unless you run your own endpoint. Empty does NOT disable the
+# prefix command: the bot answers from its own database of heard repeaters, which
+# is the normal setup. The API only augments that with node counts from a wider
+# regional dataset; location details still come from the local database.
+#
+# This dates from when the project fetched repeater data from map.w0z.is, which is
+# defunct. There is no drop-in public replacement. To serve your own, return JSON:
+#   {"data": [{"prefix": "AB", "node_count": 3, "node_names": ["Node One", ...]}, ...]}
+# Fetched with a plain GET, must answer HTTP 200 with that JSON, 10s timeout.
+# "prefix" is upper-cased by the bot; "node_count" is an int; "node_names" a list.
+# Responses are cached for repeater_prefix_cache_hours below.
 repeater_prefix_api_url = 
 
 # Repeater prefix cache duration in hours
 # How long to cache prefix data before refreshing from API
 # Recommended: 1-6 hours (data doesn't change frequently)
 repeater_prefix_cache_hours = 1
-
 [Prefix_Command]
 # Enable or disable repeater geolocation in prefix command
 # true: Show city names with repeaters when location data is available
@@ -707,8 +756,7 @@ prefix_best_location_radius_km = 50
 # Useful for excluding major infrastructure repeaters or reserved prefixes
 # Example: prefix_best_do_not_suggest = 00,FF,01,02
 # Leave empty to allow all prefixes
-prefix_best_do_not_suggest = 
-
+prefix_best_do_not_suggest =
 [Weather]
 # NOTE: Unit settings are used by both the wx and gwx commands and Weather_Service plugin
 
@@ -723,35 +771,20 @@ weather_provider = noaa
 # Leave unset to default to "best_match"
 # Supported model names: https://open-meteo.com/en/docs
 # Set to an empty value (weather_model =) to omit model selection and let Open-Meteo auto-select
-# For France, use meteofrance_arome_france_hd for high-resolution French weather
-# Or use arpege_europe for the ARPEGE model (Météo-France) covering France and Europe
-weather_model = arpege_europe
-
-# Open-Meteo weather settings (for utils_weather.py integration)
-# Coordinates for weather data (0.0 = auto-detect from GPS if available)
-# Default: Paris, France (48.8566, 2.3522)
-#weather_latitude = 48.8566
-#weather_longitude = 2.3522
-
-# Enable/disable Open-Meteo weather API
-#weather_use_openmeteo = true
-
-# Forecast duration in days (default: 2, max: 16)
-#weather_forecast_days = 2
+#weather_model =
 
 # Default city name for empty "wx" / "gwx" commands when companion location is unavailable
 # Use English city names (examples: Seattle or Seattle, WA)
-default_city = Paris
+#default_city =
 
 # Default state for city name disambiguation
 # When users type "wx seattle", it will search for "seattle, WA, USA"
 # Use 2-letter state abbreviation (e.g., WA, CA, NY, TX)
-# Leave empty for cities without states (e.g., Paris, France)
-default_state =
+default_state = WA
 
 # Default country for city name disambiguation (for international weather plugin)
-# Use 2-letter country code (e.g., US, CA, GB, AU, FR)
-default_country = FR
+# Use 2-letter country code (e.g., US, CA, GB, AU)
+default_country = US
 
 # When true, a bare "wx" or "gwx" (no location) uses bot_latitude/bot_longitude from [Bot]
 # if there is no default WXSIM source and no companion location in the database.
@@ -804,7 +837,6 @@ temperature_low_only_format = L:{low}{units}
 # custom.mqtt_weather.default = sensors/home/weather
 # custom.mqtt_weather.patio = sensors/patio/weather
 # Broker and format options for MQTT wx/gwx: see [MqttWeather] in the service plugin block at the end of this file.
-
 [Solar_Config]
 # URL timeout for external API calls (seconds)
 url_timeout = 10
@@ -813,14 +845,30 @@ url_timeout = 10
 # true: Use 24-hour UTC format
 # false: Use 12-hour local format
 use_zulu_time = false
-
 [Aurora_Command]
 # Enable or disable the aurora command
 enabled = true
 # Optional: default coordinates when user does not specify a location
 # default_lat = 48.08
 # default_lon = -121.97
-
+[Rain_Command]
+# Minute-level rain nowcast ("rain starting in ~20min") via Open-Meteo's
+# 15-minutely precipitation. Worldwide, no API key. Keywords: rain, nowcast, snow.
+# (snow leads the reply with snowfall depth; rain/nowcast lead with rain amount.)
+# Usage: rain [city|zipcode|lat,lon]   (no location -> companion, then bot location)
+enabled = true
+# How far ahead to look, in minutes (default: 120)
+# window_minutes = 120
+# Precipitation amount (mm per 15-min bucket) at/above which it counts as raining.
+# Lower = more sensitive to light drizzle; raise to ignore trace amounts. (default: 0.1)
+# precip_threshold_mm = 0.1
+# Look up US ZIP -> "City, ST" via Zippopotam.us (free, no key). OpenStreetMap
+# often lacks the city for a ZIP centroid, so this gives nicer labels. Set false
+# to skip the external lookup and reverse-geocode instead. (default: true)
+# zip_city_lookup = true
+# Optional: default coordinates when user does not specify a location
+# default_lat = 47.6062
+# default_lon = -122.3321
 [Channels_List]
 # Common hashtag channels for the region
 # Format: channel_name = description
@@ -860,7 +908,6 @@ emergency.emergency = Emergency communications and alerts
 emergency.weather = Weather updates and conditions
 emergency.traffic = Traffic updates and road conditions
 emergency.hamradio = Amateur radio emergency net
-
 [Sports_Command]
 # Enable or disable the sports command (true/false)
 enabled = true
@@ -884,9 +931,24 @@ channel_override = #sounders=sounders,#seahawks=seahawks,#kraken=kraken,#mariner
 
 # ESPN API timeout in seconds
 api_timeout = 10
+[Worldcup_Command]
+# Enable or disable the World Cup command (true/false)
+# Commands: wc / worldcup
+# This command only responds while a FIFA World Cup (men's or women's) is actually
+# in progress. The active tournament is auto-detected from the ESPN schedule, so no
+# dates need to be configured; outside a tournament it replies that none is in progress.
+# World Cup scores are also available year-round via the sports command (e.g. "sports fifa").
+enabled = true
 
+# ESPN API timeout in seconds
+api_timeout = 10
+
+# How long (in minutes) to cache season detection and nation roster lookups,
+# to avoid repeated ESPN requests. Default: 360 (6 hours).
+cache_ttl_minutes = 360
 [Stats_Command]
-# Enable or disable the stats command (true/false)
+# Enable or disable the user-facing stats command (true/false)
+# This only controls whether the bot responds to the "stats" command.
 enabled = true
 
 # Data retention settings
@@ -900,6 +962,11 @@ data_retention_days = 7
 auto_cleanup = true
 
 # Stats collection settings
+# Collect message, command, and path stats for the web viewer dashboard
+# true: Populate stats tables even if the stats command is disabled
+# false: Disable stats table writes
+collect_stats = true
+
 # Track all incoming messages (not just commands)
 # true: Record all messages for comprehensive stats
 # false: Only record command executions
@@ -915,11 +982,17 @@ track_command_details = true
 # true: Replace user IDs with anonymous identifiers
 # false: Keep actual user IDs in stats
 anonymize_users = false
-
 [Data_Retention]
 # Data retention controls how long the bot keeps data in the database.
 # The scheduler runs cleanup daily so retention is enforced even when the
 # standalone web viewer is not running. Shorter retention reduces DB size.
+#
+# Old rows are deleted in committed chunks so live packet/contact/graph writers
+# can run between batches. These defaults suit Raspberry Pi and SD-card installs.
+# Smaller batches/longer pauses reduce I/O bursts but take longer to drain a
+# large first-run backlog.
+retention_delete_batch_size = 1000
+retention_delete_pause_seconds = 0.1
 #
 # Packet stream (web viewer real-time display and transmission_tracker)
 # 2-3 days is enough for most deployments; 7 days if you need longer history.
@@ -934,7 +1007,12 @@ purging_log_retention_days = 90
 #
 # Mesh connections (path graph edges). Should be >= Path_Command graph_edge_expiration_days.
 mesh_connections_retention_days = 7
-
+#
+# Zero-hop neighbour observation history (see [PacketCapture] neighbors_enabled).
+# At most one row per neighbour per cycle, and cycles are >= 12h apart, so this
+# grows very slowly and a long window is cheap. The neighbor_links aggregate that
+# the mesh graph reads is never pruned.
+neighbor_observations_retention_days = 365
 [Path_Command]
 # Enable or disable the path command
 enabled = true
@@ -953,10 +1031,18 @@ require_path_bytes_failure_response =
 # false: Only respond to "path", "decode", or "route" keywords
 enable_p_shortcut = true
 
-# Optional first line prepended to path command RF replies (Python str.format on the triggering message).
-# Placeholders match Multitest/Keywords-style responses: {sender}, {connection_info}, {path},
-# {timestamp}, {snr}, {rssi}. Only the first RF chunk includes the prefix when the reply is split.
+# Optional first line prepended to path command RF replies.
+# Placeholders match keyword-style responses: {sender}, {connection_info}, {path},
+# {hops}, {hops_label}, {timestamp}, {snr}, {rssi}, {packet_hash}, plus {path_distance}.
+# {path_distance} is the total distance travelled (sender -> hops -> bot), e.g. "12.4km".
+# It renders empty unless every node in the chain has known coordinates and the bot has
+# bot_latitude/bot_longitude set, so a partial sum is never mistaken for the full distance.
+# Feed-style pipe filters are supported (same engine as [Test_Command] response_format),
+# so a label can disappear along with an empty value. hops_min:1 drops a clause on a
+# direct message, where {path_distance} would otherwise render "N/A".
+# Only the first RF chunk includes the prefix when the reply is split.
 # Example: @[{sender}]
+# Example: {path_distance|prefix_if_nonempty:\U0001F4CF }
 reply_prefix =
 
 # Bytes per hop required before resolving repeater names from the database.
@@ -1023,7 +1109,8 @@ graph_edge_expiration_days = 7
 # - batched: Accumulate updates, flush periodically (better performance, risk of data loss on crash)
 # - hybrid: Immediate for new edges, batched for observation count increments (balanced)
 # Recommended: 'hybrid' for development (frequent restarts), 'batched' for production
-graph_write_strategy = hybrid
+# and SD-card installations to reduce transaction/WAL writes.
+graph_write_strategy = batched
 
 # Batch write interval in seconds (only used if strategy is 'batched' or 'hybrid')
 # How often to flush pending edge updates to database
@@ -1140,6 +1227,7 @@ graph_path_validation_obs_divisor = 50.0
 #   14 - Good balance of coverage vs. memory (default for unconfigured installs)
 #   7  - Reduced memory footprint for Raspberry Pi Zero 2 W
 # Note: edges older than graph_edge_expiration_days are never loaded regardless of this value.
+# Raspberry Pi 4 / SD-card profile: use 7 to make that effective bound explicit.
 graph_startup_load_days = 0
 
 # Enable graph data capture from incoming packets (default: true)
@@ -1158,7 +1246,11 @@ graph_capture_enabled = true
 # Set to 1.0 to disable star bias
 star_bias_multiplier = 2.5
 
-
+# Symbols shown next to inferred repeater names to indicate confidence
+# in the path guess (high / medium / low).
+high_confidence_symbol = 🎯
+medium_confidence_symbol = 📍
+low_confidence_symbol = ❓
 [Joke_Command]
 # Enable or disable the joke command (true/false)
 enabled = true
@@ -1175,7 +1267,6 @@ long_jokes = false
 
 # Channels where joke command is allowed (omit to use global monitor_channels)
 # channels = #bot,#jokes
-
 [DadJoke_Command]
 # Enable or disable the dad joke command (true/false)
 enabled = true
@@ -1187,11 +1278,9 @@ long_jokes = false
 
 # Channels where dadjoke command is allowed (omit to use global monitor_channels)
 # channels = #bot,#jokes
-
 [Hacker_Command]
 # Enable or disable the hacker command (true/false; responds to Linux commands with supervillain mainframe errors)
 enabled = false
-
 [Multitest_Command]
 # Response format for multitest command results
 # Available fields: {sender}, {path_count}, {paths}, {listening_duration}
@@ -1212,7 +1301,6 @@ condense_paths = true
 require_path_bytes_greater_or_equal_to = 0
 # Optional response when rejected by path-byte requirement; leave empty for silent reject
 require_path_bytes_failure_response =
-
 [Greeter_Command]
 # Enable greeter to greet users on first channel message (true/false)
 enabled = false
@@ -1235,7 +1323,10 @@ greeting_message = Welcome to the mesh, @[{sender}]!
 # Channel-specific greeting messages (optional)
 # Format: channel_name:greeting_message,channel_name2:greeting_message2
 # If a channel has a specific greeting, it will be used instead of the default greeting_message
-# Example: Public:Welcome to Public channel, @[{sender}]!|general:Welcome to general, @[{sender}]!
+# Example: Public:Welcome to Public channel, @[{sender}]!,general:Welcome to general, @[{sender}]!
+# Greeting text may contain commas, URLs and clock times: a fragment is only
+# treated as a new entry when the text before its first colon looks like a
+# channel name. (So avoid text like ", wx: sunny" if wx is also a channel.)
 # Multi-part greetings are supported per channel using pipe (|) separator
 # Leave empty to use greeting_message for all channels
 channel_greetings = 
@@ -1278,26 +1369,41 @@ auto_backfill = false
 # Example: 0 = mark all users who have ever posted (all time)
 backfill_lookback_days = 30
 
+# Seconds to wait after a new user's first message before sending the bot greeting.
+# Gives humans time to welcome them first when defer_to_human_greeting is enabled.
+# 0 = greet immediately (default)
+dead_air_delay_seconds = 0
+
+# When true, skip the bot greeting if a human already mentioned the new user in the
+# channel (uses message_stats). Works with dead_air_delay_seconds as a wait window.
+# Default: false
+defer_to_human_greeting = false
+
+# Fuzzy name matching for greet-once tracking and human-greeting detection.
+# 0 = exact match only (default). 1-3 = allow small typos/variants in sender names.
+levenshtein_distance = 0
 [Alert_Command]
 # Enable or disable the alert command (true/false)
 enabled = false
 
-# PulsePoint agency IDs by county/region
-# Format: agency.<county_name> = comma-separated agency IDs
+# Only report incidents within this distance of the bot (kilometers)
+max_distance_km = 20.0
+
+# Only report incidents newer than this (hours)
+max_incident_age_hours = 24.0
+
+# PulsePoint agency IDs by city or county
+# Format: agency.city.<name> = comma-separated agency IDs
+#         agency.county.<name> = comma-separated agency IDs
+# Legacy: agency.<name> or agency_<name> (treated as county)
 # Get agency IDs from: https://web.pulsepoint.org/ or PulsePoint searchagencies API
-# You can use any naming convention that makes sense for your region
-# Examples: agency.county1, agency.city1, agency.region1, etc.
+# Use underscores for multi-word names (e.g. agency.city.federal_way)
+
+# Example: City agencies
+# agency.city.seattle = 17D20,17M15
 
 # Example: County agencies
-# agency.county1 = 
-
-# Example: City agencies (can have multiple entries for the same region)
-# agency.city1 = 
-# agency.city1_alias = 
-
-# Example: Combined region (all counties/agencies)
-# agency.region_all = 
-
+# agency.county.king = 17D02,17M15
 [Announcements_Command]
 # Enable or disable the announcements command (true/false)
 enabled = false
@@ -1327,19 +1433,18 @@ announcement_cooldown = 60
 announce.default = This is the default announcement.
 announce.bots = This is an announcement with the list of bots.
 announce.other = This is a different announcement on another topic.
-
 [Airplanes_Command]
 # Enable or disable the airplanes command (true/false)
 enabled = true
 
-# API endpoint URL for ADS-B aircraft data
-# Default: airplanes.live API
-# Supports any standardized ADS-B API using readsb/airplanes.live format
+# API endpoint URL for ADS-B aircraft data (readsb / ADSBExchange v2 format)
+# Default: adsb.lol. The previous public airplanes.live API now returns 403
+# for unregistered clients; that host is remapped to this default at runtime.
+# A local readsb URL or any other host is left unchanged.
 # Examples:
-#   http://api.airplanes.live/v2/ (default)
-#   https://adsbexchange-com1.p.rapidapi.com/v2/ (if compatible)
+#   https://api.adsb.lol/v2/ (default)
 #   http://localhost:8080/data/ (local readsb instance)
-api_url = http://api.airplanes.live/v2/
+api_url = https://api.adsb.lol/v2/
 
 # Default search radius in nautical miles
 # Maximum: 250 nautical miles
@@ -1354,159 +1459,87 @@ url_timeout = 10
 # Command stubs (enable/channels only; omit to use global monitor_channels)
 [Wx_Command]
 enabled = true
-# channels =
-# aliases = comma-separated additional trigger words, e.g.: aliases = weather, w, meteo
-aliases = weather, meteo
 
+# Temperature unit for weather reports: fahrenheit (default) or celsius
+temperature_unit = fahrenheit
+
+# Wind speed unit for weather reports: mph (default) or kmh
+wind_speed_unit = mph
+# channels =
+# aliases = comma-separated additional trigger words, e.g.: aliases = weather, w
+
+# =============================================================================
+# Background service plugins (*_Service sections, alphabetical)
+# =============================================================================
 [WebViewer_Command]
 enabled = true
 # channels =
-
 [Sun_Command]
 enabled = true
 # channels =
-
 [Solar_Command]
 enabled = true
 # channels =
-
 [Solarforecast_Command]
 enabled = true
 # channels =
-
 [Satpass_Command]
 enabled = true
 # channels =
-
 [Roll_Command]
 enabled = true
 # channels =
-
 [Repeater_Command]
 enabled = true
 # channels =
-
 [Ping_Command]
 enabled = true
 # channels =
-
 [Version_Command]
 enabled = true
 # channels =
-
 [Moon_Command]
 enabled = true
 # channels =
-
 [Magic8_Command]
 enabled = true
 # channels =
-
 [Hfcond_Command]
 enabled = true
 # channels =
-
 [Help_Command]
 enabled = true
 # channels =
-
 [Hello_Command]
 enabled = true
 # channels =
-
 [Dice_Command]
 enabled = true
 # channels =
-
-[BBS_Command]
-# Per-user store-and-forward BBS messaging service.
-# Users can leave messages for other nodes that are delivered when the recipient next DMs the bot.
-# Usage: 's <name> <message>' to send, 'bbs r' to read, 'bbs list' to count pending messages.
-# true: Enable BBS service (default)
-# false: Disable BBS service
-enabled = true
-
-# Maximum number of unread messages that can be held for a single recipient.
-# Once the limit is reached, further sends to that recipient are rejected until they read their mail.
-# Default: 10
-max_messages_per_user = 10
-
-# Number of days to retain messages before they are automatically deleted.
-# Messages older than this (whether read or unread) are purged when the next send occurs.
-# Default: 7
-max_message_age_days = 7
-
-# Maximum number of messages a single sender can send in one calendar day (UTC).
-# Prevents flooding. Set to 0 to disable the daily limit.
-# Default: 20
-max_messages_per_sender_per_day = 20
-
 [Cmd_Command]
 enabled = true
 # Optional: override `cmd` output with a link to your full docs page
 # cmd_reference_url = https://example.com/command-reference
 # channels =
-
-[Llm_Command]
-# Local llama.cpp AI chat command (aliases: llm, ia, ai, chat)
-enabled = true
-# OpenAI-compatible llama.cpp endpoint
-endpoint = http://127.0.0.1:8080/v1/chat/completions
-# Optional model name (leave blank to use server default)
-model =
-# Keep this short for mesh bandwidth
-system_prompt = You are a helpful assistant on a low-bandwidth mesh network. Reply briefly in one short sentence.
-# Generation settings
-max_tokens = 80
-temperature = 0.4
-top_p = 0.9
-timeout_seconds = 20
-# Remove <think> blocks from some reasoning models
-strip_thinking_tags = true
-# Per-user conversation context: 0 to disable, otherwise seconds a conversation is remembered
-context_window_seconds = 600
-# Maximum number of prior exchange turns (user+assistant pairs) to include in context
-context_max_turns = 5
-# Context settings for local data injection
-include_local_context = true
-context_include_weather = true
-context_include_repeaters = true
-context_include_network_status = true
-context_include_contacts = true
-context_include_moon = true
-context_include_sun = true
-context_include_commands = true
-# Weather location for LLM context (city name)
-context_weather_location = Paris, France
-context_cache_seconds = 60
-# Pagination settings: split long responses into multiple messages
-pagination_enabled = false
-# Maximum number of message pages to send (1-10)
-page_count = 2
-# Maximum characters per page (50-500)
-chars_per_page = 160
-# CPU temperature cooling threshold in degrees Celsius (0 to disable, default 60)
-# Before accepting an LLM query, the CPU temperature must be below this threshold
-# Useful for Raspberry Pi systems to prevent overheating during AI inference
-cpu_temp_threshold = 60.0
-# channels =
-
 [Channels_Command]
 enabled = true
 # channels =
-
 [Catfact_Command]
 enabled = true
 # channels =
-
 [Aqi_Command]
 enabled = true
 # channels =
-
 [Advert_Command]
 enabled = true
 # channels =
-
+[Neighbors_Command]
+# Runs one zero-hop neighbour discovery cycle on demand (DM only, 15min cooldown).
+# The scheduled interval has a 12h floor, so this is how you test a change or
+# refresh after moving the node. Requires [PacketCapture] neighbors_enabled = true.
+# Worth adding to Admin_ACL admin_commands, since a cycle spends airtime.
+enabled = true
+# channels =
 [Test_Command]
 enabled = true
 # Require minimum path byte length before responding to test/t
@@ -1520,12 +1553,17 @@ require_path_bytes_failure_response =
 
 # Optional: full ack template for test/t. When set, overrides [Keywords] test for this command only.
 # Same placeholders as Keywords (sender, phrase, phrase_part, connection_info, path, hops, hops_label,
-# timestamp, elapsed, snr, path_distance, firstlast_distance).
+# timestamp, elapsed, snr, rssi, packet_hash, path_distance, firstlast_distance).
+# {firstlast_distance} requires at least two path nodes with stored repeater/roomserver coordinates.
 # Pipe filters (feed-style), e.g. only show cumulative path distance when hops are multibyte (2+ bytes per hop):
 # response_format = ack @[{sender}]{phrase_part} | {connection_info}{path_distance|pathbytes_min:2|prefix_if_nonempty: | Path Dist: }| F/L Dist: {firstlast_distance} | {elapsed} | Rec: {timestamp}
-# Filters: pathbytes_min:N (alias pathbytes:N) clears the field unless bytes_per_hop >= N; prefix_if_nonempty:L prepends literal L when value non-empty after prior filters. If L contains |, put prefix_if_nonempty last in that placeholder (it consumes the rest of the chain as its literal).
+# Filters: pathbytes_min:N (alias pathbytes:N) clears the field unless bytes_per_hop >= N; hops_min:N clears it unless the message travelled at least N hops; prefix_if_nonempty:L prepends literal L when value non-empty after prior filters. If L contains |, put prefix_if_nonempty last in that placeholder (it consumes the rest of the chain as its literal).
+# hops_min asks about the route, pathbytes_min about how it is encoded. Use hops_min:1 to drop a
+# distance clause on a direct message without also dropping a measurable one-byte multi-hop path.
+# The distance placeholders render "N/A" on a direct message, which is non-empty, so
+# prefix_if_nonempty alone will still print its label there -- gate with hops_min:1 first:
+# response_format = ack @[{sender}]{phrase_part} | {path}{firstlast_distance|hops_min:1|prefix_if_nonempty: | F/L Dist: }{packet_hash|prefix_if_nonempty: | Hash: }
 # channels =
-
 [Trace_Command]
 # Enable or disable the trace/tracer commands (link diagnostics)
 enabled = true
@@ -1549,7 +1587,57 @@ update_graph_two_byte = true
 # Output format: inline (default) or vertical
 # output_format = inline
 # channels =
+[Feed_Manager]
+# Enable or disable RSS/API feed subscriptions
+# true: Feed manager polls configured feeds and sends updates to channels
+# false: Feed manager disabled (default)
+feed_manager_enabled = false
 
+# Default check interval (seconds)
+default_check_interval_seconds = 300
+
+# Maximum items to examine per check (the scan window). Filtered-out items count
+# against this; raise it for long feeds behind a restrictive filter (e.g. within_days)
+# so the scan reaches newer passing items. Values below 1 are clamped to 1.
+max_items_per_check = 10
+
+# Maximum items to post per check. Defaults to max_items_per_check when unset, so
+# existing setups are unchanged. Cap this (while raising max_items_per_check) to scan
+# deep without flooding a channel in a single poll. Values below 1 are clamped to 1;
+# to stop posting entirely set feed_manager_enabled = false, or disable one feed with
+# `feed disable <id>`.
+max_posts_per_check = 10
+
+# HTTP request timeout (seconds)
+feed_request_timeout = 30
+
+# Maximum decompressed response body size (bytes)
+max_response_bytes = 2097152
+
+# Maximum feed/API items parsed from one response
+max_parsed_items = 500
+
+# User agent for HTTP requests
+feed_user_agent = MeshCoreBot/1.0 FeedManager
+
+# Rate limit between requests to same domain (seconds)
+feed_rate_limit_seconds = 5.0
+
+# Maximum message length (characters)
+max_message_length = 130
+
+# Default output format (see docs/FEEDS.md for placeholders)
+default_output_format = {emoji} {body|truncate:100} - {date}\n{link|truncate:50}
+
+# Default interval between sending queued messages (seconds)
+default_message_send_interval_seconds = 2.0
+
+# Shorten item link URLs via [External_Data] short_url_website
+shorten_urls = false
+
+# Allow private/internal feed URLs (default false for SSRF safety)
+# Falls back to [Feed_Command] allow_private_urls when unset
+allow_private_urls = false
 [Feed_Command]
 enabled = false
 # channels =
@@ -1563,8 +1651,6 @@ allow_private_urls = false
 #                             Settings for web administration backend                              #
 #                                                                                                  #
 ####################################################################################################
-
-
 [Web_Viewer]
 # Enable or disable the web data viewer
 # Enable web viewer (true/false). false recommended unless you have configured web_viewer_password.
@@ -1602,6 +1688,41 @@ debug = false
 # false: Start web viewer manually (recommended)
 auto_start = false
 
+# Enable multibyte monitor page (/multibyte-rollout)
+# false: hide page/nav/API endpoint
+# true: expose page/nav/API endpoint
+multibyte_monitor_enabled = false
+
+# Cache the expensive lifetime multi-byte mesh aggregation for this many seconds.
+# Concurrent graph requests share one computation. The mesh page also coalesces
+# live edge events into one refresh every 30 seconds.
+mesh_graph_cache_seconds = 30
+
+# Dashboard snapshot refresher
+# A background thread in the viewer process recomputes the landing page's
+# statistics on an interval and stores them in two tables (daily_rollup and
+# dashboard_snapshot), so page loads read one row instead of running ~50
+# aggregate queries. It also accumulates daily trends that outlive the raw
+# tables' retention — message/command/path stats are pruned at 7 days and
+# packet_stream at 3, so without this there is no history to chart.
+# Disabling it leaves /api/dashboard/summary returning 503 and the dashboard
+# unable to render.
+# dashboard_snapshot_enabled = true
+#
+# How often to recompute. Each refresh recomputes today plus a 3-day trailing
+# window; older days are frozen.
+# dashboard_snapshot_interval_seconds = 60
+#
+# How many days of daily_rollup history to retain (~1 row/day, so 400 days is
+# well under a megabyte).
+# dashboard_snapshot_history_days = 400
+#
+# packet_stream rows written before this feature existed keep their route type
+# and hop encoding only inside a JSON blob. Each refresh converts this many of
+# them to real columns rather than rewriting the whole table at once, which on
+# an SD-card Pi would stall the bot for minutes. Set to 0 to disable.
+# dashboard_packet_backfill_rows = 2000
+
 # Optional timeout overrides for web viewer integration (seconds)
 # edge_post_timeout_sec = 1.0
 # node_post_timeout_sec = 0.5
@@ -1638,7 +1759,6 @@ decode_hashtag_channels =
 #          Settings for non-interactive bot services and plugins (weather, alerts, etc.)           #
 #                                                                                                  #
 ####################################################################################################
-
 [PacketCapture]
 # Enable packet capture service (true/false)
 enabled = false
@@ -1664,6 +1784,10 @@ raw_duplicate_window = 2.0
 # Keep RX_LOG SNR/RSSI keyed by packet prefix this long for RAW_DATA correlation (seconds).
 rf_data_cache_timeout = 15.0
 
+# Master switch for MQTT publishing (true/false). When false, packets are only
+# written to output_file (if set) and no MQTT connections are made.
+mqtt_enabled = true
+
 # If true, do not publish packet JSON to MQTT when content hash is 0000000000000000
 # (strict path_len reject, too-short buffer, or other unparseable cases). File output is unchanged.
 mqtt_skip_unparseable_packets = true
@@ -1672,9 +1796,106 @@ mqtt_skip_unparseable_packets = true
 # (MeshCore createAdvert signature over pubkey || timestamp || app_data). File output is unchanged.
 advert_require_valid_signature = false
 
+# --- Payload decoding (issues #197 & #35) ---
+# When enabled, a nested "decoded" object is added to each packet's JSON (file + MQTT) with
+# plain-text / structured fields: GRP_TXT channel messages are decrypted (sender, text),
+# ADVERTs are parsed (name, role, lat/lon), and human-readable type/route labels + path are
+# included. Raw fields are unchanged, so this is backward compatible. Default off.
+# NOTE: Direct messages (TXT_MSG) are ECDH-encrypted between two nodes and cannot be decrypted
+# by a passive observer; they are marked {"encrypted": true} instead.
+decode_payloads = false
+
+# Global default for whether the "decoded" object is published to MQTT (default false: opt in
+# per broker with mqttN_include_decoded, or set this to true to publish decoded to all brokers).
+# The log file always follows decode_payloads, independent of this setting.
+include_decoded = false
+
+# Channels used to decrypt GRP_TXT messages (in addition to the bot's own configured radio
+# channels, which are used automatically):
+#   decode_hashtag_channels - comma-separated public/hashtag channel names; keys are derived
+#                             from the name (SHA256 of "#name"). '#' optional.
+#   decode_channel_keys     - comma-separated name=key pairs for custom channels; key may be
+#                             32-char hex or base64 (16 bytes).
+#   decode_include_public   - include the well-known default "Public" channel key (default true).
+decode_hashtag_channels =
+decode_channel_keys =
+decode_include_public = true
+
+# --- Packet log rotation (issue #35) ---
+# Roll the output_file so historical dumps stay manageable. Default off = single appended file.
+#   log_rotation      - off | size | time
+#   log_max_bytes     - roll when the file reaches this size (size mode); accepts 50MB, 10M, etc.
+#   log_rotation_when - interval for time mode (midnight, H, D, W0-W6) - see TimedRotatingFileHandler
+#   log_backup_count  - number of rolled files to keep
+log_rotation = off
+log_max_bytes = 50MB
+log_rotation_when = midnight
+log_backup_count = 5
+
+# --- Neighbour discovery (zero-hop) ---
+# Periodically asks which repeaters this node can hear DIRECTLY, then records each
+# confirmed link with its measured SNR. This is the strongest link evidence the bot
+# has: two full 32-byte public keys and a first-party RF measurement, as opposed to
+# path inference over 1-3 byte prefixes.
+#
+# Results go to the neighbor_links / neighbor_observations tables, feed the mesh
+# graph, and are published to every enabled broker (mqttN_neighbors defaults true;
+# set it false on a broker you want to hold back).
+# Trigger one on demand with the `neighbors` DM command (see [Neighbors_Command]).
+#
+# This is the single switch for the whole feature. Off by default because a cycle
+# spends real airtime; turning it on needs no other change.
+neighbors_enabled = false
+
+# How often a cycle runs, in hours. Clamped to 12-336 to match the firmware; an
+# out-of-range value is clamped with a warning rather than silently honoured.
+neighbors_interval_hours = 24
+
+# Seconds spent listening for responses. Repeaters answer after a randomised delay,
+# so a short window simply finds fewer neighbours (floor: 5s). The bot stays fully
+# responsive during this window — it is a passive listen, not a busy wait.
+neighbors_discover_window = 60
+
+# Cap on neighbours recorded per cycle, most useful first (most recently heard,
+# then strongest SNR).
+neighbors_max = 32
+
+# Also add each confirmed direct link to the mesh graph as an edge.
+neighbors_feed_mesh_graph = true
+
+# Also ask each neighbour for its region scopes. OFF BY DEFAULT, and worth
+# understanding before enabling:
+#   - Every bot radio command is serialised, and a scope request waits for its
+#     reply while holding that lock — up to ~25s per neighbour. With many
+#     neighbours the bot's own replies stall in bursts for minutes.
+#   - The zero-hop probe assumes the neighbour is not a known contact. This bot
+#     does track contacts, and for a repeater with no stored path the meshcore
+#     library reaches zero-hop by temporarily rewriting that contact's path on the
+#     device, then restoring it.
+# With this off, the snapshot reports every neighbour it heard with empty scopes.
+neighbors_collect_scopes = false
+
+# Cap on the discover request itself; a stalled BLE/serial write can otherwise
+# block far longer than the library's own reply timeout.
+neighbors_command_timeout = 20
+
+# Scope-request tuning (only used when neighbors_collect_scopes = true)
+# neighbors_scope_timeout: per-request wait; 0 = use the device's own airtime estimate
+# neighbors_scope_min_timeout: floor under the device-suggested timeout
+# neighbors_scope_gap: settle delay between requests (they must not overlap on air)
+# neighbors_cycle_timeout: overall budget for the pass; unreached neighbours report timeout
+neighbors_scope_timeout = 0
+neighbors_scope_min_timeout = 8
+neighbors_scope_gap = 2.0
+neighbors_cycle_timeout = 600
+
+# Override for this node's own "self.scopes" value in the published payload.
+# Empty asks the device for its default flood scope.
+neighbors_self_scopes =
+
 # Owner information (for packet analyzer registration)
 # Owner public key (64-character hex string)
-owner_public_key = 
+owner_public_key =
 
 # Owner email address
 owner_email = 
@@ -1698,6 +1919,10 @@ auth_token_method = device
 # Default: XYZ (invalid if not set)
 iata = XYZ
 
+# Optional observer name used in MQTT packet/status payloads.
+# If unset, the connected device/bot name is used.
+observer_name =
+
 # MQTT Broker Configuration
 # You can configure multiple MQTT brokers by using mqtt1_*, mqtt2_*, mqtt3_*, etc.
 # Each broker can have independent settings for transport, TLS, authentication, and topics.
@@ -1708,7 +1933,12 @@ iata = XYZ
 # mqttN_port = 1883                   # MQTT broker port (1883 for TCP, 443 for WSS)
 # mqttN_transport = tcp/websockets    # Transport type (tcp or websockets)
 # mqttN_use_tls = true/false          # Enable TLS/SSL (required for WSS)
+# mqttN_tls_insecure = true/false     # INSECURE: skip certificate/hostname verification.
+#                                     # Default false. Only for self-signed brokers on a
+#                                     # trusted network — otherwise credentials are MITMable.
 # mqttN_websocket_path = /mqtt        # WebSocket path (for websockets transport)
+# mqttN_keepalive = 60                # Seconds between PINGREQs. Lower (30) for websockets
+#                                     # through a proxy that drops idle connections.
 # mqttN_username =                     # MQTT username (optional, auto-generated for auth tokens)
 # mqttN_password =                     # MQTT password (optional, auto-generated for auth tokens)
 # mqttN_use_auth_token = true/false   # Use JWT auth token instead of username/password
@@ -1716,8 +1946,23 @@ iata = XYZ
 # mqttN_topic_status =                # Status topic template (uses placeholders below)
 # mqttN_topic_packets =               # Packets topic template (uses placeholders below)
 # mqttN_topic_prefix =                # Legacy topic prefix (fallback if topic_status/topic_packets not set)
-# mqttN_client_id =                   # MQTT client ID (optional, auto-generated from bot name)
+# mqttN_client_id =                   # MQTT client ID (optional; one is generated per broker).
+#                                     # Two brokers must never share an ID — brokers behind one
+#                                     # cluster (mqtt-a/mqtt-b) will evict each other's session.
 # mqttN_upload_packet_types =         # Comma-separated packet types to upload (e.g. 2,4); empty = all
+# mqttN_include_decoded = true/false  # Publish the decoded object to this broker (default: include_decoded)
+# mqttN_neighbors = true/false        # Publish the zero-hop neighbours snapshot to this broker.
+#                                     # Default TRUE — neighbors_enabled below is the single
+#                                     # switch, so nothing is sent until you turn that on.
+#                                     # Set false to hold just this broker back.
+# mqttN_topic_neighbors =             # Neighbours topic template. Defaults to this broker's
+#                                     # packets topic with its last segment swapped for
+#                                     # "neighbors" (so a templated packets topic yields
+#                                     # meshcore/{IATA}/{PUBLIC_KEY}/neighbors), else
+#                                     # <mqttN_topic_prefix>/neighbors. A derived
+#                                     # location-routed topic is skipped with a warning when
+#                                     # no iata is set (blank or XYZ), rather than publishing
+#                                     # into that shared namespace.
 #
 # Topic template placeholders:
 # {IATA} - Uppercase IATA code (e.g., SEA)
@@ -1736,11 +1981,15 @@ mqtt1_token_audience = mqtt-us-v1.letsmesh.net
 mqtt1_topic_status = meshcore/{IATA}/{PUBLIC_KEY}/status
 mqtt1_topic_packets = meshcore/{IATA}/{PUBLIC_KEY}/packets
 mqtt1_websocket_path = /mqtt
-mqtt1_client_id = 
-mqtt1_upload_packet_types = 
+mqtt1_client_id =
+mqtt1_upload_packet_types =
+# mqtt1_include_decoded = true         # Publish decoded payloads to this broker (default: include_decoded)
 # Optional per-broker JWT (inherit globals if omitted):
 # mqtt1_jwt_ttl_seconds = 3600           # JWT exp claim: iat + this many seconds
 # mqtt1_jwt_renewal_interval = 1800      # Refresh password this often; use < ttl; 0 = no renewal loop
+# mqtt1_jwt_reconnect_on_renew = true    # Reconnect after renewing so the fresh token is in force.
+#                                        # Default true. Brokers that enforce the JWT's expiry drop
+#                                        # the session otherwise. Off only if yours ignores expiry.
 
 # MQTT Broker 2 - Let's Mesh Analyzer (EU)
 mqtt2_enabled = true
@@ -1776,7 +2025,6 @@ health_check_interval = 30
 
 # Health check grace period (consecutive failures before warning)
 health_check_grace_period = 2
-
 [MapUploader]
 # Enable map uploader (true/false). Uploads node adverts (repeaters, room servers, sensors) to map.meshcore.dev
 # CHAT adverts skipped; adverts without GPS or with 0.0 coords skipped. Uses device radio parameters
@@ -1805,7 +2053,6 @@ min_reupload_interval = 3600
 # true: Show detailed debug information (useful for troubleshooting)
 # false: Standard logging (default)
 verbose = false
-
 [Weather_Service]
 # Enable weather service for scheduled forecasts and alert monitoring (true/false)
 enabled = false
@@ -1843,27 +2090,46 @@ alerts_channel = #weather
 # Default: 600000 (10 minutes)
 poll_weather_alerts_interval = 600000
 
-# DEPRECATED: Lightning detection has been moved to [Blitzortung_Service]
-# The settings below are kept for backward compatibility only.
-# Please use [Blitzortung_Service] for new configurations.
-# If you have blitz_collection_interval or blitz_area settings below,
-# Blitzortung_Service will automatically detect and use them.
+# --- Proactive rain nowcast ("rain incoming" push) ---
+# Automatically posts a heads-up to a channel when precipitation is about to
+# start at the bot's position (my_position_lat/lon above), using Open-Meteo's
+# 15-minutely forecast — the same engine as the `rain`/`nowcast` command.
+# Fires once per rain episode (deduped), re-arms after it clears.
+# Opt-in: set true to enable. Default: false
+rain_nowcast_enabled = false
+
+# Channel for the heads-up. Defaults to weather_channel if unset.
+# rain_channel = #weather
+
+# How often to check for incoming rain (milliseconds). Default: 900000 (15 min)
+poll_rain_nowcast_interval = 900000
+
+# Only announce when rain is expected to start within this many minutes.
+# Default: 60
+rain_nowcast_lead_minutes = 60
+
+# Minimum minutes between pushes (cooldown backstop against forecast flapping).
+# Default: 30
+rain_nowcast_renotify_minutes = 30
+
+# Cache TTL in seconds for nowcast API responses at the service position.
+# Default: 300
+rain_nowcast_cache_seconds = 300
+
+# Also announce when rain is about to STOP (not just start). Default: true
+# rain_nowcast_announce_ending = true
+
+# Precipitation amount (mm per 15-min bucket) that counts as rain. Lower = more
+# sensitive to light drizzle; raise to ignore trace amounts. Default: 0.1
+# rain_nowcast_threshold_mm = 0.1
 
 # Thunder/storm data collection interval (milliseconds)
-# DEPRECATED: Use [Blitzortung_Service] window_minutes instead
 # How often to aggregate thunder data for evaluation
 # Default: 600000 (10 minutes)
 # Note: Storm detection area must be configured for this to work
-# blitz_collection_interval = 600000
+blitz_collection_interval = 600000
 
-# Minimum number of lightning strikes in a location bucket required to trigger an alert
-# DEPRECATED: Use [Blitzortung_Service] alert_threshold instead
-# Stats (strike counter and closest position) are reset after each collection interval
-# Default: 10
-# blitz_alert_threshold = 10
-
-# Storm detection area (optional, DEPRECATED)
-# DEPRECATED: Use [Blitzortung_Service] blitz_area_* settings instead
+# Storm detection area (optional)
 # Only report storms detected within this area
 # Leave empty to disable area filtering
 # Format: decimal degrees
@@ -1871,56 +2137,6 @@ poll_weather_alerts_interval = 600000
 # blitz_area_min_lon = 15.54
 # blitz_area_max_lat = 48.76
 # blitz_area_max_lon = 18.62
-
-[Blitzortung_Service]
-# Dedicated Blitzortung lightning detection service.
-# Consolidates all lightning detection functionality (previously split between
-# Blitzortung_Service and Weather_Service). When enabled, the Weather_Service
-# will automatically skip its built-in lightning detection to prevent duplicates.
-# Requires paho-mqtt: pip install paho-mqtt
-#
-# Configuration Fallback Chain:
-# - alert_threshold: [Blitzortung_Service] → [Weather_Service] blitz_alert_threshold
-# - window_minutes: [Blitzortung_Service] → (1000 * [Weather_Service] blitz_collection_interval)
-# - position (my_position_lat/lon): [Blitzortung_Service] → [Weather_Service]
-# - blitz_area_*: [Blitzortung_Service] → [Weather_Service]
-#
-# This enables painless migration: existing Weather_Service config will work, but
-# new configs should use [Blitzortung_Service].
-enabled = false
-
-# Optional regional TC_FLOOD scope for mesh channel posts from this service.
-# flood_scope = #west
-
-# Channel to post lightning alerts to
-channel = #bot
-
-# Minimum number of strikes per (heading, 10 km distance) bucket within the
-# collection window required to trigger an alert.
-# Default: 10 (falls back to [Weather_Service] blitz_alert_threshold if not set)
-# alert_threshold = 10
-
-# Collection window in minutes. Strikes are grouped and counted over this period,
-# then the buffer is reset.
-# Default: 10 minutes (falls back to [Weather_Service] blitz_collection_interval in ms if not set)
-# window_minutes = 10
-
-# Bot position for heading/distance calculation.
-# Can be omitted here if already set in [Weather_Service] (will fall back automatically).
-# my_position_lat = 47.51
-# my_position_lon = 15.54
-
-# Bounding box – only strikes within this rectangle are processed.
-# All four values are required to enable strike monitoring.
-# Falls back to [Weather_Service] blitz_area_* if not set here.
-# blitz_area_min_lat = 47.0
-# blitz_area_min_lon = 15.0
-# blitz_area_max_lat = 48.0
-# blitz_area_max_lon = 16.5
-
-# When true, mesh channel alerts are suppressed; only external webhooks / Telegram receive them.
-# silence_mesh_output = false
-
 [MqttWeather]
 # MQTT subscriber for custom.mqtt_weather.* topics (requires paho-mqtt). Service plugin: mqtt_weather_service.
 # Topic strings belong under [Weather]: custom.mqtt_weather.default and custom.mqtt_weather.<name> (see that section).
@@ -1933,6 +2149,9 @@ enabled = false
 # For WebSockets: transport = websockets, set port (e.g. 443), websocket_path, often use_tls = true
 # websocket_path = /mqtt
 # use_tls = false
+# INSECURE: skip certificate/hostname verification. Default false. Only for
+# self-signed brokers on a trusted network — otherwise credentials are MITMable.
+# tls_insecure = false
 # username =
 # password =
 # client_id =
@@ -1958,7 +2177,6 @@ enabled = false
 
 # Max output length after sanitize (characters)
 # passthrough_max_length = 500
-
 [Earthquake_Service]
 # Enable earthquake alert service (true/false)
 # Polls USGS Earthquake API and posts alerts to a channel when quakes occur in the configured region
@@ -1994,7 +2212,67 @@ maxlongitude = -114.0
 # When true: notification message then link-only message. When false: no link sent.
 # Default: true
 send_link = true
+[Worldcup_Service]
+# Live FIFA World Cup score updates posted to a channel (true/false).
+# Posts proactive messages as matches progress, e.g.:
+#   Group E: Côte d'Ivoire 0, Ecuador 0 (half-time)
+# Only runs while a World Cup (men's or women's) is in progress; the active tournament
+# is auto-detected from the ESPN calendar, so no dates need to be configured. When no
+# tournament is active the service idles. Pairs with the wc/worldcup command.
+enabled = false
 
+# Optional regional TC_FLOOD scope for mesh channel posts from this service.
+# flood_scope = #west
+
+# Channel to post live updates to
+channel = #general
+
+# Poll interval (milliseconds) while a tournament is active but no match is in progress
+# (waiting for the next kick-off). Default: 60000 (1 minute)
+poll_interval = 60000
+
+# Faster poll interval (milliseconds) used while at least one match is LIVE, for timelier
+# goal/half-time/full-time updates. ESPN's scoreboard is edge-cached ~15-20s, so polling
+# faster than that yields no fresher data. Default: 20000 (20 seconds)
+live_poll_interval = 20000
+
+# Idle interval (seconds) used when no tournament is in progress. Default: 1800 (30 min)
+idle_interval = 1800
+
+# Which match events to announce (each true/false)
+announce_kickoff = true
+announce_goals = true
+# Post a follow-up when a previously-announced goal is overturned by VAR (the score is
+# rescinded), e.g. "Group J: Argentina 0, Algeria 0 — 60' Lionel Messi ruled out (VAR)".
+# Detected from the score being reverted; requires announce_goals = true.
+announce_disallowed = true
+# Announce red cards, e.g.
+#   "Group H: Bosnia-Herzegovina 0, Switzerland 1 — red card: Tarik Muharemovic (Switzerland, 80')"
+announce_red_cards = true
+# Announce yellow cards too. OFF by default — yellows are frequent and can flood a mesh channel.
+announce_yellow_cards = false
+# Announce match stoppages (postponed / suspended / abandoned / cancelled). Rare but important.
+announce_stoppage = true
+announce_halftime = true
+announce_fulltime = true
+
+# Send only to external targets (Discord/Telegram) and skip mesh channel posts (true/false).
+# Default: false
+silence_mesh_output = false
+
+# EXPERIMENTAL: use ESPN's "fastcast" WebSocket push for near-real-time updates instead of
+# relying solely on the poll interval (true/false). When on, a push wakes the service to
+# re-check scores immediately (with a cache-busting request); REST polling above continues
+# as a heartbeat/fallback, so this can only make updates faster, never break them.
+# This is a reverse-engineered, undocumented ESPN protocol and may stop working without
+# notice. Leave false unless you are testing it. Default: false
+use_fastcast = false
+# Optional override for the fastcast topic to subscribe to. Leave blank to use the default
+# derived from the men's tournament. The topic format is undocumented and may need tuning.
+# fastcast_topic =
+
+# ESPN API timeout in seconds
+api_timeout = 10
 [Rate_Limits]
 # Per-channel rate limiting: minimum seconds between bot messages on a specific channel.
 # Format: channel.<channel_name>_seconds = <seconds>
@@ -2003,7 +2281,6 @@ send_link = true
 #channel.BotCmds_seconds = 15
 # Example: limit the default channel to 10 seconds between responses:
 #channel.BroadcastCh_seconds = 10
-
 [Webhook]
 # Inbound webhook receiver — accept HTTP POST requests and relay them as MeshCore messages.
 # Useful for integrating external systems (alerts, monitoring, scripts) with the mesh.
@@ -2052,7 +2329,6 @@ port = 8765
 #
 # Response: {"ok": true}  or  {"error": "..."}
 # ---------------------------------------------------------------------------
-
 [RepeaterPrefixCollision_Service]
 # Enable repeater prefix collision notifications (true/false)
 # Watches NEW_CONTACT events; after the repeater is stored + geolocated in the database,
@@ -2092,10 +2368,25 @@ include_prefix_free_hint = true
 # Cooldown (minutes) to reduce alert spam for the same prefix (and repeated NEW_CONTACT events).
 cooldown_minutes_per_prefix = 60
 
+# --- Optional external notifications (BaseServicePlugin; any *_Service section) ---
+# Comma-separated Discord webhook URLs for collision/discovery alerts
+# discord_webhook_urls = https://discord.com/api/webhooks/...
+# Comma-separated Telegram chat IDs (or @channel usernames)
+# telegram_chat_ids = -1001234567890
+# Optional per-service bot token; else TELEGRAM_BOT_TOKEN env or [TelegramBridge] api_token
+# telegram_bot_token =
+
+# When true, send discovery notifications to Discord/Telegram for every new repeater
+# (not only prefix collisions). Default: false
+notify_external_on_all_new_repeaters = false
+
+# When true, skip mesh channel posts; alerts go only to external targets above.
+# Default: false
+silence_mesh_output = false
+
 # Eligibility (strict, not configurable): alerts only when first_heard is today (local) and
 # unique_advert_packets has exactly one distinct packet_hash for this public_key today—so same-day
 # re-adverts or double-ingest skip rather than spam. See docs/repeater-prefix-collision-service.md.
-
 [DiscordBridge]
 # Enable Discord bridge service
 # Enable Discord bridge (true/false). One-way, read-only webhooks
@@ -2146,7 +2437,6 @@ avatar_style = color
 #
 # Fan out a single MeshCore channel to multiple Discord servers
 # bridge.Public = https://discord.com/api/webhooks/AAA/aaa..., https://discord.com/api/webhooks/BBB/bbb...
-
 [TelegramBridge]
 # Enable Telegram bridge service
 # Posts MeshCore channel messages to Telegram via the Bot API (one-way, read-only)
@@ -2183,6 +2473,9 @@ enabled = false
 # bridge.Public = @YourChannelName
 # bridge.emergency = -1001234567890
 
+# =============================================================================
+# Command plugins (*_Command sections, alphabetical)
+# =============================================================================
 [DARC_MoWaS_Service]
 # Enable DARC MoWaS (Mobile Warning System) integration for receiving and posting warnings
 # For legal requirements and backend configuration, please read https://www.darc.de/index.php?id=58435 before operating.
@@ -2191,6 +2484,13 @@ enabled = false
 
 # Optional regional TC_FLOOD scope for mesh channel posts from this service.
 # flood_scope = #west
+# Optional flood scope setting per region (fallback to flood_scope if other region)
+# Region ids are 12-digit "Regionalschluessel", whereby the tailing zeros refer to
+# any id within that region
+# flood_scope.<region-id> = #scope
+# Example:
+# flood_scope.091840000000 = #de-by-muc
+# flood_scope.090000000000 = #de-by
 
 # Listen address and port of webserver that receives the webhook POSTs from DARC MoWaS.
 # Must be accessible from the internet (or HAMNET) for MoWaS to reach it.

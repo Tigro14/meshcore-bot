@@ -1,11 +1,15 @@
 # MeshCore Bot - Easy Start Config
 # 1. Copy to config.ini
-# 2. Set serial_port (or hostname for TCP), bot_name, bot_latitude, bot_longitude
+# 2. Set serial_port (or hostname + tcp_port for TCP), bot_name, bot_latitude, bot_longitude
 # 3. Run: python3 meshcore_bot.py
 
 [Connection]
+# serial (default). For ble/tcp see config.ini.example [Connection] precedence notes.
 connection_type = serial
 serial_port = /dev/ttyUSB0
+#ble_device_name =
+#hostname = 192.168.1.60
+#tcp_port = 5000
 timeout = 30
 radio_probe_interval_seconds = 300
 radio_probe_fail_threshold = 3
@@ -78,9 +82,14 @@ enabled = true
 [Sports_Command]
 teams = seahawks,mariners,sounders,kraken
 
-# Optional: Web viewer - uncomment to enable. SECURITY: no auth; use host=127.0.0.1 for localhost only.
+# FIFA World Cup scores (wc/worldcup); only responds during a tournament (auto-detected)
+[Worldcup_Command]
+enabled = true
+
+# Optional: Web viewer — set web_viewer_password when host is not 127.0.0.1
 # [Web_Viewer]
 # enabled = true
 # host = 127.0.0.1
+# web_viewer_password = changeme
 # port = 8080
 # auto_start = true

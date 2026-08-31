@@ -5,8 +5,10 @@ Provides scheduled weather forecasts and alert monitoring
 """
 
 import asyncio
-import contextlib
+import json
+import math
 import re
+import threading
 import time
 import xml.dom.minidom
 from datetime import datetime, timedelta, timezone
@@ -19,7 +21,29 @@ from apscheduler.triggers.cron import CronTrigger
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from ..url_shortener import shorten_url
+# Try to import MQTT client (use paho-mqtt like packet capture service)
+try:
+    import paho.mqtt.client as mqtt
+    MQTT_AVAILABLE = True
+except ImportError:
+    MQTT_AVAILABLE = False
+    mqtt = None
+
+import contextlib
+
+from ..commands.rain_command import (
+    analyze_precip_nowcast,
+    decide_rain_notification,
+    episode_probability_temp,
+    fetch_precip_series,
+    fetch_precip_series_nws,
+    format_amount_estimate,
+    join_location,
+    nws_http_means_no_coverage,
+    precip_descriptor,
+    reverse_geocode_region,
+)
+from ..url_shortener import shorten_url_sync
 from ..utils import format_temperature_high_low, get_config_timezone
 from .base_service import BaseServicePlugin
 
@@ -27,12 +51,42 @@ from .base_service import BaseServicePlugin
 class WeatherService(BaseServicePlugin):
     """Weather service providing scheduled forecasts and alert monitoring.
 
-    Manages daily weather forecasts and polls for NOAA weather alerts.
-    Lightning strike monitoring is handled by BlitzortungService.
+    Manages daily weather forecasts, polls for NOAA weather alerts, and
+    monitors lightning strikes via MQTT (Blitzortung).
     """
 
     config_section = 'Weather_Service'
     description = "Scheduled weather forecasts and alert monitoring"
+
+    # Web-viewer settings schema (see modules/settings_schema.py)
+    settings_schema = [
+        {"key": "weather_alarm", "label": "Daily forecast time", "type": "str", "default": "6:00",
+         "help": "HH:MM (24h), or 'sunrise'/'sunset'."},
+        {"key": "weather_channel", "label": "Forecast channel", "type": "str", "default": "#weather",
+         "help": "Channel for daily forecasts."},
+        {"key": "alerts_channel", "label": "Alerts channel", "type": "str", "default": "#weather",
+         "help": "Channel for weather alerts."},
+        {"key": "my_position_lat", "label": "Latitude", "type": "float", "min": -90, "max": 90, "default": "",
+         "help": "Bot latitude (decimal degrees) for forecasts/alerts."},
+        {"key": "my_position_lon", "label": "Longitude", "type": "float", "min": -180, "max": 180, "default": "",
+         "help": "Bot longitude (decimal degrees)."},
+        {"key": "poll_weather_alerts_interval", "label": "Alert poll interval", "type": "int",
+         "min": 1000, "default": 600000, "unit": "ms", "help": "How often to check for new alerts."},
+        {"key": "rain_nowcast_enabled", "label": "Rain nowcast", "type": "bool", "default": False,
+         "help": "Push a heads-up when rain is about to start at the bot's position."},
+        {"key": "rain_channel", "label": "Rain nowcast channel", "type": "str", "default": "",
+         "help": "Channel for rain heads-ups. Defaults to the forecast channel."},
+        {"key": "poll_rain_nowcast_interval", "label": "Rain poll interval", "type": "int",
+         "min": 1000, "default": 900000, "unit": "ms", "help": "How often to check for incoming rain."},
+        {"key": "rain_nowcast_lead_minutes", "label": "Rain lead time", "type": "int", "min": 1, "default": 60, "unit": "min",
+         "help": "Only announce rain starting within this many minutes."},
+        {"key": "rain_nowcast_renotify_minutes", "label": "Rain renotify", "type": "int", "min": 1, "default": 30, "unit": "min",
+         "help": "Minimum minutes between rain pushes."},
+        {"key": "blitz_collection_interval", "label": "Storm collection interval", "type": "int",
+         "min": 1000, "default": 600000, "unit": "ms", "help": "How often thunder/storm data is aggregated."},
+        {"key": "flood_scope", "label": "Flood scope", "type": "str", "default": "",
+         "help": "Optional regional TC_FLOOD scope for mesh posts (e.g. #west)."},
+    ]
 
     def __init__(self, bot: Any):
         """Initialize weather service.
@@ -51,7 +105,18 @@ class WeatherService(BaseServicePlugin):
         self.weather_model = self._load_weather_model()
 
         # Polling intervals (in milliseconds, converted to seconds)
+        self.blitz_collection_interval = self.bot.config.getint('Weather_Service', 'blitz_collection_interval', fallback=600000) / 1000.0
         self.poll_weather_alerts_interval = self.bot.config.getint('Weather_Service', 'poll_weather_alerts_interval', fallback=600000) / 1000.0
+
+        # Storm detection area (optional)
+        self.blitz_area = None
+        if self.bot.config.has_option('Weather_Service', 'blitz_area_min_lat'):
+            self.blitz_area = {
+                'min_lat': self.bot.config.getfloat('Weather_Service', 'blitz_area_min_lat'),
+                'min_lon': self.bot.config.getfloat('Weather_Service', 'blitz_area_min_lon'),
+                'max_lat': self.bot.config.getfloat('Weather_Service', 'blitz_area_max_lat'),
+                'max_lon': self.bot.config.getfloat('Weather_Service', 'blitz_area_max_lon'),
+            }
 
         # Validate position
         if self.my_position_lat is None or self.my_position_lon is None:
@@ -61,11 +126,33 @@ class WeatherService(BaseServicePlugin):
 
         # Create retry-enabled session for API calls
         self.api_session = self._create_retry_session()
+        # requests.Session mutates shared cookie/adapter state and is not safe to
+        # use concurrently. Keep all of this service's threaded session work
+        # serialized without making the event loop wait on a threading lock.
+        self._api_session_lock = threading.Lock()
 
         # Get temperature/wind units from config (for Open-Meteo)
         self.temperature_unit = self.bot.config.get('Weather', 'temperature_unit', fallback='fahrenheit')
         self.wind_speed_unit = self.bot.config.get('Weather', 'wind_speed_unit', fallback='mph')
         self.precipitation_unit = self.bot.config.get('Weather', 'precipitation_unit', fallback='inch')
+
+        # Proactive rain nowcast ("rain incoming" push). Reuses the rain command's
+        # Open-Meteo 15-minutely logic for the bot's own position.
+        self.rain_nowcast_enabled = self.bot.config.getboolean('Weather_Service', 'rain_nowcast_enabled', fallback=False)
+        self.rain_channel = self.bot.config.get('Weather_Service', 'rain_channel', fallback=self.weather_channel)
+        self.poll_rain_nowcast_interval = self.bot.config.getint('Weather_Service', 'poll_rain_nowcast_interval', fallback=900000) / 1000.0
+        self.rain_nowcast_lead_minutes = self.bot.config.getint('Weather_Service', 'rain_nowcast_lead_minutes', fallback=60)
+        self.rain_nowcast_renotify_minutes = self.bot.config.getint('Weather_Service', 'rain_nowcast_renotify_minutes', fallback=30)
+        self.rain_nowcast_threshold_mm = self.bot.config.getfloat('Weather_Service', 'rain_nowcast_threshold_mm', fallback=0.1)
+        # Also announce when rain is about to stop (not just start).
+        self.rain_nowcast_announce_ending = self.bot.config.getboolean('Weather_Service', 'rain_nowcast_announce_ending', fallback=True)
+        # Optional precip-amount estimate in the heads-up, e.g. "(est 0.2 in)".
+        self.rain_nowcast_show_amount = self.bot.config.getboolean('Weather_Service', 'rain_nowcast_show_amount', fallback=True)
+        self.rain_nowcast_amount_unit = self.bot.config.get('Weather_Service', 'rain_nowcast_amount_unit', fallback='in').strip().lower()
+        # Only push an "incoming" alert when precip is at least this likely (%), to
+        # cut false alarms; reuse a fetched series for this many seconds.
+        self.rain_nowcast_min_probability = self.bot.config.getint('Weather_Service', 'rain_nowcast_min_probability', fallback=50)
+        self.rain_nowcast_cache_seconds = self.bot.config.getint('Weather_Service', 'rain_nowcast_cache_seconds', fallback=300)
 
         # Track seen alerts to avoid duplicates
         self.seen_alert_ids: set[str] = set()
@@ -73,11 +160,35 @@ class WeatherService(BaseServicePlugin):
         # Track last alert check time to only send new alerts
         self.last_alert_check_time: Optional[float] = None
 
+        # Lazy: None = unknown, False = NOAA alerts unavailable (non-US / no coverage)
+        self._nws_alerts_available: Optional[bool] = None
+
         # Background tasks
         self._alerts_task: Optional[asyncio.Task] = None
         self._forecast_task: Optional[asyncio.Task] = None
+        self._lightning_task: Optional[asyncio.Task] = None
+        self._rain_task: Optional[asyncio.Task] = None
         self._forecast_scheduler: Optional[BackgroundScheduler] = None
         self._running = False
+
+        # Rain nowcast episode state (dedup): which notice has fired for the
+        # current rain episode, and the last-push timestamps (cooldown backstop).
+        self._rain_start_announced = False
+        self._rain_end_announced = False
+        self._last_rain_start_time: Optional[float] = None
+        self._last_rain_end_time: Optional[float] = None
+        # "City, ST" / "City, Country" for the proactive push (cached separately
+        # from the daily-forecast location name).
+        self._cached_rain_location: Optional[str] = None
+
+        # Track recent lightning strikes to avoid duplicates
+        self.recent_lightning_strikes: set[str] = set()
+
+        # Lightning detection via MQTT
+        self.blitz_buffer: list[dict[str, Any]] = []
+        self.seen_blitz_keys: set[str] = set()
+        self.mqtt_client: Optional[Any] = None  # paho.mqtt.client.Client
+        self.mqtt_task: Optional[asyncio.Task] = None
 
         # Check if using sunrise/sunset
         self.use_sunrise_sunset = self.weather_alarm_time.lower() in ['sunrise', 'sunset']
@@ -130,6 +241,30 @@ class WeatherService(BaseServicePlugin):
         session.mount("https://", adapter)
         session.mount("http://", adapter)
         return session
+
+    def _run_api_session_call(self, callback: Any, *args: Any, **kwargs: Any) -> Any:
+        """Run one complete synchronous session operation under the session lock."""
+        with self._api_session_lock:
+            return callback(*args, **kwargs)
+
+    def _get_api_json(
+        self,
+        url: str,
+        *,
+        params: Optional[dict[str, Any]] = None,
+        timeout: float,
+    ) -> tuple[requests.Response, Any]:
+        """Fetch and decode JSON as one serialized worker-thread operation."""
+        with self._api_session_lock:
+            response = self.api_session.get(url, params=params, timeout=timeout)
+            data = response.json() if response.ok else None
+            return response, data
+
+    def _get_api_text(self, url: str, *, timeout: float) -> tuple[requests.Response, str]:
+        """Fetch and decode text as one serialized worker-thread operation."""
+        with self._api_session_lock:
+            response = self.api_session.get(url, timeout=timeout)
+            return response, response.text if response.ok else ""
 
     def _get_sunrise_sunset_time(self, event: str) -> Optional[datetime]:
         """Get sunrise or sunset time for configured position.
@@ -184,6 +319,22 @@ class WeatherService(BaseServicePlugin):
         # Start background tasks
         self._alerts_task = asyncio.create_task(self._poll_weather_alerts_loop())
 
+        # Start proactive rain nowcast polling
+        if self.rain_nowcast_enabled:
+            self._rain_task = asyncio.create_task(self._poll_rain_nowcast_loop())
+        else:
+            self._rain_task = None
+
+        # Start lightning detection if area is configured
+        if self.blitz_area and MQTT_AVAILABLE:
+            self._lightning_task = asyncio.create_task(self._poll_lightning_loop())
+            self.mqtt_task = asyncio.create_task(self._connect_blitzortung_mqtt())
+        else:
+            self._lightning_task = None
+            self.mqtt_task = None
+            if self.blitz_area and not MQTT_AVAILABLE:
+                self.logger.warning("Lightning detection configured but paho-mqtt not available")
+
         self.logger.info("Weather service started")
 
     async def stop(self) -> None:
@@ -204,6 +355,28 @@ class WeatherService(BaseServicePlugin):
             self._forecast_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._forecast_task
+
+        if self._lightning_task:
+            self._lightning_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._lightning_task
+
+        if self._rain_task:
+            self._rain_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._rain_task
+
+        if self.mqtt_task:
+            self.mqtt_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.mqtt_task
+
+        if self.mqtt_client:
+            try:
+                self.mqtt_client.loop_stop()
+                self.mqtt_client.disconnect()
+            except Exception:
+                pass
 
         if self._forecast_scheduler is not None:
             try:
@@ -383,15 +556,18 @@ class WeatherService(BaseServicePlugin):
                 params['models'] = self.weather_model
 
             try:
-                response = self.api_session.get(api_url, params=params, timeout=10)
+                response, data = await asyncio.to_thread(
+                    self._get_api_json,
+                    api_url,
+                    params=params,
+                    timeout=10,
+                )
                 if not response.ok:
                     self.logger.warning(f"Error fetching weather from Open-Meteo: HTTP {response.status_code}")
                     return "Error fetching weather data"
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 self.logger.warning(f"Timeout/connection error fetching weather: {e}")
                 return "Error fetching weather data"
-
-            data = response.json()
 
             # Extract current conditions
             current = data.get('current', {})
@@ -605,6 +781,9 @@ class WeatherService(BaseServicePlugin):
                 # Subsequent checks: only get alerts since last check
                 time_window_start = self.last_alert_check_time
 
+            if self._nws_alerts_available is False:
+                return
+
             # Round coordinates
             lat_rounded = round(self.my_position_lat, 4)
             lon_rounded = round(self.my_position_lon, 4)
@@ -613,17 +792,31 @@ class WeatherService(BaseServicePlugin):
             alert_url = f"https://api.weather.gov/alerts/active.atom?point={lat_rounded},{lon_rounded}"
 
             try:
-                alert_data = self.api_session.get(alert_url, timeout=10)
+                alert_data, alert_text = await asyncio.to_thread(
+                    self._get_api_text,
+                    alert_url,
+                    timeout=10,
+                )
                 if not alert_data.ok:
-                    self.logger.debug(f"Error fetching alerts: HTTP {alert_data.status_code}")
+                    if nws_http_means_no_coverage(alert_data.status_code):
+                        self._nws_alerts_available = False
+                        self.logger.warning(
+                            "NWS weather alerts unavailable (HTTP %s); NOAA alerts are US-only — "
+                            "skipping future alert polls",
+                            alert_data.status_code,
+                        )
+                    else:
+                        self.logger.debug(f"Error fetching alerts: HTTP {alert_data.status_code}")
                     return
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 self.logger.debug(f"Timeout/connection error fetching alerts: {e}")
                 return
 
+            self._nws_alerts_available = True
+
             # Parse ATOM feed with full metadata extraction (same as wx_command)
             alerts = []
-            alertxml = xml.dom.minidom.parseString(alert_data.text)
+            alertxml = await asyncio.to_thread(xml.dom.minidom.parseString, alert_text)
 
             for entry in alertxml.getElementsByTagName("entry"):
                 try:
@@ -706,6 +899,415 @@ class WeatherService(BaseServicePlugin):
 
         except Exception as e:
             self.logger.error(f"Error checking weather alerts: {e}")
+
+    async def _poll_rain_nowcast_loop(self) -> None:
+        """Background task: poll for incoming rain and push a heads-up once per episode."""
+        self.logger.info(
+            f"Starting rain nowcast polling (interval: {self.poll_rain_nowcast_interval}s, "
+            f"lead: {self.rain_nowcast_lead_minutes}min)"
+        )
+        while self._running:
+            try:
+                await self._check_rain_nowcast()
+                await asyncio.sleep(self.poll_rain_nowcast_interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error in rain nowcast polling loop: {e}")
+                await asyncio.sleep(60)  # Wait 1 minute on error before retrying
+
+    async def _check_rain_nowcast(self) -> None:
+        """Fetch the precip nowcast for the bot's position and push if rain is incoming."""
+        try:
+            # Prefer the NWS gridpoint (forecaster-adjusted QPF + PoP — it captures
+            # the convection the Open-Meteo model smooths away, which is why this
+            # push could stay silent during real rain). Fall back to Open-Meteo when
+            # NWS has no coverage (non-US) or the request fails.
+            series = await asyncio.to_thread(
+                self._run_api_session_call,
+                fetch_precip_series_nws,
+                self.api_session,
+                self.my_position_lat,
+                self.my_position_lon,
+                timeout=10,
+                logger=self.logger,
+                cache_ttl=self.rain_nowcast_cache_seconds,
+            )
+            if not series:
+                series = await asyncio.to_thread(
+                    self._run_api_session_call,
+                    fetch_precip_series,
+                    self.api_session,
+                    self.my_position_lat,
+                    self.my_position_lon,
+                    weather_model=self.weather_model or "",
+                    timeout=10,
+                    logger=self.logger,
+                )
+            if not series:
+                return
+
+            # Look at least as far ahead as the lead window (plus a margin so we can
+            # estimate how long the rain lasts).
+            window = max(120, self.rain_nowcast_lead_minutes + 15)
+            result = analyze_precip_nowcast(
+                series["times"], series["precip"], series["codes"], series["now"],
+                window_minutes=window, threshold=self.rain_nowcast_threshold_mm,
+                current_precip=series.get("current_precip"), current_code=series.get("current_code"),
+                snow=series.get("snow"),
+            )
+            if result is None:
+                return
+
+            prob, temp_f = episode_probability_temp(series, result)
+            # Probability gate: skip a low-confidence "incoming" alert, and leave
+            # the announced flag unset so it can still fire if confidence rises.
+            if result.state == "dry_incoming" and prob is not None and prob < self.rain_nowcast_min_probability:
+                return
+
+            now_ts = time.time()
+            since_start = None if self._last_rain_start_time is None else (now_ts - self._last_rain_start_time)
+            since_end = None if self._last_rain_end_time is None else (now_ts - self._last_rain_end_time)
+            kind, self._rain_start_announced, self._rain_end_announced = decide_rain_notification(
+                result.state,
+                result.minutes,
+                lead_minutes=self.rain_nowcast_lead_minutes,
+                start_announced=self._rain_start_announced,
+                end_announced=self._rain_end_announced,
+                seconds_since_last_start=since_start,
+                seconds_since_last_end=since_end,
+                renotify_minutes=self.rain_nowcast_renotify_minutes,
+                announce_ending=self.rain_nowcast_announce_ending,
+            )
+            if kind is None:
+                return
+
+            message = await self._format_rain_nowcast(result, kind, prob, temp_f)
+            await self.bot.command_manager.send_channel_message(
+                self.rain_channel,
+                message,
+                scope=self.get_mesh_flood_scope(),
+            )
+            if kind == "starting":
+                self._last_rain_start_time = now_ts
+            else:
+                self._last_rain_end_time = now_ts
+            self.logger.info(f"Rain nowcast ({kind}) sent to {self.rain_channel}: {message}")
+
+        except Exception as e:
+            self.logger.error(f"Error checking rain nowcast: {e}")
+
+    async def _format_rain_nowcast(
+        self, result: Any, kind: str, prob: Optional[int] = None, temp_f: Optional[int] = None
+    ) -> str:
+        """Build the proactive heads-up line (English, mesh-friendly).
+
+        kind is "starting" (rain incoming) or "ending" (rain about to stop).
+        prob/temp_f add a probability and a borderline-temperature tag.
+        """
+        emoji, ptype = precip_descriptor(result.bucket)
+
+        # City + state/country (same labeling as the !rain command), reverse-
+        # geocoded once and cached. Kept separate from the daily-forecast cache.
+        if self._cached_rain_location is None:
+            loop = asyncio.get_event_loop()
+            city, suffix = await loop.run_in_executor(
+                None,
+                lambda: reverse_geocode_region(
+                    self.bot, self.my_position_lat, self.my_position_lon, timeout=10, logger=self.logger
+                ),
+            )
+            self._cached_rain_location = join_location(city, suffix)
+        location = f" near {self._cached_rain_location}" if self._cached_rain_location else ""
+
+        parts = []
+        if self.rain_nowcast_show_amount:
+            amt = format_amount_estimate(
+                result.bucket, result.amount_mm, result.snow_cm, self.rain_nowcast_amount_unit
+            )
+            if amt:
+                parts.append(f"est {amt}")
+        if prob is not None:
+            parts.append(f"{prob}%")
+        est = f" ({', '.join(parts)})" if parts else ""
+        temp = f" {temp_f}°F" if (temp_f is not None and 30 <= temp_f <= 38) else ""
+        if kind == "ending":
+            return f"{emoji} Heads up — {ptype} ending in ~{result.minutes}min{est}{temp}{location}"
+        # Flag prolonged rain ("steady") rather than a numeric duration, which
+        # would sit confusingly next to the minutes-until-start value.
+        steady = " (steady)" if result.open_ended else ""
+        return f"{emoji} Heads up — {ptype} starting in ~{result.minutes}min{est}{steady}{temp}{location}"
+
+    async def _connect_blitzortung_mqtt(self) -> None:
+        """Connect to Blitzortung MQTT broker and subscribe to lightning data.
+
+        Maintains a connection to the MQTT broker for real-time lightning strikes.
+        """
+        if not self.blitz_area or not MQTT_AVAILABLE:
+            return
+
+        broker_host = "blitzortung.ha.sed.pl"
+        broker_port = 1883
+        topic = "blitzortung/1.1/#"
+
+        self.logger.info(f"Connecting to Blitzortung MQTT broker: {broker_host}:{broker_port}")
+
+        while self._running:
+            try:
+                # Create paho-mqtt client
+                client_id = f"meshcore_weather_{int(time.time())}"
+                client = mqtt.Client(client_id=client_id)
+                self.mqtt_client = client
+
+                # Set up message callback
+                def on_message(client, userdata, msg):
+                    try:
+                        # Decode message
+                        payload = msg.payload.decode('utf-8')
+                        blitz_data = json.loads(payload)
+
+                        # Check if strike is within our area
+                        lat = blitz_data.get('lat')
+                        lon = blitz_data.get('lon')
+
+                        if lat is None or lon is None:
+                            return
+
+                        if (self.blitz_area['min_lat'] <= lat <= self.blitz_area['max_lat'] and
+                            self.blitz_area['min_lon'] <= lon <= self.blitz_area['max_lon']):
+                            # Schedule async processing
+                            asyncio.create_task(self._handle_lightning_strike(blitz_data))
+
+                    except json.JSONDecodeError:
+                        self.logger.debug("Invalid JSON in lightning MQTT message")
+                    except Exception as e:
+                        self.logger.debug(f"Error processing lightning MQTT message: {e}")
+
+                client.on_message = on_message
+
+                # Connect and subscribe (non-blocking to avoid blocking event loop)
+                loop = asyncio.get_event_loop()
+                try:
+                    await loop.run_in_executor(None, client.connect, broker_host, broker_port, 60)
+                except Exception as connect_error:
+                    # Connection failed, but don't block - will retry on next cycle
+                    self.logger.debug(f"Initial connect() call failed (non-blocking): {connect_error}")
+                    raise  # Re-raise to trigger retry logic
+
+                # Subscribe is non-blocking, but wrap it anyway for consistency
+                try:
+                    client.subscribe(topic)
+                except Exception as subscribe_error:
+                    self.logger.debug(f"Subscribe() call failed: {subscribe_error}")
+                    raise
+
+                client.loop_start()
+
+                self.logger.info(f"Connected to Blitzortung MQTT, subscribed to {topic}")
+
+                # Keep connection alive
+                while self._running:
+                    await asyncio.sleep(1)
+                    if not client.is_connected():
+                        self.logger.warning("Blitzortung MQTT disconnected, reconnecting...")
+                        break
+
+                client.loop_stop()
+                client.disconnect()
+
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error in Blitzortung MQTT connection: {e}")
+                if self._running:
+                    self.logger.info("Reconnecting to Blitzortung MQTT in 30 seconds...")
+                    await asyncio.sleep(30)
+
+    async def _handle_lightning_strike(self, blitz_data: dict[str, Any]) -> None:
+        """Handle a single lightning strike from MQTT.
+
+        Calculates distance and adds to buffer if within range.
+
+        Args:
+            blitz_data: Dictionary containing lightning strike data.
+        """
+        lat = blitz_data.get('lat')
+        lon = blitz_data.get('lon')
+
+        if lat is None or lon is None:
+            return
+
+        # Calculate heading and distance from bot position
+        heading, distance = self._calculate_heading_and_distance(
+            self.my_position_lat, self.my_position_lon, lat, lon
+        )
+
+        # Create bucket key (same as original: heading|distance/10)
+        distance_bucket = int(distance / 10)
+        key = f"{heading}|{distance_bucket}"
+
+        # Add to buffer
+        self.blitz_buffer.append({
+            'key': key,
+            'heading': heading,
+            'distance': distance,
+            'lat': lat,
+            'lon': lon,
+            'timestamp': blitz_data.get('time', time.time())
+        })
+
+    def _calculate_heading_and_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> tuple:
+        """Calculate heading and distance between two points (same as original implementation).
+
+        Args:
+            lat1: Latitude of point 1.
+            lon1: Longitude of point 1.
+            lat2: Latitude of point 2.
+            lon2: Longitude of point 2.
+
+        Returns:
+            tuple: (heading_degrees, distance_km)
+        """
+        # Convert to radians
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        dlon_rad = math.radians(lon2 - lon1)
+
+        # Calculate distance using Haversine formula
+        a = math.sin((lat2_rad - lat1_rad) / 2)**2 + \
+            math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon_rad / 2)**2
+        c = 2 * math.asin(math.sqrt(a))
+        distance_km = 6371 * c  # Earth radius in km
+
+        # Calculate bearing/heading
+        y = math.sin(dlon_rad) * math.cos(lat2_rad)
+        x = math.cos(lat1_rad) * math.sin(lat2_rad) - \
+            math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon_rad)
+        heading_rad = math.atan2(y, x)
+        heading_deg = (math.degrees(heading_rad) + 360) % 360
+
+        return (int(heading_deg), distance_km)
+
+    async def _poll_lightning_loop(self) -> None:
+        """Background task to aggregate and report lightning strikes.
+
+        Periodically processes the lightning buffer and sends alerts.
+        """
+        self.logger.info(f"Starting lightning aggregation (interval: {self.blitz_collection_interval}s)")
+
+        while self._running:
+            try:
+                await self._process_lightning_buffer()
+                await asyncio.sleep(self.blitz_collection_interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error in lightning aggregation loop: {e}")
+                await asyncio.sleep(60)  # Wait 1 minute on error before retrying
+
+    async def _process_lightning_buffer(self) -> None:
+        """Process buffered lightning strikes and send alerts if threshold met.
+
+        Groups strikes by location bucket and sends alerts if count exceeds threshold.
+        """
+        if not self.blitz_buffer:
+            return
+
+        # Count strikes by bucket key
+        counter: dict[str, int] = {}
+        for blitz in self.blitz_buffer:
+            key = blitz['key']
+            counter[key] = counter.get(key, 0) + 1
+
+        # Check each bucket
+        for key, count in counter.items():
+            # Only alert if 10+ strikes in bucket and we haven't seen this bucket before
+            if count >= 10 and key not in self.seen_blitz_keys:
+                # Find a representative strike from this bucket
+                bucket_strikes = [b for b in self.blitz_buffer if b['key'] == key]
+                if not bucket_strikes:
+                    continue
+
+                data = bucket_strikes[0]
+                heading = data['heading']
+                distance = data['distance']
+
+                # Get compass direction name
+                compass_name = self._heading_to_compass(heading)
+
+                # Try to geocode location (optional, may fail)
+                location_name = await self._geocode_location(data['lat'], data['lon'])
+
+                # Format message
+                if location_name:
+                    message = f"🌩️ {location_name} ({int(distance)}km {compass_name})"
+                else:
+                    message = f"🌩️ Lightning activity ({int(distance)}km {compass_name})"
+
+                await self.bot.command_manager.send_channel_message(
+                    self.alerts_channel,
+                    message,
+                    scope=self.get_mesh_flood_scope(),
+                )
+                self.logger.info(f"Lightning alert sent: {message}")
+
+                # Mark this bucket as seen
+                self.seen_blitz_keys.add(key)
+
+                # Small delay between alerts
+                await asyncio.sleep(2)
+
+        # Clear buffer
+        self.blitz_buffer = []
+
+        # Clean up old seen keys (keep last 1000)
+        if len(self.seen_blitz_keys) > 1000:
+            self.seen_blitz_keys = set(list(self.seen_blitz_keys)[-1000:])
+
+    def _heading_to_compass(self, heading: int) -> str:
+        """Convert heading in degrees to compass direction name.
+
+        Args:
+            heading: Heading in degrees.
+
+        Returns:
+            str: Compass direction abbreviation (e.g., 'N', 'NW').
+        """
+        compass_points = [
+            'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+            'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'
+        ]
+        index = int((heading + 11.25) / 22.5) % 16
+        return compass_points[index]
+
+    async def _geocode_location(self, lat: float, lon: float) -> Optional[str]:
+        """Geocode coordinates to location name (optional, may return None).
+
+        Args:
+            lat: Latitude.
+            lon: Longitude.
+
+        Returns:
+            Optional[str]: City/town name or None if lookup fails.
+        """
+        try:
+            # Use reverse geocoding if available in utils
+            from ..utils import rate_limited_nominatim_reverse_sync
+            location = await asyncio.to_thread(
+                rate_limited_nominatim_reverse_sync,
+                self.bot,
+                f"{lat}, {lon}",
+                timeout=5,
+            )
+            if location:
+                # Extract city/town name
+                if isinstance(location, dict):
+                    return location.get('city') or location.get('town') or location.get('village') or None
+                return str(location)
+        except Exception:
+            pass
+        return None
 
     def _parse_alert_entry(self, entry: Any, alert_id: str) -> Optional[dict[str, Any]]:
         """Parse alert XML entry and extract full metadata (same logic as wx_command).
@@ -1377,10 +1979,11 @@ class WeatherService(BaseServicePlugin):
 
     async def _shorten_url(self, url: str) -> str:
         """Shorten URL using [External_Data] short_url_website (default v.gd)."""
-        return await shorten_url(
+        return await asyncio.to_thread(
+            self._run_api_session_call,
+            shorten_url_sync,
             url,
             config=self.bot.config,
             session=self.api_session,
             logger=self.logger,
         )
-

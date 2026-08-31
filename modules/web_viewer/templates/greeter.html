@@ -106,7 +106,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ g.csp_nonce }}">
 class GreeterManager {
     constructor() {
         this.greeterData = null;
@@ -184,16 +184,14 @@ class GreeterManager {
         const statusDiv = document.getElementById('rollout-status');
         
         if (!this.greeterData) {
-            statusDiv.innerHTML = '<div class="loading">Loading...</div>';
+            statusDiv.replaceChildren(this.makeTextElement('div', 'Loading...', 'loading'));
             return;
         }
         
         if (!this.greeterData.enabled) {
-            statusDiv.innerHTML = `
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle"></i> Greeter is currently disabled.
-                </div>
-            `;
+            statusDiv.replaceChildren(
+                this.makeTextElement('div', 'Greeter is currently disabled.', 'alert alert-warning'),
+            );
             return;
         }
         
@@ -202,31 +200,37 @@ class GreeterManager {
             const timeStr = this.formatTimeRemaining(timeRemaining);
             const endDate = new Date(this.greeterData.rollout_data.end_date);
             
-            statusDiv.innerHTML = `
-                <div class="alert alert-info">
-                    <h5><i class="fas fa-hourglass-half"></i> Onboarding Period Active</h5>
-                    <p class="mb-2"><strong>Time Remaining:</strong> <span class="badge bg-primary" style="font-size: 1.1em;">${timeStr}</span></p>
-                    <p class="mb-2"><strong>Started:</strong> ${new Date(this.greeterData.rollout_data.started_at).toLocaleString()}</p>
-                    <p class="mb-2"><strong>Ends:</strong> ${endDate.toLocaleString()}</p>
-                    <p class="mb-0"><strong>Duration:</strong> ${this.greeterData.rollout_data.days} days</p>
-                </div>
-                <div class="mt-3">
-                    <button class="btn btn-danger" id="end-rollout-btn">
-                        <i class="fas fa-stop-circle"></i> End Onboarding Period
-                    </button>
-                </div>
-            `;
-            
-            // Setup end rollout button
-            document.getElementById('end-rollout-btn').addEventListener('click', () => {
-                this.endRollout();
-            });
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-info';
+            alert.appendChild(this.makeTextElement('h5', 'Onboarding Period Active'));
+            this.appendLabeledParagraph(alert, 'Time Remaining', timeStr, 'mb-2');
+            this.appendLabeledParagraph(
+                alert,
+                'Started',
+                new Date(this.greeterData.rollout_data.started_at).toLocaleString(),
+                'mb-2',
+            );
+            this.appendLabeledParagraph(alert, 'Ends', endDate.toLocaleString(), 'mb-2');
+            this.appendLabeledParagraph(
+                alert,
+                'Duration',
+                `${this.greeterData.rollout_data.days} days`,
+                'mb-0',
+            );
+            const actions = document.createElement('div');
+            actions.className = 'mt-3';
+            const endButton = this.makeTextElement('button', 'End Onboarding Period', 'btn btn-danger');
+            endButton.type = 'button';
+            endButton.id = 'end-rollout-btn';
+            endButton.addEventListener('click', () => this.endRollout());
+            actions.appendChild(endButton);
+            statusDiv.replaceChildren(alert, actions);
         } else {
-            statusDiv.innerHTML = `
-                <div class="alert alert-success">
-                    <i class="fas fa-check-circle"></i> No active onboarding period. New users will be greeted immediately.
-                </div>
-            `;
+            statusDiv.replaceChildren(this.makeTextElement(
+                'div',
+                'No active onboarding period. New users will be greeted immediately.',
+                'alert alert-success',
+            ));
         }
     }
     
@@ -234,34 +238,36 @@ class GreeterManager {
         const settingsDiv = document.getElementById('greeter-settings');
         
         if (!this.greeterData) {
-            settingsDiv.innerHTML = '<div class="loading">Loading...</div>';
+            settingsDiv.replaceChildren(this.makeTextElement('div', 'Loading...', 'loading'));
             return;
         }
         
         const settings = this.greeterData.settings;
-        settingsDiv.innerHTML = `
-            <ul class="list-unstyled">
-                <li><strong>Enabled:</strong> <span class="badge bg-${settings.enabled ? 'success' : 'secondary'}">${settings.enabled ? 'Yes' : 'No'}</span></li>
-                <li><strong>Rollout Days:</strong> ${settings.rollout_days}</li>
-                <li><strong>Per-Channel Greetings:</strong> <span class="badge bg-${settings.per_channel_greetings ? 'info' : 'secondary'}">${settings.per_channel_greetings ? 'Yes' : 'No'}</span></li>
-                <li><strong>Include Mesh Info:</strong> <span class="badge bg-${settings.include_mesh_info ? 'info' : 'secondary'}">${settings.include_mesh_info ? 'Yes' : 'No'}</span></li>
-            </ul>
-        `;
+        const list = document.createElement('ul');
+        list.className = 'list-unstyled';
+        [
+            ['Enabled', settings.enabled ? 'Yes' : 'No'],
+            ['Rollout Days', settings.rollout_days],
+            ['Per-Channel Greetings', settings.per_channel_greetings ? 'Yes' : 'No'],
+            ['Include Mesh Info', settings.include_mesh_info ? 'Yes' : 'No'],
+        ].forEach(([label, value]) => this.appendLabeledListItem(list, label, value));
+        settingsDiv.replaceChildren(list);
     }
     
     renderSampleGreeting() {
         const greetingDiv = document.getElementById('sample-greeting');
         
         if (!this.greeterData) {
-            greetingDiv.innerHTML = '<div class="loading">Loading...</div>';
+            greetingDiv.replaceChildren(this.makeTextElement('div', 'Loading...', 'loading'));
             return;
         }
         
-        greetingDiv.innerHTML = `
-            <div class="alert alert-light" style="white-space: pre-wrap; font-family: monospace;">
-${this.escapeHtml(this.greeterData.sample_greeting)}
-            </div>
-        `;
+        const sample = this.makeTextElement(
+            'div',
+            this.greeterData.sample_greeting,
+            'alert alert-light greeter-sample-text',
+        );
+        greetingDiv.replaceChildren(sample);
     }
     
     renderGreetedUsers(usersToRender = null) {
@@ -269,7 +275,7 @@ ${this.escapeHtml(this.greeterData.sample_greeting)}
         const badge = document.getElementById('total-greeted-badge');
         
         if (!this.greeterData) {
-            tableBody.innerHTML = '<tr><td colspan="6" class="text-center"><div class="loading">Loading...</div></td></tr>';
+            this.renderEmptyRow(tableBody, 'Loading...', 'text-center loading');
             return;
         }
         
@@ -286,11 +292,16 @@ ${this.escapeHtml(this.greeterData.sample_greeting)}
         if (users.length === 0) {
             const searchInput = document.getElementById('greeted-users-search');
             const hasSearch = searchInput && searchInput.value.trim();
-            tableBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">${hasSearch ? 'No users match your search.' : 'No users have been greeted yet.'}</td></tr>`;
+            this.renderEmptyRow(
+                tableBody,
+                hasSearch ? 'No users match your search.' : 'No users have been greeted yet.',
+                'text-center text-muted',
+            );
             return;
         }
-        
-        tableBody.innerHTML = users.map(user => {
+
+        tableBody.replaceChildren();
+        users.forEach(user => {
             // greeted_at is a SQLite timestamp string (ISO format like "2025-12-03 02:52:38")
             // SQLite stores timestamps in UTC, but without timezone indicator
             // JavaScript Date will interpret it as local time, so we need to be explicit
@@ -315,26 +326,62 @@ ${this.escapeHtml(this.greeterData.sample_greeting)}
                 // Convert to milliseconds
                 lastSeenDate = new Date(timestamp * 1000);
             }
-            const lastSeenStr = lastSeenDate ? lastSeenDate.toLocaleString() : '<span class="text-muted">Never</span>';
-            const rolloutBadge = user.rollout_marked 
-                ? '<span class="badge bg-warning">Rollout</span>' 
-                : '<span class="badge bg-success">Manual</span>';
-            
-            return `
-                <tr>
-                    <td><code>${this.escapeHtml(user.sender_id)}</code></td>
-                    <td>${this.escapeHtml(user.channel)}</td>
-                    <td>${greetedDate.toLocaleString()}</td>
-                    <td>${lastSeenStr}</td>
-                    <td>${rolloutBadge}</td>
-                    <td>
-                        <button class="btn btn-sm btn-danger" onclick="greeterManager.ungreetUser('${this.escapeHtml(user.sender_id)}', '${this.escapeHtml(user.channel)}')">
-                            <i class="fas fa-undo"></i> Mark Ungreeted
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
+            const row = document.createElement('tr');
+            const senderCell = document.createElement('td');
+            senderCell.appendChild(this.makeTextElement('code', user.sender_id));
+            row.appendChild(senderCell);
+            [
+                user.channel,
+                greetedDate.toLocaleString(),
+                lastSeenDate ? lastSeenDate.toLocaleString() : 'Never',
+            ].forEach(value => row.appendChild(this.makeTextElement('td', value)));
+            const rolloutCell = document.createElement('td');
+            rolloutCell.appendChild(this.makeTextElement(
+                'span',
+                user.rollout_marked ? 'Rollout' : 'Manual',
+                `badge ${user.rollout_marked ? 'bg-warning' : 'bg-success'}`,
+            ));
+            row.appendChild(rolloutCell);
+            const actionCell = document.createElement('td');
+            const button = this.makeTextElement('button', 'Mark Ungreeted', 'btn btn-sm btn-danger');
+            button.type = 'button';
+            button.addEventListener('click', () => this.ungreetUser(user.sender_id, user.channel));
+            actionCell.appendChild(button);
+            row.appendChild(actionCell);
+            tableBody.appendChild(row);
+        });
+    }
+
+    makeTextElement(tagName, value, className = '') {
+        const element = document.createElement(tagName);
+        element.className = className;
+        element.textContent = String(value ?? '');
+        return element;
+    }
+
+    appendLabeledParagraph(parent, label, value, className = '') {
+        const paragraph = document.createElement('p');
+        paragraph.className = className;
+        const strong = document.createElement('strong');
+        strong.textContent = `${label}:`;
+        paragraph.append(strong, document.createTextNode(` ${String(value ?? '')}`));
+        parent.appendChild(paragraph);
+    }
+
+    appendLabeledListItem(parent, label, value) {
+        const item = document.createElement('li');
+        const strong = document.createElement('strong');
+        strong.textContent = `${label}:`;
+        item.append(strong, document.createTextNode(` ${String(value ?? '')}`));
+        parent.appendChild(item);
+    }
+
+    renderEmptyRow(tableBody, message, className) {
+        const row = document.createElement('tr');
+        const cell = this.makeTextElement('td', message, className);
+        cell.colSpan = 6;
+        row.appendChild(cell);
+        tableBody.replaceChildren(row);
     }
     
     filterUsers(searchTerm) {
@@ -493,6 +540,11 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 
 <style>
+.greeter-sample-text {
+    white-space: pre-wrap;
+    font-family: monospace;
+}
+
 /* Dark mode table styling with better contrast - matching contacts page */
 [data-theme="dark"] .table-striped > tbody > tr:nth-of-type(odd) > td {
     background-color: #3a3a3a; /* Slightly lighter than even rows, but not too light */
@@ -540,4 +592,3 @@ document.addEventListener('DOMContentLoaded', () => {
 }
 </style>
 {% endblock %}
-

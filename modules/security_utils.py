@@ -4,6 +4,9 @@ Security Utilities for MeshCore Bot
 Provides centralized security validation functions to prevent common attacks
 """
 
+from __future__ import annotations
+
+import asyncio
 import ipaddress
 import logging
 import os
@@ -11,13 +14,449 @@ import platform
 import re
 import socket
 from pathlib import Path
-from typing import Optional
-from urllib.parse import urlparse
+from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import urljoin, urlsplit
+
+import aiohttp
+import requests
+from aiohttp.abc import AbstractResolver
+from requests.adapters import HTTPAdapter
+from urllib3 import PoolManager
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.exceptions import NewConnectionError
+from urllib3.util.connection import create_connection
+
+if TYPE_CHECKING:
+    from aiohttp.abc import ResolveResult
 
 logger = logging.getLogger('MeshCoreBot.Security')
 
 # CGN (Carrier-Grade NAT) network 100.64.0.0/10 - RFC 6598
 _CGN_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+
+# Well-known instance/task metadata addresses must never receive feed requests,
+# even when an administrator explicitly enables ordinary private-network feeds.
+_METADATA_ADDRESSES = {
+    ipaddress.ip_address("169.254.169.254"),  # AWS, Azure, GCP, and others
+    ipaddress.ip_address("169.254.170.2"),  # AWS ECS task credentials
+    ipaddress.ip_address("100.100.100.200"),  # Alibaba Cloud
+    ipaddress.ip_address("fd00:ec2::254"),  # AWS IPv6 metadata
+}
+_METADATA_HOSTNAMES = {
+    "metadata.google.internal",
+    "metadata.goog",
+}
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_SAFE_REDIRECT_HEADERS = {"accept", "accept-encoding", "user-agent"}
+
+
+class UnsafeUrlError(ValueError):
+    """Raised when a URL or any of its resolved destinations violates policy."""
+
+
+class SafeUrlPolicy:
+    """Reusable SSRF policy for parsing, DNS resolution, redirects, and connects."""
+
+    def __init__(
+        self,
+        *,
+        allow_private: bool = False,
+        allow_loopback: bool | None = None,
+        timeout: float = 2.0,
+        max_redirects: int = 5,
+    ) -> None:
+        self.allow_private = allow_private
+        self.allow_loopback = allow_loopback
+        # Portable synchronous DNS has no per-call timeout. Async callers and
+        # the aiohttp connect-time resolver enforce this value with wait_for().
+        self.timeout = timeout
+        self.max_redirects = max_redirects
+
+    def parse(self, url: str) -> tuple[str, str, int]:
+        """Strictly parse an HTTP(S) URL and return scheme, hostname, and port."""
+        if not isinstance(url, str) or not url:
+            raise UnsafeUrlError("URL must be a non-empty string")
+        if re.search(r"[\x00-\x20\x7f]", url):
+            raise UnsafeUrlError("URL contains control characters or whitespace")
+        # WHATWG-style parsers may treat backslashes as separators while
+        # urllib.parse does not. Reject them so every layer sees one authority.
+        if "\\" in url:
+            raise UnsafeUrlError("URL contains an ambiguous backslash")
+
+        try:
+            parsed = urlsplit(url)
+            port = parsed.port
+        except ValueError as exc:
+            raise UnsafeUrlError(f"Invalid URL authority: {exc}") from exc
+
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"}:
+            raise UnsafeUrlError(f"URL scheme not allowed: {parsed.scheme}")
+        if not parsed.netloc or not parsed.hostname:
+            raise UnsafeUrlError("URL is missing a hostname")
+        if parsed.username is not None or parsed.password is not None:
+            raise UnsafeUrlError("Embedded URL credentials are not allowed")
+
+        raw_hostname = parsed.hostname.lower()
+        if raw_hostname.endswith(".."):
+            raise UnsafeUrlError("URL contains an ambiguous hostname")
+        hostname = raw_hostname.rstrip(".")
+        if not hostname or ".." in hostname or "%" in hostname:
+            raise UnsafeUrlError("URL contains an ambiguous hostname")
+        if hostname in _METADATA_HOSTNAMES:
+            raise UnsafeUrlError("Cloud metadata hostnames are not allowed")
+
+        # IPv6 literals must be bracketed. Numeric-looking IPv4 hosts must use
+        # canonical dotted decimal; this rejects octal, hexadecimal, and dword
+        # spellings accepted inconsistently by DNS/socket implementations.
+        if ":" in hostname and not parsed.netloc.startswith("["):
+            raise UnsafeUrlError("IPv6 URL literals must be bracketed")
+        numeric_ipv4 = bool(re.fullmatch(r"(?:0[xX][0-9a-fA-F]+|[0-9.]+)", hostname))
+        if numeric_ipv4:
+            try:
+                address = ipaddress.ip_address(hostname)
+            except ValueError as exc:
+                raise UnsafeUrlError("Non-canonical numeric IP address") from exc
+            if not isinstance(address, ipaddress.IPv4Address) or str(address) != hostname:
+                raise UnsafeUrlError("Non-canonical numeric IP address")
+
+        return scheme, hostname, port or (443 if scheme == "https" else 80)
+
+    def _check_address(self, address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
+        # Canonicalize IPv4-mapped IPv6 (e.g. ``::ffff:169.254.169.254``) to the
+        # IPv4 target the socket layer will actually dial. The mapped form is a
+        # distinct address object that is absent from _METADATA_ADDRESSES and
+        # reports is_reserved=False/is_global=False, so without this it would
+        # bypass the metadata and non-unicast checks under allow_private=True.
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+            address = address.ipv4_mapped
+        if address in _METADATA_ADDRESSES:
+            raise UnsafeUrlError(f"Cloud metadata address is not allowed: {address}")
+        # These cannot be meaningful unicast HTTP server destinations. They
+        # remain blocked even under the explicit private-network exception.
+        if address.is_unspecified or address.is_multicast or address.is_reserved:
+            raise UnsafeUrlError(f"Non-unicast destination is not allowed: {address}")
+
+        if self.allow_loopback is True:
+            if not address.is_loopback:
+                raise UnsafeUrlError(f"Non-loopback destination is not allowed: {address}")
+            return
+        if self.allow_private:
+            return
+        if not address.is_global or address in _CGN_NETWORK:
+            raise UnsafeUrlError(f"Private or non-global destination is not allowed: {address}")
+
+    def validate_records(self, records: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+        """Validate every A/AAAA answer before any one of them can be used."""
+        if not records:
+            raise UnsafeUrlError("Hostname did not resolve to an address")
+        validated: list[tuple[Any, ...]] = []
+        seen: set[tuple[int, str]] = set()
+        for record in records:
+            family, _socktype, _proto, _canonname, sockaddr = record
+            if family not in {socket.AF_INET, socket.AF_INET6}:
+                continue
+            address = ipaddress.ip_address(sockaddr[0])
+            self._check_address(address)
+            key = (family, str(address))
+            if key not in seen:
+                seen.add(key)
+                validated.append(record)
+        if not validated:
+            raise UnsafeUrlError("Hostname did not resolve to an A or AAAA address")
+        return validated
+
+    def resolve(
+        self,
+        hostname: str,
+        port: int,
+        *,
+        family: socket.AddressFamily = socket.AF_UNSPEC,
+    ) -> list[tuple[Any, ...]]:
+        """Resolve and validate all socket addresses for a host."""
+        try:
+            records = socket.getaddrinfo(
+                hostname,
+                port,
+                family=family,
+                type=socket.SOCK_STREAM,
+            )
+        except (socket.gaierror, socket.timeout, OSError) as exc:
+            raise UnsafeUrlError(f"Failed to resolve hostname {hostname}: {exc}") from exc
+        return self.validate_records(records)
+
+    def validate(self, url: str) -> bool:
+        """Parse and resolve a URL, raising UnsafeUrlError on policy failure."""
+        _scheme, hostname, port = self.parse(url)
+        self.resolve(hostname, port)
+        return True
+
+    async def validate_async(self, url: str) -> bool:
+        """Asynchronously parse and resolve a URL without blocking the event loop."""
+        _scheme, hostname, port = self.parse(url)
+        loop = asyncio.get_running_loop()
+        try:
+            records = await asyncio.wait_for(
+                loop.getaddrinfo(
+                    hostname,
+                    port,
+                    family=socket.AF_UNSPEC,
+                    type=socket.SOCK_STREAM,
+                ),
+                timeout=self.timeout,
+            )
+        except (asyncio.TimeoutError, socket.gaierror, socket.timeout, OSError) as exc:
+            raise UnsafeUrlError(f"Failed to resolve hostname {hostname}: {exc}") from exc
+        self.validate_records(records)
+        return True
+
+
+class SafeAiohttpResolver(AbstractResolver):
+    """aiohttp resolver that validates the exact addresses used to connect."""
+
+    def __init__(self, policy: SafeUrlPolicy) -> None:
+        self.policy = policy
+
+    async def resolve(
+        self,
+        host: str,
+        port: int = 0,
+        family: socket.AddressFamily = socket.AF_INET,
+    ) -> list[ResolveResult]:
+        loop = asyncio.get_running_loop()
+        try:
+            records = await asyncio.wait_for(
+                loop.getaddrinfo(
+                    host,
+                    port,
+                    family=family,
+                    type=socket.SOCK_STREAM,
+                ),
+                timeout=self.policy.timeout,
+            )
+            records = self.policy.validate_records(records)
+        except (
+            UnsafeUrlError,
+            asyncio.TimeoutError,
+            socket.gaierror,
+            socket.timeout,
+            OSError,
+        ) as exc:
+            raise OSError(f"Failed to resolve safe destination {host}: {exc}") from exc
+        return [
+            {
+                "hostname": host,
+                "host": str(record[4][0]),
+                "port": int(record[4][1]),
+                "family": record[0],
+                "proto": record[2],
+                "flags": socket.AI_NUMERICHOST,
+            }
+            for record in records
+        ]
+
+    async def close(self) -> None:
+        return None
+
+
+def _redirect_target(current_url: str, location: str, policy: SafeUrlPolicy) -> str:
+    target = urljoin(current_url, location)
+    policy.validate(target)
+    return target
+
+
+def _same_origin(left: str, right: str, policy: SafeUrlPolicy) -> bool:
+    return policy.parse(left) == policy.parse(right)
+
+
+def _headers_for_redirect(
+    headers: dict[str, str] | None,
+    *,
+    same_origin: bool,
+) -> dict[str, str] | None:
+    if headers is None or same_origin:
+        return headers
+    # Arbitrary API headers often contain tokens under provider-specific names.
+    # On a cross-origin redirect retain only headers known not to be credentials.
+    return {key: value for key, value in headers.items() if key.lower() in _SAFE_REDIRECT_HEADERS}
+
+
+async def safe_aiohttp_request(
+    session: aiohttp.ClientSession,
+    method: str,
+    url: str,
+    *,
+    policy: SafeUrlPolicy,
+    headers: dict[str, str] | None = None,
+    **kwargs: Any,
+) -> aiohttp.ClientResponse:
+    """Issue a request with bounded, policy-checked manual redirects."""
+    current_url = url
+    current_method = method.upper()
+    current_headers = headers
+    for redirect_count in range(policy.max_redirects + 1):
+        await policy.validate_async(current_url)
+        response = await session.request(
+            current_method,
+            current_url,
+            headers=current_headers,
+            allow_redirects=False,
+            **kwargs,
+        )
+        if response.status not in _REDIRECT_STATUSES or not response.headers.get("Location"):
+            return response
+        if redirect_count >= policy.max_redirects:
+            response.release()
+            raise UnsafeUrlError("Too many redirects")
+
+        try:
+            target = urljoin(current_url, response.headers["Location"])
+            await policy.validate_async(target)
+            same_origin = _same_origin(current_url, target, policy)
+            current_headers = _headers_for_redirect(current_headers, same_origin=same_origin)
+            if not same_origin and (
+                current_method not in {"GET", "HEAD"}
+                or kwargs.get("json") is not None
+                or kwargs.get("data") is not None
+            ):
+                raise UnsafeUrlError("Cross-origin redirects cannot forward request bodies")
+            # Query parameters belong only to the originally configured endpoint.
+            # A redirect's Location carries its own query string.
+            kwargs.pop("params", None)
+            if response.status == 303 or (
+                response.status in {301, 302} and current_method == "POST"
+            ):
+                current_method = "GET"
+                kwargs.pop("json", None)
+                kwargs.pop("data", None)
+        finally:
+            response.release()
+        current_url = target
+    raise UnsafeUrlError("Too many redirects")
+
+
+def _pinned_connection_classes(
+    policy: SafeUrlPolicy,
+) -> tuple[type[HTTPConnectionPool], type[HTTPSConnectionPool]]:
+    def _new_connection(connection: HTTPConnection) -> socket.socket:
+        hostname = connection.host
+        port = connection.port or connection.default_port
+        if port is None:
+            raise NewConnectionError(connection, "Destination has no port")
+        try:
+            records = policy.resolve(hostname, port)
+            last_error: OSError | None = None
+            for record in records:
+                try:
+                    return create_connection(
+                        (record[4][0], port),
+                        timeout=connection.timeout,
+                        source_address=connection.source_address,
+                        socket_options=connection.socket_options,
+                    )
+                except OSError as exc:
+                    last_error = exc
+            raise last_error or OSError("No validated destination was connectable")
+        except (UnsafeUrlError, OSError) as exc:
+            raise NewConnectionError(connection, f"Blocked or failed destination {hostname}: {exc}") from exc
+
+    class PinnedHTTPConnection(HTTPConnection):
+        def _new_conn(self) -> socket.socket:
+            return _new_connection(self)
+
+    class PinnedHTTPSConnection(HTTPSConnection):
+        def _new_conn(self) -> socket.socket:
+            return _new_connection(self)
+
+    class PinnedHTTPConnectionPool(HTTPConnectionPool):
+        ConnectionCls = PinnedHTTPConnection
+
+    class PinnedHTTPSConnectionPool(HTTPSConnectionPool):
+        ConnectionCls = PinnedHTTPSConnection
+
+    return PinnedHTTPConnectionPool, PinnedHTTPSConnectionPool
+
+
+class SafeRequestsAdapter(HTTPAdapter):
+    """requests adapter that validates DNS answers at socket creation time."""
+
+    def __init__(self, policy: SafeUrlPolicy, *args: Any, **kwargs: Any) -> None:
+        self.policy = policy
+        super().__init__(*args, **kwargs)
+
+    def init_poolmanager(
+        self,
+        connections: int,
+        maxsize: int,
+        block: bool = False,
+        **pool_kwargs: Any,
+    ) -> None:
+        manager = PoolManager(num_pools=connections, maxsize=maxsize, block=block, **pool_kwargs)
+        http_pool, https_pool = _pinned_connection_classes(self.policy)
+        manager.pool_classes_by_scheme = {"http": http_pool, "https": https_pool}
+        self.poolmanager = manager
+
+
+def create_safe_requests_session(policy: SafeUrlPolicy) -> requests.Session:
+    """Create a no-proxy requests session with connect-time destination enforcement."""
+    session = requests.Session()
+    session.trust_env = False
+    adapter = SafeRequestsAdapter(policy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def safe_requests_request(
+    session: requests.Session,
+    method: str,
+    url: str,
+    *,
+    policy: SafeUrlPolicy,
+    headers: dict[str, str] | None = None,
+    **kwargs: Any,
+) -> requests.Response:
+    """Issue a requests call with bounded, policy-checked manual redirects."""
+    current_url = url
+    current_method = method.upper()
+    current_headers = headers
+    for redirect_count in range(policy.max_redirects + 1):
+        policy.validate(current_url)
+        response = session.request(
+            current_method,
+            current_url,
+            headers=current_headers,
+            allow_redirects=False,
+            **kwargs,
+        )
+        if response.status_code not in _REDIRECT_STATUSES or not response.headers.get("Location"):
+            return response
+        if redirect_count >= policy.max_redirects:
+            response.close()
+            raise UnsafeUrlError("Too many redirects")
+
+        try:
+            target = _redirect_target(current_url, response.headers["Location"], policy)
+            same_origin = _same_origin(current_url, target, policy)
+            current_headers = _headers_for_redirect(current_headers, same_origin=same_origin)
+            if not same_origin and (
+                current_method not in {"GET", "HEAD"}
+                or kwargs.get("json") is not None
+                or kwargs.get("data") is not None
+            ):
+                raise UnsafeUrlError("Cross-origin redirects cannot forward request bodies")
+            kwargs.pop("params", None)
+            if response.status_code == 303 or (
+                response.status_code in {301, 302} and current_method == "POST"
+            ):
+                current_method = "GET"
+                kwargs.pop("json", None)
+                kwargs.pop("data", None)
+        finally:
+            response.close()
+        current_url = target
+    raise UnsafeUrlError("Too many redirects")
 
 
 def _is_nix_environment() -> bool:
@@ -59,7 +498,8 @@ def validate_external_url(
         allow_private: Whether to allow private/internal IPs (default: False)
         allow_loopback: If True, only loopback addresses are permitted. Deprecated for
             broad internal access; use allow_private=True instead.
-        timeout: DNS resolution timeout in seconds (default: 2.0)
+        timeout: Retained for API compatibility. The system resolver does not
+            provide a portable per-call DNS timeout.
 
     Returns:
         True if URL is safe, False otherwise
@@ -72,66 +512,13 @@ def validate_external_url(
         - allow_private=True permits all internal ranges (loopback, RFC1918, CGN, link-local)
     """
     try:
-        parsed = urlparse(url)
-
-        # Only allow HTTP/HTTPS
-        if parsed.scheme not in ['http', 'https']:
-            logger.warning(f"URL scheme not allowed: {parsed.scheme}")
-            return False
-
-        # Reject file:// and other dangerous schemes
-        if not parsed.netloc:
-            logger.warning(f"URL missing network location: {url}")
-            return False
-
-        # Resolve and check if IP is internal/private (with timeout)
-        try:
-            # Set socket timeout for DNS resolution
-            # Note: getdefaulttimeout() can return None (no timeout), which is valid
-            old_timeout = socket.getdefaulttimeout()
-            socket.setdefaulttimeout(timeout)
-            try:
-                ip = socket.gethostbyname(parsed.hostname or "")
-            finally:
-                # Restore original timeout (None means no timeout, which is correct)
-                socket.setdefaulttimeout(old_timeout)
-
-            ip_obj = ipaddress.ip_address(ip)
-
-            if allow_loopback is True:
-                if not ip_obj.is_loopback:
-                    logger.warning(
-                        f"URL resolves to non-loopback IP with allow_loopback: {ip}"
-                    )
-                    return False
-            elif allow_private:
-                pass
-            else:
-                if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
-                    logger.warning(f"URL resolves to private/internal IP: {ip}")
-                    return False
-
-                # Reject CGN (Carrier-Grade NAT) - RFC 6598
-                if ip_obj in _CGN_NETWORK:
-                    logger.warning(f"URL resolves to CGN IP: {ip}")
-                    return False
-
-                # Reject reserved ranges
-                if ip_obj.is_reserved or ip_obj.is_multicast:
-                    logger.warning(f"URL resolves to reserved/multicast IP: {ip}")
-                    return False
-
-        except socket.gaierror as e:
-            logger.warning(f"Failed to resolve hostname {parsed.hostname}: {e}")
-            return False
-        except socket.timeout:
-            logger.warning(f"DNS resolution timeout for {parsed.hostname}")
-            return False
-
-        return True
-
-    except Exception as e:
-        logger.error(f"URL validation failed: {e}")
+        return SafeUrlPolicy(
+            allow_private=allow_private,
+            allow_loopback=allow_loopback,
+            timeout=timeout,
+        ).validate(url)
+    except (UnsafeUrlError, ValueError) as e:
+        logger.warning(f"URL validation failed: {e}")
         return False
 
 

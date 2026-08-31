@@ -30,6 +30,12 @@ class ScheduleCommand(BaseCommand):
     usage = "schedule [list]"
     examples = ["schedule", "schedule list"]
 
+    # Web-viewer settings schema (see modules/settings_schema.py)
+    settings_schema = [
+        {"key": "dm_only", "label": "DM only", "type": "bool", "default": True,
+         "help": "Restrict the schedule command to direct messages only."},
+    ]
+
     def __init__(self, bot: Any) -> None:
         super().__init__(bot)
         self._enabled = self.get_config_value(
@@ -55,7 +61,11 @@ class ScheduleCommand(BaseCommand):
 
     async def execute(self, message: MeshMessage) -> bool:
         response = self._build_response()
-        return await self.send_response(message, response)
+        max_len = self.get_max_message_length(message)
+        if len(response.encode("utf-8")) <= max_len:
+            return await self.send_response(message, response)
+        chunks = self.bot.command_manager.split_text_into_utf8_chunks(response, max_len)
+        return await self.send_response_chunked(message, chunks)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -67,12 +77,20 @@ class ScheduleCommand(BaseCommand):
         # --- Scheduled messages ---
         scheduled = self._get_scheduled_messages()
         if scheduled:
-            lines.append(f"Scheduled ({len(scheduled)}):")
+            lines.append(f"Sched({len(scheduled)}):")
             for sched_display, channel, preview, scope in scheduled:
-                scope_part = f" ({scope})" if scope else ""
-                lines.append(f"  {sched_display} #{channel}{scope_part}: {preview}")
+                scope_code = ""
+                if scope:
+                    scope_l = str(scope).lower()
+                    if scope_l in ("local", "l"):
+                        scope_code = "/L"
+                    elif scope_l in ("flood", "f", "global", "*", "0"):
+                        scope_code = "/F"
+                    else:
+                        scope_code = f"/{scope}"
+                lines.append(f"{sched_display} #{channel}{scope_code}: {preview}")
         else:
-            lines.append("No scheduled messages configured.")
+            lines.append("No scheduled messages.")
 
         # --- Interval advertising ---
         advert_info = self._get_advert_info()
@@ -115,7 +133,7 @@ class ScheduleCommand(BaseCommand):
                 c if c.isprintable() or c == " " else "?" for c in message
             )
             preview = (
-                safe_message if len(safe_message) <= 40 else safe_message[:37] + "..."
+                safe_message if len(safe_message) <= 18 else safe_message[:15] + "..."
             )
             rows.append((display_label, schedule_key, channel, preview, scope))
         rows.sort(key=lambda r: (r[0].lower(), r[1]))
@@ -128,7 +146,7 @@ class ScheduleCommand(BaseCommand):
                 "Bot", "advert_interval_hours", fallback=0
             )
             if interval_hours > 0:
-                return f"Advert interval: every {interval_hours}h"
+                return f"advert={interval_hours}h"
         except Exception:
             pass
         return None

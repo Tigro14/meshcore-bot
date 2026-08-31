@@ -19,6 +19,8 @@ class DadJokeCommand(BaseCommand):
     """Handles dad joke commands using icanhazdadjoke.com API"""
 
     # Plugin metadata
+    # Read-only informational output; safe for scheduled {cmd:...} rendering.
+    render_safe = True
     name = "dadjoke"
     keywords = ['dadjoke', 'dad joke', 'dadjokes', 'dad jokes']
     description = "Get a random dad joke from icanhazdadjoke.com"
@@ -30,6 +32,17 @@ class DadJokeCommand(BaseCommand):
     short_description = "Get a random dad joke"
     usage = "dadjoke"
     examples = ["dadjoke"]
+
+    # Web-viewer settings schema (see modules/settings_schema.py)
+    settings_schema = [
+        {
+            "key": "long_jokes",
+            "label": "Allow long jokes",
+            "type": "bool",
+            "default": False,
+            "help": "Permit multi-message long-form jokes instead of short one-liners.",
+        },
+    ]
 
     # API configuration
     DAD_JOKE_API_URL = "https://icanhazdadjoke.com/"

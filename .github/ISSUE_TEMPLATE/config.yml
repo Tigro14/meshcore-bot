@@ -1,0 +1,7 @@
+# Blank issues stay enabled: Discussions is not turned on for this repository, so
+# they are the only route for questions and anything the templates do not cover.
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/agessaman/meshcore-bot/security/advisories/new
+    about: Report security issues privately, not as a public issue. See SECURITY.md.

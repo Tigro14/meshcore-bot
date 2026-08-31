@@ -57,6 +57,12 @@ class BaseServicePlugin(ABC):
     # Optional: Service name for metadata
     name: str = ""
 
+    # Optional machine-readable description of this service's configurable
+    # settings, used by the web viewer to render typed widgets and validate
+    # input.  See modules/settings_schema.py for the field format.  Services that
+    # leave this empty get a generic enable-toggle + raw key/value editor.
+    settings_schema: list[dict[str, Any]] = []
+
     def __init__(self, bot: Any):
         """Initialize the service plugin.
 
@@ -232,6 +238,14 @@ class BaseServicePlugin(ABC):
         """
         pass
 
+    async def on_transport_reconnected(self) -> None:
+        """Called after bot.connect() replaces meshcore; re-bind mesh subscriptions.
+
+        Override in services that subscribe to meshcore events. Default is no-op.
+        Only invoked for services that are already running (after initial start).
+        """
+        return None
+
     def get_metadata(self) -> dict[str, Any]:
         """Get service metadata.
 
@@ -244,7 +258,9 @@ class BaseServicePlugin(ABC):
             'description': getattr(self, 'description', ''),
             'enabled': self.enabled,
             'running': self._running,
-            'config_section': self.config_section or self._derive_config_section()
+            'config_section': self.config_section or self._derive_config_section(),
+            'settings_schema': self.settings_schema,
+            'has_schema': bool(self.settings_schema),
         }
 
     def _derive_service_name(self) -> str:

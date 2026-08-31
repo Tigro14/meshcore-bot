@@ -4,6 +4,7 @@ Alert command for the MeshCore Bot
 Provides PulsePoint incident alerts for locations, zip codes, and street addresses
 """
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -189,6 +190,32 @@ class AlertCommand(BaseCommand):
         {"name": "all", "description": "Show all incidents (not just nearby)"}
     ]
     requires_internet = True  # Requires internet access for PulsePoint API
+
+    # Web-viewer settings schema (see modules/settings_schema.py).
+    # PulsePoint agency.* keys are dynamic and appear under "Other config values".
+    settings_schema = [
+        {"key": "max_distance_km", "label": "Max distance", "type": "float",
+         "min": 0, "default": 20.0, "unit": "km",
+         "help": "Only show incidents within this distance of the location."},
+        {"key": "max_incident_age_hours", "label": "Max incident age", "type": "float",
+         "min": 0, "default": 24.0, "unit": "hours",
+         "help": "Ignore incidents older than this many hours."},
+    ]
+
+    # Web-viewer dynamic editor for the PulsePoint agency.* keys in this section.
+    settings_dynamic_sections = [
+        {
+            "section": "Alert_Command",
+            "key_prefix": "agency.",
+            "label": "PulsePoint agencies",
+            "help": ("Map a region name to its PulsePoint agency IDs. Users query "
+                     "with 'alert <region>'. Find IDs at web.pulsepoint.org."),
+            "key_label": "Region name",
+            "value_label": "Agency IDs (comma-separated)",
+            "key_placeholder": "county1",
+            "value_placeholder": "1234,5678",
+        }
+    ]
 
     def __init__(self, bot):
         super().__init__(bot)
@@ -834,8 +861,6 @@ class AlertCommand(BaseCommand):
             message: The message to respond to.
             incidents: List of incidents to send.
         """
-        import asyncio
-
         if not incidents:
             await self.send_response(message, "🚨 No active incidents")
             return
@@ -847,41 +872,50 @@ class AlertCommand(BaseCommand):
         # Start first message with header
         current_lines = [header]
         current_length = len(header)
+        # Whether the message being built already carries an incident. Only the
+        # first message has a header, so a length check cannot tell "header
+        # only" from "one incident, no header" — conflating them let a second
+        # incident be appended past the limit.
+        has_incident = False
 
         for inc in incidents:
             incident_text = self._format_incident_compact(inc)
             incident_length = len(incident_text)
 
             # Calculate what the message would look like with this incident added
-            # Need to account for newline character between lines
-            test_length = current_length + 1 + incident_length  # +1 for newline
+            # (+1 for the joining newline, unless the message is still empty)
+            test_length = current_length + (1 if current_lines else 0) + incident_length
 
             # Check if this incident fits in the current message
             if test_length <= 130:
                 # It fits, add it
                 current_lines.append(incident_text)
                 current_length = test_length
-            else:
-                # Doesn't fit - finalize current message and start new one
-                if len(current_lines) > 1:  # Has at least header + one incident
-                    messages.append("\n".join(current_lines))
-                else:
-                    # Only header, must add at least one incident even if it exceeds limit
-                    current_lines.append(incident_text)
-                    messages.append("\n".join(current_lines))
-                    current_lines = []
-                    current_length = 0
-                    continue
-
-                # Start new message with this incident (no header for subsequent messages)
+                has_incident = True
+            elif has_incident:
+                # Doesn't fit and we already have something worth sending —
+                # finalize, then start a new message (no header) with this one.
+                messages.append("\n".join(current_lines))
                 current_lines = [incident_text]
                 current_length = incident_length
+            else:
+                # Nothing but the header (or an empty buffer) so far: a message
+                # with no incident is useless, so take this one even though it
+                # exceeds the limit, then start fresh.
+                current_lines.append(incident_text)
+                messages.append("\n".join(current_lines))
+                current_lines = []
+                current_length = 0
+                has_incident = False
 
-        # Add the last message if it has content
+        # Add the last message if it has content.
+        # No header-only special case here: `incidents` is non-empty (guarded
+        # above), so the loop always puts at least one incident into
+        # current_lines or flushes and clears it. The old length-1 check also
+        # matched a final chunk holding a single *incident* — subsequent
+        # messages carry no header — and appended incidents[0] on top of it,
+        # duplicating the first incident into the last message.
         if current_lines:
-            # If we only have header, add first incident
-            if len(current_lines) == 1 and len(incidents) > 0:
-                current_lines.append(self._format_incident_compact(incidents[0]))
             messages.append("\n".join(current_lines))
 
         # Send all messages with delays between them
@@ -890,6 +924,146 @@ class AlertCommand(BaseCommand):
             # Wait between messages (except after the last one)
             if i < len(messages) - 1:
                 await asyncio.sleep(2.0)
+
+    def _rank_incidents(
+        self,
+        query_type: str,
+        query: str,
+        location: Optional[str],
+        lat: Optional[float],
+        lon: Optional[float],
+        incidents: list[dict],
+    ) -> list[dict]:
+        """Filter and rank incidents for the query (runs off the event loop).
+
+        The zipcode and street_city branches geocode over blocking HTTP, so
+        this is called via asyncio.to_thread rather than inline.
+        """
+        # Process based on query type
+        if query_type == "coordinates":
+            # Sort by distance with configurable max distance, then by time
+            incidents = self._sort_by_distance_then_time(incidents, lat, lon, max_distance=self.max_distance_km)
+        elif query_type == "zipcode":
+            # Geocode zipcode and get city name
+            zip_lat, zip_lon = geocode_zipcode_sync(self.bot, location)
+            zip_city = None
+
+            if zip_lat and zip_lon:
+                # Get city name from zipcode via reverse geocoding
+                try:
+                    reverse_location = rate_limited_nominatim_reverse_sync(self.bot, f"{zip_lat}, {zip_lon}", timeout=10)
+                    if reverse_location and reverse_location.raw:
+                        address = reverse_location.raw.get('address', {})
+                        zip_city = (address.get('city') or
+                                   address.get('town') or
+                                   address.get('village') or
+                                   address.get('hamlet') or
+                                   address.get('municipality') or
+                                   address.get('suburb') or '')
+                        if zip_city:
+                            zip_city = zip_city.lower().strip()
+                            self.logger.debug(f"Zipcode {location} maps to city: {zip_city}")
+                except Exception as e:
+                    self.logger.debug(f"Error getting city from zipcode: {e}")
+
+                # Split incidents by coordinate validity
+                with_coords = [inc for inc in incidents if self._has_valid_coordinates(inc)]
+                without_coords = [inc for inc in incidents if not self._has_valid_coordinates(inc)]
+
+                # Prioritize incidents that match the zipcode's city
+                if zip_city:
+                    # Filter by city name match, then sort by distance and time
+                    matched_coords, _ = self._match_city_name(with_coords, zip_city)
+                    matched_no_coords, _ = self._match_city_name(without_coords, zip_city)
+
+                    # Sort matched incidents by distance (for those with coords), then time
+                    matched_coords = self._sort_by_distance_then_time(matched_coords, zip_lat, zip_lon, max_distance=None)
+                    matched_no_coords = self._sort_by_time(matched_no_coords)
+
+                    # If we have matches, show those. Otherwise, show nearby incidents within max distance
+                    if len(matched_coords) > 0 or len(matched_no_coords) > 0:
+                        incidents = matched_coords + matched_no_coords
+                    else:
+                        # No city matches, show nearby incidents within max distance
+                        nearby_coords = self._sort_by_distance_then_time(with_coords, zip_lat, zip_lon, max_distance=self.max_distance_km)
+                        nearby_no_coords = self._sort_by_time(without_coords)
+                        incidents = nearby_coords + nearby_no_coords
+                else:
+                    # No city name available, just sort by distance
+                    incidents = self._sort_by_distance_then_time(incidents, zip_lat, zip_lon, max_distance=self.max_distance_km)
+        elif query_type == "street_city":
+            # Extract street and city
+            parts = location.split(None, 1)
+            if len(parts) == 2:
+                street_query, city_query = parts
+                # Geocode city first
+                result = geocode_city_sync(self.bot, city_query, include_address_info=False)
+                city_lat, city_lon = None, None
+                if len(result) >= 2:
+                    city_lat, city_lon = result[0], result[1]
+
+                # Split incidents by coordinate validity
+                with_coords = [inc for inc in incidents if self._has_valid_coordinates(inc)]
+                without_coords = [inc for inc in incidents if not self._has_valid_coordinates(inc)]
+
+                # Process incidents with coordinates
+                if city_lat and city_lon:
+                    # Sort by distance (closest first) with max distance filter
+                    with_coords = self._sort_by_distance(with_coords, city_lat, city_lon, max_distance=self.max_distance_km)
+                    # Prioritize street-matched incidents by re-sorting
+                    matched_street_coords, unmatched_street_coords = self._match_street_name(with_coords, street_query)
+                    # Re-sort both groups by distance then time to maintain proximity ordering
+                    matched_street_coords = self._sort_by_distance_then_time(matched_street_coords, city_lat, city_lon, max_distance=self.max_distance_km)
+                    unmatched_street_coords = self._sort_by_distance_then_time(unmatched_street_coords, city_lat, city_lon, max_distance=self.max_distance_km)
+                    with_coords = matched_street_coords + unmatched_street_coords
+                else:
+                    # Geocoding failed - fall back to address matching for incidents with coordinates
+                    matched_street_coords, unmatched_street_coords = self._match_street_name(with_coords, street_query)
+                    matched_city_coords, _ = self._match_city_name(matched_street_coords + unmatched_street_coords, city_query)
+                    with_coords = matched_city_coords
+                    # Sort by time
+                    with_coords = self._sort_by_time(with_coords)
+
+                # Process incidents without coordinates: match by street name and city name
+                matched_street, unmatched_street = self._match_street_name(without_coords, street_query)
+                # Also match by city name in address for those without coordinates
+                matched_city, _ = self._match_city_name(matched_street + unmatched_street, city_query)
+                without_coords = matched_city
+                # Sort by time
+                without_coords = self._sort_by_time(without_coords)
+
+                # Combine: incidents with coordinates (sorted by distance or matched by address) first, then address-matched ones without coordinates
+                incidents = with_coords + without_coords
+        elif query_type == "city":
+            # Filter incidents by city name match - ONLY show matches where city appears at end of address
+            # This is the most reliable indicator and avoids false positives
+            matched, _ = self._match_city_name(incidents, location)
+
+            # Only keep incidents where city name appears at end of address (Priority 2)
+            # This ensures we only show incidents that are actually in the queried city
+            high_priority = []
+            for inc in matched:
+                priority = self._get_city_match_priority(inc, location)
+                if priority >= 2:  # Only city at end of address
+                    high_priority.append(inc)
+                else:
+                    # Log why an incident was excluded (for debugging)
+                    self.logger.debug(f"Excluding incident: {inc.get('address', 'N/A')[:60]} (priority: {priority})")
+
+            # Sort by time (most recent first)
+            incidents = self._sort_by_time(high_priority)
+            self.logger.debug(f"City query '{location}': {len(incidents)} matches (city at end of address only), {len(matched) - len(high_priority)} excluded")
+        elif query_type == "county":
+            # For county queries, return all incidents from that county (no city filtering)
+            # Sort by time (most recent first)
+            incidents = self._sort_by_time(incidents)
+            self.logger.debug(f"County query '{location}': returning {len(incidents)} incidents (no city filtering)")
+        else:
+            # Unknown query type - this shouldn't happen, but log it
+            self.logger.warning(f"Unknown query type: {query_type} for query: {query}")
+            # Default: sort by time
+            incidents = self._sort_by_time(incidents)
+        return incidents
 
     async def execute(self, message: MeshMessage) -> bool:
         """Execute the alert command.
@@ -937,137 +1111,18 @@ class AlertCommand(BaseCommand):
                 # For other queries (zipcode, coordinates, street_city), use all agencies
                 agency_ids = self._get_agency_ids()  # Default to all
 
-            # Fetch incidents
-            incidents = self._fetch_incidents(agency_ids)
+            # Fetch incidents (blocking HTTP — keep it off the event loop)
+            incidents = await asyncio.to_thread(self._fetch_incidents, agency_ids)
 
             if not incidents:
                 await self.send_response(message, "🚨 No active incidents")
                 return True
 
-            # Process based on query type
-            if query_type == "coordinates":
-                # Sort by distance with configurable max distance, then by time
-                incidents = self._sort_by_distance_then_time(incidents, lat, lon, max_distance=self.max_distance_km)
-            elif query_type == "zipcode":
-                # Geocode zipcode and get city name
-                zip_lat, zip_lon = geocode_zipcode_sync(self.bot, location)
-                zip_city = None
-
-                if zip_lat and zip_lon:
-                    # Get city name from zipcode via reverse geocoding
-                    try:
-                        reverse_location = rate_limited_nominatim_reverse_sync(self.bot, f"{zip_lat}, {zip_lon}", timeout=10)
-                        if reverse_location and reverse_location.raw:
-                            address = reverse_location.raw.get('address', {})
-                            zip_city = (address.get('city') or
-                                       address.get('town') or
-                                       address.get('village') or
-                                       address.get('hamlet') or
-                                       address.get('municipality') or
-                                       address.get('suburb') or '')
-                            if zip_city:
-                                zip_city = zip_city.lower().strip()
-                                self.logger.debug(f"Zipcode {location} maps to city: {zip_city}")
-                    except Exception as e:
-                        self.logger.debug(f"Error getting city from zipcode: {e}")
-
-                    # Split incidents by coordinate validity
-                    with_coords = [inc for inc in incidents if self._has_valid_coordinates(inc)]
-                    without_coords = [inc for inc in incidents if not self._has_valid_coordinates(inc)]
-
-                    # Prioritize incidents that match the zipcode's city
-                    if zip_city:
-                        # Filter by city name match, then sort by distance and time
-                        matched_coords, _ = self._match_city_name(with_coords, zip_city)
-                        matched_no_coords, _ = self._match_city_name(without_coords, zip_city)
-
-                        # Sort matched incidents by distance (for those with coords), then time
-                        matched_coords = self._sort_by_distance_then_time(matched_coords, zip_lat, zip_lon, max_distance=None)
-                        matched_no_coords = self._sort_by_time(matched_no_coords)
-
-                        # If we have matches, show those. Otherwise, show nearby incidents within max distance
-                        if len(matched_coords) > 0 or len(matched_no_coords) > 0:
-                            incidents = matched_coords + matched_no_coords
-                        else:
-                            # No city matches, show nearby incidents within max distance
-                            nearby_coords = self._sort_by_distance_then_time(with_coords, zip_lat, zip_lon, max_distance=self.max_distance_km)
-                            nearby_no_coords = self._sort_by_time(without_coords)
-                            incidents = nearby_coords + nearby_no_coords
-                    else:
-                        # No city name available, just sort by distance
-                        incidents = self._sort_by_distance_then_time(incidents, zip_lat, zip_lon, max_distance=self.max_distance_km)
-            elif query_type == "street_city":
-                # Extract street and city
-                parts = location.split(None, 1)
-                if len(parts) == 2:
-                    street_query, city_query = parts
-                    # Geocode city first
-                    result = geocode_city_sync(self.bot, city_query, include_address_info=False)
-                    city_lat, city_lon = None, None
-                    if len(result) >= 2:
-                        city_lat, city_lon = result[0], result[1]
-
-                    # Split incidents by coordinate validity
-                    with_coords = [inc for inc in incidents if self._has_valid_coordinates(inc)]
-                    without_coords = [inc for inc in incidents if not self._has_valid_coordinates(inc)]
-
-                    # Process incidents with coordinates
-                    if city_lat and city_lon:
-                        # Sort by distance (closest first) with max distance filter
-                        with_coords = self._sort_by_distance(with_coords, city_lat, city_lon, max_distance=self.max_distance_km)
-                        # Prioritize street-matched incidents by re-sorting
-                        matched_street_coords, unmatched_street_coords = self._match_street_name(with_coords, street_query)
-                        # Re-sort both groups by distance then time to maintain proximity ordering
-                        matched_street_coords = self._sort_by_distance_then_time(matched_street_coords, city_lat, city_lon, max_distance=self.max_distance_km)
-                        unmatched_street_coords = self._sort_by_distance_then_time(unmatched_street_coords, city_lat, city_lon, max_distance=self.max_distance_km)
-                        with_coords = matched_street_coords + unmatched_street_coords
-                    else:
-                        # Geocoding failed - fall back to address matching for incidents with coordinates
-                        matched_street_coords, unmatched_street_coords = self._match_street_name(with_coords, street_query)
-                        matched_city_coords, _ = self._match_city_name(matched_street_coords + unmatched_street_coords, city_query)
-                        with_coords = matched_city_coords
-                        # Sort by time
-                        with_coords = self._sort_by_time(with_coords)
-
-                    # Process incidents without coordinates: match by street name and city name
-                    matched_street, unmatched_street = self._match_street_name(without_coords, street_query)
-                    # Also match by city name in address for those without coordinates
-                    matched_city, _ = self._match_city_name(matched_street + unmatched_street, city_query)
-                    without_coords = matched_city
-                    # Sort by time
-                    without_coords = self._sort_by_time(without_coords)
-
-                    # Combine: incidents with coordinates (sorted by distance or matched by address) first, then address-matched ones without coordinates
-                    incidents = with_coords + without_coords
-            elif query_type == "city":
-                # Filter incidents by city name match - ONLY show matches where city appears at end of address
-                # This is the most reliable indicator and avoids false positives
-                matched, _ = self._match_city_name(incidents, location)
-
-                # Only keep incidents where city name appears at end of address (Priority 2)
-                # This ensures we only show incidents that are actually in the queried city
-                high_priority = []
-                for inc in matched:
-                    priority = self._get_city_match_priority(inc, location)
-                    if priority >= 2:  # Only city at end of address
-                        high_priority.append(inc)
-                    else:
-                        # Log why an incident was excluded (for debugging)
-                        self.logger.debug(f"Excluding incident: {inc.get('address', 'N/A')[:60]} (priority: {priority})")
-
-                # Sort by time (most recent first)
-                incidents = self._sort_by_time(high_priority)
-                self.logger.debug(f"City query '{location}': {len(incidents)} matches (city at end of address only), {len(matched) - len(high_priority)} excluded")
-            elif query_type == "county":
-                # For county queries, return all incidents from that county (no city filtering)
-                # Sort by time (most recent first)
-                incidents = self._sort_by_time(incidents)
-                self.logger.debug(f"County query '{location}': returning {len(incidents)} incidents (no city filtering)")
-            else:
-                # Unknown query type - this shouldn't happen, but log it
-                self.logger.warning(f"Unknown query type: {query_type} for query: {query}")
-                # Default: sort by time
-                incidents = self._sort_by_time(incidents)
+            # Offloaded: the zipcode/street_city branches geocode over
+            # blocking HTTP, which would stall the event loop.
+            incidents = await asyncio.to_thread(
+                self._rank_incidents, query_type, query, location, lat, lon, incidents
+            )
 
             # Limit to 10 incidents if "all" mode is enabled
             if show_all:

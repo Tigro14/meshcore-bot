@@ -1,0 +1,191 @@
+####################################################################################################
+#                                                                                                  #
+#                    32-bit Raspberry Pi Tuning Profile (Pi 2 / Pi 3 armhf)                        #
+#                                                                                                  #
+#  THIS IS AN OVERLAY, NOT A COMPLETE CONFIG. It contains only the keys that should differ from    #
+#  their defaults on a memory- and I/O-constrained 32-bit Pi. Start from one of the complete        #
+#  configs and copy these sections over the matching ones:                                          #
+#                                                                                                  #
+#      config.ini.quickstart        - smallest working config                                       #
+#      config.ini.minimal-example   - core testing commands only                                    #
+#      config.ini.example           - every option, fully documented                                #
+#                                                                                                  #
+#  Every key here also exists in config.ini.example with its full description. This file explains   #
+#  only WHY the value differs for a small Pi.                                                       #
+#                                                                                                  #
+#  Target hardware: Raspberry Pi 2 Model B (2015, BCM2836 / Cortex-A7 / ARMv7 / 1 GB RAM) and       #
+#  similar 32-bit armhf boards. Also useful on a Pi 3 running a 32-bit OS.                          #
+#                                                                                                  #
+####################################################################################################
+
+####################################################################################################
+# DEPLOYMENT NOTES (read before you build)
+####################################################################################################
+#
+# ARCHITECTURE
+#   A 2015 Pi 2 Model B is ARMv7 (Cortex-A7), which is exactly what Debian armhf and the project's
+#   linux/arm/v7 image target. The published image runs there unmodified - no Dockerfile changes
+#   are needed. Verified: uname -m = armv7l, Python 3.11, all runtime dependencies import.
+#
+#   Check your board first:  cat /proc/cpuinfo | grep -i revision
+#   A Pi 2 v1.2 (late 2016) is BCM2837 / Cortex-A53, which is 64-bit capable. If you have that
+#   revision, install a 64-bit OS and use the linux/arm64 image instead - it avoids every 32-bit
+#   caveat below and is a fully supported Docker platform.
+#
+# DOCKER ENGINE VERSION CEILING
+#   Docker Engine v28 is the LAST major version to ship packages for 32-bit Raspberry Pi OS
+#   (armhf). v29 and later provide no armhf packages. On a 32-bit Pi you must pin to v28.x and
+#   accept that the engine will not receive further major updates. A true Pi 2 v1.1 cannot run a
+#   64-bit OS, so there is no upgrade path off this ceiling short of new hardware.
+#
+# DEPENDENCIES / BUILDING
+#   Ten dependencies publish no prebuilt armv7 wheel on PyPI and would compile from source:
+#   PyNaCl (bundles libsodium), pycryptodome, ephem, pyephem, brotli, cffi, MarkupSafe, librt,
+#   backports.zstd, sgmllib3k. On a 900 MHz Cortex-A7 with 1 GB RAM that is hours of work and a
+#   likely OOM. Everything else already resolves to a wheel - cryptography, aiohttp, jellyfish
+#   and qh3 all publish armv7 builds, so no Rust toolchain is needed.
+#
+#   You should not have to compile any of them:
+#
+#     Docker install - nothing to do. The published linux/arm/v7 image ships everything
+#       prebuilt. Just pull it; do not build the image on the Pi.
+#
+#     Native install - install-service.sh handles this automatically. On a 32-bit ARM host it
+#       adds the piwheels index and applies constraints-armv7.txt, which resolves the entire
+#       dependency set to wheels (measured: 75/75, zero compiled). Raspberry Pi OS already
+#       configures piwheels in /etc/pip.conf; the explicit flag also covers Ubuntu armhf and
+#       DietPi, which do not.
+#
+#     Manual pip install - pass both yourself:
+#       pip install --extra-index-url https://www.piwheels.org/simple \
+#                   -c constraints-armv7.txt -r requirements.txt
+#
+#   See constraints-armv7.txt for the measurements and for how to re-check the pins as
+#   piwheels catches up.
+#
+# RADIO TRANSPORT
+#   The Pi 2 has no onboard Bluetooth or WiFi - those arrived with the Pi 3. BLE requires a USB
+#   dongle plus host BlueZ/D-Bus passthrough into the container. USB serial is the simpler and
+#   more reliable path here; see the devices: stanza in docker-compose.yml.
+#
+# STORAGE
+#   Database I/O on an SD card is the real bottleneck on this class of hardware, which is what the
+#   retention settings below address. Putting the database on USB storage rather than the SD card
+#   helps more than any single config value.
+#
+####################################################################################################
+
+####################################################################################################
+# ONE-TIME CLEANUP (only relevant when migrating an existing database)
+####################################################################################################
+#
+# A fresh database does not need this. If you are moving an existing database onto a Pi, two items
+# are not governed by retention and will not shrink on their own:
+#
+#   1. topology_inference_shadow - an orphaned table from removed shadow-comparison work. It has no
+#      remaining references anywhere in the codebase and is no longer written. On the reference
+#      deployment it held 248k rows / 130 MB of dead weight.
+#
+#          sqlite3 meshcore_bot.db "DROP TABLE IF EXISTS topology_inference_shadow;"
+#
+#      Back up the database first (backup_database.py) and confirm the table is stale in YOUR
+#      database before dropping it:
+#          sqlite3 meshcore_bot.db "SELECT COUNT(*), MAX(created_at) FROM topology_inference_shadow;"
+#
+#   2. Free pages left behind by past deletions. VACUUM reclaims them, but it rewrites the whole
+#      file - run it off-device or during a maintenance window, not on the Pi mid-flight:
+#
+#          sqlite3 meshcore_bot.db "VACUUM;"
+#
+# Note that a fresh database is NOT a substitute for the retention values below. Retention is
+# enforced correctly, so database size converges to a steady state set by these windows and your
+# mesh's traffic volume. Starting fresh delays that convergence, it does not avoid it.
+#
+####################################################################################################
+
+
+[Data_Retention]
+# This is the section that matters most on a small Pi. Sizes below were measured on a reference
+# deployment on a busy mesh, with every table sitting exactly at its retention window. Your
+# absolute numbers scale with local traffic volume, but the ratios between tables hold.
+#
+#   table (incl. indexes)      default window    steady state    growth
+#   -------------------------  ----------------  --------------  ------------
+#   observed_paths                   90 days          562 MB      6.2 MB/day
+#   packet_stream                     3 days          298 MB     99.4 MB/day
+#   unique_advert_packets            90 days          113 MB      1.3 MB/day
+#   mesh_connections                  7 days           12 MB      1.7 MB/day
+#
+# The defaults total roughly 1.2 GB in steady state. The values below bring that to roughly 300 MB
+# and hold it there.
+
+# Deletion batching. The shipped defaults were already chosen for Pi/SD-card installs; smaller
+# batches and a longer pause reduce I/O bursts at the cost of draining a backlog more slowly.
+# Worth lowering only if you see the bot stutter during the daily cleanup pass.
+retention_delete_batch_size = 500
+retention_delete_pause_seconds = 0.25
+
+# Packet stream. By far the densest writer in the database - roughly 99 MB/day against
+# observed_paths' 6 MB/day. On a 32-bit Pi this is both the capacity concern and the SD-card
+# write-endurance concern. 1 day keeps the web viewer's real-time display working while cutting
+# the largest single source of write churn.
+# Raise to 2 if you want a bit more history and can afford ~100 MB more.
+packet_stream_retention_days = 1
+
+# Repeater/stats tables. daily_stats_retention_days governs both daily_stats and
+# unique_advert_packets; observed_paths_retention_days governs observed_paths.
+# observed_paths plus its six indexes is the single largest consumer at the default 90 days
+# (562 MB); 14 days brings it to roughly 87 MB with no loss of recent-path accuracy.
+daily_stats_retention_days = 30
+observed_paths_retention_days = 14
+
+# Purging log - a small audit trail, but there is no reason to keep a quarter of it on a Pi.
+purging_log_retention_days = 30
+
+# Mesh connections (path graph edges). Left at the default deliberately. This table is small
+# (12 MB including indexes) and is what the path/trace commands and the mesh page read.
+# Must stay >= Path_Command graph_edge_expiration_days.
+mesh_connections_retention_days = 7
+
+# Zero-hop neighbour history. At most one row per neighbour per cycle and cycles are >= 12h apart,
+# so this grows very slowly and the long default window is cheap even here. Left at the default.
+neighbor_observations_retention_days = 365
+
+
+[Path_Command]
+# Mesh graph tuning.
+#
+# The mesh graph is a common suspect for Pi resource pressure, but on the reference deployment it
+# is not the problem: 12 MB of database including indexes (about 1% of total) and 16 MB resident
+# for 31k edges. It is already bounded to 7 days and already batches its writes specifically to
+# keep WAL churn low on SD cards. Disabling it saves very little and costs you the path command,
+# trace edge updates, neighbors_feed_mesh_graph, and the mesh page.
+#
+# The recommendation for a 32-bit Pi is therefore to KEEP capture enabled and simply narrow the
+# startup load, rather than turning the feature off.
+
+# Leave capture on. See the two traps below before changing this.
+graph_capture_enabled = true
+
+# Batched writes keep transaction and WAL churn low - the right choice on SD cards.
+# Do not use 'hybrid' here; it persists every new edge immediately.
+graph_write_strategy = batched
+graph_batch_interval_seconds = 60
+
+# How many days of edges to load into memory at startup.
+#
+# TRAP: 0 does NOT mean "load nothing" - it means "no window". The loader builds its filter as
+#   [days for days in (graph_startup_load_days, graph_edge_expiration_days) if days > 0]
+# and applies the smallest active window, so setting BOTH of these to 0 removes the WHERE clause
+# entirely and loads every edge ever recorded. Always use a small positive number here.
+graph_startup_load_days = 2
+
+# Edges older than this are never loaded and are pruned from the database.
+# Keep <= Data_Retention mesh_connections_retention_days.
+graph_edge_expiration_days = 7
+
+# TRAP: setting graph_capture_enabled = false does NOT reclaim the startup memory. MeshGraph
+# calls _load_from_database() unconditionally in __init__, before it checks capture_enabled, so
+# you still pay the full startup query and the in-memory graph. Disabling capture stops new edge
+# writes and the batch-writer thread - nothing more. If your goal is memory, lower
+# graph_startup_load_days instead; that is the knob that actually changes the footprint.

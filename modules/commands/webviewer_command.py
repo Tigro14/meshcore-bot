@@ -106,24 +106,21 @@ class WebViewerCommand(BaseCommand):
             return
 
         integration = self.bot.web_viewer_integration
-        status = {
-            'enabled': integration.enabled,
-            'running': integration.running,
-            'url': f"http://{integration.host}:{integration.port}" if integration.running else None
-        }
+        en = 1 if integration.enabled else 0
+        run = 1 if integration.running else 0
+        url = f"{integration.host}:{integration.port}" if integration.running else "-"
 
+        cb = "ok"
+        fail = 0
+        shut = 0
         if hasattr(integration, 'bot_integration') and integration.bot_integration:
             bot_integration = integration.bot_integration
-            status.update({
-                'circuit_breaker_open': bot_integration.circuit_breaker_open,
-                'circuit_breaker_failures': bot_integration.circuit_breaker_failures,
-                'shutdown': getattr(bot_integration, 'is_shutting_down', False)
-            })
+            cb = "open" if bot_integration.circuit_breaker_open else "ok"
+            fail = bot_integration.circuit_breaker_failures
+            shut = 1 if getattr(bot_integration, 'is_shutting_down', False) else 0
 
-        status_text = "Web Viewer Status:\n"
-        for key, value in status.items():
-            status_text += f"• {key}: {value}\n"
-
+        # Compact one-liner stays under DM 158-byte budget
+        status_text = f"WV en={en} run={run} url={url} cb={cb} fail={fail} shut={shut}"
         await self.send_response(message, status_text)
 
     async def _handle_reset(self, message: MeshMessage) -> None:

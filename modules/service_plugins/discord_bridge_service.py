@@ -35,6 +35,10 @@ except ImportError:
 # Import base service
 import contextlib
 
+from ..bridge_outbound import (
+    DISCORD_WEBHOOK_ALLOWED_MENTIONS,
+    neutralize_discord_mention_content,
+)
 from ..profanity_filter import censor, contains_profanity
 from ..security_utils import sanitize_name
 from .base_service import BaseServicePlugin
@@ -44,7 +48,7 @@ from .base_service import BaseServicePlugin
 class QueuedMessage:
     """Represents a message queued for Discord posting."""
     webhook_url: str
-    payload: dict[str, str]
+    payload: dict[str, Any]
     channel_name: str
     retry_count: int = 0
     first_queued: float = 0.0  # Timestamp when first queued
@@ -67,6 +71,34 @@ class DiscordBridgeService(BaseServicePlugin):
 
     config_section = 'DiscordBridge'
     description = "Posts MeshCore channel messages to Discord (one-way, read-only)"
+
+    # Web-viewer settings schema (see modules/settings_schema.py)
+    settings_schema = [
+        {"key": "avatar_style", "label": "Avatar style", "type": "enum",
+         "options": [{"value": "color", "label": "Color (default, no API)"},
+                     {"value": "fun-emoji", "label": "Fun emoji (DiceBear)"},
+                     {"value": "avataaars", "label": "Avataaars (DiceBear)"},
+                     {"value": "bottts", "label": "Bottts (DiceBear)"},
+                     {"value": "identicon", "label": "Identicon (DiceBear)"},
+                     {"value": "pixel-art", "label": "Pixel art (DiceBear)"},
+                     {"value": "adventurer", "label": "Adventurer (DiceBear)"},
+                     {"value": "initials", "label": "Initials (DiceBear)"}],
+         "default": "color", "help": "How user avatars are generated in Discord."},
+        {"key": "filter_profanity", "label": "Profanity filter", "type": "enum",
+         "options": [{"value": "drop", "label": "Drop (don't bridge)"},
+                     {"value": "censor", "label": "Censor (****)"},
+                     {"value": "off", "label": "Off"}],
+         "default": "drop", "help": "How to handle profanity in messages and usernames."},
+        {"key": "bridge_bot_responses", "label": "Bridge bot responses", "type": "bool",
+         "default": True, "help": "Also bridge the bot's own command replies."},
+    ]
+    settings_dynamic_sections = [
+        {"section": "DiscordBridge", "key_prefix": "bridge.",
+         "label": "Channel mappings", "key_label": "MeshCore channel", "value_label": "Discord webhook URL(s)",
+         "help": "Map a MeshCore channel to one or more Discord webhook URLs (comma-separated). "
+                 "Webhook URLs are secrets — anyone with one can post to your channel. DMs are never bridged.",
+         "key_placeholder": "Public", "value_placeholder": "https://discord.com/api/webhooks/..."},
+    ]
 
     def __init__(self, bot: Any):
         """Initialize Discord bridge service.
@@ -325,6 +357,13 @@ class DiscordBridgeService(BaseServicePlugin):
         self._running = True
         self.logger.info(f"Discord bridge service started (bridging {len(self.channel_webhooks)} channels)")
 
+    async def on_transport_reconnected(self) -> None:
+        """Re-subscribe to channel messages on the new meshcore instance."""
+        if not self._running or not getattr(self.bot, 'meshcore', None):
+            return
+        self.bot.meshcore.subscribe(EventType.CHANNEL_MSG_RECV, self._on_mesh_channel_message)
+        self.logger.info("Discord bridge re-subscribed to CHANNEL_MSG_RECV after transport reconnect")
+
     async def stop(self) -> None:
         """Stop the Discord bridge service.
 
@@ -413,6 +452,7 @@ class DiscordBridgeService(BaseServicePlugin):
 
             # Clean up MeshCore @ mentions: @[username] → **@username**
             message_text = self._format_mentions(message_text)
+            message_text = neutralize_discord_mention_content(message_text)
 
             # Profanity filter: drop (don't bridge), censor (replace with ****), or off
             if self.filter_profanity == 'drop':
@@ -450,7 +490,8 @@ class DiscordBridgeService(BaseServicePlugin):
 
             payload = {
                 "content": message,
-                "username": username
+                "username": username,
+                "allowed_mentions": DISCORD_WEBHOOK_ALLOWED_MENTIONS,
             }
 
             if avatar_url:
@@ -575,7 +616,7 @@ class DiscordBridgeService(BaseServicePlugin):
                 self.logger.error(f"Error in message queue processor: {e}", exc_info=True)
                 await asyncio.sleep(1.0)  # Wait a bit before retrying on error
 
-    async def _post_to_webhook(self, webhook_url: str, payload: dict[str, str], channel_name: str, queued_msg: Optional[QueuedMessage] = None) -> bool:
+    async def _post_to_webhook(self, webhook_url: str, payload: dict[str, Any], channel_name: str, queued_msg: Optional[QueuedMessage] = None) -> bool:
         """Post message to Discord webhook.
 
         Args:
@@ -601,7 +642,7 @@ class DiscordBridgeService(BaseServicePlugin):
             self.logger.error(f"Failed to post to Discord webhook [{channel_name}]: {e}", exc_info=True)
             return False
 
-    async def _post_async(self, webhook_url: str, payload: dict[str, str], channel_name: str, queued_msg: Optional[QueuedMessage] = None) -> bool:
+    async def _post_async(self, webhook_url: str, payload: dict[str, Any], channel_name: str, queued_msg: Optional[QueuedMessage] = None) -> bool:
         """Post to webhook using aiohttp (async).
 
         Args:
@@ -653,7 +694,7 @@ class DiscordBridgeService(BaseServicePlugin):
             self.logger.error(f"Error posting to Discord webhook [{channel_name}]: {e}")
             return False
 
-    async def _post_sync(self, webhook_url: str, payload: dict[str, str], channel_name: str, queued_msg: Optional[QueuedMessage] = None) -> bool:
+    async def _post_sync(self, webhook_url: str, payload: dict[str, Any], channel_name: str, queued_msg: Optional[QueuedMessage] = None) -> bool:
         """Post to webhook using requests library (sync fallback).
 
         Args:

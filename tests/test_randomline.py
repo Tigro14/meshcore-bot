@@ -5,6 +5,29 @@ from modules.command_manager import CommandManager
 
 
 class TestRandomLine:
+    def test_bundled_default_loads_outside_source_tree(self, mock_bot, tmp_path, monkeypatch):
+        if not mock_bot.config.has_section("RandomLine"):
+            mock_bot.config.add_section("RandomLine")
+        mock_bot.config.set("RandomLine", "prefix.default", "")
+        mock_bot.config.set("RandomLine", "triggers.funfact", "funfact")
+        mock_bot.config.set("RandomLine", "file.funfact", "data/randomlines/funfacts.txt")
+
+        manager = CommandManager(mock_bot)
+        manager.command_prefix = ""
+        monkeypatch.chdir(tmp_path)
+        msg = SimpleNamespace(
+            content="funfact",
+            is_dm=True,
+            sender_id="abc",
+            channel="general",
+        )
+
+        with patch("modules.command_manager.random.choice", return_value="bundled fact") as choice:
+            result = manager.match_randomline(msg)
+
+        assert result == ("funfact", "bundled fact")
+        assert choice.call_args.args[0]
+
     def test_match_randomline_exact_match_normalizes_spaces_and_case(self, mock_bot, tmp_path):
         f = tmp_path / "momjoke.txt"
         f.write_text("line one\n\nline two\n", encoding="utf-8")

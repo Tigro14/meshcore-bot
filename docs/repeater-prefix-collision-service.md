@@ -20,6 +20,10 @@ post_process_timeout_seconds = 15.0
 post_process_poll_interval_seconds = 0.2
 include_prefix_free_hint = true
 cooldown_minutes_per_prefix = 60
+# discord_webhook_urls = https://discord.com/api/webhooks/...
+# telegram_chat_ids = -1001234567890
+notify_external_on_all_new_repeaters = false
+silence_mesh_output = false
 ```
 
 ## Options
@@ -49,6 +53,19 @@ There is **no** config knob to loosen this rule.
 
 - **include_prefix_free_hint**: When notifying on 1-byte collisions, appends: `Type 'prefix free' to find one.`
 - **cooldown_minutes_per_prefix**: Cooldown to reduce repeat alerts for the same prefix.
+
+### External notifications (optional)
+
+Any `*_Service` section can use [BaseServicePlugin](https://github.com/agessaman/meshcore-bot/blob/main/modules/service_plugins/base_service.py) outbound keys:
+
+- **discord_webhook_urls** — Comma-separated Discord webhook URLs.
+- **telegram_chat_ids** — Comma-separated Telegram chat IDs or `@channel` names.
+- **telegram_bot_token** — Optional; else `TELEGRAM_BOT_TOKEN` env or `[TelegramBridge] api_token`.
+
+Repeater-prefix-collision-specific:
+
+- **notify_external_on_all_new_repeaters** — When `true`, send discovery alerts to Discord/Telegram for every new repeater, not only prefix collisions. Default: `false`.
+- **silence_mesh_output** — When `true`, skip mesh channel posts; alerts go only to external targets. Default: `false`.
 
 ## Message format
 

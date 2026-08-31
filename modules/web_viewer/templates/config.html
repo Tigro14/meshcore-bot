@@ -346,15 +346,15 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="restoreModalLabel">
-                    <i class="fas fa-undo me-2"></i>Restore Database
+                    <i class="fas fa-undo me-2"></i>Stage Database Restore
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="alert alert-warning">
                     <i class="fas fa-exclamation-triangle me-2"></i>
-                    <strong>Warning:</strong> Restoring will overwrite the active database.
-                    The bot must be restarted after restore for changes to take effect.
+                    <strong>Restart required:</strong> This verifies and stages the selected backup.
+                    The active database remains unchanged until the complete MeshCore Bot service is restarted.
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="restore-db-path">Backup file path</label>
@@ -379,7 +379,7 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-warning" id="restore-confirm-btn">
-                    <i class="fas fa-undo me-1"></i>Restore
+                    <i class="fas fa-undo me-1"></i>Stage Restore
                 </button>
             </div>
         </div>
@@ -389,7 +389,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ g.csp_nonce }}">
 class ConfigManager {
     constructor() {
         this.fields = {
@@ -1003,27 +1003,49 @@ class MaintenanceStatusManager {
                 { label: 'Log rotation (applied)', ran: d.log_rotation_applied_at, outcome: '' },
             ];
 
-            this.tbody.innerHTML = jobs.map(j => {
-                const ranDisplay = !j.ran
-                    ? '<span class="text-muted">never</span>'
-                    : `<span class="text-muted config-maint-time">${j.ran.replace('T', ' ').split('.')[0]}</span>`;
-                let outHtml;
+            this.tbody.replaceChildren();
+            jobs.forEach(j => {
+                const row = document.createElement('tr');
+                const labelCell = document.createElement('td');
+                labelCell.className = 'fw-medium';
+                labelCell.textContent = j.label;
+                const ranCell = document.createElement('td');
+                ranCell.className = 'text-center config-maint-col-ran';
+                const ranDisplay = document.createElement('span');
+                ranDisplay.className = j.ran
+                    ? 'text-muted config-maint-time'
+                    : 'text-muted';
+                ranDisplay.textContent = j.ran
+                    ? String(j.ran).replace('T', ' ').split('.')[0]
+                    : 'never';
+                ranCell.appendChild(ranDisplay);
+                const outcomeCell = document.createElement('td');
+                outcomeCell.className = 'text-end config-outcome-cell';
+                const outcome = document.createElement('span');
                 if (j.outcome === 'ok') {
-                    outHtml = '<span class="badge bg-success">ok</span>';
+                    outcome.className = 'badge bg-success';
+                    outcome.textContent = 'ok';
                 } else if (j.outcome) {
-                    const esc = String(j.outcome).replace(/"/g, '&quot;');
-                    outHtml = `<span class="badge bg-danger" title="${esc}">error</span>`;
+                    outcome.className = 'badge bg-danger';
+                    outcome.title = String(j.outcome);
+                    outcome.textContent = 'error';
                 } else {
-                    outHtml = '<span class="text-muted config-outcome-dash" aria-hidden="true">—</span>';
+                    outcome.className = 'text-muted config-outcome-dash';
+                    outcome.setAttribute('aria-hidden', 'true');
+                    outcome.textContent = '—';
                 }
-                return `<tr>
-                    <td class="fw-medium">${j.label}</td>
-                    <td class="text-center config-maint-col-ran">${ranDisplay}</td>
-                    <td class="text-end config-outcome-cell">${outHtml}</td>
-                </tr>`;
-            }).join('');
+                outcomeCell.appendChild(outcome);
+                row.append(labelCell, ranCell, outcomeCell);
+                this.tbody.appendChild(row);
+            });
         } catch (err) {
-            this.tbody.innerHTML = `<tr><td colspan="3" class="text-danger text-center">Failed to load: ${err.message}</td></tr>`;
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 3;
+            cell.className = 'text-danger text-center';
+            cell.textContent = `Failed to load: ${err.message}`;
+            row.appendChild(cell);
+            this.tbody.replaceChildren(row);
         } finally {
             this.refreshBtn.disabled = false;
         }
@@ -1048,7 +1070,7 @@ class RestoreManager {
         loading.style.display = '';
         empty.style.display   = 'none';
         table.style.display   = 'none';
-        tbody.innerHTML       = '';
+        tbody.replaceChildren();
         try {
             const resp = await fetch('/api/maintenance/list_backups');
             const data = await resp.json();
@@ -1061,13 +1083,27 @@ class RestoreManager {
             for (const b of data.backups) {
                 const dt = new Date(b.mtime * 1000).toLocaleString();
                 const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><small>${b.name}</small></td>
-                    <td><small>${b.size_mb} MB</small></td>
-                    <td><small>${dt}</small></td>
-                    <td><button class="btn btn-xs btn-outline-secondary btn-sm py-0"
-                        onclick="document.getElementById('restore-db-path').value='${b.path}'">
-                        Use</button></td>`;
+                const addCell = (value) => {
+                    const td = document.createElement('td');
+                    const small = document.createElement('small');
+                    small.textContent = String(value ?? '');
+                    td.appendChild(small);
+                    tr.appendChild(td);
+                    return td;
+                };
+                addCell(b.name);
+                addCell(`${b.size_mb} MB`);
+                addCell(dt);
+                const actionCell = document.createElement('td');
+                const useButton = document.createElement('button');
+                useButton.type = 'button';
+                useButton.className = 'btn btn-xs btn-outline-secondary btn-sm py-0';
+                useButton.textContent = 'Use';
+                useButton.addEventListener('click', () => {
+                    this.pathEl.value = String(b.path ?? '');
+                });
+                actionCell.appendChild(useButton);
+                tr.appendChild(actionCell);
                 tbody.appendChild(tr);
             }
         } catch (e) {
@@ -1080,9 +1116,12 @@ class RestoreManager {
     async restore() {
         const path = this.pathEl ? this.pathEl.value.trim() : '';
         if (!path) { this.showStatus('Please enter a backup file path.', 'danger'); return; }
-        if (!confirm(`Restore database from:\n${path}\n\nThis will overwrite the active database. Continue?`)) return;
+        if (!confirm(
+            `Stage database restore from:\n${path}\n\n` +
+            'The active database will remain unchanged until the complete MeshCore Bot service is restarted. Continue?'
+        )) return;
         this.confirmBtn.disabled = true;
-        this.confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Restoring…';
+        this.confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Staging…';
         try {
             const resp = await fetch('/api/maintenance/restore', {
                 method: 'POST',
@@ -1094,12 +1133,15 @@ class RestoreManager {
             });
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || 'Restore failed');
-            this.showStatus(`Restored successfully. ${data.warning || ''}`, 'success');
+            this.showStatus(
+                data.warning || 'Restore verified and staged. Restart the complete MeshCore Bot service to apply it.',
+                'success',
+            );
         } catch (err) {
             this.showStatus('Restore failed: ' + err.message, 'danger');
         } finally {
             this.confirmBtn.disabled = false;
-            this.confirmBtn.innerHTML = '<i class="fas fa-undo me-1"></i>Restore';
+            this.confirmBtn.innerHTML = '<i class="fas fa-undo me-1"></i>Stage Restore';
         }
     }
 
@@ -1225,9 +1267,18 @@ class PurgeManager {
             const total = Object.values(deleted).reduce((s, v) => s + v, 0);
             this.showStatus(`Done — ${total} row${total === 1 ? '' : 's'} deleted`, 'success');
             if (this.resultsBody && Object.keys(deleted).length > 0) {
-                this.resultsBody.innerHTML = Object.entries(deleted)
-                    .map(([t, c]) => `<tr><td><code>${t}</code></td><td>${c}</td></tr>`)
-                    .join('');
+                this.resultsBody.replaceChildren();
+                Object.entries(deleted).forEach(([tableName, count]) => {
+                    const row = document.createElement('tr');
+                    const tableCell = document.createElement('td');
+                    const code = document.createElement('code');
+                    code.textContent = String(tableName);
+                    tableCell.appendChild(code);
+                    const countCell = document.createElement('td');
+                    countCell.textContent = String(count);
+                    row.append(tableCell, countCell);
+                    this.resultsBody.appendChild(row);
+                });
                 if (this.resultsEl) this.resultsEl.style.display = 'block';
             }
         } catch (e) {
@@ -1295,30 +1346,66 @@ class DatabaseInfoManager {
     renderTablesInfo() {
         const infoElement = document.getElementById('tables-info');
         if (!infoElement) return;
+        infoElement.replaceChildren();
         if (!this.dbData.tables || this.dbData.tables.length === 0) {
-            infoElement.innerHTML = '<div class="text-muted">No tables found</div>';
+            const empty = document.createElement('div');
+            empty.className = 'text-muted';
+            empty.textContent = 'No tables found';
+            infoElement.appendChild(empty);
             return;
         }
-        infoElement.innerHTML = this.dbData.tables.map(table => `
-            <div class="row mb-3 p-3 border rounded config-db-table-row g-2 align-items-center">
-                <div class="col-md-4">
-                    <h6 class="mb-1"><i class="fas fa-table config-table-name-icon me-1"></i>${table.name}</h6>
-                    <small class="text-muted">${table.description || 'Database table'}</small>
-                </div>
-                <div class="col-md-2 text-center">
-                    <div class="h5 mb-0 config-table-metric">${table.record_count || 0}</div>
-                    <small class="text-muted">Records</small>
-                </div>
-                <div class="col-md-3 text-center">
-                    <div class="h6 mb-0">${table.size || 'Unknown'}</div>
-                    <small class="text-muted">Size</small>
-                </div>
-                <div class="col-md-3 text-center">
-                    <span class="badge bg-${this.getTableStatusClass(table)}">${this.getTableStatus(table)}</span>
-                    <br><small class="text-muted">Status</small>
-                </div>
-            </div>
-        `).join('');
+        const makeTextElement = (tag, text, className = '') => {
+            const element = document.createElement(tag);
+            element.className = className;
+            element.textContent = String(text ?? '');
+            return element;
+        };
+        this.dbData.tables.forEach(table => {
+            const row = document.createElement('div');
+            row.className = 'row mb-3 p-3 border rounded config-db-table-row g-2 align-items-center';
+
+            const identity = document.createElement('div');
+            identity.className = 'col-md-4';
+            const heading = document.createElement('h6');
+            heading.className = 'mb-1';
+            const icon = document.createElement('i');
+            icon.className = 'fas fa-table config-table-name-icon me-1';
+            heading.append(icon, document.createTextNode(String(table.name ?? '')));
+            identity.append(
+                heading,
+                makeTextElement('small', table.description || 'Database table', 'text-muted'),
+            );
+
+            const records = document.createElement('div');
+            records.className = 'col-md-2 text-center';
+            records.append(
+                makeTextElement('div', table.record_count || 0, 'h5 mb-0 config-table-metric'),
+                makeTextElement('small', 'Records', 'text-muted'),
+            );
+
+            const size = document.createElement('div');
+            size.className = 'col-md-3 text-center';
+            size.append(
+                makeTextElement('div', table.size || 'Unknown', 'h6 mb-0'),
+                makeTextElement('small', 'Size', 'text-muted'),
+            );
+
+            const status = document.createElement('div');
+            status.className = 'col-md-3 text-center';
+            const badge = makeTextElement(
+                'span',
+                this.getTableStatus(table),
+                `badge bg-${this.getTableStatusClass(table)}`,
+            );
+            status.append(
+                badge,
+                document.createElement('br'),
+                makeTextElement('small', 'Status', 'text-muted'),
+            );
+
+            row.append(identity, records, size, status);
+            infoElement.appendChild(row);
+        });
     }
 
     getTableStatus(table) {
@@ -1391,7 +1478,12 @@ class DatabaseInfoManager {
 
     showError(message) {
         const tablesInfo = document.getElementById('tables-info');
-        if (tablesInfo) tablesInfo.innerHTML = `<div class="alert alert-danger">${message}</div>`;
+        if (tablesInfo) {
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-danger';
+            alert.textContent = String(message ?? '');
+            tablesInfo.replaceChildren(alert);
+        }
     }
 }
 

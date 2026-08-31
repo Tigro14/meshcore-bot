@@ -18,7 +18,15 @@ These options only affect the **path** command’s reply text and whether repeat
 **`reply_prefix`** (string, default empty)
 
 - Prepended as the first line of path command RF replies (only the **first** chunk when the reply is split for length).
-- Uses Python `str.format` on the **triggering** message. Placeholders: `{sender}`, `{connection_info}`, `{path}`, `{timestamp}`, `{snr}`, `{rssi}` (same idea as `[Multitest_Command]` `response_format`).
+- Placeholders: `{sender}`, `{connection_info}`, `{path}`, `{hops}`, `{hops_label}`, `{timestamp}`, `{snr}`, `{rssi}`, `{packet_hash}`, `{path_distance}`.
+- `{path_distance}` is the total distance travelled, summed sender → each resolved hop → bot (e.g. `12.4km`). It is **empty** whenever the chain cannot be measured end to end: an unresolved hop, a prefix collision, a node with no stored coordinates, an unknown sender position, or no `[Bot] bot_latitude`/`bot_longitude`. A partial sum is never reported, since it would understate the real distance.
+- `{packet_hash}` is the 16-char MeshCore packet identity hash (uppercase hex) of the packet that carried the request. It is **empty** when RF correlation could not tie a heard packet to this message, so a hash from an unrelated transmission is never shown.
+- Supports the same **feed-style pipe filters** as the test command's `response_format` (see `modules/response_template.py`). Use `prefix_if_nonempty` so a label disappears along with an empty distance:
+
+```ini
+reply_prefix = "{path_distance|prefix_if_nonempty:📏 }\n"
+```
+- `hops_min:N` clears a field unless the message actually travelled at least N hops. `{path_distance}` renders `N/A` on a direct message, which `prefix_if_nonempty` treats as a value, so gate it first: `{path_distance|hops_min:1|prefix_if_nonempty:📏 }`. Unlike `pathbytes_min:N`, which asks how the path is *encoded*, this keeps a measurable one-byte multi-hop path.
 
 **`minimum_path_bytes`** (integer `0`–`3`, default `0`)
 
@@ -217,7 +225,7 @@ These settings control how graph edges are stored in the database.
 - `immediate`: Write each edge update immediately (safer, higher I/O)
 - `batched`: Accumulate updates, flush periodically (better performance)
 - `hybrid`: Immediate for new edges, batched for increments (balanced)
-- Default: `hybrid`
+- Default: `batched` (recommended for SD-card installations)
 
 **`graph_batch_interval_seconds`** (seconds)
 - How often to flush pending edge updates (only for batched/hybrid)
@@ -238,6 +246,69 @@ These settings control how graph edges are stored in the database.
 - Edges already in the database are still used for path validation
 - Set to `false` on devices that don't use the path command
 - Default: `true`
+
+## Raspberry Pi / Low-Power Profile
+
+For a Raspberry Pi 4 using an SD card, start with:
+
+```ini
+[Path_Command]
+graph_based_validation = true
+graph_capture_enabled = true
+min_edge_observations = 5
+graph_edge_expiration_days = 7
+graph_startup_load_days = 7
+graph_write_strategy = batched
+graph_batch_interval_seconds = 60
+graph_batch_max_pending = 250
+graph_use_bidirectional = true
+graph_use_hop_position = true
+graph_multi_hop_enabled = true
+graph_multi_hop_max_hops = 2
+graph_prefer_stored_keys = true
+
+[Data_Retention]
+packet_stream_retention_days = 3
+observed_paths_retention_days = 30
+mesh_connections_retention_days = 7
+daily_stats_retention_days = 90
+purging_log_retention_days = 90
+retention_delete_batch_size = 1000
+retention_delete_pause_seconds = 0.1
+```
+
+`batched` persistence groups dirty edges into one transaction, reducing WAL
+and SD-card transaction churn. A 60-second interval can lose at most roughly
+one minute of not-yet-flushed graph updates after abrupt power loss. Use
+`hybrid` if immediate persistence of newly discovered edges matters more than
+write volume.
+
+`observed_paths_retention_days` is the main bound on multi-byte graph
+derivation work because lifetime edge identity and counts are derived from all
+retained path evidence before the selected browser timeframe is applied.
+Thirty days is a practical Pi baseline; use 14 days for very busy meshes or 90
+days when historical fidelity matters more than database size and query cost.
+
+Retention deletes are committed in chunks and pause briefly between batches.
+This prevents a large first cleanup from holding SQLite's only writer lock for
+minutes. Reduce `retention_delete_batch_size` or increase
+`retention_delete_pause_seconds` if maintenance still causes visible I/O-wait
+spikes; doing so lengthens the cleanup.
+
+For the web graph, use **Multi-byte Only**, a **72-hour edge window**, a
+**7-day node window**, and a minimum observation threshold around **5**. These
+settings reduce response and rendering work; retained-history length controls
+the underlying multi-byte aggregation cost.
+
+The installed systemd service allows up to 1GB of memory and 200% CPU (two
+cores). These are upper limits rather than reserved resources. A USB SSD is
+still the most effective way to reduce SD-card wear on high-volume nodes.
+
+The web viewer caches the lifetime multi-byte edge aggregate for 30 seconds and
+coalesces live mesh events into one refresh per 30 seconds. On unusually large
+meshes, increase `[Web_Viewer] mesh_graph_cache_seconds` to 60. Keep
+`[Logging] log_level = INFO` during normal operation; `DEBUG` emits multiple
+records per observed edge and can create substantial SD-card write traffic.
 
 ## Preset Configurations
 
@@ -261,6 +332,17 @@ These settings control how graph edges are stored in the database.
 - Distance penalties: enabled (50km threshold, weaker penalty)
 - Final hop proximity: enabled with lower weight
 - Good for: Well-connected networks with strong graph evidence
+
+## Geographic scoring toggle
+
+**`geographic_scoring_enabled`** in `[Path_Command]` (default `true`):
+
+- When **`true`**, geographic proximity scoring is used during path decode (subject to other preset and graph settings).
+- When **`false`**, geographic proximity guessing is disabled entirely for path decode.
+
+This is a **configuration** option only — there is no chat subcommand to toggle it at runtime. Restart the bot (or reload config if supported) after changing it.
+
+See also the [`path` command](command-reference.md#path-or-decode-or-route) in the command reference.
 
 ## Typical LoRa Transmission Ranges
 

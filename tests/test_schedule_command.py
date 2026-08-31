@@ -71,12 +71,12 @@ class TestBuildResponseEmpty:
     def test_no_schedules_says_none_configured(self, bot):
         cmd = make_cmd(bot)
         response = cmd._build_response()
-        assert "No scheduled messages configured" in response
+        assert "No scheduled messages" in response
 
     def test_no_advert_interval_omits_advert_line(self, bot):
         cmd = make_cmd(bot)
         response = cmd._build_response()
-        assert "Advert" not in response
+        assert "advert=" not in response
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ class TestBuildResponseWithSchedules:
         }
         cmd = make_cmd(bot)
         response = cmd._build_response()
-        assert "Scheduled (2)" in response
+        assert "Sched(2)" in response
 
     def test_formats_time_as_hhmm(self, bot):
         bot.scheduler.scheduled_messages = {"0930": ("general", "Hello", "09:30", None)}
@@ -114,13 +114,13 @@ class TestBuildResponseWithSchedules:
         bot.scheduler.scheduled_messages = {"0800": ("general", long_msg, "08:00", None)}
         cmd = make_cmd(bot)
         response = cmd._build_response()
-        # Preview should be ≤43 chars (40 + "...")
+        # Preview should be ≤18 chars (15 + "...")
         for line in response.splitlines():
             if "08:00" in line:
                 # Extract the message part after the channel
-                parts = line.split(": ", 2)
-                if len(parts) == 3:
-                    assert len(parts[2]) <= 43
+                parts = line.split(": ", 1)
+                if len(parts) == 2:
+                    assert len(parts[1]) <= 18
 
     def test_entries_sorted_by_time(self, bot):
         bot.scheduler.scheduled_messages = {
@@ -149,7 +149,7 @@ class TestBuildResponseWithSchedules:
         }
         cmd = make_cmd(bot)
         response = cmd._build_response()
-        assert "(#sea)" in response
+        assert "/#sea" in response
         assert "#Public" in response
         assert "Hello mesh" in response
 
@@ -173,19 +173,19 @@ class TestAdvertInfo:
         bot.config.set("Bot", "advert_interval_hours", "4")
         cmd = make_cmd(bot)
         response = cmd._build_response()
-        assert "Advert interval: every 4h" in response
+        assert "advert=4h" in response
 
     def test_zero_interval_omitted(self, bot):
         bot.config.set("Bot", "advert_interval_hours", "0")
         cmd = make_cmd(bot)
         response = cmd._build_response()
-        assert "Advert" not in response
+        assert "advert=" not in response
 
     def test_missing_advert_interval_omitted(self, bot):
         # advert_interval_hours not in config → fallback 0 → omitted
         cmd = make_cmd(bot)
         response = cmd._build_response()
-        assert "Advert" not in response
+        assert "advert=" not in response
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +198,7 @@ class TestNoScheduler:
         del bot.scheduler
         cmd = make_cmd(bot)
         response = cmd._build_response()
-        assert "No scheduled messages configured" in response
+        assert "No scheduled messages" in response
 
 
 # ---------------------------------------------------------------------------

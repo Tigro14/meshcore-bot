@@ -1,0 +1,47 @@
+name: Feature request
+description: Suggest a new command, service plugin, or capability
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: if this is specific to your own deployment, a local plugin
+        may be a better fit than an upstream change — see
+        [docs/local-plugins.md](https://github.com/agessaman/meshcore-bot/blob/main/docs/local-plugins.md).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation you are trying to handle, not just the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should the bot do? Include example command syntax and replies if relevant.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: airtime
+    attributes:
+      label: Does this spend mesh airtime?
+      description: >
+        Commands and scheduled announcements consume shared, unlicensed spectrum.
+        Anything that transmits needs to justify its cost and default conservatively.
+      options:
+        - "No — web viewer, config, or internal only"
+        - "Yes — sends a reply when a user asks for it"
+        - "Yes — transmits on a schedule or unprompted"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing commands, config options, or local plugins you have already tried.

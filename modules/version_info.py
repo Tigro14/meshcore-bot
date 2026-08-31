@@ -14,6 +14,10 @@ import re
 import subprocess
 from pathlib import Path
 
+# A release-looking version: "v" then a digit. Distinguishes a real release from
+# the installer's "dev-<sha>" fallback and from tag names like "nightly".
+_RELEASE_VERSION_RE = re.compile(r"^v\d")
+
 
 def _normalize_tag(value: str | None) -> str | None:
     if not value:
@@ -21,7 +25,15 @@ def _normalize_tag(value: str | None) -> str | None:
     value = value.strip()
     if not value:
         return None
-    return value if value.startswith("v") else f"v{value}"
+    # Only version-looking values get the conventional "v" prefix. install-service.sh
+    # writes installer_version = "dev-<sha>" for untagged checkouts, and a repo may
+    # carry tags like "nightly" — prefixing those produced "vdev-abc1234"/"vnightly".
+    return f"v{value}" if value[0].isdigit() else value
+
+
+def _is_release_version(value: str | None) -> bool:
+    """True when `value` names an actual release, not a dev/branch identifier."""
+    return bool(value and _RELEASE_VERSION_RE.match(value))
 
 
 def _safe_git_run(repo_root: Path, args: list[str]) -> str | None:
@@ -78,14 +90,35 @@ def _read_pyproject_version(repo_root: Path) -> str | None:
     return None
 
 
+def get_application_root() -> Path:
+    """Return the installed/source directory containing the bot application.
+
+    Runtime configuration may live elsewhere (for example, ``/etc/meshcore-bot``
+    or ``/data/config``), so version metadata must be resolved relative to this
+    module rather than relative to the config file.
+    """
+    return Path(__file__).resolve().parent.parent
+
+
+def resolve_application_version() -> dict[str, str | None]:
+    """Resolve version metadata for the running bot application."""
+    return resolve_runtime_version(get_application_root())
+
+
 def resolve_runtime_version(repo_root: Path | str) -> dict[str, str | None]:
     """Resolve version metadata and a single runtime display value.
 
     Returns a dict with:
       - baked: release-like version from env/.version_info/pyproject (v-prefixed)
-      - tag: same as baked for template compatibility
-      - branch, commit, date: git metadata when available
-      - display: final runtime version string
+      - tag: the release this checkout actually *is*, else None. Deliberately not
+        ``baked``: a source checkout bakes in the in-progress pyproject version —
+        which on a release-prep commit names a tag that does not exist yet — and
+        reporting that as the running release is how the viewer footer and the
+        version command came to disagree. Only a value git corroborates (or an
+        explicit override) becomes a tag.
+      - branch, commit, date: git metadata when available (branch is None when
+        HEAD is detached)
+      - display: final runtime version string; the single value UI should show
     """
     root = Path(repo_root).resolve()
 
@@ -102,21 +135,44 @@ def resolve_runtime_version(repo_root: Path | str) -> dict[str, str | None]:
         # %ci format is "YYYY-MM-DD HH:MM:SS +TZ"; keep date only.
         date = date_raw.split()[0] if " " in date_raw else date_raw
 
+    # Detached HEAD: rev-parse reports the literal string "HEAD", not a branch name.
+    detached = branch == "HEAD"
+    if detached:
+        branch = None
+
+    # The tag HEAD actually sits on, if any. Checked on every checkout shape rather
+    # than only detached ones: `main` two commits past v1.0.0 is not v1.0.0 (and a
+    # release-prep commit bumps pyproject *before* the tag exists), while a release
+    # branch parked exactly on the tag is.
+    exact_tag: str | None = None
+    if commit:
+        exact_tag = _normalize_tag(
+            _safe_git_run(root, ["describe", "--tags", "--exact-match", "HEAD"])
+        )
+
     display: str | None
-    if branch and branch != "main" and commit:
+    tag: str | None
+    if env_version:
+        # An explicit override is authoritative — pinning the reported version is
+        # the only reason to set it.
+        display = env_version
+    elif exact_tag:
+        display = exact_tag
+    elif branch and commit:
         display = f"{branch}-{commit}"
-    elif branch == "main" and baked:
-        display = baked
+    elif detached and commit:
+        display = f"detached-{commit}"
     else:
-        # Fallbacks for non-git/runtime-constrained environments.
-        display = baked or (f"{branch}-{commit}" if branch and commit else None) or "unknown"
+        # No usable git metadata: an installed release, which writes .version_info.
+        display = baked or "unknown"
+    # `tag` is a release identity, so it only survives when the value looks like one.
+    tag = display if _is_release_version(display) else None
 
     return {
         "baked": baked,
-        "tag": baked,
+        "tag": tag,
         "branch": branch,
         "commit": commit,
         "date": date,
         "display": display,
     }
-

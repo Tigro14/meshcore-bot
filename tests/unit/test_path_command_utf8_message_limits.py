@@ -120,6 +120,27 @@ class TestPathCommandReplyPrefix:
         assert path_cmd.last_response == "[alice]\nline1"
 
     @pytest.mark.asyncio
+    async def test_prefix_supports_hops_and_enhanced_path(self, path_cmd, mock_bot):
+        path_cmd.path_reply_prefix = "[{sender}] {path} ({hops_label})"
+        path_cmd.get_max_message_length = lambda _msg: 200
+        msg = MeshMessage(
+            content="path",
+            channel="general",
+            is_dm=False,
+            sender_id="alice",
+            hops=2,
+            path="raw fallback",
+            routing_info={"path_length": 2, "path_nodes": ["01", "5f"]},
+        )
+
+        await path_cmd._send_path_response(msg, "line1")
+
+        path_cmd.send_response.assert_awaited_once()
+        payload = path_cmd.send_response.call_args[0][1]
+        assert payload == "[alice] 01,5f (2 hops) (2 hops)\nline1"
+        assert path_cmd.last_response == "[alice] 01,5f (2 hops) (2 hops)\nline1"
+
+    @pytest.mark.asyncio
     async def test_prefix_only_on_first_split_message(self, path_cmd, mock_bot):
         path_cmd.path_reply_prefix = "P:"
         path_cmd.get_max_message_length = lambda _msg: 25

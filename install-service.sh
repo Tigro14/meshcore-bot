@@ -14,14 +14,18 @@
 #   ./install-service.sh          # Normal installation (non-destructive if already installed)
 #   ./install-service.sh --upgrade # Upgrade mode (copies new files, updates dependencies)
 #   ./install-service.sh -u        # Short form of --upgrade
+#   ./install-service.sh -u --install-extras # upgrade + install optional packages (profanity, geocoding)
+#   ./install-service.sh --update-venv           # Only refresh the venv, in place
+#   ./install-service.sh -u --update-venv        # Upgrade code, reuse the venv
 #
 # Prerequisites:
 #   - Linux system with systemd OR macOS
-#   - Python 3.9+ installed
+#   - Python 3.10+ installed
 #   - sudo access (script will prompt if needed)
 #   - Run from the meshcore-bot directory
 
 set -e
+umask 077
 
 # Colors for output
 RED='\033[0;31m'
@@ -53,6 +57,8 @@ if [[ "$IS_MACOS" == true ]]; then
     SERVICE_USER="$(whoami)"  # macOS: use current user or _meshcore
     SERVICE_GROUP="staff"
     INSTALL_DIR="/usr/local/meshcore-bot"
+    CONF_DIR="/usr/local/etc/meshcore-bot"
+    STATE_DIR="/usr/local/var/lib/meshcore-bot"
     LOG_DIR="/usr/local/var/log/meshcore-bot"
     SERVICE_FILE="com.meshcore.bot.plist"
     LAUNCHD_DIR="/Library/LaunchDaemons"
@@ -60,19 +66,31 @@ else
     SERVICE_USER="meshcore"
     SERVICE_GROUP="meshcore"
     INSTALL_DIR="/opt/meshcore-bot"
+    CONF_DIR="/etc/meshcore-bot"
+    STATE_DIR="/var/lib/meshcore-bot"
     LOG_DIR="/var/log/meshcore-bot"
     SERVICE_FILE="meshcore-bot.service"
     SYSTEMD_DIR="/etc/systemd/system"
 fi
 
+CONFIG_FILE="$CONF_DIR/config.ini"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Parse command line arguments (before sudo check so help works)
 UPGRADE_MODE=false
+UPDATE_VENV=false
+INSTALL_EXTRAS=false
 for arg in "$@"; do
     case $arg in
         --upgrade|-u)
             UPGRADE_MODE=true
+            ;;
+        --update-venv)
+            UPDATE_VENV=true
+            ;;
+        --install-extras|-ie)
+            INSTALL_EXTRAS=true
             ;;
         --help|-h)
             echo "MeshCore Bot Service Installation Script"
@@ -81,12 +99,20 @@ for arg in "$@"; do
             echo ""
             echo "Options:"
             echo "  --upgrade, -u    Upgrade mode: update files and dependencies"
+            echo "  --update-venv    Update dependencies inside the existing virtualenv"
+            echo "                   instead of rebuilding it from scratch. On its own"
+            echo "                   nothing else is touched: no file sync, no service"
+            echo "                   file changes. Combine with --upgrade to sync code"
+            echo "                   and still skip the slow rebuild."
             echo "  --help, -h       Show this help message"
             echo ""
             echo "Examples:"
-            echo "  $0               # Normal installation (non-destructive if already installed)"
-            echo "  $0 --upgrade     # Upgrade existing installation"
-            echo "  $0 -u            # Short form of --upgrade"
+            echo "  $0                     # Normal installation (non-destructive if already installed)"
+            echo "  $0 --upgrade           # Upgrade existing installation (rebuilds the venv)"
+            echo "  $0 -u                  # Short form of --upgrade"
+            echo "  $0 -u --install-extras # Upgrade and install optional packages without prompting"
+            echo "  $0 --update-venv       # Refresh dependencies only, keeping the venv"
+            echo "  $0 -u --update-venv    # Upgrade code and refresh the venv in place"
             exit 0
             ;;
         *)
@@ -96,6 +122,14 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# --update-venv on its own is a virtualenv-only run: skip the service user,
+# directory, file-sync and service-file steps entirely.  Combined with --upgrade
+# it stays a normal upgrade that reuses the virtualenv instead of rebuilding it.
+VENV_ONLY_MODE=false
+if [[ "$UPDATE_VENV" == true && "$UPGRADE_MODE" != true ]]; then
+    VENV_ONLY_MODE=true
+fi
 
 # Function to print section headers
 print_section() {
@@ -148,9 +182,15 @@ ask_yes_no() {
     done
 }
 
-if [[ "$UPGRADE_MODE" == true ]]; then
+if [[ "$VENV_ONLY_MODE" == true ]]; then
+    print_section "MeshCore Bot Virtual Environment Update"
+    print_info "Running in VENV-ONLY mode - only Python dependencies will change"
+elif [[ "$UPGRADE_MODE" == true ]]; then
     print_section "MeshCore Bot Service Upgrader"
     print_info "Running in UPGRADE mode - will update files and dependencies"
+    if [[ "$UPDATE_VENV" == true ]]; then
+        print_info "Reusing the existing virtualenv instead of rebuilding it"
+    fi
 else
     print_section "MeshCore Bot Service Installer"
 fi
@@ -222,8 +262,258 @@ fi
 # Check if Python 3 is available
 if ! command -v python3 &> /dev/null; then
     print_error "Python 3 is not installed or not in PATH"
-    print_error "Please install Python 3.9 or higher before running this script"
+    print_error "Please install Python 3.10 or higher before running this script"
     exit 1
+fi
+if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
+    print_error "Python 3.10 or higher is required"
+    print_error "Found: $(python3 --version 2>&1)"
+    exit 1
+fi
+if ! command -v rsync &> /dev/null; then
+    print_error "rsync is required for a source-authoritative secure install"
+    print_error "Install rsync before stopping or upgrading the service"
+    exit 1
+fi
+
+# Stop a running legacy service before changing code or taking the SQLite
+# backup used for layout migration.  This runs only after sudo re-execution and
+# service-manager validation, so --help and unprivileged discovery stay inert.
+SERVICE_RESTART_PENDING=false
+SERVICE_RESTART_SAFE=true
+
+restart_previously_active_service() {
+    if [[ "$SERVICE_RESTART_PENDING" != true ]]; then
+        return 0
+    fi
+
+    if [[ "$IS_MACOS" == true ]]; then
+        if ! launchctl list "$PLIST_NAME" &>/dev/null; then
+            if ! launchctl load "$LAUNCHD_DIR/$SERVICE_FILE" 2>/dev/null; then
+                return 1
+            fi
+        fi
+    elif ! systemctl start "$SERVICE_NAME"; then
+        return 1
+    fi
+
+    SERVICE_RESTART_PENDING=false
+    return 0
+}
+
+restore_active_service_on_failure() {
+    local status=$?
+    trap - EXIT
+    if [[ "$status" -ne 0 && "$SERVICE_RESTART_PENDING" == true && "$SERVICE_RESTART_SAFE" == true ]]; then
+        print_warning "Upgrade failed; attempting to restore the previously active service"
+        if restart_previously_active_service; then
+            print_warning "Previously active service was restarted after the failed upgrade"
+        else
+            print_error "Could not restart the previously active service; manual recovery is required"
+        fi
+    elif [[ "$status" -ne 0 && "$SERVICE_RESTART_PENDING" == true ]]; then
+        print_error "Upgrade failed and the executable rollback was incomplete"
+        print_error "Refusing to restart a potentially partial code tree; manual recovery is required"
+    fi
+    exit "$status"
+}
+
+trap restore_active_service_on_failure EXIT
+
+# Normalize virtualenv permissions after any pip activity.  pip inherits this
+# script's `umask 077`, so freshly written files (pyvenv.cfg, *.pth, compiled
+# *.so, dist-info metadata) land root-only and the service account cannot import
+# them -- Python aborts with "init_import_site: Failed to import the site
+# module".  Add read for all plus execute/traverse only where an execute bit
+# already exists.  No write bit is ever granted, so the service account still
+# cannot modify dependency code.
+harden_venv_permissions() {
+    local venv="$1"
+    chmod -R go-w "$venv" 2>/dev/null || true
+    chmod -R a+rX "$venv" 2>/dev/null || true
+}
+
+# Echo a human-readable reason when an existing virtualenv must not be updated
+# in place, or nothing when reuse is safe.  The rebuild path exists because a
+# service-writable venv can hide a malicious .pth or module that hardening would
+# then bless as root-owned executable code, so reuse demands a tree that is
+# root-owned and free of group/other write bits.
+venv_reuse_blocker() {
+    local venv="$1"
+
+    if [ ! -d "$venv" ]; then
+        echo "no virtualenv exists at $venv"
+        return
+    fi
+    if [ ! -x "$venv/bin/python" ]; then
+        echo "$venv has no usable interpreter at bin/python"
+        return
+    fi
+
+    local offender
+    offender="$(find "$venv" ! -user root -print 2>/dev/null | head -1)"
+    if [ -n "$offender" ]; then
+        echo "not root-owned throughout (e.g. $offender)"
+        return
+    fi
+
+    offender="$(find "$venv" \( -perm -g+w -o -perm -o+w \) -print 2>/dev/null | head -1)"
+    if [ -n "$offender" ]; then
+        echo "group/other-writable paths present (e.g. $offender)"
+        return
+    fi
+
+    # A system Python upgrade leaves the venv pointing at a replaced interpreter
+    # or a stale site-packages version directory; in-place pip cannot repair it.
+    local venv_ver sys_ver
+    venv_ver="$("$venv/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+    sys_ver="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+    if [ -z "$venv_ver" ]; then
+        echo "the interpreter at $venv/bin/python does not run"
+        return
+    fi
+    if [ -n "$sys_ver" ] && [ "$venv_ver" != "$sys_ver" ]; then
+        echo "virtualenv Python $venv_ver does not match system python3 $sys_ver"
+        return
+    fi
+}
+
+# Extra pip arguments for 32-bit ARM hosts (Raspberry Pi 2/3 on a 32-bit OS).
+#
+# Ten dependencies have no prebuilt armv7 wheel on PyPI and would compile from source on
+# the device - hours of work on a Cortex-A7 and a likely OOM at 1 GB RAM.  piwheels serves
+# prebuilt armv7 wheels and is already configured on Raspberry Pi OS via /etc/pip.conf;
+# passing it explicitly also covers Ubuntu armhf, DietPi and other 32-bit distros that do
+# not ship that default.  constraints-armv7.txt then closes the last two gaps, so the
+# install resolves entirely to wheels.  See that file for the measurements.
+#
+# Scoped to 32-bit ARM on purpose: the constraints hold two packages one version back, and
+# there is no reason to impose that on amd64/arm64.  Results go in ARMV7_PIP_ARGS, which is
+# empty on every other platform.
+ARMV7_PIP_ARGS=()
+configure_armv7_pip_args() {
+    local requirements="$1"
+    local constraints
+
+    ARMV7_PIP_ARGS=()
+    case "$(uname -m)" in
+        armv6l|armv7l) ;;
+        *) return 0 ;;
+    esac
+
+    ARMV7_PIP_ARGS+=(--extra-index-url https://www.piwheels.org/simple)
+    print_info "32-bit ARM detected; using piwheels prebuilt wheels to avoid on-device compilation"
+
+    constraints="$(dirname "$requirements")/constraints-armv7.txt"
+    if [ -f "$constraints" ]; then
+        ARMV7_PIP_ARGS+=(-c "$constraints")
+    else
+        print_warning "constraints-armv7.txt not found next to $requirements"
+        print_warning "brotli and ephem will compile from source; this can take a while"
+    fi
+}
+
+# Bring an existing virtualenv up to date with requirements.txt.  Plain
+# `pip install -r` (no --upgrade) is deliberate: it installs what is missing and
+# upgrades only what no longer satisfies a specifier, which is the fast path.
+# `--upgrade` would eagerly churn transitive dependencies on every run.  Extras
+# installed previously (profanity filter, geocoding) survive, unlike a rebuild.
+# Also rewrites console-script shebangs so an earlier .venv-build-$$ relocate
+# does not leave venv/bin/pip broken after --update-venv (issue #229).
+update_venv_in_place() {
+    local venv="$1"
+    local requirements="$2"
+    local rewrite_helper
+
+    print_info "Reusing the existing virtualenv at $venv"
+    print_info "Synchronizing dependencies from $requirements"
+    configure_armv7_pip_args "$requirements"
+    if ! "$venv/bin/python" -m pip install --quiet "${ARMV7_PIP_ARGS[@]}" -r "$requirements"; then
+        print_error "Failed to update Python dependencies"
+        print_info "Check your internet connection, or rebuild with: $0 --upgrade"
+        return 1
+    fi
+
+    # Prefer the helper shipped with this installer invocation so --update-venv
+    # heals broken shebangs even before a full code sync lands under INSTALL_DIR.
+    if [ -f "$SCRIPT_DIR/scripts/rewrite_venv_shebangs.sh" ]; then
+        rewrite_helper="$SCRIPT_DIR/scripts/rewrite_venv_shebangs.sh"
+    else
+        rewrite_helper="$INSTALL_DIR/scripts/rewrite_venv_shebangs.sh"
+    fi
+    if ! bash "$rewrite_helper" "$venv"; then
+        print_error "Failed to rewrite virtualenv console-script shebangs"
+        print_info "Rebuild with: $0 --upgrade"
+        return 1
+    fi
+
+    harden_venv_permissions "$venv"
+    print_success "Dependencies are up to date in the existing virtualenv"
+}
+
+if [[ "$IS_MACOS" == true ]]; then
+    if launchctl list "$PLIST_NAME" &>/dev/null; then
+        if ! launchctl unload "$LAUNCHD_DIR/$SERVICE_FILE" 2>/dev/null; then
+            launchctl stop "$PLIST_NAME" 2>/dev/null || true
+        fi
+        if launchctl list "$PLIST_NAME" &>/dev/null; then
+            print_error "The launchd service is still running; refusing an unsafe live database migration"
+            exit 1
+        fi
+        SERVICE_RESTART_PENDING=true
+    fi
+elif systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    systemctl stop "$SERVICE_NAME"
+    SERVICE_RESTART_PENDING=true
+fi
+
+# ---------------------------------------------------------------------------
+# Virtualenv-only fast path.  Everything above still applies (privilege check,
+# service-manager and Python validation, stopping a running service); nothing
+# below does, so the run ends here rather than threading conditionals through
+# every remaining step.
+# ---------------------------------------------------------------------------
+if [[ "$VENV_ONLY_MODE" == true ]]; then
+    print_section "Updating Python Virtual Environment"
+
+    if [ ! -d "$INSTALL_DIR" ]; then
+        print_error "No installation found at $INSTALL_DIR"
+        print_info "Run a full install first: sudo $0"
+        exit 1
+    fi
+
+    REQUIREMENTS_SRC="$SCRIPT_DIR/requirements.txt"
+    if [ ! -f "$REQUIREMENTS_SRC" ]; then
+        print_error "requirements.txt not found at $REQUIREMENTS_SRC"
+        exit 1
+    fi
+
+    VENV_BLOCKER="$(venv_reuse_blocker "$INSTALL_DIR/venv")"
+    if [ -n "$VENV_BLOCKER" ]; then
+        print_error "Cannot update the virtualenv in place: $VENV_BLOCKER"
+        print_info "Rebuild it with: sudo $0 --upgrade"
+        exit 1
+    fi
+
+    update_venv_in_place "$INSTALL_DIR/venv" "$REQUIREMENTS_SRC" || exit 1
+
+    if [[ "$SERVICE_RESTART_PENDING" == true ]]; then
+        print_info "Restarting the service because it was running before the update"
+        if ! restart_previously_active_service; then
+            print_error "Failed to restart the service"
+            exit 1
+        fi
+        print_success "Service restarted"
+    elif [[ "$IS_MACOS" == true ]]; then
+        print_info "Service was not running; start it with: sudo launchctl load $LAUNCHD_DIR/$SERVICE_FILE"
+    else
+        print_info "Service was not running; start it with: sudo systemctl start $SERVICE_NAME"
+    fi
+
+    print_section "Virtual Environment Update Complete"
+    print_info "Code in $INSTALL_DIR, configuration and the service file were left untouched"
+    print_info "Dependencies came from $REQUIREMENTS_SRC"
+    exit 0
 fi
 
 print_section "Step 1: Setting Up Service User"
@@ -249,7 +539,7 @@ else
     else
         print_warning "User $SERVICE_USER already exists (skipping creation)"
     fi
-    
+
     # Add user to dialout group for serial port access (Linux)
     print_info "Configuring serial port access permissions"
     if getent group dialout > /dev/null 2>&1; then
@@ -263,7 +553,7 @@ else
         print_warning "dialout group not found - serial port access may require manual configuration"
         print_info "If using serial connection, you may need to: sudo usermod -a -G dialout $SERVICE_USER"
     fi
-    
+
     # Also check for other common serial port groups (tty, uucp, lock)
     for group in tty uucp lock; do
         if getent group "$group" > /dev/null 2>&1; then
@@ -291,160 +581,107 @@ else
     print_success "Created installation directory: $INSTALL_DIR"
 fi
 
-# Create log directory
-mkdir -p "$LOG_DIR"
+# Create mutable runtime directories separately from executable code.
+mkdir -p "$CONF_DIR" "$STATE_DIR" "$LOG_DIR"
+print_success "Created configuration directory: $CONF_DIR"
+print_success "Created state directory: $STATE_DIR"
 print_success "Created log directory: $LOG_DIR"
 
 print_section "Step 3: Copying Bot Files"
 if [[ "$UPGRADE_MODE" == true ]]; then
     print_info "Upgrading files in $INSTALL_DIR"
-    print_info "Only newer files will be copied, preserving existing configuration"
+    print_info "Replacing executable files from the trusted source while preserving explicit runtime state"
 else
     print_info "Copying bot files to $INSTALL_DIR"
-    print_info "Existing files will be updated only if source is newer"
+    print_info "Executable files will exactly match the trusted source"
 fi
 
-# Function to copy files intelligently
+# Synchronize executable code authoritatively.  Using --update or a merge-only
+# fallback can preserve a newer/stale Python file written by a previously
+# compromised service account and then cement it as root-owned executable code.
+# Only the explicitly excluded runtime paths survive an upgrade.
+sync_executable_tree() {
+    local source_dir="$1"
+    local dest_dir="$2"
+
+    rsync -a --delete --exclude='.git' \
+        --exclude='__pycache__' \
+        --exclude='*.pyc' \
+        --exclude='*.pyo' \
+        --exclude='.DS_Store' \
+        --exclude='venv' \
+        --exclude='*.db' \
+        --exclude='*.db-shm' \
+        --exclude='*.db-wal' \
+        --exclude='*.log' \
+        --exclude='backups' \
+        --exclude='local/' \
+        --exclude='config.ini' \
+        "$source_dir/" "$dest_dir/"
+}
+
 copy_files_smart() {
     local source_dir="$1"
     local dest_dir="$2"
-    local files_copied=0
-    local files_skipped=0
-    local files_updated=0
-    
-    # Use rsync if available (better for this use case)
-    if command -v rsync &> /dev/null; then
-        print_info "Using rsync for efficient file copying"
-        # Preserve config.ini if it exists
-        local preserve_config=""
-        if [ -f "$dest_dir/config.ini" ]; then
-            preserve_config="--exclude=config.ini"
-            print_info "Preserving existing config.ini (not overwriting)"
-        fi
-        
-        # Note: --update flag preserves files in alternatives/ if destination is newer or same
-        # This protects user's custom alternative commands while allowing updates to repository files
-        if [ -d "$dest_dir/modules/commands/alternatives" ]; then
-            print_info "Preserving existing alternative commands (only updating if source is newer)"
-        fi
-        
-        # Preserve install dir's local/ entirely (user custom commands and service plugins)
-        # Never overwrite or delete anything under $dest_dir/local/
-        if [ -d "$dest_dir/local" ]; then
-            print_info "Preserving existing local/ directory (not overwriting)"
-        fi
-        
-        # Exclude patterns
-        rsync -a --update --exclude='.git' \
-              --exclude='__pycache__' \
-              --exclude='*.pyc' \
-              --exclude='*.pyo' \
-              --exclude='.DS_Store' \
-              --exclude='venv' \
-              --exclude='*.db' \
-              --exclude='*.db-shm' \
-              --exclude='*.db-wal' \
-              --exclude='*.log' \
-              --exclude='backups' \
-              --exclude='local/' \
-              $preserve_config \
-              "$source_dir/" "$dest_dir/" 2>/dev/null || {
-            print_warning "rsync had some issues, falling back to manual copy"
-        }
-        # If install dir has no local/, create minimal structure from source so service has valid layout
-        if [ ! -d "$dest_dir/local" ]; then
-            print_info "Creating local/ directory structure (first-time install)"
-            mkdir -p "$dest_dir/local/commands" "$dest_dir/local/service_plugins"
-            [ -f "$source_dir/local/README.md" ] && cp "$source_dir/local/README.md" "$dest_dir/local/" || true
-            [ -f "$source_dir/local/__init__.py" ] && cp "$source_dir/local/__init__.py" "$dest_dir/local/" || true
-            [ -f "$source_dir/local/commands/.gitkeep" ] && cp "$source_dir/local/commands/.gitkeep" "$dest_dir/local/commands/" || true
-            [ -f "$source_dir/local/service_plugins/.gitkeep" ] && cp "$source_dir/local/service_plugins/.gitkeep" "$dest_dir/local/service_plugins/" || true
-        fi
-        print_success "Files synchronized using rsync"
-        return 0
+    local alternatives_backup
+    local rollback_backup
+
+    alternatives_backup="$(mktemp -d "${TMPDIR:-/tmp}/meshcore-alternatives.XXXXXX")"
+    rollback_backup="$(mktemp -d "${TMPDIR:-/tmp}/meshcore-executable-rollback.XXXXXX")"
+    if ! python3 "$SCRIPT_DIR/scripts/preserve_service_alternatives.py" backup \
+          --source "$source_dir/modules/commands/alternatives" \
+          --installed "$dest_dir/modules/commands/alternatives" \
+          --backup "$alternatives_backup"; then
+        print_error "Failed to preserve installed-only alternative commands"
+        print_error "Partial backup retained at $alternatives_backup"
+        return 1
     fi
-    
-    # Fallback: manual copy with find
-    print_info "Using manual file copy (consider installing rsync for better performance)"
-    
-    # Preserve alternatives directory if it exists
-    if [ -d "$dest_dir/modules/commands/alternatives" ]; then
-        print_info "Preserving existing alternative commands (not overwriting)"
+
+    print_info "Creating a rollback snapshot of the installed executable tree"
+    if ! sync_executable_tree "$dest_dir" "$rollback_backup"; then
+        print_error "Failed to create the executable rollback snapshot"
+        print_error "Incomplete snapshot retained at $rollback_backup"
+        return 1
     fi
-    
-    # Preserve install dir's local/ entirely - never overwrite when it exists
-    if [ -d "$dest_dir/local" ]; then
-        print_info "Preserving existing local/ directory (not overwriting)"
-    fi
-    
-    # Copy files, preserving config.ini if it exists
-    while IFS= read -r file; do
-        local rel_path="${file#$source_dir/}"
-        local dest_file="$dest_dir/$rel_path"
-        local dest_dir_path
-        dest_dir_path="$(dirname "$dest_file")"
-        
-        # Skip excluded patterns
-        [[ "$rel_path" == *".git"* ]] && continue
-        [[ "$rel_path" == *"__pycache__"* ]] && continue
-        [[ "$rel_path" == *".pyc" ]] && continue
-        [[ "$rel_path" == *".pyo" ]] && continue
-        [[ "$rel_path" == *".DS_Store"* ]] && continue
-        [[ "$rel_path" == *"/venv/"* ]] && continue
-        [[ "$rel_path" == *".db" ]] && continue
-        [[ "$rel_path" == *".db-shm" ]] && continue
-        [[ "$rel_path" == *".db-wal" ]] && continue
-        [[ "$rel_path" == *".log" ]] && continue
-        [[ "$rel_path" == *"/backups/"* ]] && continue
-        
-        # Preserve install dir's local/ entirely - skip all files under local/ when dest has local/
-        if [[ "$rel_path" == "local/"* ]] && [ -d "$dest_dir/local" ]; then
-            files_skipped=$((files_skipped + 1))
-            continue
-        fi
-        
-        # Preserve alternatives directory - only update if source file is newer
-        if [[ "$rel_path" == "modules/commands/alternatives/"* ]] && [ -d "$dest_dir/modules/commands/alternatives" ]; then
-            if [ -f "$dest_file" ]; then
-                # File exists in destination - only update if source is newer
-                if [ "$file" -nt "$dest_file" ]; then
-                    # Source is newer, will update below
-                    :
-                else
-                    # Destination is same or newer - preserve user's version
-                    files_skipped=$((files_skipped + 1))
-                    continue
-                fi
+
+    print_info "Using rsync for source-authoritative executable synchronization"
+    SERVICE_RESTART_SAFE=false
+    if ! sync_executable_tree "$source_dir" "$dest_dir"; then
+        print_warning "rsync failed; restoring the previous executable tree"
+        if sync_executable_tree "$rollback_backup" "$dest_dir"; then
+            SERVICE_RESTART_SAFE=true
+            rm -rf -- "$rollback_backup"
+            if ! python3 "$SCRIPT_DIR/scripts/preserve_service_alternatives.py" restore \
+                  --installed "$dest_dir/modules/commands/alternatives" \
+                  --backup "$alternatives_backup"; then
+                print_error "Alternative-command backup retained at $alternatives_backup"
             fi
-            # File doesn't exist in destination, or source is newer - will copy below
-        fi
-        
-        # Create destination directory if needed
-        mkdir -p "$dest_dir_path"
-        
-        # Special handling for config.ini - preserve existing if it exists
-        if [[ "$rel_path" == "config.ini" ]] && [ -f "$dest_file" ]; then
-            files_skipped=$((files_skipped + 1))
-            continue
-        fi
-        
-        # Copy if destination doesn't exist or source is newer
-        if [ ! -f "$dest_file" ] || [ "$file" -nt "$dest_file" ]; then
-            if cp "$file" "$dest_file" 2>/dev/null; then
-                if [ -f "$dest_file" ]; then
-                    files_updated=$((files_updated + 1))
-                else
-                    files_copied=$((files_copied + 1))
-                fi
-            else
-                print_warning "Could not copy $rel_path"
-            fi
+            print_warning "Previous executable tree restored after synchronization failure"
         else
-            files_skipped=$((files_skipped + 1))
+            print_error "Executable rollback failed; snapshot retained at $rollback_backup"
         fi
-    done < <(find "$source_dir" -type f 2>/dev/null)
-    
-    print_success "File sync complete: $files_updated updated, $files_copied new, $files_skipped unchanged"
+        print_error "rsync failed; refusing to continue the upgrade"
+        return 1
+    fi
+    if ! python3 "$SCRIPT_DIR/scripts/preserve_service_alternatives.py" restore \
+          --installed "$dest_dir/modules/commands/alternatives" \
+          --backup "$alternatives_backup"; then
+        print_error "Failed to restore installed-only alternative commands"
+        print_error "Backup retained at $alternatives_backup"
+        print_warning "Restoring the previous executable tree"
+        if sync_executable_tree "$rollback_backup" "$dest_dir"; then
+            SERVICE_RESTART_SAFE=true
+            rm -rf -- "$rollback_backup"
+            print_warning "Previous executable tree restored after alternative-command failure"
+        else
+            print_error "Executable rollback failed; snapshot retained at $rollback_backup"
+        fi
+        return 1
+    fi
+
+    SERVICE_RESTART_SAFE=true
+    rm -rf -- "$rollback_backup"
+    print_success "Executable files synchronized authoritatively using rsync"
 }
 
 # Copy files using smart copy function
@@ -456,7 +693,9 @@ copy_files_smart "$SCRIPT_DIR" "$INSTALL_DIR" || {
 # Write .version_info at install dir so web viewer and packet_capture show version after install
 if command -v git &>/dev/null && [ -d "$SCRIPT_DIR/.git" ]; then
     GIT_HASH="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
-    if VERSION="$(git -C "$SCRIPT_DIR" describe --exact-match HEAD 2>/dev/null)"; then
+    # --tags matches lightweight tags too; must stay in step with the runtime
+    # lookup in modules/version_info.py or the two disagree about one commit.
+    if VERSION="$(git -C "$SCRIPT_DIR" describe --tags --exact-match HEAD 2>/dev/null)"; then
         INSTALLER_VER="$VERSION"
     else
         INSTALLER_VER="dev-${GIT_HASH}"
@@ -465,109 +704,210 @@ if command -v git &>/dev/null && [ -d "$SCRIPT_DIR/.git" ]; then
     print_success "Wrote version info (${INSTALLER_VER}) to $INSTALL_DIR/.version_info"
 fi
 
-# If no config.ini in install dir, create it from config.ini.example
-if [ ! -f "$INSTALL_DIR/config.ini" ]; then
-    if [ -f "$INSTALL_DIR/config.ini.example" ]; then
-        cp "$INSTALL_DIR/config.ini.example" "$INSTALL_DIR/config.ini"
-        print_success "Created $INSTALL_DIR/config.ini from config.ini.example (no config was present)"
+# Keep configuration out of the root-owned application tree.  On upgrade, copy
+# the legacy config once so existing credentials and settings are preserved.
+if [ ! -f "$CONFIG_FILE" ]; then
+    if [ -f "$INSTALL_DIR/config.ini" ] && [ ! -L "$INSTALL_DIR/config.ini" ]; then
+        cp -p "$INSTALL_DIR/config.ini" "$CONFIG_FILE"
+        print_success "Migrated existing configuration to $CONFIG_FILE"
+    elif [ -f "$INSTALL_DIR/config.ini.example" ]; then
+        cp "$INSTALL_DIR/config.ini.example" "$CONFIG_FILE"
+        print_success "Created $CONFIG_FILE from config.ini.example"
     elif [ -f "$SCRIPT_DIR/config.ini.example" ]; then
-        cp "$SCRIPT_DIR/config.ini.example" "$INSTALL_DIR/config.ini"
-        print_success "Created $INSTALL_DIR/config.ini from config.ini.example (no config was present)"
+        cp "$SCRIPT_DIR/config.ini.example" "$CONFIG_FILE"
+        print_success "Created $CONFIG_FILE from config.ini.example"
     else
-        print_warning "config.ini.example not found. Create $INSTALL_DIR/config.ini manually before starting the bot."
+        print_warning "config.ini.example not found. Create $CONFIG_FILE manually before starting the bot."
     fi
 fi
 
-# Create venv and install dependencies before chown so the service user ends up
-# owning a complete, working venv (avoids partial root-owned venv and import errors).
+# Rewrite all relative runtime paths and coherently migrate an existing SQLite
+# database.  Absolute custom paths are left untouched; operators can grant an
+# additional systemd path explicitly when they intentionally store state there.
+if [ -f "$CONFIG_FILE" ]; then
+    python3 "$INSTALL_DIR/scripts/migrate_service_layout.py" \
+        --config "$CONFIG_FILE" \
+        --legacy-base "$INSTALL_DIR" \
+        --state-dir "$STATE_DIR" \
+        --log-dir "$LOG_DIR"
+fi
+
+# Remove a source-tree config copied into the application tree only when it is
+# identical to the active service config; otherwise retain it root-only as a
+# migration backup.
+if [ -f "$INSTALL_DIR/config.ini" ] && [ ! -L "$INSTALL_DIR/config.ini" ]; then
+    chmod 0600 "$INSTALL_DIR/config.ini"
+fi
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    # Retain the old diagnostic wording for automation which looks for it.
+    if [ -f "$INSTALL_DIR/config.ini.example" ]; then
+        print_warning "Failed to create $CONFIG_FILE; check directory permissions"
+    fi
+fi
+
 print_section "Step 4: Setting Up Python Virtual Environment"
-if [ -d "$INSTALL_DIR/venv" ]; then
-    print_info "Virtual environment already exists at $INSTALL_DIR/venv"
-    print_info "Preserving existing virtual environment"
-    if [[ "$UPGRADE_MODE" == true ]]; then
-        print_info "Upgrade mode: will update dependencies"
+
+# --update-venv skips the rebuild when the existing environment is safe to reuse.
+# If it is not, say why and fall back to a full rebuild rather than failing the
+# whole upgrade.
+VENV_UPDATED_IN_PLACE=false
+if [[ "$UPDATE_VENV" == true ]]; then
+    VENV_BLOCKER="$(venv_reuse_blocker "$INSTALL_DIR/venv")"
+    if [ -n "$VENV_BLOCKER" ]; then
+        print_warning "Cannot reuse the existing virtualenv: $VENV_BLOCKER"
+        print_info "Falling back to a full rebuild"
+    elif update_venv_in_place "$INSTALL_DIR/venv" "$INSTALL_DIR/requirements.txt"; then
+        VENV_UPDATED_IN_PLACE=true
     else
-        print_info "Will update dependencies if requirements.txt changed"
+        print_warning "In-place dependency update failed; falling back to a full rebuild"
     fi
-else
-    print_info "Creating an isolated Python environment for the bot"
-    print_info "This ensures dependencies don't conflict with system Python packages"
-    python3 -m venv "$INSTALL_DIR/venv"
-    print_success "Created virtual environment at $INSTALL_DIR/venv"
 fi
 
-# Verify virtual environment looks healthy
+if [[ "$VENV_UPDATED_IN_PLACE" != true ]]; then
+    # Build dependencies in a fresh environment.  The legacy venv was writable by
+    # the service account; reusing it could preserve a malicious .pth/module and
+    # turn that persistence into root-owned executable code during hardening.
+    VENV_BUILD="$INSTALL_DIR/.venv-build-$$"
+    VENV_OLD="$INSTALL_DIR/.venv-old-$$"
+    rm -rf "$VENV_BUILD" "$VENV_OLD"
+    print_info "Creating a fresh isolated Python environment"
+    python3 -m venv "$VENV_BUILD"
+    VENV_BUILD_PYTHON="$VENV_BUILD/bin/python"
+
+    # Ensure pip is available and up to date inside the venv
+    print_info "Ensuring pip is available and up to date in the virtual environment"
+    $VENV_BUILD_PYTHON -m ensurepip --upgrade >/dev/null 2>&1 || true
+    $VENV_BUILD_PYTHON -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+
+    # Install dependencies in venv using python -m pip (more portable than calling pip directly)
+    print_info "Installing Python dependencies from requirements.txt"
+    print_info "This may take a few minutes depending on your internet connection..."
+    if [ ! -f "$INSTALL_DIR/requirements.txt" ]; then
+        print_error "requirements.txt not found in installation directory"
+        exit 1
+    fi
+    configure_armv7_pip_args "$INSTALL_DIR/requirements.txt"
+    $VENV_BUILD_PYTHON -m pip install --quiet "${ARMV7_PIP_ARGS[@]}" -r "$INSTALL_DIR/requirements.txt" || {
+        print_error "Failed to install Python dependencies"
+        print_info "You may need to check your internet connection or Python version"
+        rm -rf "$VENV_BUILD"
+        exit 1
+    }
+    if [ -d "$INSTALL_DIR/venv" ]; then
+        mv "$INSTALL_DIR/venv" "$VENV_OLD"
+    fi
+    if ! mv "$VENV_BUILD" "$INSTALL_DIR/venv"; then
+        [ -d "$VENV_OLD" ] && mv "$VENV_OLD" "$INSTALL_DIR/venv"
+        print_error "Failed to activate the newly built virtual environment"
+        exit 1
+    fi
+    # Console scripts still embed the .venv-build-$$ shebang; rewrite before any
+    # later call to venv/bin/pip or other entry points (see issue #229).  Keep
+    # VENV_OLD until rewrite succeeds so a failure can restore the prior tree.
+    if ! bash "$INSTALL_DIR/scripts/rewrite_venv_shebangs.sh" "$INSTALL_DIR/venv"; then
+        print_error "Failed to rewrite virtualenv console-script shebangs after relocate"
+        if [ -d "$VENV_OLD" ]; then
+            rm -rf "$INSTALL_DIR/venv"
+            mv "$VENV_OLD" "$INSTALL_DIR/venv"
+            print_warning "Restored the previous virtualenv after shebang rewrite failure"
+        fi
+        exit 1
+    fi
+    rm -rf "$VENV_OLD"
+    print_success "Installed all Python dependencies into a fresh virtual environment"
+fi
+
+# Optional extras.  A rebuild starts empty so these have to be re-chosen; an
+# in-place update keeps whatever was installed before, so don't re-prompt.
+# --install-extras installs both sets non-interactively and takes precedence,
+# so an unattended run can top up an in-place venv update too.
+# Always invoke pip via `python -m pip` so a stale shebang cannot break installs.
 VENV_PYTHON="$INSTALL_DIR/venv/bin/python"
-if [ ! -x "$VENV_PYTHON" ]; then
-    print_error "Python virtual environment at $INSTALL_DIR/venv appears to be incomplete or corrupted"
-    print_error "Expected Python executable not found at: $VENV_PYTHON"
-    print_info "Try removing $INSTALL_DIR/venv and re-running this installer to recreate it:"
-    echo "  sudo rm -rf $INSTALL_DIR/venv"
-    echo "  sudo ./install-service.sh"
-    exit 1
-fi
 
-# Ensure pip is available and up to date inside the venv
-print_info "Ensuring pip is available and up to date in the virtual environment"
-$VENV_PYTHON -m ensurepip --upgrade >/dev/null 2>&1 || true
-$VENV_PYTHON -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
-
-# Install dependencies in venv using python -m pip (more portable than calling pip directly)
-print_info "Installing Python dependencies from requirements.txt"
-print_info "This may take a few minutes depending on your internet connection..."
-if [ ! -f "$INSTALL_DIR/requirements.txt" ]; then
-    print_error "requirements.txt not found in installation directory"
-    exit 1
-fi
-$VENV_PYTHON -m pip install --quiet -r "$INSTALL_DIR/requirements.txt" || {
-    print_error "Failed to install Python dependencies"
-    print_info "You may need to check your internet connection or Python version"
-    exit 1
-}
-print_success "Installed all Python dependencies"
-
-# Optional extras
-echo ""
-print_info "Optional feature packages are available:"
-echo "  • Profanity filter (better-profanity, unidecode) — drop/censor offensive messages"
-echo "  • Geocoding extras (pycountry, us) — improved country/state name resolution"
-echo ""
-
-if ask_yes_no "Install profanity filter packages? (recommended if using the profanity filter feature)" "n"; then
+install_profanity_packages() {
     print_info "Installing profanity filter packages..."
-    "$INSTALL_DIR/venv/bin/pip" install --quiet "better-profanity>=0.7.0" "unidecode>=1.3.0" || {
+    if "$VENV_PYTHON" -m pip install --quiet "better-profanity>=0.7.0" "unidecode>=1.3.0"; then
+        print_success "Installed profanity filter packages"
+    else
         print_warning "Failed to install profanity filter packages (non-fatal)"
-    }
-    print_success "Installed profanity filter packages"
-else
-    print_info "Skipping profanity filter packages"
-fi
+    fi
+}
 
-if ask_yes_no "Install geocoding extras? (recommended if using location/path commands)" "n"; then
+install_geocoding_packages() {
     print_info "Installing geocoding extras..."
-    "$INSTALL_DIR/venv/bin/pip" install --quiet "pycountry>=23.12.0" "us>=2.0.0" || {
+    if "$VENV_PYTHON" -m pip install --quiet "pycountry>=23.12.0" "us>=2.0.0"; then
+        print_success "Installed geocoding extras"
+    else
         print_warning "Failed to install geocoding extras (non-fatal)"
-    }
-    print_success "Installed geocoding extras"
+    fi
+}
+
+if [[ "$INSTALL_EXTRAS" == true ]]; then
+    print_info "Installing optional feature packages (--install-extras)"
+    install_profanity_packages
+    install_geocoding_packages
+elif [[ "$VENV_UPDATED_IN_PLACE" == true ]]; then
+    print_info "Kept any optional packages already installed in the virtualenv"
 else
-    print_info "Skipping geocoding extras"
+    echo ""
+    print_info "Optional feature packages are available:"
+    echo "  • Profanity filter (better-profanity, unidecode) — drop/censor offensive messages"
+    echo "  • Geocoding extras (pycountry, us) — improved country/state name resolution"
+    echo ""
+
+    if ask_yes_no "Install profanity filter packages? (recommended if using the profanity filter feature)" "n"; then
+        install_profanity_packages
+    else
+        print_info "Skipping profanity filter packages"
+    fi
+
+    if ask_yes_no "Install geocoding extras? (recommended if using location/path commands)" "n"; then
+        install_geocoding_packages
+    else
+        print_info "Skipping geocoding extras"
+    fi
 fi
 
 print_section "Step 5: Setting File Permissions"
 print_info "Configuring file ownership and permissions for security"
-print_info "The service user will own all files, with appropriate read/write permissions"
-# Set ownership
-chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR"
+print_info "Executable code is root-owned; the service owns only configuration and runtime state"
+# Executable code and the virtual environment must not be writable by the
+# network-facing service account.
+# The service group receives read-only access to any explicitly installed key
+# material while root remains the only account able to modify it.
+CODE_GROUP="$SERVICE_GROUP"
+chown -R "root:$CODE_GROUP" "$INSTALL_DIR"
 chown -R "$SERVICE_USER:$SERVICE_GROUP" "$LOG_DIR"
-print_success "Set ownership to $SERVICE_USER:$SERVICE_GROUP"
+chown -R "$SERVICE_USER:$SERVICE_GROUP" "$CONF_DIR" "$STATE_DIR"
+print_success "Separated root-owned code from service-owned runtime state"
 
-# Set permissions
+# Code is readable/executable but never service-writable.  Preserve executable
+# bits created by the virtualenv and source scripts while dropping group/other
+# write access.
 chmod 755 "$INSTALL_DIR"
+chmod -R go-w "$INSTALL_DIR"
 find "$INSTALL_DIR" -type f -name "*.py" -exec chmod 644 {} \; 2>/dev/null || true
-find "$INSTALL_DIR" -type f -name "*.ini" -exec chmod 644 {} \; 2>/dev/null || true
 find "$INSTALL_DIR" -type f -name "*.txt" -exec chmod 644 {} \; 2>/dev/null || true
 find "$INSTALL_DIR" -type f -name "*.json" -exec chmod 644 {} \; 2>/dev/null || true
 find "$INSTALL_DIR" -type d -exec chmod 755 {} \; 2>/dev/null || true
+find "$INSTALL_DIR" -type f -name "*.ini" -exec chmod 600 {} \; 2>/dev/null || true
+find "$INSTALL_DIR" -type f \( -name ".env" -o -name "*.key" -o -name "*.pem" -o -name "*.p12" -o -name "*.pfx" \) -exec chmod 640 {} \; 2>/dev/null || true
+find "$INSTALL_DIR" -type f \( -name "*.db" -o -name "*.db-wal" -o -name "*.db-shm" -o -name "*.log" -o -name "*.log.*" \) -exec chmod 600 {} \; 2>/dev/null || true
+
+# The pattern rules above only restore read on *.py/*.txt/*.json, and `chmod go-w`
+# removes write without ever granting read, so the virtualenv is still full of
+# root-only files created under `umask 077`.  Normalize it last so that *.ini
+# files bundled inside site-packages stay readable to their own package.
+harden_venv_permissions "$INSTALL_DIR/venv"
+
+# Credentials, databases, backups, and local-plugin settings are private to the
+# service user.  Directories must be writable for SQLite sidecars and atomic
+# config updates; the 0700 boundary prevents local disclosure.
+find "$CONF_DIR" "$STATE_DIR" -type d -exec chmod 700 {} \; 2>/dev/null || true
+find "$CONF_DIR" "$STATE_DIR" -type f -exec chmod 600 {} \; 2>/dev/null || true
+chmod 750 "$LOG_DIR"
+find "$LOG_DIR" -type f -exec chmod 600 {} \; 2>/dev/null || true
 
 # Make main script executable
 chmod 755 "$INSTALL_DIR/meshcore_bot.py"
@@ -579,7 +919,7 @@ if [[ "$IS_MACOS" == true ]]; then
     print_info "The service will be configured to start on boot and restart on failure"
     # Create LaunchDaemons directory if it doesn't exist
     mkdir -p "$LAUNCHD_DIR"
-    
+
     # Update plist with actual installation paths and copy to LaunchDaemons
     if [ -f "$LAUNCHD_DIR/$SERVICE_FILE" ] && [[ "$UPGRADE_MODE" != true ]]; then
         print_info "Plist file already exists at $LAUNCHD_DIR/$SERVICE_FILE"
@@ -594,22 +934,25 @@ import re
 with open('$SERVICE_FILE', 'r') as f:
     content = f.read()
 content = content.replace('/usr/local/meshcore-bot', '$INSTALL_DIR')
+content = content.replace('/usr/local/etc/meshcore-bot', '$CONF_DIR')
+content = content.replace('/usr/local/var/lib/meshcore-bot', '$STATE_DIR')
 content = content.replace('/usr/local/var/log/meshcore-bot', '$LOG_DIR')
+content = content.replace('__MESHCORE_SERVICE_USER__', '$SERVICE_USER')
 with open('$LAUNCHD_DIR/$SERVICE_FILE', 'w') as f:
     f.write(content)
 "
         else
             # Fallback to sed (works on both macOS and Linux)
-            sed "s|/usr/local/meshcore-bot|$INSTALL_DIR|g; s|/usr/local/var/log/meshcore-bot|$LOG_DIR|g" "$SERVICE_FILE" > "$LAUNCHD_DIR/$SERVICE_FILE"
+            sed "s|/usr/local/meshcore-bot|$INSTALL_DIR|g; s|/usr/local/etc/meshcore-bot|$CONF_DIR|g; s|/usr/local/var/lib/meshcore-bot|$STATE_DIR|g; s|/usr/local/var/log/meshcore-bot|$LOG_DIR|g; s|__MESHCORE_SERVICE_USER__|$SERVICE_USER|g" "$SERVICE_FILE" > "$LAUNCHD_DIR/$SERVICE_FILE"
         fi
         print_success "Copied and configured plist file to $LAUNCHD_DIR/"
     fi
-    
+
     # Set ownership
     chown root:wheel "$LAUNCHD_DIR/$SERVICE_FILE"
     chmod 644 "$LAUNCHD_DIR/$SERVICE_FILE"
     print_success "Set plist permissions"
-    
+
     print_section "Step 7: Loading Service"
     # Check if service is already loaded
     if launchctl list "$PLIST_NAME" &>/dev/null; then
@@ -627,10 +970,17 @@ with open('$LAUNCHD_DIR/$SERVICE_FILE', 'w') as f:
         fi
     else
         print_info "Loading service into launchd"
-        launchctl load "$LAUNCHD_DIR/$SERVICE_FILE" 2>/dev/null || {
-            print_error "Failed to load service. Check plist syntax and permissions."
-            exit 1
-        }
+        if [[ "$SERVICE_RESTART_PENDING" == true ]]; then
+            restart_previously_active_service || {
+                print_error "Failed to restore the previously active launchd service"
+                exit 1
+            }
+        else
+            launchctl load "$LAUNCHD_DIR/$SERVICE_FILE" 2>/dev/null || {
+                print_error "Failed to load service. Check plist syntax and permissions."
+                exit 1
+            }
+        fi
         print_success "Service '$PLIST_NAME' loaded into launchd"
     fi
     print_info "Note: The service is loaded but not started yet. You'll start it after configuration."
@@ -655,7 +1005,7 @@ else
         systemctl daemon-reload
         print_success "Systemd configuration reloaded"
     fi
-    
+
     print_section "Step 7: Enabling Service"
     # Check if service is already enabled
     if systemctl is-enabled "$SERVICE_NAME" &>/dev/null; then
@@ -667,6 +1017,15 @@ else
     fi
     print_info "Note: The service is enabled but not started yet. You'll start it after configuration."
 fi
+
+if [[ "$SERVICE_RESTART_PENDING" == true ]]; then
+    print_info "Restarting the service because it was running before the upgrade"
+    if ! restart_previously_active_service; then
+        print_error "Failed to restart the previously active service"
+        exit 1
+    fi
+fi
+trap - EXIT
 
 if [[ "$UPGRADE_MODE" == true ]]; then
     print_section "Upgrade Complete!"
@@ -684,7 +1043,7 @@ echo -e "${BLUE}📋 Next Steps${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo -e "${CYAN}1. Configure the bot:${NC}"
-echo -e "   ${YELLOW}sudo nano $INSTALL_DIR/config.ini${NC}"
+echo -e "   ${YELLOW}sudo nano $CONFIG_FILE${NC}"
 echo "   Edit the configuration file with your bot settings, API keys, and device information"
 echo ""
 
@@ -744,7 +1103,8 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${BLUE}📁 Important File Locations${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo -e "  ${CYAN}Configuration file:${NC}  ${YELLOW}$INSTALL_DIR/config.ini${NC}"
+echo -e "  ${CYAN}Configuration file:${NC}  ${YELLOW}$CONFIG_FILE${NC}"
+echo -e "  ${CYAN}State directory:${NC}       ${YELLOW}$STATE_DIR${NC}"
 echo -e "  ${CYAN}Log directory:${NC}        ${YELLOW}$LOG_DIR${NC}"
 echo -e "  ${CYAN}Installation directory:${NC} ${YELLOW}$INSTALL_DIR${NC}"
 if [[ "$IS_MACOS" == true ]]; then

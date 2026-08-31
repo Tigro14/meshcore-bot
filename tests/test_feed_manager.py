@@ -93,7 +93,7 @@ class TestQueueFeedMessage:
         _seed_feed(fm_bot.db_manager)
         feed = {"id": 1, "channel_name": "general"}
         item = {"id": "item-1", "title": "Hello Feed"}
-        fm._queue_feed_message(feed, item, "Hello Feed message")
+        assert fm._queue_feed_message(feed, item, "Hello Feed message") is True
         with fm_bot.db_manager.connection() as conn:
             row = conn.execute(
                 "SELECT message, channel_name FROM feed_message_queue WHERE feed_id = 1"
@@ -122,6 +122,28 @@ class TestQueueFeedMessage:
                 "SELECT COUNT(*) FROM feed_message_queue WHERE feed_id = 1"
             ).fetchone()[0]
         assert count == 3
+
+    def test_duplicate_valid_item_id_is_not_queued_twice(self, fm, fm_bot):
+        _seed_feed(fm_bot.db_manager)
+        feed = {"id": 1, "channel_name": "general"}
+        item = {"id": "stable-id", "title": "Same item"}
+
+        assert fm._queue_feed_message(feed, item, "first") is True
+        assert fm._queue_feed_message(feed, item, "second") is False
+
+        with fm_bot.db_manager.connection() as conn:
+            rows = conn.execute(
+                "SELECT message FROM feed_message_queue WHERE feed_id = 1"
+            ).fetchall()
+        assert [row[0] for row in rows] == ["first"]
+
+    def test_blank_item_ids_remain_repeatable(self, fm, fm_bot):
+        _seed_feed(fm_bot.db_manager)
+        feed = {"id": 1, "channel_name": "general"}
+        item = {"id": "", "title": "No stable identifier"}
+
+        assert fm._queue_feed_message(feed, item, "first") is True
+        assert fm._queue_feed_message(feed, item, "second") is True
 
 
 # ---------------------------------------------------------------------------
@@ -631,6 +653,33 @@ class TestFormatMessage:
         result = self.fm.format_message(item, self._feed(fmt="{title|truncate:20}"))
         assert result.endswith("...")
         assert len(result) <= 23
+
+    def test_truncate_hard_function_on_title(self):
+        item = self._item(title="a" * 100)
+        result = self.fm.format_message(item, self._feed(fmt="{title|truncate_hard:20}"))
+        assert result == "a" * 20
+        assert not result.endswith("...")
+
+    def test_substr_function_on_title(self):
+        item = self._item(title="Hello World")
+        result = self.fm.format_message(item, self._feed(fmt="{title|substr:6,5}"))
+        assert result == "World"
+
+    def test_emoji_field_overrides_name_heuristic(self):
+        # A per-item emoji (e.g. from API emoji_field) wins over the feed-name heuristic
+        item = self._item(emoji="🔥")
+        result = self.fm.format_message(item, self._feed(fmt="{emoji}", name="emergency"))
+        assert result == "🔥"
+
+    def test_emoji_field_empty_falls_back_to_heuristic(self):
+        item = self._item(emoji="")
+        result = self.fm.format_message(item, self._feed(fmt="{emoji}", name="emergency"))
+        assert result == "🚨"
+
+    def test_emoji_absent_falls_back_to_default(self):
+        # No emoji key at all -> default heuristic emoji
+        result = self.fm.format_message(self._item(), self._feed(fmt="{emoji}"))
+        assert result == "📢"
 
 
 # ---------------------------------------------------------------------------

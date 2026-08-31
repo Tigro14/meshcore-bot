@@ -58,15 +58,22 @@
     ("GET",  "/api/health",           "Bot health: radio state, uptime, client count"),
     ("GET",  "/api/banner-status",    "Banner state: zombie, offline, initializing flags"),
     ("GET",  "/api/system-health",    "Extended system health: DB size, queue depths, scheduler"),
-    ("GET",  "/api/stats",            "Bot-wide statistics: messages, commands, contacts"),
+    ("GET",  "/api/stats",            "DEPRECATED — whole-database statistics; use /api/dashboard/*"),
     ("GET",  "/api/stats/rate_limiters", "Per-sender rate limiter stats"),
     ("GET",  "/api/connected_clients","SocketIO connected client count"),
     ("GET",  "/api/cache",            "In-memory cache snapshot"),
     ("GET",  "/api/database",         "Database metadata: path, size, table row counts"),
     ("POST", "/api/optimize-database","Run VACUUM + ANALYZE on the SQLite database"),
   ]),
+  ("Dashboard", "fa-tachometer-alt", [
+    ("GET",  "/api/dashboard/summary", "Snapshot-backed dashboard payload with 30-day sparkline series"),
+    ("GET",  "/api/dashboard/series",  "Points for one metric (metric, days); period totals and change"),
+    ("GET",  "/api/dashboard/top",     "One leaderboard (kind, window, limit) with retention labelling"),
+    ("GET",  "/api/dashboard/windows", "Selector options derived from each source's retention"),
+    ("POST", "/api/dashboard/refresh", "Force a snapshot recomputation now"),
+  ]),
   ("Contacts", "fa-users", [
-    ("GET",  "/api/contacts",                  "List all contacts with last-seen and position"),
+    ("GET",  "/api/contacts",                  "List contacts; supports paging, search, and sorting"),
     ("GET",  "/api/export/contacts",           "Export contacts as CSV"),
     ("POST", "/api/geocode-contact",           "Reverse-geocode a contact's GPS position"),
     ("POST", "/api/toggle-star-contact",       "Star or unstar a contact"),
@@ -112,6 +119,9 @@
     ("POST", "/api/radio/connect",             "Trigger a radio reconnect"),
     ("POST", "/api/radio/firmware/config/read", "Read firmware config from radio"),
     ("POST", "/api/radio/firmware/config/write","Write firmware config to radio"),
+    ("GET",  "/api/radio/params",              "Read radio and node parameters from device"),
+    ("POST", "/api/radio/params",              "Write radio and node parameters to device"),
+    ("POST", "/api/radio/advert",              "Send a zero-hop or flood advert"),
     ("GET",  "/api/recent_commands",           "Most recent bot commands received"),
     ("POST", "/api/stream_data",               "Inject a raw packet into the stream viewer"),
   ]),
@@ -224,7 +234,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ g.csp_nonce }}">
 (function() {
     var host = window.location.origin;
 

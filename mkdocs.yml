@@ -62,13 +62,22 @@ nav:
     - Path Command: path-command-config.md
     - Config validation: config-validation.md
   - Web Viewer: web-viewer.md
-  - Command Reference: command-reference.md
+  - Command Reference:
+    - Overview: command-reference.md
+    - Repeater Commands: repeater-commands.md
+    - Custom Command Website: command-reference-website.md
   - Service Plugins:
     - Overview: service-plugins.md
     - Discord Bridge: discord-bridge.md
+    - Telegram Bridge: telegram-bridge.md
     - Packet Capture: packet-capture.md
     - Map Uploader: map-uploader.md
     - Weather Service: weather-service.md
-    - Feed Management: feeds.md
+    - Earthquake Service: earthquake-service.md
+    - Repeater Prefix Collision: repeater-prefix-collision-service.md
+    - World Cup: worldcup.md
+    - Feed Management: FEEDS.md
   - FAQ: faq.md
   - Upgrade: upgrade.md
+  - Project:
+    - Solar conditions provenance: solar-conditions-provenance.md

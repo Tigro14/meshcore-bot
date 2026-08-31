@@ -5,11 +5,105 @@
 {% block content %}
 <style>
     /* Make the mesh graph page use full height - scoped to this page only */
-    /* Fixed height so flex children (e.g. visualization-row) get remaining space; navbar + title + stats ~220px */
+    /* Fixed height so flex children (e.g. visualization-row) get remaining space; navbar + header row ~100px */
     #mesh-graph-container {
         display: flex;
         flex-direction: column;
-        height: calc(100vh - 110px);
+        height: calc(100vh - 78px);
+    }
+
+    /* Reclaim every vertical pixel for the visualization: drop the footer and the
+       container's top gap on this page only (deliberate convention break) */
+    body:has(#mesh-graph-container) footer {
+        display: none;
+    }
+    body:has(#mesh-graph-container) .container-fluid.mt-4 {
+        margin-top: 0.5rem !important;
+    }
+
+    /* Compact single-row header: title + stat chips + controls share the line to
+       maximize the visualization viewport (deliberately breaks the usual card grid) */
+    .mesh-title {
+        font-size: 1.3rem;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+    .mesh-stat-chip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 3px 10px;
+    }
+    .mesh-stat-chip > i {
+        color: var(--text-muted);
+        font-size: 0.8rem;
+    }
+    .mesh-stat-text {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.15;
+    }
+    .mesh-stat-value {
+        font-weight: 700;
+        font-size: 0.95rem;
+    }
+    .mesh-stat-label {
+        font-size: 0.66rem;
+        color: var(--text-muted);
+        white-space: nowrap;
+    }
+    .mesh-view-switch .btn,
+    .mesh-tool-group .btn {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-color);
+    }
+    .mesh-view-switch .btn:hover,
+    .mesh-tool-group .btn:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-color);
+    }
+    .mesh-view-switch .btn.active {
+        background: #0d6efd;
+        border-color: #0d6efd;
+        color: #fff;
+    }
+    .mesh-tool-group .btn.active {
+        background: #21918c; /* viridis teal: matches the heat ramp it enables */
+        border-color: #21918c;
+        color: #fff;
+    }
+    @media (max-width: 991.98px) {
+        .mesh-btn-text {
+            display: none; /* icon-only view switch on small screens */
+        }
+        .mesh-stat-label {
+            font-size: 0.62rem;
+        }
+        .mesh-stat-chip {
+            padding: 2px 8px;
+        }
+    }
+
+    /* Mobile: the header and filter panel stack tall, so a fixed-height flex
+       container starves the visualization (and strands its absolutely-positioned
+       legends). Let the page scroll and give the visualization its own height. */
+    @media (max-width: 767.98px) {
+        #mesh-graph-container {
+            height: auto;
+        }
+        .visualization-row {
+            flex: none;
+        }
+        .visualization-card .card-body {
+            height: calc(100vh - 160px) !important;
+        }
+        #map-view, #graph-view {
+            min-height: 0;
+        }
     }
     
     #map-view, #graph-view {
@@ -30,7 +124,7 @@
         display: flex;
         flex-direction: column;
         min-height: 0;
-        margin-bottom: 1rem; /* Match Bootstrap's container-fluid horizontal padding (15px) */
+        margin-bottom: 0.5rem;
     }
     
     .visualization-row > .col-12 {
@@ -42,104 +136,69 @@
 </style>
 
 <div id="mesh-graph-container" class="d-flex flex-column">
-<div class="row">
-    <div class="col-12">
-        <h1 class="mb-4">
-            <i class="fas fa-project-diagram"></i> Mesh Graph
-        </h1>
-    </div>
-</div>
-
-<!-- Statistics Panel - Compact -->
-<div class="row mb-3 g-2">
-    <div class="col">
-        <div class="card">
-            <div class="card-body p-2 d-flex align-items-center justify-content-between">
-                <div class="d-flex align-items-center">
-                    <i class="fas fa-sitemap me-2"></i>
-                    <div>
-                        <div class="small text-muted">Nodes</div>
-                        <div id="stat-node-count" class="text-primary fw-bold" style="font-size: 1.1rem; line-height: 1.2;">0</div>
-                        <div class="small text-muted">Total Repeaters</div>
-                    </div>
-                </div>
+<!-- Single-row header: title, stat chips, controls (wraps on narrow screens) -->
+<div class="mesh-header d-flex align-items-center flex-wrap gap-2 mb-2 mt-2">
+    <h1 class="mesh-title mb-0 me-1">
+        <i class="fas fa-project-diagram"></i> Mesh Graph
+    </h1>
+    <div class="d-flex align-items-center flex-wrap gap-2">
+        <div class="mesh-stat-chip" title="Total repeaters">
+            <i class="fas fa-sitemap"></i>
+            <div class="mesh-stat-text">
+                <span id="stat-node-count" class="mesh-stat-value text-primary">0</span>
+                <span class="mesh-stat-label">Repeaters</span>
+            </div>
+        </div>
+        <div class="mesh-stat-chip" title="Total connections">
+            <i class="fas fa-link"></i>
+            <div class="mesh-stat-text">
+                <span id="stat-edge-count" class="mesh-stat-value text-info">0</span>
+                <span class="mesh-stat-label" id="stat-edge-detail">Edges</span>
+            </div>
+        </div>
+        <div class="mesh-stat-chip" title="Average observations per edge">
+            <i class="fas fa-chart-line"></i>
+            <div class="mesh-stat-text">
+                <span id="stat-avg-obs" class="mesh-stat-value text-success">0</span>
+                <span class="mesh-stat-label">Avg Obs/Edge</span>
+            </div>
+        </div>
+        <div class="mesh-stat-chip" title="Average edge distance">
+            <i class="fas fa-ruler"></i>
+            <div class="mesh-stat-text">
+                <span id="stat-avg-dist" class="mesh-stat-value text-warning">0</span>
+                <span class="mesh-stat-label">Avg km</span>
             </div>
         </div>
     </div>
-    <div class="col">
-        <div class="card">
-            <div class="card-body p-2 d-flex align-items-center justify-content-between">
-                <div class="d-flex align-items-center">
-                    <i class="fas fa-link me-2"></i>
-                    <div>
-                        <div class="small text-muted">Edges</div>
-                        <div id="stat-edge-count" class="text-info fw-bold" style="font-size: 1.1rem; line-height: 1.2;">0</div>
-                        <div class="small text-muted">Total Connections</div>
-                    </div>
-                </div>
-            </div>
+    <div class="ms-auto d-flex align-items-center flex-wrap gap-2">
+        <div class="btn-group mesh-view-switch" role="group" aria-label="View">
+            <button type="button" class="btn btn-sm active" id="btn-view-map" title="Map view">
+                <i class="fas fa-map"></i><span class="mesh-btn-text"> Map</span>
+            </button>
+            <button type="button" class="btn btn-sm" id="btn-view-graph" title="Graph view">
+                <i class="fas fa-project-diagram"></i><span class="mesh-btn-text"> Graph</span>
+            </button>
         </div>
-    </div>
-    <div class="col">
-        <div class="card">
-            <div class="card-body p-2 d-flex align-items-center justify-content-between">
-                <div class="d-flex align-items-center">
-                    <i class="fas fa-chart-line me-2"></i>
-                    <div>
-                        <div class="small text-muted">Observations</div>
-                        <div id="stat-avg-obs" class="text-success fw-bold" style="font-size: 1.1rem; line-height: 1.2;">0</div>
-                        <div class="small text-muted">Avg per Edge</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col">
-        <div class="card">
-            <div class="card-body p-2 d-flex align-items-center justify-content-between">
-                <div class="d-flex align-items-center">
-                    <i class="fas fa-ruler me-2"></i>
-                    <div>
-                        <div class="small text-muted">Distance</div>
-                        <div id="stat-avg-dist" class="text-warning fw-bold" style="font-size: 1.1rem; line-height: 1.2;">0</div>
-                        <div class="small text-muted">Avg km</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col">
-        <div class="card">
-            <div class="card-body p-2 d-flex align-items-center justify-content-between">
-                <div class="d-flex align-items-center w-100">
-                    <i class="fas fa-sliders-h me-2"></i>
-                    <div class="flex-grow-1">
-                        <div class="small text-muted">Controls</div>
-                        <div class="d-flex align-items-center gap-1 mt-1 flex-wrap">
-                            <div class="btn-group" role="group">
-                                <button type="button" class="btn btn-primary btn-sm active" id="btn-view-map" onclick="switchView('map')">
-                                    <i class="fas fa-map"></i> Map
-                                </button>
-                                <button type="button" class="btn btn-outline-primary btn-sm" id="btn-view-graph" onclick="switchView('graph')">
-                                    <i class="fas fa-project-diagram"></i> Graph
-                                </button>
-                            </div>
-                            <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#filterPanel">
-                                <i class="fas fa-filter"></i>
-                            </button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="refreshData()">
-                                <i class="fas fa-sync-alt"></i>
-                            </button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="exportView()">
-                                <i class="fas fa-download"></i>
-                            </button>
-                            <button class="btn btn-outline-secondary btn-sm" id="btn-fullscreen" onclick="toggleFullscreen()">
-                                <i class="fas fa-expand"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <div class="btn-group mesh-tool-group" role="group" aria-label="Tools">
+            <button class="btn btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#filterPanel" title="Filters">
+                <i class="fas fa-filter"></i>
+            </button>
+            <button class="btn btn-sm" type="button" id="btn-heat" title="Hot connections: color edges by traffic (viridis)">
+                <i class="fas fa-fire"></i>
+            </button>
+            <button class="btn btn-sm" type="button" id="btn-mesh-theme" title="Toggle map dark mode (independent of site theme)">
+                <i class="fas fa-moon" id="mesh-theme-icon"></i>
+            </button>
+            <button class="btn btn-sm" type="button" id="btn-mesh-refresh" title="Refresh data">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+            <button class="btn btn-sm" type="button" id="btn-mesh-export" title="Export JSON">
+                <i class="fas fa-download"></i>
+            </button>
+            <button class="btn btn-sm" type="button" id="btn-fullscreen" title="Fullscreen">
+                <i class="fas fa-expand"></i>
+            </button>
         </div>
     </div>
 </div>
@@ -155,12 +214,12 @@
                 <div class="row">
                     <div class="col-md-2">
                         <label for="filter-min-obs" class="form-label">Min Observations</label>
-                        <input type="range" class="form-range" id="filter-min-obs" min="1" max="50" value="1" oninput="updateFilterLabel('filter-min-obs', 'label-min-obs'); saveFilters();">
+                        <input type="range" class="form-range" id="filter-min-obs" min="0" max="100" value="0">
                         <small id="label-min-obs" class="text-muted">1</small>
                     </div>
                     <div class="col-md-2">
                         <label for="filter-edge-days" class="form-label">Edge Timeframe</label>
-                        <select class="form-select" id="filter-edge-days" onchange="applyFilters(); saveFilters();">
+                        <select class="form-select" id="filter-edge-days">
                             <option value="">All Time</option>
                             <option value="1">Last 24 Hours</option>
                             <option value="2">Last 48 Hours</option>
@@ -172,7 +231,7 @@
                     </div>
                     <div class="col-md-2">
                         <label for="filter-node-days" class="form-label">Node Timeframe</label>
-                        <select class="form-select" id="filter-node-days" onchange="applyFilters(); saveFilters();">
+                        <select class="form-select" id="filter-node-days">
                             <option value="">All Time</option>
                             <option value="1">Last 24 Hours</option>
                             <option value="2">Last 48 Hours</option>
@@ -183,17 +242,25 @@
                         </select>
                     </div>
                     <div class="col-md-2">
+                        <label for="filter-evidence" class="form-label">Evidence</label>
+                        <select class="form-select" id="filter-evidence" title="Multi-byte only: build the graph solely from unique multi-byte path observations, ignoring ambiguous single-byte evidence. Neighbors only: only links this node confirmed directly by zero-hop discovery, with measured SNR.">
+                            <option value="all">All Evidence</option>
+                            <option value="multibyte" selected>Multi-byte Only</option>
+                            <option value="neighbors">Neighbors Only</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
                         <label for="filter-starred" class="form-label">&nbsp;</label>
                         <div class="d-flex align-items-center" style="min-height: 38px;">
                             <div class="form-check mb-0">
-                                <input type="checkbox" class="form-check-input" id="filter-starred" onchange="applyFilters(); saveFilters();">
+                                <input type="checkbox" class="form-check-input" id="filter-starred">
                                 <label class="form-check-label" for="filter-starred">Show Only Starred</label>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-2">
                         <label for="filter-search" class="form-label">Search Node</label>
-                        <input type="text" class="form-control" id="filter-search" placeholder="Name, prefix, or path (e.g., 7e,01,86)..." oninput="handleSearchInput();">
+                        <input type="text" class="form-control" id="filter-search" placeholder="Name, prefix, or path...">
                     </div>
                 </div>
             </div>
@@ -227,6 +294,30 @@
                         <span class="connection-legend-color" style="background-color: #9333ea;"></span>
                         <span>Bidirectional</span>
                     </div>
+                    <hr style="margin: 4px 0;">
+                    <div class="connection-legend-item">
+                        <span style="display: inline-block; width: 18px; border-top: 4px solid currentColor; vertical-align: middle;"></span>
+                        <span>Confirmed neighbor (zero-hop)</span>
+                    </div>
+                    <div class="connection-legend-item">
+                        <span style="display: inline-block; width: 18px; border-top: 2px solid currentColor; vertical-align: middle;"></span>
+                        <span>Multi-byte evidence</span>
+                    </div>
+                    <div class="connection-legend-item">
+                        <span style="display: inline-block; width: 18px; border-top: 2px dashed currentColor; vertical-align: middle;"></span>
+                        <span>Single-byte (uncertain)</span>
+                    </div>
+                </div>
+
+                <!-- Hot-connections (viridis) scale, shown when heat coloring is active -->
+                <div id="heat-legend" class="heat-legend">
+                    <div class="heat-legend-title">Observations</div>
+                    <div class="heat-legend-bar"></div>
+                    <div class="heat-legend-labels">
+                        <span id="heat-legend-min">1</span>
+                        <span id="heat-legend-max">1</span>
+                    </div>
+                    <div class="heat-legend-note">dots: repeater totals across paths</div>
                 </div>
             </div>
         </div>
@@ -251,6 +342,8 @@
 
 <!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<!-- MapLibre GL CSS (dark basemap is a vector style; see TILE_LAYERS) -->
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" />
 <!-- vis-network CSS -->
 <link rel="stylesheet" href="https://unpkg.com/vis-network@9.1.9/styles/vis-network.min.css" />
 
@@ -325,17 +418,19 @@
     .mesh-node-popup .prefix-byte:last-child {
         margin-right: 0;
     }
-    /* Legend for connection highlighting */
+    /* Legend for connection highlighting.
+       Colored by the mesh display theme (.mesh-dark), not the site theme, because
+       it floats over the map/graph whose darkness is toggled independently. */
     .connection-legend {
         position: absolute;
         bottom: 30px;
         right: 10px;
-        background: var(--bs-body-bg, rgba(255, 255, 255, 0.95));
-        color: var(--bs-body-color, #212529);
+        background: rgba(255, 255, 255, 0.95);
+        color: #212529;
         padding: 10px;
         border-radius: 5px;
         box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-        border: 1px solid var(--bs-border-color, rgba(0,0,0,0.1));
+        border: 1px solid rgba(0,0,0,0.1);
         z-index: 1000;
         font-size: 0.85em;
         display: none;
@@ -344,20 +439,131 @@
         display: block;
     }
     .connection-legend strong {
-        color: var(--bs-body-color, #212529);
+        color: inherit;
         font-weight: 600;
     }
     .connection-legend-item {
         display: flex;
         align-items: center;
         margin: 5px 0;
-        color: var(--bs-body-color, #212529);
+        color: inherit;
     }
     .connection-legend-color {
         width: 20px;
         height: 3px;
         margin-right: 8px;
         display: inline-block;
+    }
+    .mesh-dark .connection-legend {
+        background: rgba(45, 45, 45, 0.95);
+        color: #e9ecef;
+        border-color: #495057;
+    }
+
+    /* Hot-connections (viridis) scale legend */
+    .heat-legend {
+        position: absolute;
+        bottom: 30px;
+        left: 10px;
+        background: rgba(255, 255, 255, 0.95);
+        color: #212529;
+        padding: 8px 10px;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        border: 1px solid rgba(0,0,0,0.1);
+        z-index: 1000;
+        font-size: 0.75em;
+        display: none;
+        min-width: 140px;
+    }
+    .heat-legend.active {
+        display: block;
+    }
+    .heat-legend-title {
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+    .heat-legend-bar {
+        height: 8px;
+        border-radius: 4px;
+        background: linear-gradient(90deg, #440154, #3b528b, #21918c, #5ec962, #fde725);
+    }
+    .heat-legend-labels {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 2px;
+        color: #6c757d;
+    }
+    .heat-legend-note {
+        margin-top: 2px;
+        font-size: 0.9em;
+        color: #6c757d;
+    }
+    .mesh-dark .heat-legend-note {
+        color: #adb5bd;
+    }
+    .mesh-dark .heat-legend {
+        background: rgba(45, 45, 45, 0.95);
+        color: #e9ecef;
+        border-color: #495057;
+    }
+    /* Dark mode compresses the cold (near-black) end of the ramp out of the scale */
+    .mesh-dark .heat-legend-bar {
+        background: linear-gradient(90deg, #414487, #2c728e, #22a884, #7ad151, #fde725);
+    }
+    .mesh-dark .heat-legend-labels {
+        color: #adb5bd;
+    }
+
+    /* Mesh display dark theme: Leaflet chrome + graph canvas.
+       Applied via .mesh-dark on #mesh-graph-container, independent of [data-theme]. */
+    #graph-view {
+        background: #ffffff;
+    }
+    .mesh-dark #graph-view {
+        background: #1a1a1a;
+    }
+    .mesh-dark .leaflet-container {
+        background: #1a1a1a;
+    }
+    /* Raster fallback only (see setBaseTileLayer): invert the OSM tiles the way
+       openstreetmap.org itself did for dark mode.  Scoped to the tiles so node
+       markers, edges and popups keep their real colors.
+       This must target .leaflet-tile and not the enclosing .leaflet-tile-container:
+       the container is a 0x0 element that its absolutely-positioned tiles overflow,
+       so a filter there has an empty reference box and paints nothing.  Every
+       function here is pointwise, so filtering per tile leaves no visible seams. */
+    .mesh-basemap-fallback .leaflet-tile {
+        filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
+    }
+    .mesh-dark .leaflet-popup-content-wrapper,
+    .mesh-dark .leaflet-popup-tip {
+        background: #2d2d2d;
+        color: #e9ecef;
+    }
+    .mesh-dark .leaflet-control-zoom a {
+        background: #2d2d2d;
+        color: #e9ecef;
+        border-color: #495057;
+    }
+    .mesh-dark .leaflet-control-zoom a:hover {
+        background: #3d3d3d;
+    }
+    .mesh-dark .leaflet-control-attribution {
+        background: rgba(26, 26, 26, 0.7);
+        color: #adb5bd;
+    }
+    .mesh-dark .leaflet-control-attribution a {
+        color: #6ea8fe;
+    }
+    .mesh-dark .mesh-node-popup .leaflet-popup-content code,
+    .mesh-dark .mesh-edge-popup .leaflet-popup-content code {
+        background-color: rgba(255, 255, 255, 0.12);
+        color: #e685b5; /* Bootstrap's code pink is unreadable on the dark popup */
+    }
+    .mesh-dark .mesh-node-popup .prefix-byte {
+        background-color: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.2);
     }
 </style>
 
@@ -427,10 +633,14 @@
 
 <!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- MapLibre GL + Leaflet bridge, for the vector dark basemap. Must load after Leaflet:
+     the bridge binds against both globals. -->
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js"></script>
 <!-- vis-network JS -->
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 
-<script>
+<script nonce="{{ g.csp_nonce }}">
     // Global state
     let currentView = 'map';
     let map = null;
@@ -459,8 +669,20 @@
     let isInitialMapLoad = true; // Track if this is the first time rendering the map with nodes
     let highlightedPath = null; // Currently highlighted path data
     let pathHighlightTimeout = null; // Debounce timer for path resolution
+    let meshLoadInFlight = null;
+    let pendingMeshLoad = null;
+    let statsLoadInFlight = null;
+    let meshLiveRefreshTimer = null;
+    let meshLiveRefreshPending = false;
+    let meshLiveRefreshNeedsNodes = false;
+    let meshLiveRefreshRunning = false;
+    let meshLiveRefreshRetryCount = 0;
+    let meshLiveRefreshActiveReloadsNodes = false;
 
     const PREFIX_HEX_CHARS = parseInt('{{ prefix_hex_chars|default(2) }}', 10);
+    const MESH_LIVE_REFRESH_MS = 30000;
+    const MESH_LIVE_REFRESH_RETRY_MS = 6000;
+    const MESH_LIVE_REFRESH_MAX_RETRIES = 2;
     // Graph prefix length from edges API (2, 4, or 6 hex chars); used for node prefix display and node fetch.
     let graphPrefixHexChars = PREFIX_HEX_CHARS;
     // Format prefix for display: add byte count when multi-byte (2 or 3 bytes)
@@ -501,6 +723,379 @@
     function findNodeByEdgePrefix(prefix) {
         if (!prefix) return null;
         return filteredNodeMap[prefix] || filteredNodes.find(n => n.prefix.startsWith(prefix) || prefix.startsWith(n.prefix)) || null;
+    }
+
+    // Prefix-compatible equality across resolutions (2, 4, or 6 hex chars):
+    // equal, or one is a prefix of the other. Needed wherever edges and nodes
+    // may carry different resolutions (e.g. 4-char edge vs 6-char node prefix).
+    function prefixesCompatible(a, b) {
+        if (!a || !b) return false;
+        return a === b || a.startsWith(b) || b.startsWith(a);
+    }
+
+    function edgeTouchesNode(edge, node) {
+        return prefixesCompatible(edge.from_prefix, node.prefix) || prefixesCompatible(edge.to_prefix, node.prefix);
+    }
+
+    // Great-circle distance fallback for edges without a stored distance
+    // (multi-byte derived edges carry none; compute from resolved node coords)
+    function haversineKm(lat1, lon1, lat2, lon2) {
+        const toRad = deg => deg * Math.PI / 180;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+        return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function getEdgeDistance(edge, fromNode, toNode) {
+        if (edge.geographic_distance !== null && edge.geographic_distance !== undefined) {
+            return edge.geographic_distance;
+        }
+        if (fromNode && toNode) {
+            return haversineKm(fromNode.latitude, fromNode.longitude, toNode.latitude, toNode.longitude);
+        }
+        return null;
+    }
+
+    function isSingleByteEdge(edge) {
+        return edge.evidence === 'singlebyte';
+    }
+
+    // A zero-hop discovery response is a direct RF measurement between two full
+    // public keys — the strongest evidence class, so it gets a heavier line.
+    function isNeighborEdge(edge) {
+        return edge.evidence === 'neighbors';
+    }
+
+    function formatSnr(value) {
+        return (typeof value === 'number' && isFinite(value)) ? `${value.toFixed(1)} dB` : null;
+    }
+
+    function getEvidenceLabel(edge) {
+        if (edge.evidence === 'neighbors') {
+            const snr = formatSnr(edge.snr);
+            return snr ? `Confirmed neighbor (avg SNR ${snr})` : 'Confirmed neighbor (zero-hop)';
+        }
+        if (edge.evidence === 'multibyte') {
+            return edge.path_count
+                ? `Multi-byte (${edge.path_count} unique path${edge.path_count === 1 ? '' : 's'})`
+                : 'Multi-byte confirmed';
+        }
+        if (edge.evidence === 'singlebyte') {
+            return 'Single-byte (identity uncertain)';
+        }
+        return null;
+    }
+
+    // --- Mesh display theme (dark basemap/graph) ---
+    // Follows the site theme until the user explicitly toggles it here, after which
+    // the override is remembered independently of the site theme.
+    let meshThemeOverride = null; // 'dark' | 'light' | null = follow site theme
+
+    function getSiteTheme() {
+        return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    }
+
+    function getMeshTheme() {
+        return meshThemeOverride || getSiteTheme();
+    }
+
+    // Light is OSM raster.  Dark is OpenFreeMap's vector 'dark' style rendered through
+    // MapLibre GL: CARTO's raster dark_all now requires an API key and is being retired,
+    // and OSM itself hosts no dark tiles (its Standard layer is light only).
+    const TILE_LAYERS = {
+        light: {
+            url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            attribution: '© OpenStreetMap contributors'
+        },
+        dark: {
+            styleUrl: 'https://tiles.openfreemap.org/styles/dark',
+            // Used only by the raster fallback below; the vector style carries its own
+            // attribution, which the bridge reads off the style once it loads.
+            url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            attribution: '© OpenStreetMap contributors'
+        }
+    };
+    let baseTileLayer = null;
+
+    // The vector basemap needs both the bridge and a working WebGL context.  Either can be
+    // missing (CDN blocked, software renderer, GPU blocklist), and a blank map is a worse
+    // failure than a filtered one, so fall back to inverted OSM raster tiles.
+    let vectorBasemapSupported = null; // cached: the probe allocates a GL context
+    function canUseVectorBasemap() {
+        if (vectorBasemapSupported !== null) return vectorBasemapSupported;
+        vectorBasemapSupported = false;
+        try {
+            if (typeof L.maplibreGL === 'function' && typeof maplibregl !== 'undefined') {
+                // MapLibre GL dropped maplibregl.supported() in v3 and requires WebGL 2
+                // as of v5, so probe for a webgl2 context directly.
+                vectorBasemapSupported = Boolean(
+                    document.createElement('canvas').getContext('webgl2')
+                );
+            }
+        } catch (error) {
+            console.debug('Vector basemap unavailable, using raster fallback:', error);
+        }
+        return vectorBasemapSupported;
+    }
+
+    function setBaseTileLayer() {
+        if (!map) return;
+        const theme = getMeshTheme();
+        const cfg = TILE_LAYERS[theme];
+        if (baseTileLayer) {
+            map.removeLayer(baseTileLayer);
+            baseTileLayer = null;
+        }
+        const useVector = Boolean(cfg.styleUrl) && canUseVectorBasemap();
+        if (useVector) {
+            // The bridge renders into tilePane, so marker/overlay z-order is unchanged.
+            baseTileLayer = L.maplibreGL({ style: cfg.styleUrl });
+        } else {
+            baseTileLayer = L.tileLayer(cfg.url, { attribution: cfg.attribution });
+        }
+        // Drives the CSS inversion that stands in for dark cartography when we had to
+        // fall back to raster.  Never set when the vector style rendered.
+        const container = document.getElementById('mesh-graph-container');
+        if (container) {
+            container.classList.toggle('mesh-basemap-fallback', theme === 'dark' && !useVector);
+        }
+        baseTileLayer.addTo(map);
+    }
+
+    function applyMeshTheme() {
+        const dark = getMeshTheme() === 'dark';
+        document.getElementById('mesh-graph-container').classList.toggle('mesh-dark', dark);
+        const icon = document.getElementById('mesh-theme-icon');
+        if (icon) {
+            icon.className = dark ? 'fas fa-sun' : 'fas fa-moon';
+        }
+        setBaseTileLayer();
+    }
+
+    function toggleMeshTheme() {
+        meshThemeOverride = getMeshTheme() === 'dark' ? 'light' : 'dark';
+        try {
+            localStorage.setItem('meshGraphTheme', meshThemeOverride);
+        } catch (error) {
+            console.debug('Error saving mesh theme:', error);
+        }
+        applyMeshTheme();
+        // Heat colors are theme-dependent (dark compresses the cold end), so re-render
+        if (edgeColorMode === 'heat') {
+            applyFilters();
+        }
+    }
+
+    function initMeshTheme() {
+        try {
+            const saved = localStorage.getItem('meshGraphTheme');
+            if (saved === 'dark' || saved === 'light') {
+                meshThemeOverride = saved;
+            }
+        } catch (error) {
+            console.debug('Error loading mesh theme:', error);
+        }
+        applyMeshTheme();
+        // Track site theme changes (navbar toggle) while un-overridden
+        new MutationObserver(() => {
+            if (!meshThemeOverride) {
+                applyMeshTheme();
+                if (edgeColorMode === 'heat') {
+                    applyFilters();
+                }
+            }
+        }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    }
+
+    // --- Hot connections: viridis coloring by observation count ---
+    let edgeColorMode = 'age'; // 'age' (recency, default) | 'heat' (viridis by observations)
+    // log-domain normalization range, recomputed from filteredEdges in applyFilters
+    let heatObsRange = { min: 1, max: 1 };
+
+    // Viridis control points (matplotlib), piecewise-linearly interpolated
+    const VIRIDIS_STOPS = [
+        [0x44, 0x01, 0x54], [0x47, 0x2d, 0x7b], [0x3b, 0x52, 0x8b],
+        [0x2c, 0x72, 0x8e], [0x21, 0x91, 0x8c], [0x28, 0xae, 0x80],
+        [0x5e, 0xc9, 0x62], [0xad, 0xdc, 0x30], [0xfd, 0xe7, 0x25]
+    ];
+
+    function viridisColor(t) {
+        const clamped = Math.min(1, Math.max(0, t));
+        const scaled = clamped * (VIRIDIS_STOPS.length - 1);
+        const i = Math.min(VIRIDIS_STOPS.length - 2, Math.floor(scaled));
+        const f = scaled - i;
+        const [r1, g1, b1] = VIRIDIS_STOPS[i];
+        const [r2, g2, b2] = VIRIDIS_STOPS[i + 1];
+        const r = Math.round(r1 + (r2 - r1) * f);
+        const g = Math.round(g1 + (g2 - g1) * f);
+        const b = Math.round(b1 + (b2 - b1) * f);
+        return `rgb(${r},${g},${b})`;
+    }
+
+    // Normalized heat 0..1 for an edge: log-scaled because observation counts are heavy-tailed
+    function heatT(edge) {
+        const obs = Math.max(1, edge.observation_count || 1);
+        const lo = Math.log(heatObsRange.min);
+        const hi = Math.log(heatObsRange.max);
+        if (hi <= lo) return 1;
+        return Math.min(1, Math.max(0, (Math.log(obs) - lo) / (hi - lo)));
+    }
+
+    // On a dark basemap the cold end of viridis (near-black purple) is invisible,
+    // so compress the ramp to start at the still-visible blue-purple
+    function viridisThemed(t) {
+        return getMeshTheme() === 'dark' ? viridisColor(0.25 + 0.75 * t) : viridisColor(t);
+    }
+
+    function heatColor(edge) {
+        return viridisThemed(heatT(edge));
+    }
+
+    // Resolve an edge's endpoints from the filtered set, the same way the renderers do
+    function resolveEdgeEndpoints(edge) {
+        const fromNode = (edge.from_public_key && filteredNodeMapByKey[edge.from_public_key])
+            ? filteredNodeMapByKey[edge.from_public_key]
+            : (filteredNodeMap[edge.from_prefix] || findNodeByEdgePrefix(edge.from_prefix));
+        const toNode = (edge.to_public_key && filteredNodeMapByKey[edge.to_public_key])
+            ? filteredNodeMapByKey[edge.to_public_key]
+            : (filteredNodeMap[edge.to_prefix] || findNodeByEdgePrefix(edge.to_prefix));
+        return { fromNode, toNode };
+    }
+
+    // Per-node aggregates over the filtered edges, recomputed in applyFilters:
+    // degree drives dot size, observation totals drive heat-mode node color.
+    let nodeHeatTotals = new Map(); // nodeId -> sum of observation counts of touching edges
+    let nodeDegrees = new Map();    // nodeId -> number of touching edges
+    let nodeHeatRange = { min: 1, max: 1 };
+
+    function computeNodeStats() {
+        nodeHeatTotals = new Map();
+        nodeDegrees = new Map();
+        filteredEdges.forEach(edge => {
+            const { fromNode, toNode } = resolveEdgeEndpoints(edge);
+            if (!fromNode || !toNode) return;
+            const obs = Math.max(1, edge.observation_count || 1);
+            [fromNode, toNode].forEach(n => {
+                const id = getNodeId(n);
+                nodeHeatTotals.set(id, (nodeHeatTotals.get(id) || 0) + obs);
+                nodeDegrees.set(id, (nodeDegrees.get(id) || 0) + 1);
+            });
+        });
+        let lo = Infinity, hi = 0;
+        nodeHeatTotals.forEach(v => { if (v < lo) lo = v; if (v > hi) hi = v; });
+        nodeHeatRange = hi ? { min: lo, max: hi } : { min: 1, max: 1 };
+    }
+
+    // Normalized node heat 0..1: how often this repeater shows up in observed paths
+    function nodeHeatT(node) {
+        const total = nodeHeatTotals.get(getNodeId(node)) || 0;
+        if (!total) return 0;
+        const lo = Math.log(nodeHeatRange.min);
+        const hi = Math.log(nodeHeatRange.max);
+        if (hi <= lo) return 1;
+        return Math.min(1, Math.max(0, (Math.log(total) - lo) / (hi - lo)));
+    }
+
+    function getNodeFillColor(node) {
+        if (edgeColorMode === 'heat') {
+            return viridisThemed(nodeHeatT(node));
+        }
+        return node.role === 'roomserver' ? '#198754' : '#0d6efd';
+    }
+
+    // --- Initial map framing: home mesh component ---
+    // Nodes occasionally carry wrong GPS, and fitting the view to every node can
+    // stretch the initial frame across continents. Instead, frame the component
+    // reachable from the bot's location over provenance-trusted evidence edges
+    // only; wrong-GPS phantoms are rarely connected to it.
+    let botLocation = null; // {latitude, longitude} from /api/mesh/stats
+
+    function getHomeComponentBounds() {
+        if (!botLocation) return null;
+        // Every evidence mode tags its edges, so this works in "All Evidence" too.
+        // Confirmed neighbors count as trusted (they are measured, not inferred),
+        // and are the only tagged edges present in "Neighbors Only" mode.
+        const mbEdges = filteredEdges.filter(
+            e => e.evidence === 'multibyte' || e.evidence === 'neighbors'
+        );
+        if (!mbEdges.length) return null;
+
+        const adj = new Map();      // nodeId -> Set of neighbor nodeIds
+        const nodesById = new Map();
+        mbEdges.forEach(edge => {
+            const { fromNode, toNode } = resolveEdgeEndpoints(edge);
+            if (!fromNode || !toNode) return;
+            const a = getNodeId(fromNode);
+            const b = getNodeId(toNode);
+            nodesById.set(a, fromNode);
+            nodesById.set(b, toNode);
+            if (!adj.has(a)) adj.set(a, new Set());
+            if (!adj.has(b)) adj.set(b, new Set());
+            adj.get(a).add(b);
+            adj.get(b).add(a);
+        });
+
+        // Seeds: multibyte-connected repeaters within 30 km of the bot,
+        // falling back to the single nearest one
+        const seeds = [];
+        let nearestId = null;
+        let nearestKm = Infinity;
+        nodesById.forEach((node, id) => {
+            const d = haversineKm(botLocation.latitude, botLocation.longitude, node.latitude, node.longitude);
+            if (d <= 30) seeds.push(id);
+            if (d < nearestKm) {
+                nearestKm = d;
+                nearestId = id;
+            }
+        });
+        if (!seeds.length && nearestId) seeds.push(nearestId);
+
+        const visited = new Set(seeds);
+        const queue = [...seeds];
+        while (queue.length) {
+            const neighbors = adj.get(queue.pop());
+            if (!neighbors) continue;
+            neighbors.forEach(n => {
+                if (!visited.has(n)) {
+                    visited.add(n);
+                    queue.push(n);
+                }
+            });
+        }
+        if (visited.size < 3) return null; // too small to be the home mesh; use default framing
+
+        const bounds = [];
+        visited.forEach(id => {
+            const n = nodesById.get(id);
+            bounds.push([n.latitude, n.longitude]);
+        });
+        return bounds;
+    }
+
+    function updateHeatLegend() {
+        const legend = document.getElementById('heat-legend');
+        if (!legend) return;
+        legend.classList.toggle('active', edgeColorMode === 'heat');
+        if (edgeColorMode === 'heat') {
+            document.getElementById('heat-legend-min').textContent = heatObsRange.min.toLocaleString();
+            document.getElementById('heat-legend-max').textContent = heatObsRange.max.toLocaleString();
+        }
+    }
+
+    function syncHeatButton() {
+        const btn = document.getElementById('btn-heat');
+        if (btn) {
+            btn.classList.toggle('active', edgeColorMode === 'heat');
+        }
+    }
+
+    function toggleHeatMode() {
+        edgeColorMode = edgeColorMode === 'heat' ? 'age' : 'heat';
+        syncHeatButton();
+        applyFilters();
+        saveFilters();
     }
 
     // Detect if input is a hex path (2+ hex values)
@@ -675,8 +1270,6 @@
             return;
         }
         
-        console.log(`Highlighting path with ${pathRepeaters.length} repeaters:`, pathRepeaters.map(r => r.node_id));
-        
         // Highlight edges between consecutive nodes in the path
         // Need to match the edgeKey format used when storing edges: `${edge.from_prefix}-${edge.to_prefix}`
         const pathEdgeKeys = new Set();
@@ -720,25 +1313,11 @@
                 // Normalize to lowercase to match how edges are stored
                 const edgeKey = `${edge.from_prefix.toLowerCase()}-${edge.to_prefix.toLowerCase()}`;
                 pathEdgeKeys.add(edgeKey);
-                console.log(`Found edge for path segment ${fromRepeater.node_id}->${toRepeater.node_id}: ${edgeKey} (edge stored as ${edge.from_prefix}->${edge.to_prefix})`);
             } else {
                 console.warn(`No edge found for path segment ${fromRepeater.node_id}->${toRepeater.node_id}`);
-                // Log available edges for debugging
-                const availableEdges = filteredEdges.filter(e => {
-                    const eFrom = e.from_prefix.toUpperCase();
-                    const eTo = e.to_prefix.toUpperCase();
-                    return (eFrom === fromPrefix || eTo === fromPrefix || eFrom === toPrefix || eTo === toPrefix);
-                });
-                if (availableEdges.length > 0) {
-                    console.log(`Available edges with these prefixes:`, availableEdges.map(e => `${e.from_prefix}->${e.to_prefix}`));
-                } else {
-                    console.log(`No edges found with prefixes ${fromPrefix} or ${toPrefix} in filteredEdges (total: ${filteredEdges.length})`);
-                }
             }
         }
-        
-        console.log(`Path edge keys to highlight:`, Array.from(pathEdgeKeys));
-        
+
         // First, store original styles for ALL edges if not already stored
         edgeLines.forEach((line, edgeKey) => {
             if (!allEdgeStyles.has(edgeKey)) {
@@ -749,8 +1328,6 @@
                 });
             }
         });
-        
-        console.log(`Total edges on map: ${edgeLines.size}, Path edges to highlight: ${pathEdgeKeys.size}`);
         
         // Normalize path edge keys to lowercase for matching
         const normalizedPathEdgeKeys = new Set();
@@ -819,7 +1396,7 @@
                 const nodeId = getNodeId(node);
                 const marker = nodeMarkers.get(nodeId);
                 if (marker) {
-                    const highlightSize = getNodeSize(node) + 5;
+                    const highlightSize = getMapNodeSize(node) + 5;
                     const highlightBorderWeight = getBorderWeight(highlightSize, node.is_starred);
                     marker.setStyle({
                         radius: highlightSize,
@@ -859,7 +1436,7 @@
                     marker.setStyle(originalStyle);
                 } else {
                     // Fallback: restore based on node properties
-                    const normalSize = getNodeSize(node);
+                    const normalSize = getMapNodeSize(node);
                     const normalBorderWeight = getBorderWeight(normalSize, node.is_starred);
                     marker.setStyle({
                         radius: normalSize,
@@ -874,6 +1451,31 @@
     
     // Initialize on page load
     document.addEventListener('DOMContentLoaded', async function() {
+        document.getElementById('btn-view-map').addEventListener('click', () => switchView('map'));
+        document.getElementById('btn-view-graph').addEventListener('click', () => switchView('graph'));
+        document.getElementById('btn-heat').addEventListener('click', toggleHeatMode);
+        document.getElementById('btn-mesh-theme').addEventListener('click', toggleMeshTheme);
+        document.getElementById('btn-mesh-refresh').addEventListener('click', refreshData);
+        document.getElementById('btn-mesh-export').addEventListener('click', exportView);
+        document.getElementById('btn-fullscreen').addEventListener('click', toggleFullscreen);
+        document.getElementById('filter-min-obs').addEventListener('input', onMinObsInput);
+        document.getElementById('filter-edge-days').addEventListener('change', () => {
+            saveFilters();
+            loadData({ reloadNodes: false })
+                .catch(error => console.error('Error reloading edge window:', error));
+        });
+        document.getElementById('filter-node-days').addEventListener('change', () => {
+            saveFilters();
+            loadData({ reloadEdges: false })
+                .catch(error => console.error('Error reloading node window:', error));
+        });
+        document.getElementById('filter-starred').addEventListener('change', () => {
+            applyFilters();
+            saveFilters();
+        });
+        document.getElementById('filter-evidence').addEventListener('change', onEvidenceChange);
+        document.getElementById('filter-search').addEventListener('input', handleSearchInput);
+
         // Initialize modal instances once
         const nodeModalElement = document.getElementById('nodeDetailsModal');
         if (nodeModalElement) {
@@ -886,12 +1488,16 @@
         
         // Load saved filter settings
         loadFilters();
-        
+        syncHeatButton();
+
+        // Apply mesh display theme (dark basemap/graph) before the map is created
+        initMeshTheme();
+
         setupSocketIO();
-        // Load stats first to set initial filter value (but don't override saved filters)
-        await loadStats();
-        // Then load data (which will apply filters)
-        await loadData();
+        // Fetch stats and graph data concurrently; render once both are in so the
+        // initial map framing can use the bot location from stats
+        await Promise.all([loadStats(), loadData({ skipRender: true })]);
+        applyFilters();
         // Open graph tab if URL has #graph (e.g. /mesh#graph)
         if (window.location.hash === '#graph') {
             switchView('graph');
@@ -906,76 +1512,270 @@
         });
     });
     
-    // Load statistics
-    async function loadStats() {
+    function isValidMeshNode(node) {
+        return Boolean(
+            node
+            && typeof node === 'object'
+            && typeof node.public_key === 'string'
+            && node.public_key.length > 0
+            && typeof node.prefix === 'string'
+            && node.prefix.length > 0
+            && typeof node.name === 'string'
+            && Number.isFinite(node.latitude)
+            && Number.isFinite(node.longitude)
+        );
+    }
+
+    async function fetchMeshJson(url, requiredArrayKey = null) {
+        const response = await fetch(url);
+        let data;
         try {
-            const response = await fetch('/api/mesh/stats');
-            const stats = await response.json();
-            
-            document.getElementById('stat-node-count').textContent = stats.node_count || 0;
-            document.getElementById('stat-edge-count').textContent = stats.total_edges || 0;
-            document.getElementById('stat-avg-obs').textContent = stats.avg_observations || 0;
-            document.getElementById('stat-avg-dist').textContent = stats.avg_distance ? stats.avg_distance + ' km' : 'N/A';
-            
-            // Set initial Min Observations filter to floor of average observations
-            // Only if no saved filter value exists
-            const savedFilters = localStorage.getItem('meshGraphFilters');
-            if (!savedFilters && stats.avg_observations && stats.avg_observations > 0) {
-                const minObsValue = Math.floor(stats.avg_observations);
-                const minObsSlider = document.getElementById('filter-min-obs');
-                const minObsLabel = document.getElementById('label-min-obs');
-                if (minObsSlider && !minObsSlider.value || minObsSlider.value === '1') {
-                    minObsSlider.value = minObsValue;
-                    // Update label directly without triggering applyFilters (data not loaded yet)
-                    if (minObsLabel) {
-                        minObsLabel.textContent = minObsValue;
-                    }
-                }
-            }
+            data = await response.json();
         } catch (error) {
-            console.error('Error loading stats:', error);
+            throw new Error(`Invalid JSON response from ${url}`);
+        }
+        if (!response.ok || !data || typeof data !== 'object' || data.error) {
+            const detail = data && data.error ? `: ${data.error}` : '';
+            throw new Error(`Mesh request failed (${response.status})${detail}`);
+        }
+        if (requiredArrayKey && !Array.isArray(data[requiredArrayKey])) {
+            throw new Error(
+                `Mesh response from ${url} is missing ${requiredArrayKey}`
+            );
+        }
+        if (
+            requiredArrayKey === 'edges'
+            && !data.edges.every(edge =>
+                edge
+                && typeof edge === 'object'
+                && typeof edge.from_prefix === 'string'
+                && typeof edge.to_prefix === 'string'
+            )
+        ) {
+            throw new Error(`Mesh response from ${url} contains invalid edges`);
+        }
+        if (
+            requiredArrayKey === 'nodes'
+            && !data.nodes.every(isValidMeshNode)
+        ) {
+            throw new Error(`Mesh response from ${url} contains invalid nodes`);
+        }
+        return data;
+    }
+
+    // Load statistics
+    function loadStats() {
+        if (statsLoadInFlight) return statsLoadInFlight;
+        statsLoadInFlight = (async () => {
+            try {
+                const stats = await fetchMeshJson('/api/mesh/stats');
+
+                document.getElementById('stat-node-count').textContent = stats.node_count || 0;
+                document.getElementById('stat-edge-count').textContent = stats.total_edges || 0;
+                if (stats.multibyte_edges !== undefined) {
+                    document.getElementById('stat-edge-detail').textContent =
+                        `${stats.multibyte_edges} multi-byte confirmed`;
+                }
+                document.getElementById('stat-avg-obs').textContent = stats.avg_observations || 0;
+                document.getElementById('stat-avg-dist').textContent = stats.avg_distance ? stats.avg_distance + ' km' : 'N/A';
+                if (stats.bot_location) {
+                    botLocation = stats.bot_location; // used to frame the initial map view
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        })().finally(() => {
+            statsLoadInFlight = null;
+        });
+        return statsLoadInFlight;
+    }
+
+    // --- Min Observations slider ---
+    // Observation counts are heavy-tailed (median ~single digits, max in the tens of
+    // thousands), so the slider position maps logarithmically onto a threshold of
+    // 1..minObsScaleMax. minObsValue (the threshold) is the source of truth: it is
+    // what gets persisted, and the position is re-derived from it whenever the data
+    // (and therefore the scale) changes.
+    let minObsValue = null; // null until restored from storage or defaulted from data
+    let minObsScaleMax = 100;
+
+    function minObsPositionToThreshold(pos) {
+        return Math.max(1, Math.round(Math.pow(minObsScaleMax, pos / 100)));
+    }
+
+    function minObsThresholdToPosition(threshold) {
+        const clamped = Math.min(Math.max(threshold, 1), minObsScaleMax);
+        return Math.round(100 * Math.log(clamped) / Math.log(minObsScaleMax));
+    }
+
+    // Recompute the slider scale from the loaded edges; default the threshold to the
+    // median observation count on first visit (the old default used the average,
+    // which sits above the 75th percentile on heavy-tailed data and hid most edges).
+    function syncMinObsSlider() {
+        const counts = allEdges.map(e => e.observation_count || 0).sort((a, b) => a - b);
+        const maxCount = counts.length ? counts[counts.length - 1] : 0;
+        minObsScaleMax = Math.max(10, maxCount);
+        if (minObsValue === null) {
+            minObsValue = counts.length ? Math.max(1, counts[Math.floor(counts.length / 2)]) : 1;
+        }
+        document.getElementById('filter-min-obs').value = minObsThresholdToPosition(minObsValue);
+    }
+
+    function updateMinObsLabel() {
+        const label = document.getElementById('label-min-obs');
+        if (label) {
+            label.textContent = `≥ ${minObsValue || 1} obs · ${filteredEdges.length.toLocaleString()}/${allEdges.length.toLocaleString()} edges`;
         }
     }
+
+    function onMinObsInput() {
+        const pos = parseInt(document.getElementById('filter-min-obs').value, 10) || 0;
+        minObsValue = minObsPositionToThreshold(pos);
+        applyFilters();
+        saveFilters();
+    }
     
-    // Load nodes and edges
-    // Options: { skipRender: true } - refresh allNodes/allEdges but do not call applyFilters().
-    // Used by socket handlers so graph view is not re-rendered on live updates (avoids chaotic re-stabilization).
-    async function loadData(options) {
-        const skipRender = options && options.skipRender === true;
+    function normalizeMeshLoadOptions(options) {
+        return {
+            skipRender: Boolean(options && options.skipRender === true),
+            reloadEdges: !options || options.reloadEdges !== false,
+            reloadNodes: !options || options.reloadNodes !== false,
+            forceRefresh: Boolean(options && options.forceRefresh === true)
+        };
+    }
+
+    function mergeMeshLoadOptions(existing, incoming) {
+        if (!existing) return incoming;
+        return {
+            // Render when any queued caller needs a render.
+            skipRender: existing.skipRender && incoming.skipRender,
+            reloadEdges: existing.reloadEdges || incoming.reloadEdges,
+            reloadNodes: existing.reloadNodes || incoming.reloadNodes,
+            forceRefresh: existing.forceRefresh || incoming.forceRefresh
+        };
+    }
+
+    // Load nodes and edges. Calls are serialized and requests that arrive while
+    // one is active are merged into one trailing load.
+    function loadData(options) {
+        pendingMeshLoad = mergeMeshLoadOptions(
+            pendingMeshLoad,
+            normalizeMeshLoadOptions(options)
+        );
+        if (!meshLoadInFlight) {
+            meshLoadInFlight = drainMeshLoads().finally(() => {
+                meshLoadInFlight = null;
+            });
+        }
+        return meshLoadInFlight;
+    }
+
+    async function drainMeshLoads() {
+        let lastError = null;
+        while (pendingMeshLoad) {
+            const options = pendingMeshLoad;
+            pendingMeshLoad = null;
+            try {
+                await performMeshLoad(options);
+                lastError = null;
+            } catch (error) {
+                // Continue with work queued while the failed request was active.
+                lastError = error;
+            }
+        }
+        if (lastError) {
+            throw lastError;
+        }
+    }
+
+    async function performMeshLoad(options) {
+        const skipRender = options.skipRender;
+        const reloadEdges = options.reloadEdges;
+        const reloadNodes = options.reloadNodes;
+        const forceRefresh = options.forceRefresh;
         
         try {
-            // Load edges first so we can pass prefix_hex_chars to nodes (keeps node prefix in sync with edge prefixes)
-            const edgesResponse = await fetch('/api/mesh/edges');
-            const edgesData = await edgesResponse.json();
-            allEdges = edgesData.edges || [];
-            graphPrefixHexChars = (edgesData.prefix_hex_chars && [2, 4, 6].includes(edgesData.prefix_hex_chars))
-                ? edgesData.prefix_hex_chars
-                : PREFIX_HEX_CHARS;
-            
-            // Load nodes with graph prefix length so node.prefix matches edge prefixes (e.g. 2-byte)
-            const nodesResponse = await fetch('/api/mesh/nodes?prefix_hex_chars=' + graphPrefixHexChars);
-            const nodesData = await nodesResponse.json();
-            allNodes = nodesData.nodes || [];
-            
-            // Build node maps
-            nodeMap = {};
-            nodeMapByKey = {};
-            allNodes.forEach(node => {
-                nodeMap[node.prefix] = node; // Last node with this prefix wins (for backward compatibility)
+            const evidence = document.getElementById('filter-evidence').value;
+            const edgeDays = document.getElementById('filter-edge-days').value;
+            const nodeDays = document.getElementById('filter-node-days').value;
+            const edgeParams = new URLSearchParams();
+            if (evidence === 'multibyte' || evidence === 'neighbors') edgeParams.set('evidence', evidence);
+            if (edgeDays) edgeParams.set('days', edgeDays);
+            if (forceRefresh) edgeParams.set('refresh', '1');
+            const nodeParams = new URLSearchParams();
+            if (nodeDays) nodeParams.set('days', nodeDays);
+            const edgeQuery = edgeParams.toString();
+            const nodeQuery = nodeParams.toString();
+            const edgesUrl = edgeQuery
+                ? `/api/mesh/edges?${edgeQuery}`
+                : '/api/mesh/edges';
+            const nodesUrl = nodeQuery
+                ? `/api/mesh/nodes?${nodeQuery}`
+                : '/api/mesh/nodes';
+            // Fetch edges and nodes concurrently; node prefixes are recomputed locally
+            // below once the edge prefix length is known, so the nodes request does
+            // not have to wait for the edges response
+            const [edgesData, nodesData] = await Promise.all([
+                reloadEdges ? fetchMeshJson(edgesUrl, 'edges') : Promise.resolve(null),
+                reloadNodes ? fetchMeshJson(nodesUrl, 'nodes') : Promise.resolve(null)
+            ]);
+            const nextEdges = edgesData ? edgesData.edges : allEdges;
+            const nextPrefixHexChars = edgesData
+                ? ((edgesData.prefix_hex_chars && [2, 4, 6].includes(edgesData.prefix_hex_chars))
+                    ? edgesData.prefix_hex_chars
+                    : PREFIX_HEX_CHARS)
+                : graphPrefixHexChars;
+            const sourceNodes = nodesData ? nodesData.nodes : allNodes;
+            if (!nextEdges.every(edge =>
+                edge
+                && typeof edge === 'object'
+                && typeof edge.from_prefix === 'string'
+                && typeof edge.to_prefix === 'string'
+            )) {
+                throw new Error(`Mesh response from ${edgesUrl} contains invalid edges`);
+            }
+            if (!sourceNodes.every(isValidMeshNode)) {
+                throw new Error(`Mesh response from ${nodesUrl} contains invalid nodes`);
+            }
+
+            // Prepare a complete candidate graph before replacing any current
+            // state, so malformed responses cannot blank a working display.
+            const nextNodes = sourceNodes.map(node => {
+                const nextNode = { ...node };
+                if (nextNode.public_key) {
+                    nextNode.prefix = nextNode.public_key
+                        .substring(0, nextPrefixHexChars)
+                        .toLowerCase();
+                }
+                return nextNode;
+            });
+            const nextNodeMap = {};
+            const nextNodeMapByKey = {};
+            nextNodes.forEach(node => {
+                nextNodeMap[node.prefix] = node;
                 if (node.public_key) {
-                    nodeMapByKey[node.public_key] = node; // Map by public key for accurate lookups
+                    nextNodeMapByKey[node.public_key] = node;
                 }
             });
-            
-            // Build edge map
-            edgeMap = {};
-            allEdges.forEach(edge => {
+            const nextEdgeMap = {};
+            nextEdges.forEach(edge => {
                 const key = `${edge.from_prefix}-${edge.to_prefix}`;
-                edgeMap[key] = edge;
+                nextEdgeMap[key] = edge;
             });
-            
+
+            allEdges = nextEdges;
+            allNodes = nextNodes;
+            graphPrefixHexChars = nextPrefixHexChars;
+            nodeMap = nextNodeMap;
+            nodeMapByKey = nextNodeMapByKey;
+            edgeMap = nextEdgeMap;
+
+            // Rescale the min-observations slider to the new edge distribution
+            if (reloadEdges) {
+                syncMinObsSlider();
+            }
+
             if (!skipRender) {
-                // Apply filters (will use the min observations value set by loadStats)
                 // Note: applyFilters() will preserve and re-apply path highlights via renderMap()
                 applyFilters();
             }
@@ -989,10 +1789,12 @@
     function saveFilters() {
         try {
             const filters = {
-                minObs: document.getElementById('filter-min-obs').value,
+                minObs: minObsValue, // threshold, not slider position
                 edgeDays: document.getElementById('filter-edge-days').value,
                 nodeDays: document.getElementById('filter-node-days').value,
-                starredOnly: document.getElementById('filter-starred').checked
+                starredOnly: document.getElementById('filter-starred').checked,
+                evidence: document.getElementById('filter-evidence').value,
+                colorMode: edgeColorMode
                 // Note: searchTerm is NOT saved - it should not persist across reloads
             };
             localStorage.setItem('meshGraphFilters', JSON.stringify(filters));
@@ -1007,9 +1809,13 @@
             const saved = localStorage.getItem('meshGraphFilters');
             if (saved) {
                 const filters = JSON.parse(saved);
-                if (filters.minObs !== undefined) {
-                    document.getElementById('filter-min-obs').value = filters.minObs;
-                    updateFilterLabel('filter-min-obs', 'label-min-obs');
+                if (filters.minObs !== undefined && filters.minObs !== null) {
+                    const parsed = parseInt(filters.minObs, 10);
+                    if (!isNaN(parsed) && parsed >= 1) {
+                        // Threshold only; slider position is derived in syncMinObsSlider
+                        // once the data (and therefore the log scale) is loaded
+                        minObsValue = parsed;
+                    }
                 }
                 if (filters.edgeDays !== undefined) {
                     document.getElementById('filter-edge-days').value = filters.edgeDays;
@@ -1019,6 +1825,12 @@
                 }
                 if (filters.starredOnly !== undefined) {
                     document.getElementById('filter-starred').checked = filters.starredOnly;
+                }
+                if (['all', 'multibyte', 'neighbors'].includes(filters.evidence)) {
+                    document.getElementById('filter-evidence').value = filters.evidence;
+                }
+                if (filters.colorMode === 'age' || filters.colorMode === 'heat') {
+                    edgeColorMode = filters.colorMode;
                 }
                 // Note: searchTerm is NOT loaded - it should reset on page reload
             }
@@ -1034,7 +1846,7 @@
         // Preserve path highlight if active (will be re-applied in renderMap if still valid)
         const preservedPath = highlightedPath;
         
-        const minObs = parseInt(document.getElementById('filter-min-obs').value) || 1;
+        const minObs = minObsValue || 1;
         const edgeDays = document.getElementById('filter-edge-days').value;
         const nodeDays = document.getElementById('filter-node-days').value;
         const starredOnly = document.getElementById('filter-starred').checked;
@@ -1085,7 +1897,25 @@
             filteredNodeMap[node.prefix] = node;
             if (node.public_key) filteredNodeMapByKey[node.public_key] = node;
         });
-        
+
+        // Per-node degree and observation totals for sizing and heat coloring
+        computeNodeStats();
+
+        // Live feedback: threshold plus how many edges survive the current filters
+        updateMinObsLabel();
+
+        // Normalize heat colors over the currently visible edges (log domain).
+        // Loop rather than Math.min(...arr): tens of thousands of edges would
+        // exceed the engine's argument-count limit.
+        let heatMin = Infinity, heatMax = 0;
+        filteredEdges.forEach(e => {
+            const obs = Math.max(1, e.observation_count || 1);
+            if (obs < heatMin) heatMin = obs;
+            if (obs > heatMax) heatMax = obs;
+        });
+        heatObsRange = heatMax ? { min: heatMin, max: heatMax } : { min: 1, max: 1 };
+        updateHeatLegend();
+
         // Re-render current view
         if (currentView === 'map') {
             renderMap();
@@ -1101,13 +1931,14 @@
         }
     }
     
-    // Update filter label
-    function updateFilterLabel(inputId, labelId) {
-        const value = document.getElementById(inputId).value;
-        document.getElementById(labelId).textContent = value;
-        applyFilters();
+    // Evidence mode is a server-side parameter, so changing it re-fetches data
+    // (loadData applies the current filters and re-renders when done)
+    function onEvidenceChange() {
+        saveFilters();
+        loadData({ reloadNodes: false })
+            .catch(error => console.error('Error reloading for evidence mode:', error));
     }
-    
+
     // Switch between views
     function switchView(view) {
         currentView = view;
@@ -1122,24 +1953,15 @@
             }
         }
         
+        document.getElementById('btn-view-map').classList.toggle('active', view === 'map');
+        document.getElementById('btn-view-graph').classList.toggle('active', view !== 'map');
+
         if (view === 'map') {
-            document.getElementById('btn-view-map').classList.add('active');
-            document.getElementById('btn-view-map').classList.remove('btn-outline-primary');
-            document.getElementById('btn-view-map').classList.add('btn-primary');
-            document.getElementById('btn-view-graph').classList.remove('active');
-            document.getElementById('btn-view-graph').classList.remove('btn-primary');
-            document.getElementById('btn-view-graph').classList.add('btn-outline-primary');
             document.getElementById('map-view').style.display = 'block';
             document.getElementById('graph-view').style.display = 'none';
             document.getElementById('btn-fullscreen').style.display = 'inline-block';
             renderMap();
         } else {
-            document.getElementById('btn-view-graph').classList.add('active');
-            document.getElementById('btn-view-graph').classList.remove('btn-outline-primary');
-            document.getElementById('btn-view-graph').classList.add('btn-primary');
-            document.getElementById('btn-view-map').classList.remove('active');
-            document.getElementById('btn-view-map').classList.remove('btn-primary');
-            document.getElementById('btn-view-map').classList.add('btn-outline-primary');
             document.getElementById('map-view').style.display = 'none';
             document.getElementById('graph-view').style.display = 'block';
             document.getElementById('btn-fullscreen').style.display = 'none';
@@ -1198,11 +2020,9 @@
                     fadeAnimation: true, // Enable fade animation for markers
                     markerZoomAnimation: true // Enable zoom animation for markers
                 }).setView([0, 0], 2);
-                
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors'
-                }).addTo(map);
-                
+
+                setBaseTileLayer(); // theme-aware basemap (light OSM raster / dark OpenFreeMap vector)
+
                 // Disable popup auto-pan globally to prevent bounding boxes
                 L.Popup.prototype.options.autoPan = false;
                 mapViewState = null; // No previous state to preserve
@@ -1219,6 +2039,8 @@
                 
                 // Preserve highlights when zooming/panning
                 map.on('zoomend', () => {
+                    // Rescale dots/lines for the new zoom before highlights repaint on top
+                    updateMapSizesForZoom();
                     if (highlightedNodeObject) {
                         // Re-apply highlights after zoom using the actual node object
                         highlightNodeConnectionsForNode(highlightedNodeObject);
@@ -1257,9 +2079,7 @@
                                 zoomControl: true,
                                 preferCanvas: false
                             }).setView([0, 0], 2);
-                            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                                attribution: '© OpenStreetMap contributors'
-                            }).addTo(map);
+                            setBaseTileLayer();
                             // Re-render after successful creation
                             renderMap();
                         } catch (retryError) {
@@ -1330,23 +2150,27 @@
             if (!fromNode || !toNode) return;
             
             const color = getEdgeColor(edge);
-            const weight = Math.max(1, Math.log10(edge.observation_count) * 2);
-            
+            const weight = getMapEdgeWeight(edge);
+            const edgeDistance = getEdgeDistance(edge, fromNode, toNode);
+            const evidenceLabel = getEvidenceLabel(edge);
+
             const line = L.polyline(
                 [[fromNode.latitude, fromNode.longitude], [toNode.latitude, toNode.longitude]],
                 {
                     color: color,
                     weight: weight,
                     opacity: getEdgeOpacity(edge),
+                    dashArray: isSingleByteEdge(edge) ? '6 6' : null, // Dash ambiguous single-byte evidence
                     pane: 'overlayPane' // Use overlayPane for edges (lower z-index)
                 }
             );
-            
+
             // Simple hover tooltip for quick info
             line.bindTooltip(`
                 ${formatPrefixWithBytes(edge.from_prefix)} → ${formatPrefixWithBytes(edge.to_prefix)}<br>
                 Observations: ${edge.observation_count}<br>
-                Distance: ${edge.geographic_distance ? edge.geographic_distance.toFixed(1) + ' km' : 'N/A'}<br>
+                ${evidenceLabel ? 'Evidence: ' + evidenceLabel + '<br>' : ''}
+                Distance: ${edgeDistance ? edgeDistance.toFixed(1) + ' km' : 'N/A'}<br>
                 Last Seen: ${edge.last_seen ? new Date(edge.last_seen).toLocaleString() : 'Never'}
             `);
             
@@ -1370,9 +2194,17 @@
                             <td style="padding: 2px 8px 2px 0; color: #888;"><strong>Observations:</strong></td>
                             <td style="padding: 2px 0;">${edge.observation_count}</td>
                         </tr>
+                        ${evidenceLabel ? `<tr>
+                            <td style="padding: 2px 8px 2px 0; color: #888;"><strong>Evidence:</strong></td>
+                            <td style="padding: 2px 0;">${evidenceLabel}</td>
+                        </tr>` : ''}
+                        ${isNeighborEdge(edge) && formatSnr(edge.best_snr) ? `<tr>
+                            <td style="padding: 2px 8px 2px 0; color: #888;"><strong>Best SNR:</strong></td>
+                            <td style="padding: 2px 0;">${formatSnr(edge.best_snr)}${formatSnr(edge.last_snr) ? ` (last ${formatSnr(edge.last_snr)})` : ''}</td>
+                        </tr>` : ''}
                         <tr>
                             <td style="padding: 2px 8px 2px 0; color: #888;"><strong>Distance:</strong></td>
-                            <td style="padding: 2px 0;">${edge.geographic_distance ? edge.geographic_distance.toFixed(2) + ' km' : 'N/A'}</td>
+                            <td style="padding: 2px 0;">${edgeDistance ? edgeDistance.toFixed(2) + ' km' : 'N/A'}</td>
                         </tr>
                         <tr>
                             <td style="padding: 2px 8px 2px 0; color: #888;"><strong>Avg Hop Position:</strong></td>
@@ -1437,21 +2269,21 @@
             // Normalize to lowercase for consistent matching
             const edgeKey = `${edge.from_prefix.toLowerCase()}-${edge.to_prefix.toLowerCase()}`;
             edgeLines.set(edgeKey, line);
-            // Store the actual node objects this edge connects (not just prefixes)
-            edgeToNodes.set(edgeKey, { fromNode: fromNode, toNode: toNode });
+            // Store the node objects and edge data (edge needed for zoom re-weighting)
+            edgeToNodes.set(edgeKey, { fromNode: fromNode, toNode: toNode, edge: edge });
         });
         
         // Add markers for nodes AFTER edges (so they appear on top and are easier to click)
         filteredNodes.forEach(node => {
-            // Calculate node size based on current filtered edges (this changes when filters change)
-            const nodeSize = getNodeSize(node);
+            // Zoom-scaled size based on current filtered edges (changes with filters/zoom)
+            const nodeSize = getMapNodeSize(node);
             // Calculate border weight that scales with node size
             const borderWeight = getBorderWeight(nodeSize, node.is_starred);
-            
+
             // Create marker with calculated size and border weight
             const marker = L.circleMarker([node.latitude, node.longitude], {
                 radius: nodeSize,
-                fillColor: node.role === 'roomserver' ? '#198754' : '#0d6efd',
+                fillColor: getNodeFillColor(node),
                 color: node.is_starred ? '#ffc107' : '#fff',
                 weight: borderWeight,
                 opacity: 1,
@@ -1519,10 +2351,14 @@
                             <td style="padding: 2px 8px 2px 0; color: #888;"><strong>Connections:</strong></td>
                             <td style="padding: 2px 0;">${connections.length} total (${incoming} incoming, ${outgoing} outgoing)</td>
                         </tr>
+                        <tr>
+                            <td style="padding: 2px 8px 2px 0; color: #888;"><strong>Path Observations:</strong></td>
+                            <td style="padding: 2px 0;">${(nodeHeatTotals.get(getNodeId(node)) || 0).toLocaleString()}</td>
+                        </tr>
                     </table>
                 </div>
             `;
-            
+
             marker.bindPopup(tooltipContent, {
                 maxWidth: 300,
                 className: 'mesh-node-popup',
@@ -1564,17 +2400,22 @@
         // Note: preservedHighlightedNode was already declared at the start of renderMap()
         highlightedNode = null;
         
-        // Fit to bounds on initial load, otherwise restore previous view state
+        // Fit to bounds on initial load, otherwise restore previous view state.
+        // Prefer the home mesh component (multi-byte connectivity from the bot's
+        // location) so wrong-GPS outliers don't stretch the frame.
         if (isInitialLoad && bounds.length > 0) {
-            // First time rendering with nodes - fit to bounds
-            map.fitBounds(bounds, { padding: [50, 50] });
+            // Refresh Leaflet's cached container size first: if the map was created
+            // while the container had no layout yet, fitBounds would compute max zoom
+            map.invalidateSize();
+            map.fitBounds(getHomeComponentBounds() || bounds, { padding: [50, 50] });
             isInitialMapLoad = false; // Mark that initial load is complete
         } else if (mapViewState) {
             // Subsequent renders - restore previous view state
             map.setView(mapViewState.center, mapViewState.zoom);
         } else if (bounds.length > 0) {
             // Fallback: fit to bounds if no saved state
-            map.fitBounds(bounds, { padding: [50, 50] });
+            map.invalidateSize();
+            map.fitBounds(getHomeComponentBounds() || bounds, { padding: [50, 50] });
         }
         
         // Re-apply highlights immediately after rendering if we had a highlighted node
@@ -1620,10 +2461,10 @@
                 nodeMapById.set(nodeId, {
                     id: nodeId,
                     label: shortLabel,
-                    title: `${node.name} (${node.prefix})`, // Full name in tooltip
+                    title: `${escapeHtml(node.name)} (${escapeHtml(node.prefix)})`, // Full name in tooltip (rendered as HTML by vis-network)
                     prefix: node.prefix, // Store prefix for reference
                     color: {
-                        background: node.role === 'roomserver' ? '#198754' : '#0d6efd',
+                        background: getNodeFillColor(node),
                         border: node.is_starred ? '#ffc107' : '#fff',
                         highlight: {
                             background: node.role === 'roomserver' ? '#10b981' : '#f59e0b',
@@ -1657,17 +2498,20 @@
             
             // Only add if we haven't seen this edge ID before
             if (!edgeMapById.has(edgeId)) {
+                const evidenceLabel = getEvidenceLabel(edge);
                 edgeMapById.set(edgeId, {
                     id: edgeId, // Use unique IDs for edge ID
                     from: fromNodeId, // Use unique node ID
                     to: toNodeId, // Use unique node ID
-                    width: Math.max(1, Math.log10(edge.observation_count) * 2),
+                    width: getEdgeWeight(edge),
                     color: {
                         color: getEdgeColor(edge),
                         opacity: getEdgeOpacity(edge)
                     },
+                    dashes: isSingleByteEdge(edge), // Dash ambiguous single-byte evidence
                     arrows: 'to',
                     title: `${edge.from_prefix} → ${edge.to_prefix} (${edge.observation_count} obs)`
+                        + (evidenceLabel ? ` — ${evidenceLabel}` : '')
                 });
             }
         });
@@ -1805,7 +2649,7 @@
                         } else {
                             highlightColor = '#10b981';
                         }
-                        const baseWidth = Math.max(1, Math.log10(edge.observation_count) * 2);
+                        const baseWidth = getEdgeWeight(edge);
                         edgeStyles[edgeId] = {
                             color: {
                                 color: highlightColor,
@@ -1852,7 +2696,7 @@
                             edgeUpdates.push({
                                 id: edgeId,
                                 color: { color: getEdgeColor(originalEdge), opacity: getEdgeOpacity(originalEdge) },
-                                width: Math.max(1, Math.log10(originalEdge.observation_count) * 2)
+                                width: getEdgeWeight(originalEdge)
                             });
                         }
                     }
@@ -2058,7 +2902,7 @@
             
             if (nodeId === clickedNodeId) {
                 // Highlight the clicked node - make it larger
-                const highlightSize = getNodeSize(node) + 3;
+                const highlightSize = getMapNodeSize(node) + 3;
                 const highlightBorderWeight = getBorderWeight(highlightSize, node.is_starred);
                 marker.setStyle({
                     radius: highlightSize,
@@ -2073,7 +2917,7 @@
                     marker.setStyle(originalStyle);
                 } else {
                     // Fallback: restore based on node properties
-                    const nodeSize = getNodeSize(node);
+                    const nodeSize = getMapNodeSize(node);
                     const borderWeight = getBorderWeight(nodeSize, node.is_starred);
                     marker.setStyle({
                         radius: nodeSize,
@@ -2181,7 +3025,7 @@
                 } else {
                     highlightColor = '#10b981'; // Green for incoming
                 }
-                const baseWidth = Math.max(1, Math.log10(edge.observation_count) * 2);
+                const baseWidth = getEdgeWeight(edge);
                 edgeStyles[edgeId] = {
                     color: {
                         color: highlightColor,
@@ -2219,13 +3063,13 @@
             if (!n) return { id: nid, label: '', title: '' };
             const isClicked = nid === clickedNodeId;
             const isLinked = connectedNodeIds.has(nid);
-            const bg = n.role === 'roomserver' ? '#198754' : '#0d6efd';
+            const bg = getNodeFillColor(n);
             const border = n.is_starred ? '#ffc107' : '#fff';
             const hlBg = n.role === 'roomserver' ? '#10b981' : '#f59e0b';
             const label = isLinked
                 ? (n.name.length > 22 ? n.name.substring(0, 22) + '... (' + n.prefix + ')' : n.name + ' (' + n.prefix + ')')
                 : '';
-            const title = n.name + ' (' + n.prefix + ')';
+            const title = escapeHtml(n.name) + ' (' + escapeHtml(n.prefix) + ')';
             const update = {
                 id: nid,
                 label: label,
@@ -2269,7 +3113,7 @@
                     marker.setStyle(originalStyle);
                 } else {
                     // Fallback: restore based on node properties
-                    const nodeSize = getNodeSize(node);
+                    const nodeSize = getMapNodeSize(node);
                     const borderWeight = getBorderWeight(nodeSize, node.is_starred);
                     marker.setStyle({
                         radius: nodeSize,
@@ -2315,7 +3159,7 @@
                     edgeUpdates.push({
                         id: edgeId,
                         color: { color: getEdgeColor(originalEdge), opacity: getEdgeOpacity(originalEdge) },
-                        width: Math.max(1, Math.log10(originalEdge.observation_count) * 2)
+                        width: getEdgeWeight(originalEdge)
                     });
                 }
             }
@@ -2327,13 +3171,13 @@
                 if (!node) return { id: nodeId, label: '', font: { size: 12 } };
                 const nodeSize = getNodeSize(node);
                 const borderWidth = getBorderWeight(nodeSize, node.is_starred);
-                const bg = node.role === 'roomserver' ? '#198754' : '#0d6efd';
+                const bg = getNodeFillColor(node);
                 const border = node.is_starred ? '#ffc107' : '#fff';
                 const hlBg = node.role === 'roomserver' ? '#10b981' : '#f59e0b';
                 return {
                     id: nodeId,
                     label: getDefaultNodeLabel(node),
-                    title: node.name + ' (' + node.prefix + ')',
+                    title: escapeHtml(node.name) + ' (' + escapeHtml(node.prefix) + ')',
                     font: { size: 12 },
                     color: {
                         background: bg,
@@ -2351,13 +3195,70 @@
     
     // Helper functions
     function getNodeSize(node) {
-        // Calculate degree (number of connections) using current filteredEdges
-        // This ensures node size updates when filters change
-        const degree = filteredEdges.filter(e => 
-            e.from_prefix === node.prefix || e.to_prefix === node.prefix
-        ).length;
-        // Base size 6, scale with degree, cap at 16
-        return Math.max(6, Math.min(16, 6 + degree * 0.5));
+        // Degree comes from the per-render aggregates (computeNodeStats), which
+        // resolve endpoints the same way edges are drawn. Base 5, cap 13: large
+        // enough to click, small enough that dense clusters stay readable.
+        const degree = nodeDegrees.get(getNodeId(node)) || 0;
+        return Math.max(5, Math.min(13, 5 + degree * 0.4));
+    }
+
+    // Map dots and lines shrink as you zoom out so dense areas stay readable;
+    // full size from zoom 12 in, floor of 55% at zoom 7 and out.
+    function mapZoomScale() {
+        if (!map) return 1;
+        const z = map.getZoom();
+        if (z >= 12) return 1;
+        if (z <= 7) return 0.55;
+        return 0.55 + (z - 7) * 0.09;
+    }
+
+    function getMapNodeSize(node) {
+        return Math.max(3, getNodeSize(node) * mapZoomScale());
+    }
+
+    // Shared edge width: log-scaled, capped so heavy edges don't blanket dense areas
+    function getEdgeWeight(edge) {
+        const weight = Math.max(1, Math.min(5, Math.log10(Math.max(1, edge.observation_count || 1)) * 1.5));
+        // Confirmed zero-hop links are the strongest evidence class, but they
+        // accumulate observations slowly (one per cycle, cycles are >=12h apart).
+        // Without a floor an inferred edge seen thousands of times would always
+        // outweigh a directly measured one, which inverts the confidence order.
+        return isNeighborEdge(edge) ? Math.max(weight, 3) : weight;
+    }
+
+    function getMapEdgeWeight(edge) {
+        return Math.max(0.75, getEdgeWeight(edge) * mapZoomScale());
+    }
+
+    // Re-apply zoom-scaled sizes to existing map layers (called on zoomend, before
+    // any active highlight is re-applied on top). Keeps the saved original styles
+    // in sync so highlight restores don't resurrect stale sizes.
+    function updateMapSizesForZoom() {
+        if (!map || currentView !== 'map') return;
+        filteredNodes.forEach(node => {
+            const nodeId = getNodeId(node);
+            const marker = nodeMarkers.get(nodeId);
+            if (!marker) return;
+            const size = getMapNodeSize(node);
+            const weight = getBorderWeight(size, node.is_starred);
+            marker.setStyle({ radius: size, weight: weight });
+            const saved = allNodeStyles.get(nodeId);
+            if (saved) {
+                saved.radius = size;
+                saved.weight = weight;
+            }
+        });
+        edgeToNodes.forEach((entry, edgeKey) => {
+            if (!entry.edge) return;
+            const line = edgeLines.get(edgeKey);
+            if (!line) return;
+            const weight = getMapEdgeWeight(entry.edge);
+            line.setStyle({ weight: weight });
+            const saved = allEdgeStyles.get(edgeKey);
+            if (saved) {
+                saved.weight = weight;
+            }
+        });
     }
     
     // Helper function to calculate border weight based on node size
@@ -2380,25 +3281,30 @@
     }
     
     function getEdgeColor(edge) {
+        if (edgeColorMode === 'heat') return heatColor(edge);
+
         if (!edge.last_seen) return '#6c757d'; // Gray for unknown
-        
+
         const lastSeen = new Date(edge.last_seen);
         const now = new Date();
         const daysAgo = (now - lastSeen) / (1000 * 60 * 60 * 24);
-        
+
         if (daysAgo < 1) return '#198754'; // Green (recent)
         if (daysAgo < 7) return '#ffc107'; // Yellow
         if (daysAgo < 30) return '#fd7e14'; // Orange
         return '#dc3545'; // Red (old)
     }
-    
+
     function getEdgeOpacity(edge) {
+        // Heat mode: hot edges pop, cold edges recede (recency shown by color mode 'age')
+        if (edgeColorMode === 'heat') return 0.45 + 0.5 * heatT(edge);
+
         if (!edge.last_seen) return 0.3;
-        
+
         const lastSeen = new Date(edge.last_seen);
         const now = new Date();
         const daysAgo = (now - lastSeen) / (1000 * 60 * 60 * 24);
-        
+
         if (daysAgo < 1) return 0.9;
         if (daysAgo < 7) return 0.7;
         if (daysAgo < 30) return 0.5;
@@ -2406,25 +3312,34 @@
     }
     
     function showNodeDetails(node) {
-        const connections = filteredEdges.filter(e => 
-            e.from_prefix === node.prefix || e.to_prefix === node.prefix
-        );
-        const incoming = connections.filter(e => e.to_prefix === node.prefix).length;
-        const outgoing = connections.filter(e => e.from_prefix === node.prefix).length;
+        // Prefix-compatible matching across resolutions (see edgeTouchesNode)
+        const connections = filteredEdges.filter(e => edgeTouchesNode(e, node));
+        const incoming = connections.filter(e => prefixesCompatible(e.to_prefix, node.prefix)).length;
+        const outgoing = connections.filter(e => prefixesCompatible(e.from_prefix, node.prefix)).length;
         
         document.getElementById('nodeDetailsTitle').textContent = node.name;
-        document.getElementById('nodeDetailsBody').innerHTML = `
-            <table class="table">
-                <tr><th>Prefix</th><td>${escapeHtml(node.prefix)}</td></tr>
-                <tr><th>Public Key</th><td><code>${formatPublicKey(node.public_key)}</code></td></tr>
-                <tr><th>Role</th><td>${escapeHtml(node.role)}</td></tr>
-                <tr><th>Location</th><td>${node.latitude.toFixed(6)}, ${node.longitude.toFixed(6)}</td></tr>
-                <tr><th>Starred</th><td>${node.is_starred ? '<i class="fas fa-star text-warning"></i> Yes' : 'No'}</td></tr>
-                <tr><th>Last Heard</th><td>${node.last_heard || 'Never'}</td></tr>
-                <tr><th>Last Advert</th><td>${node.last_advert_timestamp || 'Never'}</td></tr>
-                <tr><th>Connections</th><td>${connections.length} total (${incoming} incoming, ${outgoing} outgoing)</td></tr>
-            </table>
-        `;
+        const table = document.createElement('table');
+        table.className = 'table';
+        const addRow = (label, value, code = false) => {
+            const row = document.createElement('tr');
+            const heading = document.createElement('th');
+            heading.textContent = label;
+            const cell = document.createElement('td');
+            const valueElement = document.createElement(code ? 'code' : 'span');
+            valueElement.textContent = String(value ?? '');
+            cell.appendChild(valueElement);
+            row.append(heading, cell);
+            table.appendChild(row);
+        };
+        addRow('Prefix', node.prefix);
+        addRow('Public Key', formatPublicKeyText(node.public_key), true);
+        addRow('Role', node.role);
+        addRow('Location', `${Number(node.latitude).toFixed(6)}, ${Number(node.longitude).toFixed(6)}`);
+        addRow('Starred', node.is_starred ? 'Yes' : 'No');
+        addRow('Last Heard', node.last_heard || 'Never');
+        addRow('Last Advert', node.last_advert_timestamp || 'Never');
+        addRow('Connections', `${connections.length} total (${incoming} incoming, ${outgoing} outgoing)`);
+        document.getElementById('nodeDetailsBody').replaceChildren(table);
         
         // Reuse modal instance or create new one
         if (!nodeModal) {
@@ -2445,18 +3360,124 @@
     }
     
     function formatPublicKey(publicKey) {
+        return escapeHtml(formatPublicKeyText(publicKey));
+    }
+
+    function formatPublicKeyText(publicKey) {
         if (!publicKey || publicKey.length < 32) {
-            return escapeHtml(publicKey || '');
+            return String(publicKey || '');
         }
         // First 8 bytes = 16 hex characters, last 8 bytes = 16 hex characters
         const first8Bytes = publicKey.substring(0, 16);
         const last8Bytes = publicKey.substring(publicKey.length - 16);
-        return escapeHtml(`${first8Bytes}...${last8Bytes}`);
+        return `${first8Bytes}...${last8Bytes}`;
     }
     
-    function refreshData() {
-        loadStats();
-        loadData();
+    async function refreshData() {
+        const absorbedPending = meshLiveRefreshPending
+            || meshLiveRefreshTimer !== null;
+        const absorbedNeedsNodes = meshLiveRefreshNeedsNodes;
+        if (meshLiveRefreshTimer) {
+            clearTimeout(meshLiveRefreshTimer);
+            meshLiveRefreshTimer = null;
+        }
+        meshLiveRefreshPending = false;
+        meshLiveRefreshNeedsNodes = false;
+        meshLiveRefreshRetryCount = 0;
+        const activeScheduledRefresh = meshLiveRefreshRunning;
+        const activeReloadsNodes = meshLiveRefreshActiveReloadsNodes;
+        try {
+            if (activeScheduledRefresh && meshLoadInFlight) {
+                await Promise.all([loadStats(), meshLoadInFlight]);
+                if (activeReloadsNodes) {
+                    applyFilters();
+                } else {
+                    // The active forced edge refresh is sufficient; fetch only
+                    // the nodes it omitted and render from the combined state.
+                    await loadData({
+                        reloadEdges: false,
+                        reloadNodes: true
+                    });
+                }
+            } else {
+                await Promise.all([
+                    loadStats(),
+                    loadData({ forceRefresh: true })
+                ]);
+            }
+        } catch (error) {
+            // A manual refresh may have absorbed a pending live update. Restore
+            // it and let the bounded scheduled-retry policy recover.
+            scheduleMeshLiveRefresh(true, MESH_LIVE_REFRESH_RETRY_MS);
+            throw error;
+        }
+        if (absorbedPending && activeScheduledRefresh) {
+            // Events arriving during an active database snapshot may not be
+            // represented by it, so retain that trailing refresh.
+            scheduleMeshLiveRefresh(absorbedNeedsNodes);
+        }
+    }
+
+    function scheduleMeshLiveRefresh(
+        reloadNodes,
+        delayMs = MESH_LIVE_REFRESH_MS
+    ) {
+        meshLiveRefreshPending = true;
+        meshLiveRefreshNeedsNodes = meshLiveRefreshNeedsNodes || Boolean(reloadNodes);
+        if (document.hidden || meshLiveRefreshTimer || meshLiveRefreshRunning) return;
+
+        meshLiveRefreshTimer = setTimeout(() => {
+            meshLiveRefreshTimer = null;
+            runScheduledMeshRefresh();
+        }, delayMs);
+    }
+
+    async function runScheduledMeshRefresh() {
+        if (
+            document.hidden
+            || meshLiveRefreshRunning
+            || !meshLiveRefreshPending
+        ) {
+            return;
+        }
+
+        const reloadNodes = meshLiveRefreshNeedsNodes;
+        meshLiveRefreshPending = false;
+        meshLiveRefreshNeedsNodes = false;
+        meshLiveRefreshRunning = true;
+        meshLiveRefreshActiveReloadsNodes = reloadNodes;
+        let retryDelayMs = MESH_LIVE_REFRESH_MS;
+        try {
+            await Promise.all([
+                loadStats(),
+                loadData({
+                    reloadNodes,
+                    skipRender: true,
+                    forceRefresh: true
+                })
+            ]);
+            if (currentView === 'map') {
+                applyFilters();
+            }
+            meshLiveRefreshRetryCount = 0;
+        } catch (error) {
+            console.error('Error refreshing live mesh data:', error);
+            if (meshLiveRefreshRetryCount < MESH_LIVE_REFRESH_MAX_RETRIES) {
+                meshLiveRefreshRetryCount++;
+                meshLiveRefreshPending = true;
+                meshLiveRefreshNeedsNodes =
+                    meshLiveRefreshNeedsNodes || reloadNodes;
+                retryDelayMs = MESH_LIVE_REFRESH_RETRY_MS;
+            } else {
+                meshLiveRefreshRetryCount = 0;
+            }
+        } finally {
+            meshLiveRefreshRunning = false;
+            meshLiveRefreshActiveReloadsNodes = false;
+            if (meshLiveRefreshPending) {
+                scheduleMeshLiveRefresh(false, retryDelayMs);
+            }
+        }
     }
     
     function exportView() {
@@ -2503,7 +3524,7 @@
             const exitBtn = document.createElement('button');
             exitBtn.className = 'fullscreen-exit-btn';
             exitBtn.innerHTML = '<i class="fas fa-times"></i> Exit Fullscreen';
-            exitBtn.onclick = toggleFullscreen;
+            exitBtn.addEventListener('click', toggleFullscreen);
             mapContainer.appendChild(exitBtn);
 
             setTimeout(() => { if (map) map.invalidateSize(); }, 100);
@@ -2557,27 +3578,30 @@
     
     // Socket.IO setup for real-time updates
     // Live updates are applied only when the map view is active. When the graph view is active,
-    // we refresh data in the background but do not re-render the graph, to avoid the chaotic
-    // re-stabilization layout (nodes clumping, edges tangling) that occurs when vis-network
-    // runs physics again. User can refresh or switch to map and back to see updated graph.
+    // events are coalesced into a bounded background refresh and do not re-render
+    // the graph, avoiding both request storms and chaotic physics re-stabilization.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && meshLiveRefreshPending) {
+            if (meshLiveRefreshTimer) {
+                clearTimeout(meshLiveRefreshTimer);
+                meshLiveRefreshTimer = null;
+            }
+            runScheduledMeshRefresh();
+        }
+    });
+
     function setupSocketIO() {
         const socket = window.connectionManager.socket;
         
         socket.emit('subscribe_mesh');
         
-        function onMeshUpdate(data, label) {
-            console.log(label, data);
-            loadStats();
-            loadData({ skipRender: true }).then(() => {
-                if (currentView === 'map') {
-                    applyFilters();
-                }
-            });
+        function onMeshUpdate(reloadNodes) {
+            scheduleMeshLiveRefresh(reloadNodes);
         }
         
-        socket.on('mesh_edge_added', (data) => onMeshUpdate(data, 'New edge added:'));
-        socket.on('mesh_edge_updated', (data) => onMeshUpdate(data, 'Edge updated:'));
-        socket.on('mesh_node_added', (data) => onMeshUpdate(data, 'New node added:'));
+        socket.on('mesh_edge_added', () => onMeshUpdate(false));
+        socket.on('mesh_edge_updated', () => onMeshUpdate(false));
+        socket.on('mesh_node_added', () => onMeshUpdate(true));
     }
 </script>
 

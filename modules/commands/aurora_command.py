@@ -17,6 +17,10 @@ from .base_command import BaseCommand
 class AuroraCommand(BaseCommand):
     """Command to get aurora (KP index and probability) for a location."""
 
+    # Read-only informational output; safe for scheduled {cmd:...} rendering.
+
+    render_safe = True
+
     name = "aurora"
     keywords = ["aurora", "kp"]
     description = "Get aurora forecast (KP index and probability) for a location"
@@ -29,6 +33,23 @@ class AuroraCommand(BaseCommand):
     examples = ["aurora", "aurora seattle", "aurora 98101", "aurora 48.08,-121.97"]
     parameters = [
         {"name": "location", "description": "Optional: city, US ZIP, or lat,lon. Default: config or companion location."}
+    ]
+
+    # Web-viewer settings schema (see modules/settings_schema.py).
+    # Falls back to [Bot] bot_latitude/longitude when these are unset.
+    settings_schema = [
+        {"key": "default_lat", "label": "Default latitude", "type": "float",
+         "min": -90, "max": 90, "default": "",
+         "help": "Latitude used when no location is given (overrides bot location)."},
+        {"key": "default_lon", "label": "Default longitude", "type": "float",
+         "min": -180, "max": 180, "default": "",
+         "help": "Longitude used when no location is given (overrides bot location)."},
+        {"key": "default_state", "label": "Default state", "type": "str", "section": "Weather",
+         "default": "", "help": "2-letter state for city disambiguation (e.g. WA). Shared weather setting."},
+        {"key": "default_country", "label": "Default country", "type": "str", "section": "Weather",
+         "default": "US", "help": "2-letter country code (e.g. US). Shared weather setting."},
+        {"key": "use_zulu_time", "label": "Use UTC (Zulu) time", "type": "bool", "section": "Solar_Config",
+         "default": False, "help": "On = 24-hour UTC times; off = 12-hour local. Shared solar setting."},
     ]
 
     def __init__(self, bot):
@@ -198,7 +219,12 @@ class AuroraCommand(BaseCommand):
         if len(parts) >= 2:
             location = " ".join(parts[1:]).strip()
 
-        lat, lon, location_label, err_key = self._resolve_location(message, location)
+        # Offloaded: _resolve_location geocodes over blocking HTTP, so running it
+        # inline would stall the event loop before we ever reach the
+        # already-offloaded aurora fetch below.
+        lat, lon, location_label, err_key = await asyncio.to_thread(
+            self._resolve_location, message, location
+        )
         if lat is None or lon is None:
             region = self.default_state or self.default_country
             if err_key == "commands.aurora.no_location":

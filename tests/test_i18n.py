@@ -118,6 +118,13 @@ class TestTranslatorWithRealFiles:
         t = Translator(language="en", translation_path=str(tmp_path / "nonexistent"))
         assert t.get_available_languages() == []
 
+    def test_default_catalog_loads_outside_source_tree(self, tmp_path, monkeypatch):
+        """Installed wheels must not depend on the process working directory."""
+        monkeypatch.chdir(tmp_path)
+        t = Translator(language="en")
+        assert t.fallback_translations
+        assert "en" in t.get_available_languages()
+
     def test_get_value_returns_raw_value(self, tmp_path):
         en = {"commands": {"list": ["a", "b", "c"]}}
         (tmp_path / "en.json").write_text(json.dumps(en))

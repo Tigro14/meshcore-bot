@@ -21,11 +21,27 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH \
 
 WORKDIR /build
 
-COPY requirements.txt pyproject.toml ./
+COPY requirements.txt pyproject.toml constraints-armv7.txt ./
 
 # Pip cache is scoped per-architecture.
+#
+# The arm/v7 leg additionally pulls from piwheels. Ten dependencies publish no armv7 wheel
+# on PyPI (PyNaCl, pycryptodome, ephem, brotli, cffi, MarkupSafe, librt, backports.zstd,
+# sgmllib3k) and would otherwise compile from source under QEMU on every build. piwheels
+# supplies prebuilt armv7 wheels; constraints-armv7.txt closes the last two version-skew
+# gaps so the leg resolves entirely to wheels. See constraints-armv7.txt for measurements.
+#
+# Scoped to linux/arm/v7 deliberately: amd64 and arm64 keep resolving from PyPI alone, so
+# neither the extra index nor the two held-back versions touch those images.
 RUN --mount=type=cache,target=/root/.cache/pip,id=pip-$TARGETARCH \
-    pip install --user -r requirements.txt
+    if [ "$TARGETPLATFORM" = "linux/arm/v7" ]; then \
+        pip install --user \
+            --extra-index-url https://www.piwheels.org/simple \
+            -c constraints-armv7.txt \
+            -r requirements.txt; \
+    else \
+        pip install --user -r requirements.txt; \
+    fi
 
 # ── runtime stage ──────────────────────────────────────────────────────────
 FROM python:3.11-slim

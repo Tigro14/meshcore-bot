@@ -10,6 +10,8 @@ from modules.db_migrations import (
     MigrationRunner,
     _add_column,
     _column_exists,
+    _m0017_feed_queue_item_uniqueness,
+    _m0020_mesh_connections_last_seen_index,
 )
 
 
@@ -58,6 +60,24 @@ class TestColumnHelpers:
         cursor = conn.cursor()
         _add_column(cursor, "t", "a", "TEXT")  # already exists — must not raise
         assert _column_exists(cursor, "t", "a") is True
+
+
+class TestMeshConnectionIndexMigration:
+    def test_reuses_legacy_equivalent_index(self, conn):
+        conn.execute(
+            "CREATE TABLE mesh_connections (from_prefix TEXT, to_prefix TEXT, last_seen TEXT)"
+        )
+        conn.execute("CREATE INDEX idx_last_seen ON mesh_connections(last_seen)")
+
+        _m0020_mesh_connections_last_seen_index(conn.cursor())
+
+        indexes = conn.execute('PRAGMA index_list("mesh_connections")').fetchall()
+        last_seen_indexes = []
+        for index in indexes:
+            columns = conn.execute(f'PRAGMA index_info("{index[1]}")').fetchall()
+            if [column[2] for column in columns] == ["last_seen"]:
+                last_seen_indexes.append(index[1])
+        assert last_seen_indexes == ["idx_last_seen"]
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +253,42 @@ class TestSchema:
         cursor = conn.cursor()
         assert _column_exists(cursor, "feed_message_queue", "item_id") is True
 
+    def test_feed_queue_unique_index_deduplicates_valid_ids(self, conn):
+        conn.execute(
+            """
+            CREATE TABLE feed_message_queue (
+                id INTEGER PRIMARY KEY,
+                feed_id INTEGER NOT NULL,
+                item_id TEXT,
+                sent_at TIMESTAMP
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO feed_message_queue VALUES (?, ?, ?, ?)",
+            [
+                (1, 7, "same", None),
+                (2, 7, "same", "2026-01-01"),
+                (3, 7, "same", None),
+                (4, 7, "", None),
+                (5, 7, "", None),
+                (6, 7, None, None),
+                (7, 7, None, None),
+            ],
+        )
+
+        _m0017_feed_queue_item_uniqueness(conn.cursor())
+
+        rows = conn.execute(
+            "SELECT id, item_id FROM feed_message_queue ORDER BY id"
+        ).fetchall()
+        assert rows == [(2, "same"), (4, ""), (5, ""), (6, None), (7, None)]
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO feed_message_queue (feed_id, item_id) VALUES (7, 'same')"
+            )
+        conn.execute("INSERT INTO feed_message_queue (feed_id, item_id) VALUES (7, '')")
+
     def test_foreign_key_cascade_works_when_enabled(self, runner, conn):
         conn.execute("PRAGMA foreign_keys=ON")
         runner.run()
@@ -287,6 +343,19 @@ class TestSchema:
             )
             assert cur.fetchone() is not None
 
+    def test_mesh_connections_has_table_specific_last_seen_index(self, runner, conn):
+        runner.run()
+        row = conn.execute(
+            """
+            SELECT tbl_name, sql
+            FROM sqlite_master
+            WHERE type = 'index' AND name = 'idx_mesh_connections_last_seen'
+            """
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "mesh_connections"
+        assert "last_seen" in row[1]
+
     def test_purging_log_has_details_column_after_full_migration(self, runner, conn):
         runner.run()
         cursor = conn.cursor()
@@ -323,3 +392,95 @@ class TestSchema:
 
         cursor = conn.cursor()
         assert _column_exists(cursor, "purging_log", "details") is True
+
+
+# ---------------------------------------------------------------------------
+# TestNeighborTables (migration 22)
+# ---------------------------------------------------------------------------
+
+
+class TestNeighborTables:
+    """Zero-hop neighbor discovery tables (see modules/neighbors_discovery.py)."""
+
+    def test_neighbor_tables_created(self, runner, conn):
+        runner.run()
+        for table in ["neighbor_links", "neighbor_observations"]:
+            cur = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            )
+            assert cur.fetchone() is not None
+
+    def test_neighbor_links_keeps_full_public_keys(self, runner, conn):
+        """Full 32-byte keys, not prefixes — that is the point of this evidence."""
+        runner.run()
+        cursor = conn.cursor()
+        for column in ["self_public_key", "neighbor_public_key", "best_snr",
+                       "last_snr", "snr_sum", "snr_count", "observation_count",
+                       "first_seen", "last_seen", "last_status", "scopes"]:
+            assert _column_exists(cursor, "neighbor_links", column) is True
+
+    def test_neighbor_observations_columns(self, runner, conn):
+        runner.run()
+        cursor = conn.cursor()
+        for column in ["observed_at", "self_public_key", "neighbor_public_key",
+                       "snr", "heard_secs_ago", "scopes", "status"]:
+            assert _column_exists(cursor, "neighbor_observations", column) is True
+
+    def test_neighbor_indexes_are_table_qualified(self, runner, conn):
+        """SQLite index names are database-global (see migration 20)."""
+        runner.run()
+        for idx, table in [
+            ("idx_neighbor_links_last_seen", "neighbor_links"),
+            ("idx_neighbor_links_neighbor", "neighbor_links"),
+            ("idx_neighbor_observations_observed_at", "neighbor_observations"),
+            ("idx_neighbor_observations_neighbor", "neighbor_observations"),
+        ]:
+            row = conn.execute(
+                "SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?",
+                (idx,),
+            ).fetchone()
+            assert row is not None, f"missing index {idx}"
+            assert row[0] == table
+
+    def test_neighbor_links_is_unique_per_directed_pair(self, runner, conn):
+        runner.run()
+        conn.execute(
+            "INSERT INTO neighbor_links (self_public_key, neighbor_public_key) VALUES ('a', 'b')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO neighbor_links (self_public_key, neighbor_public_key) VALUES ('a', 'b')"
+            )
+
+    def test_migration_is_idempotent(self, conn, logger):
+        MigrationRunner(conn, logger).run()
+        MigrationRunner(conn, logger).run()
+        applied = conn.execute(
+            "SELECT COUNT(*) FROM schema_version WHERE version = 22"
+        ).fetchone()[0]
+        assert applied == 1
+
+    def test_neighbor_tables_are_writable_by_the_db_manager(self, runner, conn):
+        """DBManager.ALLOWED_TABLES gates create/drop/retention helpers."""
+        from modules.db_manager import DBManager
+
+        runner.run()
+        assert "neighbor_links" in DBManager.ALLOWED_TABLES
+        assert "neighbor_observations" in DBManager.ALLOWED_TABLES
+
+
+class TestObservedPathsZeroHopSignal:
+    def test_snr_rssi_columns_added(self, runner, conn):
+        runner.run()
+        cursor = conn.cursor()
+        assert _column_exists(cursor, "observed_paths", "snr") is True
+        assert _column_exists(cursor, "observed_paths", "rssi") is True
+
+    def test_migration_is_idempotent(self, conn, logger):
+        MigrationRunner(conn, logger).run()
+        MigrationRunner(conn, logger).run()
+        applied = conn.execute(
+            "SELECT COUNT(*) FROM schema_version WHERE version = 23"
+        ).fetchone()[0]
+        assert applied == 1

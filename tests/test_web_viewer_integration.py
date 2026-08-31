@@ -4,6 +4,7 @@ import json
 import queue
 import time
 from configparser import ConfigParser
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -204,7 +205,7 @@ class TestInsertPacketStreamRow:
         bi = _make_bot_integration()
         bi._insert_packet_stream_row('{"x": 1}', "packet")
         assert not bi._write_queue.empty()
-        ts, data, row_type = bi._write_queue.get_nowait()
+        ts, data, row_type, *_dims = bi._write_queue.get_nowait()
         assert data == '{"x": 1}'
         assert row_type == "packet"
 
@@ -227,7 +228,7 @@ class TestCaptureFullPacketData:
         bi = _make_bot_integration()
         bi.capture_full_packet_data({"snr": -5.0, "path_len": 2})
         assert not bi._write_queue.empty()
-        ts, data, row_type = bi._write_queue.get_nowait()
+        ts, data, row_type, *_dims = bi._write_queue.get_nowait()
         parsed = json.loads(data)
         assert row_type == "packet"
         assert parsed["hops"] == 2
@@ -235,21 +236,21 @@ class TestCaptureFullPacketData:
     def test_no_path_len_defaults_hops_to_0(self):
         bi = _make_bot_integration()
         bi.capture_full_packet_data({"snr": -5.0})
-        ts, data, row_type = bi._write_queue.get_nowait()
+        ts, data, row_type, *_dims = bi._write_queue.get_nowait()
         parsed = json.loads(data)
         assert parsed["hops"] == 0
 
     def test_existing_hops_not_overwritten(self):
         bi = _make_bot_integration()
         bi.capture_full_packet_data({"hops": 3, "path_len": 2})
-        ts, data, row_type = bi._write_queue.get_nowait()
+        ts, data, row_type, *_dims = bi._write_queue.get_nowait()
         parsed = json.loads(data)
         assert parsed["hops"] == 3
 
     def test_datetime_added(self):
         bi = _make_bot_integration()
         bi.capture_full_packet_data({"snr": 0})
-        ts, data, _ = bi._write_queue.get_nowait()
+        ts, data, _, *_dims = bi._write_queue.get_nowait()
         parsed = json.loads(data)
         assert "datetime" in parsed
 
@@ -275,7 +276,7 @@ class TestCaptureCommand:
         msg.content = "ping"
         bi.capture_command(msg, "ping", "Pong!", True)
         assert not bi._write_queue.empty()
-        ts, data, row_type = bi._write_queue.get_nowait()
+        ts, data, row_type, *_dims = bi._write_queue.get_nowait()
         assert row_type == "command"
         parsed = json.loads(data)
         assert parsed["command"] == "ping"
@@ -289,7 +290,7 @@ class TestCaptureCommand:
         msg.channel = "ch"
         msg.content = "cmd"
         bi.capture_command(msg, "cmd", "resp", True)
-        ts, data, _ = bi._write_queue.get_nowait()
+        ts, data, _, *_dims = bi._write_queue.get_nowait()
         parsed = json.loads(data)
         assert parsed["repeat_count"] == 0
 
@@ -312,7 +313,7 @@ class TestCaptureChannelMessage:
         msg.is_dm = False
         bi.capture_channel_message(msg)
         assert not bi._write_queue.empty()
-        ts, data, row_type = bi._write_queue.get_nowait()
+        ts, data, row_type, *_dims = bi._write_queue.get_nowait()
         assert row_type == "message"
         parsed = json.loads(data)
         assert parsed["type"] == "message"
@@ -329,7 +330,7 @@ class TestCaptureChannelMessage:
         msg.path = ""
         msg.is_dm = True
         bi.capture_channel_message(msg)
-        ts, data, _ = bi._write_queue.get_nowait()
+        ts, data, _, *_dims = bi._write_queue.get_nowait()
         parsed = json.loads(data)
         assert parsed["is_dm"] is True
 
@@ -344,7 +345,7 @@ class TestCapturePacketRouting:
         bi = _make_bot_integration()
         bi.capture_packet_routing({"path_nodes": ["aa", "bb"]})
         assert not bi._write_queue.empty()
-        ts, data, row_type = bi._write_queue.get_nowait()
+        ts, data, row_type, *_dims = bi._write_queue.get_nowait()
         assert row_type == "routing"
 
 
@@ -442,6 +443,77 @@ class TestWebViewerIntegrationValidation:
                 WebViewerIntegration(bot)
         bot.logger.error.assert_not_called()
 
+    def test_start_viewer_refuses_missing_db_parent(self, tmp_path):
+        from modules.web_viewer.integration import WebViewerIntegration
+
+        bot = _make_bot()
+        bot.config_file = str(tmp_path / "config.ini")
+        Path(bot.config_file).write_text("[Bot]\n", encoding="utf-8")
+        bot.config.set("Web_Viewer", "db_path", "missing/viewer.db")
+        bot.db_manager.db_path = str(tmp_path / "bot.db")
+
+        with patch("modules.web_viewer.integration.BotIntegration._init_http_session"), \
+             patch("modules.web_viewer.integration.BotIntegration._init_packet_stream_table"), \
+             patch("modules.web_viewer.integration.BotIntegration._start_drain_thread"):
+            wvi = WebViewerIntegration(bot)
+
+        with patch.object(wvi, "_run_viewer") as run_viewer:
+            wvi.start_viewer()
+
+        run_viewer.assert_not_called()
+        assert wvi.running is False
+        assert any(
+            "parent directory does not exist" in str(call.args[0])
+            for call in bot.logger.error.call_args_list
+        )
+
+    def test_start_viewer_refuses_db_parent_that_is_file(self, tmp_path):
+        from modules.web_viewer.integration import WebViewerIntegration
+
+        bot = _make_bot()
+        bot.config_file = str(tmp_path / "config.ini")
+        Path(bot.config_file).write_text("[Bot]\n", encoding="utf-8")
+        not_dir = tmp_path / "not_a_directory"
+        not_dir.write_text("not a directory", encoding="utf-8")
+        bot.config.set("Web_Viewer", "db_path", "not_a_directory/viewer.db")
+        bot.db_manager.db_path = str(tmp_path / "bot.db")
+
+        with patch("modules.web_viewer.integration.BotIntegration._init_http_session"), \
+             patch("modules.web_viewer.integration.BotIntegration._init_packet_stream_table"), \
+             patch("modules.web_viewer.integration.BotIntegration._start_drain_thread"):
+            wvi = WebViewerIntegration(bot)
+
+        with patch.object(wvi, "_run_viewer") as run_viewer:
+            wvi.start_viewer()
+
+        run_viewer.assert_not_called()
+        assert wvi.running is False
+        assert any(
+            "parent path is not a directory" in str(call.args[0])
+            for call in bot.logger.error.call_args_list
+        )
+
+    def test_start_viewer_allows_valid_db_parent(self, tmp_path):
+        from modules.web_viewer.integration import WebViewerIntegration
+
+        bot = _make_bot()
+        bot.config_file = str(tmp_path / "config.ini")
+        Path(bot.config_file).write_text("[Bot]\n", encoding="utf-8")
+        bot.config.set("Web_Viewer", "db_path", "viewer.db")
+        bot.db_manager.db_path = str(tmp_path / "bot.db")
+
+        with patch("modules.web_viewer.integration.BotIntegration._init_http_session"), \
+             patch("modules.web_viewer.integration.BotIntegration._init_packet_stream_table"), \
+             patch("modules.web_viewer.integration.BotIntegration._start_drain_thread"):
+            wvi = WebViewerIntegration(bot)
+
+        with patch("modules.web_viewer.integration.threading.Thread") as thread_cls:
+            thread = thread_cls.return_value
+            wvi.start_viewer()
+
+        thread.start.assert_called_once()
+        assert wvi.running is True
+
 
 class TestNormalizedWebViewerPassword:
     def test_blank_and_null_placeholders(self):
@@ -526,3 +598,44 @@ class TestIntegrationTimeoutConfig:
         assert wvi.viewer_stop_force_timeout_sec == 4
         assert wvi.port_cleanup_lsof_timeout_sec == 8
         assert wvi.port_cleanup_kill_timeout_sec == 1
+
+
+class TestViewerLogDir:
+    """Web viewer subprocess log dir follows [Logging] log_file."""
+
+    def test_empty_log_file_returns_none(self):
+        from modules.web_viewer.integration import WebViewerIntegration
+
+        bot = _make_bot()
+        bot.config.add_section("Logging")
+        bot.config.set("Logging", "log_file", "")
+        with patch("modules.web_viewer.integration.BotIntegration._init_http_session"), \
+             patch("modules.web_viewer.integration.BotIntegration._init_packet_stream_table"), \
+             patch("modules.web_viewer.integration.BotIntegration._start_drain_thread"):
+            wvi = WebViewerIntegration(bot)
+        assert wvi._viewer_log_dir("/tmp/config.ini") is None
+
+    def test_missing_logging_section_returns_none(self):
+        from modules.web_viewer.integration import WebViewerIntegration
+
+        bot = _make_bot()
+        assert not bot.config.has_section("Logging")
+        with patch("modules.web_viewer.integration.BotIntegration._init_http_session"), \
+             patch("modules.web_viewer.integration.BotIntegration._init_packet_stream_table"), \
+             patch("modules.web_viewer.integration.BotIntegration._start_drain_thread"):
+            wvi = WebViewerIntegration(bot)
+        assert wvi._viewer_log_dir("/tmp/config.ini") is None
+
+    def test_absolute_log_file_uses_parent(self, tmp_path: Path):
+        from modules.web_viewer.integration import WebViewerIntegration
+
+        bot = _make_bot()
+        log_dir = tmp_path / "var" / "log" / "meshcore-bot"
+        log_dir.mkdir(parents=True)
+        bot.config.add_section("Logging")
+        bot.config.set("Logging", "log_file", str(log_dir / "meshcore_bot.log"))
+        with patch("modules.web_viewer.integration.BotIntegration._init_http_session"), \
+             patch("modules.web_viewer.integration.BotIntegration._init_packet_stream_table"), \
+             patch("modules.web_viewer.integration.BotIntegration._start_drain_thread"):
+            wvi = WebViewerIntegration(bot)
+        assert wvi._viewer_log_dir(str(tmp_path / "config.ini")) == log_dir.resolve()

@@ -210,7 +210,7 @@ TEAM_MAPPINGS = {
     'ari': {'sport': 'baseball', 'league': 'mlb', 'team_id': '29'},
     'dodgers': {'sport': 'baseball', 'league': 'mlb', 'team_id': '19'},
     'lad': {'sport': 'baseball', 'league': 'mlb', 'team_id': '19'},
-    'giants': {'sport': 'baseball', 'league': 'mlb', 'team_id': '26'},
+    # 'giants' resolves to the NFL Giants (defined above); use 'san francisco'.
     'san francisco': {'sport': 'baseball', 'league': 'mlb', 'team_id': '26'},
     'sf': {'sport': 'baseball', 'league': 'mlb', 'team_id': '26'},
     'guardians': {'sport': 'baseball', 'league': 'mlb', 'team_id': '5'},
@@ -267,7 +267,7 @@ TEAM_MAPPINGS = {
     'nyy': {'sport': 'baseball', 'league': 'mlb', 'team_id': '10'},
 
     # NBA Teams
-    'hawks': {'sport': 'basketball', 'league': 'nba', 'team_id': '1'},
+    # 'hawks' is the Seahawks alias (defined above); use 'atlanta hawks'.
     'atlanta hawks': {'sport': 'basketball', 'league': 'nba', 'team_id': '1'},
     'celtics': {'sport': 'basketball', 'league': 'nba', 'team_id': '2'},
     'boston celtics': {'sport': 'basketball', 'league': 'nba', 'team_id': '2'},
@@ -400,7 +400,7 @@ TEAM_MAPPINGS = {
     'panthers': {'sport': 'hockey', 'league': 'nhl', 'team_id': '26'},
     'florida': {'sport': 'hockey', 'league': 'nhl', 'team_id': '26'},
     'fla': {'sport': 'hockey', 'league': 'nhl', 'team_id': '26'},
-    'kings': {'sport': 'hockey', 'league': 'nhl', 'team_id': '8'},
+    # 'kings' resolves to the Sacramento Kings (NBA, above); use 'los angeles'.
     'los angeles': {'sport': 'hockey', 'league': 'nhl', 'team_id': '8'},
     'la': {'sport': 'hockey', 'league': 'nhl', 'team_id': '8'},
     'wild': {'sport': 'hockey', 'league': 'nhl', 'team_id': '30'},
@@ -418,7 +418,7 @@ TEAM_MAPPINGS = {
     'islanders': {'sport': 'hockey', 'league': 'nhl', 'team_id': '12'},
     'new york islanders': {'sport': 'hockey', 'league': 'nhl', 'team_id': '12'},
     'nyi': {'sport': 'hockey', 'league': 'nhl', 'team_id': '12'},
-    'rangers': {'sport': 'hockey', 'league': 'nhl', 'team_id': '13'},
+    # 'rangers' resolves to the Texas Rangers (MLB, above); use 'new york rangers'.
     'new york rangers': {'sport': 'hockey', 'league': 'nhl', 'team_id': '13'},
     'nyr': {'sport': 'hockey', 'league': 'nhl', 'team_id': '13'},
     'senators': {'sport': 'hockey', 'league': 'nhl', 'team_id': '14'},
@@ -457,7 +457,7 @@ TEAM_MAPPINGS = {
     'capitals': {'sport': 'hockey', 'league': 'nhl', 'team_id': '23'},
     'washington': {'sport': 'hockey', 'league': 'nhl', 'team_id': '23'},
     'wsh': {'sport': 'hockey', 'league': 'nhl', 'team_id': '23'},
-    'jets': {'sport': 'hockey', 'league': 'nhl', 'team_id': '28'},
+    # 'jets' resolves to the NFL Jets (defined above); use 'winnipeg'.
     'winnipeg': {'sport': 'hockey', 'league': 'nhl', 'team_id': '28'},
     'wpg': {'sport': 'hockey', 'league': 'nhl', 'team_id': '28'},
 
@@ -473,13 +473,13 @@ TEAM_MAPPINGS = {
     'spokane chiefs': {'sport': 'hockey', 'league': 'whl', 'team_id': '144381', 'api_source': 'thesportsdb'},
     'spokane': {'sport': 'hockey', 'league': 'whl', 'team_id': '144381', 'api_source': 'thesportsdb'},
     'vancouver giants': {'sport': 'hockey', 'league': 'whl', 'team_id': '144376', 'api_source': 'thesportsdb'},
-    'blazers': {'sport': 'hockey', 'league': 'whl', 'team_id': '144373', 'api_source': 'thesportsdb'},
+    # 'blazers' resolves to the Trail Blazers (NBA, above); use 'kamloops blazers'.
     'kamloops blazers': {'sport': 'hockey', 'league': 'whl', 'team_id': '144373', 'api_source': 'thesportsdb'},
     'kamloops': {'sport': 'hockey', 'league': 'whl', 'team_id': '144373', 'api_source': 'thesportsdb'},
     'cougars': {'sport': 'hockey', 'league': 'whl', 'team_id': '144375', 'api_source': 'thesportsdb'},
     'prince george cougars': {'sport': 'hockey', 'league': 'whl', 'team_id': '144375', 'api_source': 'thesportsdb'},
     'prince george': {'sport': 'hockey', 'league': 'whl', 'team_id': '144375', 'api_source': 'thesportsdb'},
-    'rockets': {'sport': 'hockey', 'league': 'whl', 'team_id': '144374', 'api_source': 'thesportsdb'},
+    # 'rockets' resolves to the Houston Rockets (NBA, above); use 'kelowna rockets'.
     'kelowna rockets': {'sport': 'hockey', 'league': 'whl', 'team_id': '144374', 'api_source': 'thesportsdb'},
     'kelowna': {'sport': 'hockey', 'league': 'whl', 'team_id': '144374', 'api_source': 'thesportsdb'},
     'tri-city americans': {'sport': 'hockey', 'league': 'whl', 'team_id': '144382', 'api_source': 'thesportsdb'},
@@ -664,7 +664,41 @@ LEAGUE_MAPPINGS = {
 
     # Premier League
     'epl': {'sport': 'soccer', 'league': 'eng.1'},
-    'premier league': {'sport': 'soccer', 'league': 'eng.1'}
+    'premier league': {'sport': 'soccer', 'league': 'eng.1'},
+
+    # FIFA World Cup (men's = fifa.world, women's = fifa.wwc)
+    'fifa': {'sport': 'soccer', 'league': 'fifa.world'},
+    'worldcup': {'sport': 'soccer', 'league': 'fifa.world'},
+    'world cup': {'sport': 'soccer', 'league': 'fifa.world'},
+    'wc': {'sport': 'soccer', 'league': 'fifa.world'},
+    'fifaw': {'sport': 'soccer', 'league': 'fifa.wwc'},
+    'wwc': {'sport': 'soccer', 'league': 'fifa.wwc'},
+}
+
+# Common nation name synonyms -> ESPN national-team display name.
+# Used to resolve `wc <nation>` / `sports <nation>` against the live name->id index
+# built from standings/scoreboard data. Keep this small; the live index is the source
+# of truth and already matches full names, locations, and abbreviations.
+WORLD_CUP_NATIONS = {
+    'usa': 'United States',
+    'us': 'United States',
+    'usmnt': 'United States',
+    'uswnt': 'United States',
+    'united states': 'United States',
+    'america': 'United States',
+    'korea': 'Korea Republic',
+    'south korea': 'Korea Republic',
+    'north korea': 'Korea DPR',
+    'iran': 'IR Iran',
+    'ivory coast': "Côte d'Ivoire",
+    'holland': 'Netherlands',
+    'turkey': 'Türkiye',
+    'czech republic': 'Czechia',
+    'uae': 'United Arab Emirates',
+    'bosnia': 'Bosnia and Herzegovina',
+    'cape verde': 'Cabo Verde',
+    'drc': 'Congo DR',
+    'dr congo': 'Congo DR',
 }
 
 def format_clean_date_time(dt) -> str:

@@ -4,6 +4,7 @@ Global Weather command for the MeshCore Bot
 Provides worldwide weather information using Open-Meteo API
 """
 
+import asyncio
 import re
 from datetime import datetime, timedelta
 from typing import Any, Optional, Union
@@ -438,7 +439,10 @@ class GlobalWxCommand(BaseCommand):
                 # Use custom WXSIM default source
                 try:
                     self.record_execution(message.sender_id)
-                    weather_data = self._get_wxsim_weather(wxsim_source, "default", 7, message)
+                    # Blocking HTTP fetch of the WXSIM plaintext file.
+                    weather_data = await asyncio.to_thread(
+                        self._get_wxsim_weather, wxsim_source, "default", 7, message
+                    )
                     await self.send_response(message, weather_data)
                     return True
                 except Exception as e:
@@ -450,7 +454,11 @@ class GlobalWxCommand(BaseCommand):
             companion_location = self._get_companion_location(message)
             if companion_location:
                 # Convert coordinates to location string
-                location_str = self._coordinates_to_location_string(companion_location[0], companion_location[1])
+                # Blocking reverse geocode.
+                location_str = await asyncio.to_thread(
+                    self._coordinates_to_location_string,
+                    companion_location[0], companion_location[1],
+                )
                 if location_str:
                     # Use the location string as if user provided it
                     parts = [parts[0], location_str]
@@ -481,7 +489,10 @@ class GlobalWxCommand(BaseCommand):
                     )
                     bot_loc = self._get_bot_location() if use_bot else None
                     if bot_loc:
-                        location_str = self._coordinates_to_location_string(bot_loc[0], bot_loc[1])
+                        # Blocking reverse geocode.
+                        location_str = await asyncio.to_thread(
+                            self._coordinates_to_location_string, bot_loc[0], bot_loc[1]
+                        )
                         if location_str:
                             parts = [parts[0], location_str]
                             self.logger.info(
@@ -563,7 +574,11 @@ class GlobalWxCommand(BaseCommand):
             # Use custom WXSIM source
             try:
                 self.record_execution(message.sender_id)
-                weather_data = self._get_wxsim_weather(wxsim_source, forecast_type, num_days, message, location_name=location)
+                # Blocking HTTP fetch of the WXSIM plaintext file.
+                weather_data = await asyncio.to_thread(
+                    self._get_wxsim_weather, wxsim_source, forecast_type, num_days,
+                    message, location,
+                )
                 if forecast_type == "multiday":
                     await self._send_multiday_forecast(message, weather_data)
                 else:
@@ -587,7 +602,6 @@ class GlobalWxCommand(BaseCommand):
                 await self.send_response(message, weather_data[1])
 
                 # Wait for bot TX rate limiter
-                import asyncio
                 rate_limit = self.bot.config.getfloat('Bot', 'bot_tx_rate_limit_seconds', fallback=1.0)
                 sleep_time = max(rate_limit + 1.0, 2.0)
                 await asyncio.sleep(sleep_time)
@@ -616,9 +630,25 @@ class GlobalWxCommand(BaseCommand):
             num_days: Number of days for multiday forecast (2–16).
             message: The MeshMessage for dynamic length calculation.
 
+        Geocoding and the Open-Meteo fetch are both blocking HTTP, so the whole
+        body runs on a worker thread; inline it stalled every other coroutine for
+        up to several chained 10s timeouts.
+
         Returns:
             Union[str, Tuple[str, str, str]]: Format string or tuple for multi-message response.
         """
+        return await asyncio.to_thread(
+            self._get_weather_for_location_sync, location, forecast_type, num_days, message
+        )
+
+    def _get_weather_for_location_sync(
+        self,
+        location: str,
+        forecast_type: str = "default",
+        num_days: int = 7,
+        message: MeshMessage = None,
+    ) -> Union[str, tuple[str, str, str]]:
+        """Blocking body of :meth:`get_weather_for_location` (runs off the event loop)."""
         try:
             # Convert location to lat/lon with address details
             result = self.geocode_location(location)

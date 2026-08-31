@@ -67,11 +67,6 @@ No reference server is included in this repo; use any stack (e.g. Flask, FastAPI
 
 The repo includes a **stdlib-only** reference server you can run behind nginx with no pip or virtualenv.
 
-### Script
-
-- **Location**: [scripts/checkin_receiver.py](../scripts/checkin_receiver.py)
-- **Dependencies**: Python 3 standard library only (`json`, `sqlite3`, `secrets`, `http.server`, etc.)
-
 ### Environment variables
 
 | Variable | Required | Description |

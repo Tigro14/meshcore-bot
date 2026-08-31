@@ -374,6 +374,28 @@ class TestNominatimRateLimiterWaitAndRequest:
 
         asyncio.run(_inner())
 
+    def test_async_and_sync_reservations_share_one_gate(self):
+        """Mixed caller types cannot reserve the same Nominatim interval."""
+        async def _inner():
+            limiter = NominatimRateLimiter(seconds=0.02)
+            completed = []
+
+            async def reserve_async():
+                await limiter.wait_and_request()
+                completed.append(time.monotonic())
+
+            def reserve_sync():
+                limiter.wait_and_request_sync()
+                completed.append(time.monotonic())
+
+            await asyncio.gather(reserve_async(), asyncio.to_thread(reserve_sync))
+
+            assert len(completed) == 2
+            assert abs(completed[1] - completed[0]) >= limiter.seconds
+            assert limiter.get_stats()["total_requests"] == 2
+
+        asyncio.run(_inner())
+
 
 class TestNominatimRateLimiterWaitForRequestSync:
     """Cover lines 232-235: NominatimRateLimiter.wait_for_request_sync."""

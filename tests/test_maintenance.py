@@ -193,18 +193,22 @@ class TestMaybeRunDbBackupWeeklyDedup:
 
 
 # ---------------------------------------------------------------------------
-# MessageScheduler — retention timer not immediate
+# MessageScheduler — startup retention timing
 # ---------------------------------------------------------------------------
 
 
 class TestSchedulerRetentionTimer:
-    def test_last_data_retention_run_is_recent_at_init(self):
+    def test_retention_is_due_shortly_after_startup_but_email_is_not(self):
         bot = Mock()
         bot.logger = Mock()
         bot.config = ConfigParser()
         bot.config.add_section("Bot")
         sched = MessageScheduler(bot)
-        assert time.time() - sched.last_data_retention_run < 3.0
+        until_retention_due = (
+            sched._data_retention_interval_seconds
+            - (time.time() - sched.last_data_retention_run)
+        )
+        assert 57.0 < until_retention_due <= sched._data_retention_startup_delay_seconds
         assert time.time() - sched.last_nightly_email_time < 3.0
 
 

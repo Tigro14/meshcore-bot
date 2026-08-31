@@ -1,0 +1,54 @@
+# Pip constraints for 32-bit ARM (armv7l / armv6l) installs.
+#
+# WHY THIS EXISTS
+# ---------------
+# Ten of this project's dependencies publish no prebuilt armv7 wheel on PyPI and would
+# otherwise compile from source on the device. On a Raspberry Pi 2 (900 MHz Cortex-A7,
+# 1 GB RAM) that is hours of work and a likely OOM - PyNaCl alone builds a bundled
+# libsodium.
+#
+# piwheels (https://www.piwheels.org) serves prebuilt armv7 wheels for those packages and
+# is preconfigured on Raspberry Pi OS via /etc/pip.conf. Adding it covers 8 of the 10.
+#
+# The last two gaps are not missing builds - they are version skew. pip prefers the newest
+# release across all configured indexes, and for these two the newest PyPI release is one
+# step ahead of piwheels' current cp311 build:
+#
+#     brotli   PyPI 1.2.0   piwheels 1.1.0
+#     ephem    PyPI 4.2.1   piwheels 4.2
+#
+# Holding them one version back lets the whole install resolve to wheels. Measured in a
+# linux/arm/v7 container against requirements.txt:
+#
+#     PyPI only ................................ 10 packages compile from source
+#     + piwheels extra-index-url ...............  2 packages compile from source
+#     + this constraints file ..................  0 packages compile - 75/75 wheels
+#
+# No other package is held back. cryptography, aiohttp, pycryptodome, PyNaCl and the rest
+# all resolve to their current releases.
+#
+# HOW IT IS APPLIED
+# -----------------
+# install-service.sh passes this file together with the piwheels index, but only when it
+# detects a 32-bit ARM host. The Dockerfile does the same for the linux/arm/v7 build leg
+# only. The environment markers below are a second layer of safety: if this file is ever
+# applied on another platform, it becomes a no-op rather than needlessly pinning it.
+#
+# MAINTENANCE
+# -----------
+# These pins are only needed until piwheels catches up. Re-check periodically - if piwheels
+# has published the newer version, delete that line. To verify current state:
+#
+#   docker run --rm --platform linux/arm/v7 \
+#     -v "$PWD/requirements.txt:/req.txt:ro" python:3.11-slim \
+#     sh -c 'pip install --dry-run --report /tmp/r.json \
+#              --extra-index-url https://www.piwheels.org/simple -r /req.txt >/dev/null 2>&1;
+#            python3 -c "import json; d=json.load(open(\"/tmp/r.json\")); \
+#              print([i[\"metadata\"][\"name\"] for i in d[\"install\"] \
+#                     if not i[\"download_info\"][\"url\"].endswith(\".whl\")])"'
+#
+# Note that piwheels builds track the Debian release's Python (bookworm = cp311,
+# trixie = cp313), so this skew can differ across OS versions.
+
+brotli <= 1.1.0 ; platform_machine == "armv7l" or platform_machine == "armv6l"
+ephem <= 4.2 ; platform_machine == "armv7l" or platform_machine == "armv6l"

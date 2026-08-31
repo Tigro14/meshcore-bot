@@ -7,6 +7,10 @@ Supports (schedule keys):
 - Standard 5-field crontab: minute hour day-of-month month day-of-week
 - Preset aliases: @yearly, @annually, @monthly, @weekly, @daily, @midnight, @hourly
 - Deprecated legacy HHMM (24-hour, no colon) for daily firing at that clock time
+
+Day-of-week uses APScheduler numbering (0=Monday … 6=Sunday), not Vixie cron
+(0=Sunday; 7 often allowed). Prefer mon–sun names. ``@weekly`` expands to
+``0 0 * * 0`` (Monday 00:00). See docs/configuration.md and config.ini.example.
 """
 
 from __future__ import annotations

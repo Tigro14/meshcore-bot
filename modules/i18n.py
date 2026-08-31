@@ -5,6 +5,7 @@ Provides translation functionality for bot commands and responses
 """
 
 import json
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -108,12 +109,20 @@ class Translator:
             Dictionary of translations, empty dict if file not found
         """
         file_path = Path(self.translation_path) / f"{lang}.json"
-        if not file_path.exists():
-            return {}
-
         try:
-            with open(file_path, encoding='utf-8') as f:
-                return json.load(f)
+            # An explicitly configured filesystem catalog always wins.  The
+            # package fallback makes the defaults work from an installed wheel
+            # (where ``translations/`` is not relative to the current cwd).
+            if file_path.is_file():
+                with open(file_path, encoding='utf-8') as f:
+                    return json.load(f)
+
+            if not self._uses_bundled_defaults():
+                return {}
+            bundled = resources.files("translations").joinpath(f"{lang}.json")
+            if not bundled.is_file():
+                return {}
+            return json.loads(bundled.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             print(f"Error parsing translation file {file_path}: {e}")
             return {}
@@ -179,7 +188,19 @@ class Translator:
         if trans_path.exists():
             for file in trans_path.glob('*.json'):
                 languages.append(file.stem)
-        return sorted(languages)
+        if self._uses_bundled_defaults():
+            try:
+                for resource in resources.files("translations").iterdir():
+                    if resource.is_file() and resource.name.endswith(".json"):
+                        languages.append(resource.name[:-5])
+            except (ModuleNotFoundError, OSError):
+                pass
+        return sorted(set(languages))
+
+    def _uses_bundled_defaults(self) -> bool:
+        """Return whether ``translation_path`` names the shipped catalog."""
+        normalized = str(self.translation_path).replace("\\", "/").rstrip("/")
+        return normalized == "translations"
 
     def get_value(self, key: str) -> Any:
         """
@@ -210,4 +231,3 @@ class Translator:
                 break
 
         return value
-

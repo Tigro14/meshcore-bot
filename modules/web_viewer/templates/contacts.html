@@ -86,11 +86,13 @@
 
     .contacts-toolbar-filters .form-select-sm,
     .contacts-toolbar-filters .input-group-sm,
-    .contacts-toolbar-filters #contacts-timespan {
+    .contacts-toolbar-filters #contacts-timespan,
+    .contacts-toolbar-filters #contacts-path-bytes {
         flex-shrink: 0;
     }
 
-    .contacts-toolbar-filters #contacts-timespan {
+    .contacts-toolbar-filters #contacts-timespan,
+    .contacts-toolbar-filters #contacts-path-bytes {
         min-height: 2.375rem;
         padding-top: 0.375rem;
         padding-bottom: 0.375rem;
@@ -375,6 +377,51 @@
                             <option value="90d">Last 90 days</option>
                             <option value="all">All time</option>
                         </select>
+                        <div class="dropdown flex-shrink-0">
+                            <button type="button" class="btn btn-outline-secondary" id="contacts-filters-trigger"
+                                    data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                                    title="Filter contacts">
+                                <i class="fas fa-filter" aria-hidden="true"></i> Filters
+                            </button>
+                            <div class="dropdown-menu dropdown-menu-end p-3" style="min-width: 15rem;">
+                                <div class="mb-2">
+                                    <label class="form-label small mb-1" for="contacts-device-role">Device role</label>
+                                    <select class="form-select form-select-sm contacts-list-filter" id="contacts-device-role">
+                                        <option value="">Any role</option><option value="companion">Companion</option>
+                                        <option value="repeater">Repeater</option><option value="roomserver">Room server</option>
+                                        <option value="sensor">Sensor</option><option value="other">Other / unknown</option>
+                                    </select>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small mb-1" for="contacts-path-bytes">Path bytes per hop</label>
+                                    <select class="form-select form-select-sm contacts-list-filter" id="contacts-path-bytes" title="Uses the widest path encoding observed for each contact">
+                                        <option value="">Any bytes/hop</option><option value="1">1 byte/hop</option>
+                                        <option value="2">2 bytes/hop</option><option value="3">3 bytes/hop</option>
+                                        <option value="unknown">Unknown bytes/hop</option>
+                                    </select>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small mb-1" for="contacts-hop-filter">Hops</label>
+                                    <select class="form-select form-select-sm contacts-list-filter" id="contacts-hop-filter">
+                                        <option value="">Any hop count</option><option value="0">Direct only</option>
+                                        <option value="1">1+ hops</option><option value="2">2+ hops</option><option value="3">3+ hops</option>
+                                    </select>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small mb-1" for="contacts-location-filter">Location</label>
+                                    <select class="form-select form-select-sm contacts-list-filter" id="contacts-location-filter">
+                                        <option value="">Any location</option><option value="known">Location known</option><option value="unknown">Location unknown</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label small mb-1" for="contacts-starred-filter">Starred</label>
+                                    <select class="form-select form-select-sm contacts-list-filter" id="contacts-starred-filter">
+                                        <option value="">Any star state</option><option value="yes">Starred</option><option value="no">Not starred</option>
+                                    </select>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-secondary w-100" id="contacts-clear-filters">Clear filters</button>
+                            </div>
+                        </div>
                         <div class="dropdown d-md-none flex-shrink-0">
                             <button type="button" class="btn btn-sm btn-outline-secondary contacts-overflow-btn" id="contacts-timespan-mobile-trigger"
                                     data-bs-toggle="dropdown" aria-expanded="false"
@@ -415,12 +462,12 @@
                                 </li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><h6 class="dropdown-header">Export Contacts</h6></li>
-                                <li><a class="dropdown-item" href="#" onclick="exportData('contacts','csv');return false;"><i class="fas fa-file-csv me-2 text-success"></i>CSV</a></li>
-                                <li><a class="dropdown-item" href="#" onclick="exportData('contacts','json');return false;"><i class="fas fa-file-code me-2 text-warning"></i>JSON</a></li>
+                                <li><a class="dropdown-item contacts-export-action" href="#" data-export-kind="contacts" data-export-format="csv"><i class="fas fa-file-csv me-2 text-success"></i>CSV</a></li>
+                                <li><a class="dropdown-item contacts-export-action" href="#" data-export-kind="contacts" data-export-format="json"><i class="fas fa-file-code me-2 text-warning"></i>JSON</a></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><h6 class="dropdown-header">Export Paths</h6></li>
-                                <li><a class="dropdown-item" href="#" onclick="exportData('paths','csv');return false;"><i class="fas fa-file-csv me-2 text-success"></i>CSV</a></li>
-                                <li><a class="dropdown-item" href="#" onclick="exportData('paths','json');return false;"><i class="fas fa-file-code me-2 text-warning"></i>JSON</a></li>
+                                <li><a class="dropdown-item contacts-export-action" href="#" data-export-kind="paths" data-export-format="csv"><i class="fas fa-file-csv me-2 text-success"></i>CSV</a></li>
+                                <li><a class="dropdown-item contacts-export-action" href="#" data-export-kind="paths" data-export-format="json"><i class="fas fa-file-code me-2 text-warning"></i>JSON</a></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><h6 class="dropdown-header">Time range</h6></li>
                                 <li>
@@ -459,6 +506,8 @@
                             <option value="snr|desc">SNR (high first)</option>
                             <option value="hop_count|asc">Hops (low first)</option>
                             <option value="hop_count|desc">Hops (high first)</option>
+                            <option value="path_bytes|asc">Bytes/hop (low first)</option>
+                            <option value="path_bytes|desc">Bytes/hop (high first)</option>
                             <option value="first_heard|asc">First heard (oldest first)</option>
                             <option value="first_heard|desc">First heard (newest first)</option>
                             <option value="last_seen|asc">Last heard (oldest first)</option>
@@ -476,47 +525,49 @@
                                 <input type="checkbox" class="form-check-input" id="contacts-select-all" title="Select all on page">
                             </th>
                             <th class="sortable" data-sort="username">
-                                Name <i class="fas fa-sort"></i>
+                                Name <i class="fas fa-sort sort-icon" aria-hidden="true"></i>
                             </th>
                             <th class="sortable" data-sort="device_type">
-                                Device Type <i class="fas fa-sort"></i>
+                                Device Type <i class="fas fa-sort sort-icon" aria-hidden="true"></i>
                             </th>
                             <th class="sortable" data-sort="location">
-                                Location <i class="fas fa-sort"></i>
+                                Location <i class="fas fa-sort sort-icon" aria-hidden="true"></i>
                             </th>
                             <th class="sortable" data-sort="distance">
-                                Distance <i class="fas fa-sort"></i>
+                                Distance <i class="fas fa-sort sort-icon" aria-hidden="true"></i>
                             </th>
                             <th class="sortable" data-sort="snr">
-                                SNR <i class="fas fa-sort"></i>
+                                SNR <i class="fas fa-sort sort-icon" aria-hidden="true"></i>
                             </th>
                             <th class="sortable" data-sort="hop_count">
                                 <span class="d-inline-flex align-items-center gap-1">
-                                    Hops <i class="fas fa-sort"></i>
+                                    Hops <i class="fas fa-sort sort-icon" aria-hidden="true"></i>
                                     <button type="button" class="btn btn-link p-0 border-0 align-baseline text-muted path-encoding-info-btn"
                                             id="contacts-list-multibyte-badge-info"
                                             aria-label="How Multibyte and 1-byte only badges are determined"
-                                            data-bs-toggle="tooltip" data-bs-placement="top"
-                                            onclick="event.stopPropagation();">
+                                            data-bs-toggle="tooltip" data-bs-placement="top">
                                         <i class="fas fa-info-circle" aria-hidden="true"></i>
                                     </button>
                                 </span>
                             </th>
+                            <th class="sortable" data-sort="path_bytes">
+                                Bytes/hop <i class="fas fa-sort sort-icon" aria-hidden="true"></i>
+                            </th>
                             <th class="sortable" data-sort="first_heard">
-                                First Heard <i class="fas fa-sort"></i>
+                                First Heard <i class="fas fa-sort sort-icon" aria-hidden="true"></i>
                             </th>
                             <th class="sortable sort-active" data-sort="last_seen">
-                                Last Heard <i class="fas fa-sort-down"></i>
+                                Last Heard <i class="fas fa-sort-down sort-icon" aria-hidden="true"></i>
                             </th>
                             <th class="sortable" data-sort="advert_count">
-                                Adverts <i class="fas fa-sort"></i>
+                                Adverts <i class="fas fa-sort sort-icon" aria-hidden="true"></i>
                             </th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                         <tbody id="contacts-table-body">
                             <tr>
-                                <td colspan="11" class="text-center">
+                                <td colspan="12" class="text-center">
                                     <div class="loading">Loading contacts data...</div>
                                 </td>
                             </tr>
@@ -525,6 +576,18 @@
             </div>
             <div class="d-md-none" id="contacts-mobile-stack" aria-live="polite">
                 <div class="loading text-center py-3">Loading contacts data...</div>
+            </div>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3"
+                 id="contacts-pagination" aria-label="Contacts pagination">
+                <small class="text-muted" id="contacts-page-summary">Loading contacts…</small>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Contact pages">
+                    <button type="button" class="btn btn-outline-secondary" id="contacts-page-previous" disabled>
+                        <i class="fas fa-chevron-left" aria-hidden="true"></i> Previous
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" id="contacts-page-next" disabled>
+                        Next <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                    </button>
+                </div>
             </div>
         </div>
         </div>
@@ -567,15 +630,25 @@
 {% endblock %}
 
 {% block extra_js %}
-        <script>
+        <script nonce="{{ g.csp_nonce }}">
 class ModernContactsManager {
     constructor() {
-        this.contactsData = [];
+        this.contactsData = { tracking_data: [], server_stats: {} };
         this.filteredData = [];
         this.selectedContactIds = new Set();
         this.searchTerm = '';
         this.sortColumn = 'last_seen';
         this.sortDirection = 'desc';
+        this.currentPage = 1;
+        this.pageSize = 100;
+        this.pagination = {
+            page: 1, page_size: 100, total_items: 0, total_pages: 1,
+            has_previous: false, has_next: false,
+        };
+        this.filteredStats = {};
+        this.requestController = null;
+        this.searchTimer = null;
+        this.mobileLayout = window.matchMedia('(max-width: 767.98px)');
         this.activityChart = null; // Chart.js instance for activity trends
         this.initializeContacts();
     }
@@ -588,20 +661,42 @@ class ModernContactsManager {
             el.value = (savedTimespan && valid.includes(savedTimespan)) ? savedTimespan : '30d';
         }
         this.syncContactsTimespanMobileUI();
-        await this.loadContactsData();
         this.setupEventHandlers();
-        this.applySort();
-        this.updateSortIcons();
-        this.renderContactsData();
+        this.updateFiltersButton();
         const toolbarWrap = document.querySelector('.contacts-toolbar-filters-wrap');
         if (toolbarWrap) this.initContactsDropdowns(toolbarWrap);
-        this.updateStatistics();
+        if (this.mobileLayout.addEventListener) {
+            this.mobileLayout.addEventListener('change', () => this.renderContactsData());
+        }
+        await this.loadContactsData();
     }
     
-    async loadContactsData() {
+    async loadContactsData({ resetPage = false, clearSelection = false } = {}) {
+        if (resetPage) this.currentPage = 1;
+        if (clearSelection) this.selectedContactIds.clear();
+        if (this.requestController) this.requestController.abort();
+        const controller = new AbortController();
+        this.requestController = controller;
+        this.setLoadingState(true);
         try {
             const since = document.getElementById('contacts-timespan').value || '30d';
-            const response = await fetch('/api/contacts?since=' + encodeURIComponent(since));
+            const params = new URLSearchParams({
+                since,
+                page: String(this.currentPage),
+                page_size: String(this.pageSize),
+                search: this.searchTerm,
+                path_bytes: document.getElementById('contacts-path-bytes').value,
+                device_role: document.getElementById('contacts-device-role').value,
+                hop_filter: document.getElementById('contacts-hop-filter').value,
+                location_filter: document.getElementById('contacts-location-filter').value,
+                starred: document.getElementById('contacts-starred-filter').value,
+                sort: this.sortColumn,
+                direction: this.sortDirection,
+            });
+            const response = await fetch('/api/contacts?' + params.toString(), {
+                signal: controller.signal,
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             
             if (data.error) {
@@ -614,42 +709,86 @@ class ModernContactsManager {
                 server_stats: data.server_stats || {}
             };
             this.filteredData = [...this.contactsData.tracking_data];
-            this.selectedContactIds.clear();
+            this.pagination = data.pagination || {
+                page: 1,
+                page_size: this.filteredData.length || this.pageSize,
+                total_items: this.filteredData.length,
+                total_pages: 1,
+                has_previous: false,
+                has_next: false,
+            };
+            this.currentPage = this.pagination.page;
+            this.filteredStats = data.filtered_stats || {};
+            this.updateSortIcons();
+            this.renderContactsData();
+            this.updatePagination();
+            this.updateStatistics();
             
         } catch (error) {
+            if (error.name === 'AbortError') return;
             console.error('Error loading contacts data:', error);
             this.showError('Failed to load contacts data: ' + error.message);
+        } finally {
+            if (this.requestController === controller) {
+                this.requestController = null;
+                this.setLoadingState(false);
+            }
+        }
+    }
+
+    setLoadingState(loading) {
+        const refresh = document.getElementById('refresh-contacts');
+        if (refresh) refresh.disabled = loading;
+        const summary = document.getElementById('contacts-page-summary');
+        if (loading && summary) summary.textContent = 'Loading contacts…';
+        const previous = document.getElementById('contacts-page-previous');
+        const next = document.getElementById('contacts-page-next');
+        if (loading) {
+            if (previous) previous.disabled = true;
+            if (next) next.disabled = true;
+        } else {
+            this.updatePagination();
         }
     }
     
     setupEventHandlers() {
-        document.getElementById('refresh-contacts').addEventListener('click', () => {
-            this.loadContactsData().then(() => {
-                this.applySearch();
-                this.applySort();
-                this.renderContactsData();
-                this.updateStatistics();
+        document.querySelectorAll('.contacts-export-action').forEach(link => {
+            link.addEventListener('click', (event) => {
+                event.preventDefault();
+                exportData(link.dataset.exportKind, link.dataset.exportFormat);
             });
+        });
+        document.getElementById('contacts-list-multibyte-badge-info')
+            ?.addEventListener('click', event => event.stopPropagation());
+        document.getElementById('refresh-contacts').addEventListener('click', () => {
+            this.loadContactsData();
         });
         
         document.getElementById('search-contacts').addEventListener('input', (e) => {
             this.searchTerm = e.target.value.toLowerCase().trim();
-            this.applySearch();
-            this.applySort();
-            this.renderContactsData();
-            this.updateStatistics();
+            window.clearTimeout(this.searchTimer);
+            this.searchTimer = window.setTimeout(() => {
+                this.loadContactsData({ resetPage: true, clearSelection: true });
+            }, 300);
         });
         
         document.getElementById('contacts-timespan').addEventListener('change', () => {
             const since = document.getElementById('contacts-timespan').value;
             localStorage.setItem('contactsTimespan', since);
             this.syncContactsTimespanMobileUI();
-            this.loadContactsData().then(() => {
-                this.applySearch();
-                this.applySort();
-                this.renderContactsData();
-                this.updateStatistics();
+            this.loadContactsData({ resetPage: true, clearSelection: true });
+        });
+
+        document.querySelectorAll('.contacts-list-filter').forEach(filter => {
+            filter.addEventListener('change', () => {
+                this.updateFiltersButton();
+                this.loadContactsData({ resetPage: true, clearSelection: true });
             });
+        });
+        document.getElementById('contacts-clear-filters').addEventListener('click', () => {
+            document.querySelectorAll('.contacts-list-filter').forEach(filter => { filter.value = ''; });
+            this.updateFiltersButton();
+            this.loadContactsData({ resetPage: true, clearSelection: true });
         });
 
         const mobileTimespanMenu = document.getElementById('contacts-timespan-mobile-menu');
@@ -684,12 +823,25 @@ class ModernContactsManager {
                     this.updateBulkDeleteButton();
                     this.updateSelectAllCheckbox();
                 } else if (t.classList.contains('contact-row-checkbox')) {
-                    const userId = t.dataset.userId;
+                    const contact = this.filteredData[Number(t.dataset.contactIndex)];
+                    if (!contact) return;
+                    const userId = contact.user_id;
                     if (t.checked) this.selectedContactIds.add(userId);
                     else this.selectedContactIds.delete(userId);
                     this.updateBulkDeleteButton();
                     this.updateSelectAllCheckbox();
                 }
+            });
+            listPanel.addEventListener('click', (event) => {
+                const action = event.target.closest('[data-contact-action]');
+                if (!action) return;
+                const contact = this.filteredData[Number(action.dataset.contactIndex)];
+                if (!contact) return;
+                const kind = action.dataset.contactAction;
+                if (kind === 'star') this.toggleStar(contact.user_id, action);
+                else if (kind === 'advert') this.viewAdvertData(contact.user_id);
+                else if (kind === 'geocode') this.geocodeContact(contact.user_id, action);
+                else if (kind === 'delete') this.showDeleteConfirmation(contact.user_id);
             });
         }
 
@@ -700,9 +852,8 @@ class ModernContactsManager {
                 if (v.length === 2) {
                     this.sortColumn = v[0];
                     this.sortDirection = v[1];
-                    this.applySort();
-                    this.renderContactsData();
                     this.updateSortIcons();
+                    this.loadContactsData({ resetPage: true, clearSelection: true });
                 }
             });
         }
@@ -712,10 +863,20 @@ class ModernContactsManager {
             header.addEventListener('click', () => {
                 const column = header.dataset.sort;
                 this.setSort(column);
-                this.applySort();
-                this.renderContactsData();
                 this.updateSortIcons();
+                this.loadContactsData({ resetPage: true, clearSelection: true });
             });
+        });
+
+        document.getElementById('contacts-page-previous').addEventListener('click', () => {
+            if (!this.pagination.has_previous) return;
+            this.currentPage -= 1;
+            this.loadContactsData();
+        });
+        document.getElementById('contacts-page-next').addEventListener('click', () => {
+            if (!this.pagination.has_next) return;
+            this.currentPage += 1;
+            this.loadContactsData();
         });
     }
     
@@ -730,79 +891,10 @@ class ModernContactsManager {
         }
     }
     
-    applySort() {
-        this.filteredData.sort((a, b) => {
-            let aValue = this.getSortValue(a, this.sortColumn);
-            let bValue = this.getSortValue(b, this.sortColumn);
-            
-            // Handle null/undefined values
-            if (aValue === null || aValue === undefined) aValue = '';
-            if (bValue === null || bValue === undefined) bValue = '';
-            
-            // Handle different data types
-            if (this.sortColumn === 'last_seen' || this.sortColumn === 'first_heard') {
-                // Date sorting
-                aValue = new Date(aValue);
-                bValue = new Date(bValue);
-            } else if (this.sortColumn === 'snr' || this.sortColumn === 'hop_count' || this.sortColumn === 'advert_count' || this.sortColumn === 'distance') {
-                // Numeric sorting
-                aValue = parseFloat(aValue) || 0;
-                bValue = parseFloat(bValue) || 0;
-            } else {
-                // String sorting
-                aValue = String(aValue).toLowerCase();
-                bValue = String(bValue).toLowerCase();
-            }
-            
-            let comparison = 0;
-            if (aValue < bValue) comparison = -1;
-            else if (aValue > bValue) comparison = 1;
-            
-            return this.sortDirection === 'desc' ? -comparison : comparison;
-        });
-    }
-    
-    getSortValue(contact, column) {
-        switch (column) {
-            case 'username':
-                return contact.username || '';
-            case 'device_type':
-                return contact.device_type || '';
-            case 'location':
-                return this.getLocationString(contact);
-            case 'snr':
-                return contact.snr;
-            case 'hop_count':
-                return contact.hop_count;
-            case 'first_heard':
-                return contact.first_heard;
-            case 'last_seen':
-                return contact.last_seen;
-            case 'advert_count':
-                return contact.advert_count;
-            case 'distance':
-                return contact.distance || 0;
-            default:
-                return '';
-        }
-    }
-    
-    getLocationString(contact) {
-        if (contact.city && contact.state) {
-            return `${contact.city}, ${contact.state}`;
-        } else if (contact.city) {
-            return contact.city;
-        } else if (contact.latitude && contact.longitude) {
-            return `${contact.latitude}, ${contact.longitude}`;
-        } else {
-            return '';
-        }
-    }
-    
     updateSortIcons() {
-        // Remove all sort icons
-        document.querySelectorAll('.sortable i').forEach(icon => {
-            icon.className = 'fas fa-sort';
+        // Only touch dedicated sort chevrons — never the hops path-encoding (i) tip.
+        document.querySelectorAll('.sortable .sort-icon').forEach(icon => {
+            icon.className = 'fas fa-sort sort-icon';
         });
         
         // Remove active class from all headers
@@ -814,9 +906,11 @@ class ModernContactsManager {
         const activeHeader = document.querySelector(`[data-sort="${this.sortColumn}"]`);
         if (activeHeader) {
             activeHeader.classList.add('sort-active');
-            const icon = activeHeader.querySelector('i');
+            const icon = activeHeader.querySelector('.sort-icon');
             if (icon) {
-                icon.className = this.sortDirection === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down';
+                icon.className = this.sortDirection === 'asc'
+                    ? 'fas fa-sort-up sort-icon'
+                    : 'fas fa-sort-down sort-icon';
             }
         }
         this.syncMobileSortSelect();
@@ -862,55 +956,22 @@ class ModernContactsManager {
         });
     }
     
-    applySearch() {
-        if (!this.searchTerm) {
-            this.filteredData = [...this.contactsData.tracking_data];
-            return;
-        }
-        
-        this.filteredData = this.contactsData.tracking_data.filter(contact => {
-            // Search in all text fields (case-insensitive)
-            const searchableFields = [
-                contact.username || '',
-                contact.role || '',
-                contact.device_type || '',
-                contact.city || '',
-                contact.state || '',
-                contact.country || ''
-            ];
-            
-            // For public key, only match from the beginning
-            const publicKey = contact.user_id || '';
-            const publicKeyMatch = publicKey.toLowerCase().startsWith(this.searchTerm);
-            
-            // For other fields, match anywhere in the string
-            const otherFieldsMatch = searchableFields.some(field => 
-                field.toLowerCase().includes(this.searchTerm)
-            );
-            
-            return publicKeyMatch || otherFieldsMatch;
-        });
-    }
-    
-    renderContactCardHtml(contact) {
-        const uidEsc = this.escapeHtml(contact.user_id);
-        const uidJs = contact.user_id.replace(/'/g, "\\'");
-        const nameJs = (contact.username || 'Unknown').replace(/'/g, "\\'");
+    renderContactCardHtml(contact, contactIndex) {
         const checked = this.selectedContactIds.has(contact.user_id) ? 'checked' : '';
         const hasGeo = !!(contact.latitude && contact.longitude && contact.latitude !== 0 && contact.longitude !== 0);
         const starLabel = contact.is_starred ? 'Unstar contact' : 'Star contact';
         const geoMenuItem = hasGeo
-            ? `<li><button type="button" class="dropdown-item" onclick="contactsManager.geocodeContact('${uidJs}', this)"><i class="fas fa-map-marker-alt me-2 text-primary"></i>Geocode location</button></li>`
+            ? `<li><button type="button" class="dropdown-item" data-contact-action="geocode" data-contact-index="${contactIndex}"><i class="fas fa-map-marker-alt me-2 text-primary"></i>Geocode location</button></li>`
             : '';
         return `
             <div class="contact-mobile-card">
                 <div class="d-flex align-items-start gap-2">
-                    <input type="checkbox" class="form-check-input contact-row-checkbox mt-1 flex-shrink-0" data-user-id="${uidEsc}" ${checked}>
+                    <input type="checkbox" class="form-check-input contact-row-checkbox mt-1 flex-shrink-0" data-contact-index="${contactIndex}" ${checked}>
                     <div class="flex-grow-1 min-w-0">
                         <div class="d-flex justify-content-between align-items-start gap-2">
                             <div class="min-w-0">
-                                <div class="fw-bold">${contact.username || 'Unknown'}</div>
-                                <small class="text-muted text-break d-block">${contact.user_id ? contact.user_id.substring(0, 16) + '...' : 'Unknown'}</small>
+                                <div class="fw-bold">${this.escapeHtml(contact.username || 'Unknown')}</div>
+                                <small class="text-muted text-break d-block">${this.escapeHtml(contact.user_id ? contact.user_id.substring(0, 16) + '...' : 'Unknown')}</small>
                             </div>
                             <div class="contact-mobile-device text-end flex-shrink-0">${this.formatDeviceType(contact)}</div>
                         </div>
@@ -921,10 +982,11 @@ class ModernContactsManager {
                             <div class="d-flex align-items-center flex-wrap gap-2 min-w-0">
                                 <div class="d-flex flex-column align-items-start gap-1 min-w-0">
                                 <div class="d-flex align-items-center min-w-0">${this.formatHops(contact)}</div>
+                                <div class="d-flex align-items-center gap-1"><span class="text-muted small">Bytes/hop:</span>${this.formatPathBytes(contact)}</div>
                                 ${this.formatPathEncodingBadge(contact)}
                                 </div>
                                 <div class="d-flex align-items-center gap-1">
-                                    <span class="badge bg-success">${contact.advert_count || 0}</span>
+                                    <span class="badge bg-success">${Number(contact.advert_count) || 0}</span>
                                     <span class="text-muted small">adverts</span>
                                 </div>
                             </div>
@@ -935,11 +997,11 @@ class ModernContactsManager {
                                     <i class="fas fa-ellipsis-vertical" aria-hidden="true"></i>
                                 </button>
                                 <ul class="dropdown-menu dropdown-menu-end">
-                                    <li><button type="button" class="dropdown-item" onclick="contactsManager.toggleStar('${uidJs}', this)"><i class="fas fa-star me-2 text-warning"></i>${starLabel}</button></li>
-                                    <li><button type="button" class="dropdown-item" onclick="contactsManager.viewAdvertData('${contact.user_id}')"><i class="fas fa-info-circle me-2 text-info"></i>View advertisement data</button></li>
+                                    <li><button type="button" class="dropdown-item" data-contact-action="star" data-contact-index="${contactIndex}"><i class="fas fa-star me-2 text-warning"></i>${starLabel}</button></li>
+                                    <li><button type="button" class="dropdown-item" data-contact-action="advert" data-contact-index="${contactIndex}"><i class="fas fa-info-circle me-2 text-info"></i>View advertisement data</button></li>
                                     ${geoMenuItem}
                                     <li><hr class="dropdown-divider"></li>
-                                    <li><button type="button" class="dropdown-item text-danger" onclick="contactsManager.showDeleteConfirmation('${uidJs}', '${nameJs}')"><i class="fas fa-trash me-2"></i>Delete contact</button></li>
+                                    <li><button type="button" class="dropdown-item text-danger" data-contact-action="delete" data-contact-index="${contactIndex}"><i class="fas fa-trash me-2"></i>Delete contact</button></li>
                                 </ul>
                             </div>
                         </div>
@@ -957,72 +1019,96 @@ class ModernContactsManager {
             const message = this.searchTerm ?
                 `No contacts match "${this.searchTerm}"` :
                 'No contacts data available';
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="11" class="text-center text-muted">
-                        ${message}
-                    </td>
-                </tr>
-            `;
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 12;
+            cell.className = 'text-center text-muted';
+            cell.textContent = message;
+            row.appendChild(cell);
+            tbody.replaceChildren(row);
             if (mobileStack) {
-                mobileStack.innerHTML = `<div class="text-center text-muted py-4">${message}</div>`;
+                const empty = document.createElement('div');
+                empty.className = 'text-center text-muted py-4';
+                empty.textContent = message;
+                mobileStack.replaceChildren(empty);
             }
             this.updateBulkDeleteButton();
             this.updateSelectAllCheckbox();
             return;
         }
 
-        tbody.innerHTML = this.filteredData.map(contact => `
+        if (!this.mobileLayout.matches) {
+            tbody.innerHTML = this.filteredData.map((contact, contactIndex) => `
             <tr>
                 <td class="text-center align-middle">
-                    <input type="checkbox" class="form-check-input contact-row-checkbox" data-user-id="${this.escapeHtml(contact.user_id)}" ${this.selectedContactIds.has(contact.user_id) ? 'checked' : ''}>
+                    <input type="checkbox" class="form-check-input contact-row-checkbox" data-contact-index="${contactIndex}" ${this.selectedContactIds.has(contact.user_id) ? 'checked' : ''}>
                 </td>
                 <td>
-                    <strong>${contact.username || 'Unknown'}</strong>
+                    <strong>${this.escapeHtml(contact.username || 'Unknown')}</strong>
                     <br>
-                    <small class="text-muted">${contact.user_id ? contact.user_id.substring(0, 16) + '...' : 'Unknown'}</small>
+                    <small class="text-muted">${this.escapeHtml(contact.user_id ? contact.user_id.substring(0, 16) + '...' : 'Unknown')}</small>
                 </td>
                 <td>${this.formatDeviceType(contact)}</td>
                 <td>${this.formatLocation(contact)}</td>
                 <td>${this.formatDistance(contact)}</td>
                 <td>${this.formatSignal(contact)}</td>
                 <td><div class="d-flex flex-column align-items-start gap-1">${this.formatHops(contact)}${this.formatPathEncodingBadge(contact)}</div></td>
+                <td>${this.formatPathBytes(contact)}</td>
                 <td>${this.formatTimestamp(contact.first_heard)}</td>
                 <td>${this.formatTimeAgo(contact.last_seen)}</td>
-                <td><span class="badge bg-success">${contact.advert_count || 0}</span></td>
+                <td><span class="badge bg-success">${Number(contact.advert_count) || 0}</span></td>
                 <td>
                     <div class="btn-group" role="group">
-                        <button class="btn btn-sm ${contact.is_starred ? 'btn-warning' : 'btn-outline-warning'}" onclick="contactsManager.toggleStar('${contact.user_id.replace(/'/g, "\\'")}', this)" title="${contact.is_starred ? 'Unstar contact' : 'Star contact'}">
+                        <button class="btn btn-sm ${contact.is_starred ? 'btn-warning' : 'btn-outline-warning'}" data-contact-action="star" data-contact-index="${contactIndex}" title="${contact.is_starred ? 'Unstar contact' : 'Star contact'}">
                             <i class="fas fa-star"></i>
                         </button>
-                        <button class="btn btn-sm btn-outline-info" onclick="contactsManager.viewAdvertData('${contact.user_id}')" title="View Advertisement Data">
+                        <button class="btn btn-sm btn-outline-info" data-contact-action="advert" data-contact-index="${contactIndex}" title="View Advertisement Data">
                             <i class="fas fa-info-circle"></i>
                         </button>
                         ${contact.latitude && contact.longitude && contact.latitude !== 0 && contact.longitude !== 0 ? 
-                            `<button class="btn btn-sm btn-outline-primary" onclick="contactsManager.geocodeContact('${contact.user_id.replace(/'/g, "\\'")}', this)" title="Geocode Location">
+                            `<button class="btn btn-sm btn-outline-primary" data-contact-action="geocode" data-contact-index="${contactIndex}" title="Geocode Location">
                                 <i class="fas fa-map-marker-alt"></i>
                             </button>` : 
                             ''
                         }
-                        <button class="btn btn-sm btn-outline-danger" onclick="contactsManager.showDeleteConfirmation('${contact.user_id.replace(/'/g, "\\'")}', '${(contact.username || 'Unknown').replace(/'/g, "\\'")}')" title="Delete Contact">
+                        <button class="btn btn-sm btn-outline-danger" data-contact-action="delete" data-contact-index="${contactIndex}" title="Delete Contact">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
                 </td>
             </tr>
-        `).join('');
-
-        if (mobileStack) {
-            mobileStack.innerHTML = this.filteredData.map(contact => this.renderContactCardHtml(contact)).join('');
+            `).join('');
+            if (mobileStack) mobileStack.replaceChildren();
+        } else if (mobileStack) {
+            tbody.replaceChildren();
+            mobileStack.innerHTML = this.filteredData.map((contact, contactIndex) => this.renderContactCardHtml(contact, contactIndex)).join('');
         }
 
         // Setup path tooltips after rendering
         this.setupPathTooltips();
         this.updateBulkDeleteButton();
         this.updateSelectAllCheckbox();
-        if (mobileStack) {
+        if (mobileStack && this.mobileLayout.matches) {
             this.initContactsDropdowns(mobileStack);
         }
+    }
+
+    updatePagination() {
+        const summary = document.getElementById('contacts-page-summary');
+        const previous = document.getElementById('contacts-page-previous');
+        const next = document.getElementById('contacts-page-next');
+        const total = Number(this.pagination.total_items) || 0;
+        const pageSize = Number(this.pagination.page_size) || this.pageSize;
+        const page = Number(this.pagination.page) || 1;
+        const start = total === 0 ? 0 : ((page - 1) * pageSize) + 1;
+        const end = Math.min(total, start + this.filteredData.length - 1);
+        if (summary) {
+            summary.textContent = total === 0
+                ? 'No contacts'
+                : `${start.toLocaleString()}–${end.toLocaleString()} of ${total.toLocaleString()} contacts`;
+        }
+        if (previous) previous.disabled = !this.pagination.has_previous;
+        if (next) next.disabled = !this.pagination.has_next;
     }
     
     updateBulkDeleteButton() {
@@ -1061,17 +1147,17 @@ class ModernContactsManager {
         const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         
         // Calculate time-based metrics
-        const contacts24h = this.filteredData.filter(contact => {
+        const contacts24h = this.filteredStats.contacts_24h ?? this.filteredData.filter(contact => {
             const lastSeen = new Date(contact.last_seen);
             return lastSeen >= oneDayAgo;
         }).length;
         
-        const contacts7d = this.filteredData.filter(contact => {
+        const contacts7d = this.filteredStats.contacts_7d ?? this.filteredData.filter(contact => {
             const lastSeen = new Date(contact.last_seen);
             return lastSeen >= oneWeekAgo;
         }).length;
         
-        const contactsAll = this.filteredData.length;
+        const contactsAll = this.filteredStats.contacts_total ?? this.filteredData.length;
         
         // Calculate advertisement metrics using daily tracking data
         // Note: These should now be provided by the server from the daily_advertisements table
@@ -1079,8 +1165,6 @@ class ModernContactsManager {
         
         // Try to get server-provided daily stats first
         const serverStats = this.contactsData.server_stats || {};
-        console.log('Contacts data structure:', typeof this.contactsData, 'has server_stats:', 'server_stats' in this.contactsData);
-        console.log('Server stats received:', serverStats);
         const adverts24h = (serverStats.advertisements_24h !== undefined) ? serverStats.advertisements_24h : this.filteredData.filter(contact => {
             const lastSeen = new Date(contact.last_seen);
             const now = new Date();
@@ -1096,31 +1180,9 @@ class ModernContactsManager {
         
         const advertsAll = (serverStats.total_advertisements !== undefined) ? serverStats.total_advertisements : this.filteredData.reduce((sum, contact) => sum + (contact.advert_count || 0), 0);
         
-        console.log('Final advertisement counts:', {
-            '24h': adverts24h,
-            '7d': adverts7d, 
-            'All': advertsAll,
-            'using_server_stats': (serverStats.advertisements_24h !== undefined) && 
-                                  (serverStats.advertisements_7d !== undefined) && 
-                                  (serverStats.total_advertisements !== undefined)
-        });
-        
         // Calculate new device metrics (devices first seen in the last 7 days)
-        // Debug: Log device types to see what we're working with
-        const deviceTypes = [...new Set(this.filteredData.map(contact => contact.device_type))];
-        console.log('Available device types:', deviceTypes);
-        console.log('Sample contact data:', this.filteredData[0]);
-        
-        // Also check for any devices first heard in the last week regardless of type
-        const anyNewDevices = this.filteredData.filter(contact => {
-            const firstHeard = new Date(contact.first_heard);
-            return firstHeard >= oneWeekAgo;
-        });
-        console.log('Any new devices in last week:', anyNewDevices.length);
-        console.log('Sample new device:', anyNewDevices[0]);
-        
         // Try different possible device type values
-        const newCompanions = this.filteredData.filter(contact => {
+        const newCompanions = this.filteredStats.new_companions ?? this.filteredData.filter(contact => {
             const firstHeard = new Date(contact.first_heard);
             const deviceType = (contact.device_type || '').toLowerCase();
             return firstHeard >= oneWeekAgo && (
@@ -1130,7 +1192,7 @@ class ModernContactsManager {
             );
         }).length;
         
-        const newRepeaters = this.filteredData.filter(contact => {
+        const newRepeaters = this.filteredStats.new_repeaters ?? this.filteredData.filter(contact => {
             const firstHeard = new Date(contact.first_heard);
             const deviceType = (contact.device_type || '').toLowerCase();
             return firstHeard >= oneWeekAgo && (
@@ -1140,7 +1202,7 @@ class ModernContactsManager {
             );
         }).length;
         
-        const newRoomServers = this.filteredData.filter(contact => {
+        const newRoomServers = this.filteredStats.new_room_servers ?? this.filteredData.filter(contact => {
             const firstHeard = new Date(contact.first_heard);
             const deviceType = (contact.device_type || '').toLowerCase();
             return firstHeard >= oneWeekAgo && (
@@ -1151,11 +1213,6 @@ class ModernContactsManager {
                 deviceType.includes('server')
             );
         }).length;
-        
-        // Debug: Log the counts
-        console.log('New companions:', newCompanions);
-        console.log('New repeaters:', newRepeaters);
-        console.log('New room servers:', newRoomServers);
         
         // Update contact metrics
         document.getElementById('contacts-24h').textContent = contacts24h;
@@ -1431,9 +1488,9 @@ class ModernContactsManager {
     
     formatLocation(contact) {
         if (contact.city && contact.state) {
-            return `${contact.city}, ${contact.state}`;
+            return `${this.escapeHtml(contact.city)}, ${this.escapeHtml(contact.state)}`;
         } else if (contact.city) {
-            return contact.city;
+            return this.escapeHtml(contact.city);
         } else if (contact.latitude && contact.longitude) {
             return `${contact.latitude.toFixed(4)}, ${contact.longitude.toFixed(4)}`;
         } else {
@@ -1471,7 +1528,7 @@ class ModernContactsManager {
             badgeClass = 'bg-info'; // Light blue for Sensor
         }
         
-        return `<span class="badge ${badgeClass}">${displayText}</span>`;
+        return `<span class="badge ${badgeClass}">${this.escapeHtml(displayText)}</span>`;
     }
     
     formatSignal(contact) {
@@ -1488,21 +1545,22 @@ class ModernContactsManager {
     }
     
     formatHops(contact) {
-        const hopCount = contact.hop_count || 0;
+        const hopCount = Number(contact.hop_count) || 0;
         const outPath = contact.out_path || '';
-        const outPathLen = contact.out_path_len || -1;
-        const allPaths = contact.all_paths || [];
-        const hasMultiplePaths = allPaths.length > 1;
+        const outPathLen = Number(contact.out_path_len ?? -1);
+        // Full paths are loaded on demand in the modal; the list only needs the count.
+        const pathsCount = Number(contact.paths_count) || 0;
+        const hasMultiplePaths = pathsCount > 1;
         
         // Escape the path for use in HTML attributes
-        const escapedPath = outPath.replace(/"/g, '&quot;');
-        const escapedUserId = contact.user_id.replace(/"/g, '&quot;');
+        const escapedPath = this.escapeAttribute(outPath);
+        const escapedUserId = this.escapeAttribute(contact.user_id);
         
         // If we have path data, add tooltip and click functionality
         if (outPath && outPathLen > 0) {
             // Create a unique ID for this tooltip
             const tooltipId = `hops-tooltip-${contact.user_id.substring(0, 16).replace(/[^a-zA-Z0-9]/g, '_')}`;
-            const pathCountText = hasMultiplePaths ? ` <small>(${allPaths.length} paths)</small>` : '';
+            const pathCountText = hasMultiplePaths ? ` <small>(${pathsCount} paths)</small>` : '';
             const bytesPerHop = contact.out_bytes_per_hop != null && [1, 2, 3].includes(Number(contact.out_bytes_per_hop)) ? Number(contact.out_bytes_per_hop) : '';
             return `<span class="badge bg-primary path-badge" 
                           id="${tooltipId}" 
@@ -1510,7 +1568,6 @@ class ModernContactsManager {
                           data-path-len="${outPathLen}"
                           data-bytes-per-hop="${bytesPerHop}"
                           data-user-id="${escapedUserId}"
-                          onclick="contactsManager.showPathsModal('${escapedUserId}')"
                           style="cursor: pointer; position: relative;" 
                           title="${hasMultiplePaths ? 'Click to view all paths' : 'Click to view path'}">
                       ${hopCount}${pathCountText}
@@ -1540,6 +1597,23 @@ class ModernContactsManager {
         }
         return '';
     }
+
+    updateFiltersButton() {
+        const trigger = document.getElementById('contacts-filters-trigger');
+        if (!trigger) return;
+        const active = [...document.querySelectorAll('.contacts-list-filter')]
+            .filter(filter => filter.value !== '').length;
+        trigger.innerHTML = `<i class="fas fa-filter" aria-hidden="true"></i> Filters${active ? ` (${active})` : ''}`;
+        trigger.classList.toggle('btn-primary', active > 0);
+        trigger.classList.toggle('btn-outline-secondary', active === 0);
+    }
+
+    formatPathBytes(contact) {
+        const bytes = Number(contact.path_bytes_per_hop);
+        return [1, 2, 3].includes(bytes)
+            ? `<span class="badge bg-primary">${bytes}</span>`
+            : '<span class="text-muted">—</span>';
+    }
     
     setupPathTooltips() {
         // Create a global custom tooltip element if it doesn't exist
@@ -1561,6 +1635,7 @@ class ModernContactsManager {
             if (badge.dataset.tooltipSetup === 'true') return;
             
             badge.dataset.tooltipSetup = 'true';
+            badge.addEventListener('click', () => this.showPathsModal(badge.dataset.userId));
             
             // Load path data on first hover (for tooltip)
             let pathLoaded = false;
@@ -1568,7 +1643,8 @@ class ModernContactsManager {
             
             const showTooltip = (event) => {
                 const rect = badge.getBoundingClientRect();
-                customTooltip.innerHTML = pathContent;
+                customTooltip.textContent = pathContent;
+                customTooltip.style.whiteSpace = 'pre-line';
                 customTooltip.style.display = 'block';
                 customTooltip.style.left = (rect.left + rect.width / 2 - customTooltip.offsetWidth / 2) + 'px';
                 customTooltip.style.top = (rect.top - customTooltip.offsetHeight - 8) + 'px';
@@ -1636,8 +1712,7 @@ class ModernContactsManager {
                         // Format the path response
                         const pathLines = data.path.map(node => {
                             if (node.found) {
-                                // Escape HTML to prevent XSS
-                                const name = this.escapeHtml(node.name);
+                                const name = String(node.name ?? '');
                                 // Add ❓ emoji if this is a geographic guess (collision)
                                 const guessIndicator = node.geographic_guess ? ' ❓' : '';
                                 return `${node.node_id}: ${name}${guessIndicator}`;
@@ -1646,7 +1721,7 @@ class ModernContactsManager {
                             }
                         });
                         
-                        pathContent = pathLines.length > 0 ? pathLines.join('<br>') : 'No path data';
+                        pathContent = pathLines.length > 0 ? pathLines.join('\n') : 'No path data';
                         pathLoaded = true;
                         badge.dataset.loading = 'false';
                         
@@ -1730,6 +1805,7 @@ class ModernContactsManager {
     }
     
     renderPathsInModal(paths, primaryPath) {
+        this.renderedModalPaths = paths;
         if (paths.length === 0) {
             return '<p class="text-muted">No path data available for this contact.</p>';
         }
@@ -1750,12 +1826,12 @@ class ModernContactsManager {
                         <div class="flex-grow-1">
                             <h6 class="mb-1">
                                 Path ${i + 1} ${primaryBadge}
-                                <small class="text-muted">(${hopLabel}${path.path_length} bytes, ${path.observation_count} observations)</small>
+                                <small class="text-muted">(${hopLabel}${Number(path.path_length) || 0} bytes, ${Number(path.observation_count) || 0} observations)</small>
                             </h6>
                             <p class="mb-1"><code class="path-hex-code">${this.escapeHtml(formattedPathHex)}</code></p>
                             <small class="text-muted">Last seen: ${this.formatTimeAgo(path.last_seen)}</small>
                         </div>
-                        <button class="btn btn-sm btn-outline-primary" onclick="contactsManager.decodePathInModal('${String(path.path_hex).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}', ${i}, ${bph != null ? bph : 'null'})">
+                        <button class="btn btn-sm btn-outline-primary" data-decode-path-index="${i}">
                             <i class="fas fa-code"></i> Decode
                         </button>
                     </div>
@@ -1778,8 +1854,23 @@ class ModernContactsManager {
         
         // Store contact and paths for re-rendering
         this.currentModalContact = contact;
-        this.currentModalPaths = contact.all_paths || [];
         const primaryPath = contact.out_path || '';
+
+        // Full path objects are loaded on demand (kept out of the /api/contacts list payload
+        // for performance) — fetch them for this contact now.
+        let detailPaths = [];
+        try {
+            const resp = await fetch('/api/contact-detail?user_id=' + encodeURIComponent(userId));
+            if (resp.ok) {
+                const detail = await resp.json();
+                detailPaths = detail.all_paths || [];
+            } else {
+                console.error('Failed to load contact paths:', resp.status);
+            }
+        } catch (err) {
+            console.error('Error loading contact paths:', err);
+        }
+        this.currentModalPaths = detailPaths;
         
         // Load sort preference from localStorage (default to 'length')
         const sortOrder = localStorage.getItem('contactsPathSortOrder') || 'length';
@@ -1833,6 +1924,19 @@ class ModernContactsManager {
         
         // Add modal to page
         document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        const pathsListContainer = document.getElementById('paths-list-container');
+        pathsListContainer.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-decode-path-index]');
+            if (!button) return;
+            const index = Number(button.dataset.decodePathIndex);
+            const path = this.renderedModalPaths[index];
+            if (!path) return;
+            const bph = path.bytes_per_hop != null && [1, 2, 3].includes(Number(path.bytes_per_hop))
+                ? Number(path.bytes_per_hop)
+                : null;
+            this.decodePathInModal(String(path.path_hex ?? ''), index, bph);
+        });
         
         // Setup sort dropdown event handler
         const sortSelect = document.getElementById('pathSortOrder');
@@ -1908,31 +2012,35 @@ class ModernContactsManager {
                 throw new Error('Invalid path data format');
             }
             
-            // Format the decoded path
-            const pathLines = data.path.map(node => {
-                if (node.found) {
-                    const name = this.escapeHtml(node.name);
-                    const guessIndicator = node.geographic_guess ? ' <span class="badge bg-warning">Guess</span>' : '';
-                    return `<div class="mb-1"><strong>${node.node_id}:</strong> ${name}${guessIndicator}</div>`;
-                } else {
-                    return `<div class="mb-1 text-muted"><strong>${node.node_id}:</strong> Unknown</div>`;
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-info decoded-path-alert mb-0';
+            const heading = document.createElement('strong');
+            heading.textContent = 'Decoded Path:';
+            const content = document.createElement('div');
+            content.className = 'mt-2 decoded-path-content';
+            data.path.forEach(node => {
+                const line = document.createElement('div');
+                line.className = node.found ? 'mb-1' : 'mb-1 text-muted';
+                const id = document.createElement('strong');
+                id.textContent = `${String(node.node_id ?? '')}:`;
+                line.append(id, document.createTextNode(` ${node.found ? String(node.name ?? '') : 'Unknown'}`));
+                if (node.found && node.geographic_guess) {
+                    const guess = document.createElement('span');
+                    guess.className = 'badge bg-warning ms-1';
+                    guess.textContent = 'Guess';
+                    line.appendChild(guess);
                 }
+                content.appendChild(line);
             });
-            
-            decodedDiv.innerHTML = `
-                <div class="alert alert-info decoded-path-alert mb-0">
-                    <strong>Decoded Path:</strong>
-                    <div class="mt-2 decoded-path-content">${pathLines.join('')}</div>
-                </div>
-            `;
+            alert.append(heading, content);
+            decodedDiv.replaceChildren(alert);
             
         } catch (error) {
             console.error('Error decoding path:', error);
-            decodedDiv.innerHTML = `
-                <div class="alert alert-danger mb-0">
-                    <strong>Error:</strong> ${this.escapeHtml(error.message)}
-                </div>
-            `;
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-danger mb-0';
+            alert.textContent = `Error: ${error.message}`;
+            decodedDiv.replaceChildren(alert);
         } finally {
             button.disabled = false;
             button.innerHTML = originalHtml;
@@ -1973,25 +2081,40 @@ class ModernContactsManager {
         }
     }
     
-    viewAdvertData(userId) {
-        // Find the contact data
+    async viewAdvertData(userId) {
+        // Find the contact data (for the title); the advert payload is loaded on demand below.
         const contact = this.filteredData.find(c => c.user_id === userId);
         if (!contact) {
             alert('Contact data not found');
             return;
         }
-        
+
+        // Advertisement data is kept out of the /api/contacts list payload for performance —
+        // fetch it for this contact now.
+        let advertData = 'No advertisement data available';
+        try {
+            const resp = await fetch('/api/contact-detail?user_id=' + encodeURIComponent(userId));
+            if (resp.ok) {
+                const detail = await resp.json();
+                advertData = detail.raw_advert_data_parsed || detail.raw_advert_data || advertData;
+            } else {
+                console.error('Failed to load advertisement data:', resp.status);
+            }
+        } catch (err) {
+            console.error('Error loading advertisement data:', err);
+        }
+
         // Create a modal to display the advertisement data
         const modalHtml = `
             <div class="modal fade" id="advertModal" tabindex="-1">
                 <div class="modal-dialog modal-lg">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h5 class="modal-title">Advertisement Data - ${contact.username || 'Unknown'}</h5>
+                            <h5 class="modal-title">Advertisement Data - ${this.escapeHtml(contact.username || 'Unknown')}</h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body">
-                            <pre class="bg-light p-3 rounded" style="background-color: var(--bg-secondary); color: var(--text-color);">${JSON.stringify(contact.raw_advert_data_parsed || contact.raw_advert_data || 'No advertisement data available', null, 2)}</pre>
+                            <pre class="bg-light p-3 rounded" style="background-color: var(--bg-secondary); color: var(--text-color);">${this.escapeHtml(JSON.stringify(advertData, null, 2))}</pre>
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -2169,14 +2292,17 @@ class ModernContactsManager {
         }
     }
     
-    showDeleteConfirmation(userId, username) {
+    showDeleteConfirmation(userId) {
         // Find the contact data
         const contact = this.filteredData.find(c => c.user_id === userId);
         if (!contact) {
             this.showError('Contact data not found');
             return;
         }
-        
+        // Derive the display name from the looked-up contact rather than
+        // trusting a value interpolated through an HTML attribute by the caller.
+        const username = contact.username || 'Unknown';
+
         // Create a modal for delete confirmation
         const modalHtml = `
             <div class="modal fade" id="deleteContactModal" tabindex="-1">
@@ -2195,7 +2321,7 @@ class ModernContactsManager {
                             <div class="alert alert-warning">
                                 <strong>Contact Information:</strong><br>
                                 <strong>Name:</strong> ${this.escapeHtml(username || 'Unknown')}<br>
-                                <strong>Public Key:</strong> <code>${userId.substring(0, 16)}...</code>
+                                <strong>Public Key:</strong> <code>${this.escapeHtml(userId.substring(0, 16))}...</code>
                             </div>
                             <div class="alert alert-danger">
                                 <i class="fas fa-exclamation-triangle"></i>
@@ -2282,16 +2408,11 @@ class ModernContactsManager {
                 modal.hide();
             }
             
-            // Remove contact from local data
-            this.contactsData.tracking_data = this.contactsData.tracking_data.filter(c => c.user_id !== userId);
-            this.filteredData = this.filteredData.filter(c => c.user_id !== userId);
-            
-            // Re-render the table
-            this.renderContactsData();
-            this.updateStatistics();
+            this.selectedContactIds.delete(userId);
+            await this.loadContactsData();
             
             // Show success message
-            this.showSuccess(`Contact "${username || 'Unknown'}" has been deleted successfully.`);
+            this.showSuccess(`Contact "${this.escapeHtml(username || 'Unknown')}" has been deleted successfully.`);
             
         } catch (error) {
             console.error('Error deleting contact:', error);
@@ -2402,14 +2523,8 @@ class ModernContactsManager {
             const modal = bootstrap.Modal.getInstance(modalElement);
             if (modal) modal.hide();
             
-            toDelete.forEach(userId => {
-                this.contactsData.tracking_data = this.contactsData.tracking_data.filter(c => c.user_id !== userId);
-                this.filteredData = this.filteredData.filter(c => c.user_id !== userId);
-                this.selectedContactIds.delete(userId);
-            });
-            
-            this.renderContactsData();
-            this.updateStatistics();
+            toDelete.forEach(userId => this.selectedContactIds.delete(userId));
+            await this.loadContactsData();
             
             if (failCount === 0) {
                 this.showSuccess(`${successCount} contact${successCount !== 1 ? 's' : ''} deleted successfully.`);
@@ -2429,15 +2544,28 @@ class ModernContactsManager {
         div.textContent = text;
         return div.innerHTML;
     }
+
+    escapeAttribute(text) {
+        return String(text ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
     
     showError(message) {
         const errorDiv = document.createElement('div');
         errorDiv.className = 'alert alert-danger alert-dismissible fade show';
         errorDiv.setAttribute('role', 'alert');
-        errorDiv.innerHTML = `
-            <strong>Error:</strong> ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        `;
+        const text = document.createElement('span');
+        text.textContent = `Error: ${String(message ?? '')}`;
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'btn-close';
+        close.dataset.bsDismiss = 'alert';
+        close.setAttribute('aria-label', 'Close');
+        errorDiv.append(text, close);
         
         const content = document.querySelector('.container-fluid');
         if (content) {
@@ -2455,10 +2583,14 @@ class ModernContactsManager {
         const successDiv = document.createElement('div');
         successDiv.className = 'alert alert-success alert-dismissible fade show';
         successDiv.setAttribute('role', 'alert');
-        successDiv.innerHTML = `
-            <strong>Success:</strong> ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        `;
+        const text = document.createElement('span');
+        text.textContent = `Success: ${String(message ?? '')}`;
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'btn-close';
+        close.dataset.bsDismiss = 'alert';
+        close.setAttribute('aria-label', 'Close');
+        successDiv.append(text, close);
         
         const content = document.querySelector('.container-fluid');
         if (content) {
@@ -2486,17 +2618,17 @@ class ModernContactsManager {
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || 'Failed to load preview');
             if (data.count === 0) {
-                previewText.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i>No contacts found that are older than <strong>${days} days</strong>.`;
+                previewText.textContent = `No contacts found that are older than ${days} days.`;
                 confirmBtn.disabled = true;
             } else {
-                const sampleNames = (data.samples || []).map(s => `<em>${s.name}</em>`).join(', ');
+                const sampleNames = (data.samples || []).map(s => String(s.name ?? '')).join(', ');
                 const more = data.count > 5 ? ` and ${data.count - 5} more` : '';
-                previewText.innerHTML = `<i class="fas fa-exclamation-triangle text-warning me-1"></i><strong>${data.count}</strong> contact(s) will be deleted: ${sampleNames}${more}.`;
+                previewText.textContent = `${data.count} contact(s) will be deleted: ${sampleNames}${more}.`;
                 confirmLabel.textContent = `Purge ${data.count} contact(s)`;
                 confirmBtn.disabled = false;
             }
         } catch (err) {
-            previewText.innerHTML = `<i class="fas fa-times-circle text-danger me-1"></i>Error: ${err.message}`;
+            previewText.textContent = `Error: ${err.message}`;
             confirmBtn.disabled = true;
         }
     }
@@ -2656,18 +2788,18 @@ async function loadLocalHopCollisions() {
     transition: all 0.2s ease;
 }
 
-.sortable i {
+.sortable .sort-icon {
     margin-left: 5px;
     opacity: 0.5;
     transition: opacity 0.2s ease;
     font-size: 0.8em;
 }
 
-.sortable:hover i {
+.sortable:hover .sort-icon {
     opacity: 0.8;
 }
 
-.sort-active i {
+.sort-active .sort-icon {
     opacity: 1;
     color: #0d6efd !important;
 }

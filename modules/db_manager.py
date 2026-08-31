@@ -5,14 +5,21 @@ Provides common database operations and table management for the MeshCore Bot
 """
 
 import json
+import os
 import re
 import sqlite3
+import threading
 from collections.abc import AsyncGenerator, Generator
-from contextlib import asynccontextmanager, contextmanager
-from datetime import date, datetime
+from contextlib import asynccontextmanager, contextmanager, suppress
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from .db_migrations import MigrationRunner
+from .db_retention import (
+    delete_timestamp_rows_in_chunks,
+    retention_delete_settings,
+)
 from .security_utils import VALID_JOURNAL_MODES
 
 
@@ -42,6 +49,8 @@ class DBManager:
         'bot_metadata',
         'packet_stream',
         'message_stats',
+        'command_stats',
+        'path_stats',
         'greeted_users',
         'repeater_contacts',
         'complete_contact_tracking',  # Repeater manager
@@ -50,13 +59,21 @@ class DBManager:
         'purging_log',  # Repeater manager
         'mesh_connections',  # Mesh graph for path validation
         'observed_paths',  # Repeater manager - observed paths from adverts and messages
-        'bbs_messages',  # BBS store-and-forward messaging
+        'neighbor_links',  # Zero-hop neighbor discovery - current adjacency
+        'neighbor_observations',  # Zero-hop neighbor discovery - per-cycle history
     }
 
     def __init__(self, bot: Any, db_path: str = "meshcore_bot.db"):
         self.bot = bot
         self.logger = bot.logger
         self.db_path = db_path
+        # WAL is persistent database state, and re-applying it on every
+        # short-lived connection is surprisingly expensive (and can take a
+        # lock), so it is set once per config section. The rollback journal
+        # modes are connection-local; see _apply_sqlite_pragmas.
+        self._journal_mode_lock = threading.Lock()
+        self._journal_mode_initialized: set[str] = set()
+        self._journal_mode_warned: set[str] = set()
         self._init_database()
 
     def _init_database(self) -> None:
@@ -74,8 +91,34 @@ class DBManager:
                 self.logger.info("Database manager initialized successfully")
 
         except Exception as e:
-            self.logger.error(f"Failed to initialize database: {e}")
+            self.logger.error(
+                "Failed to initialize database at %s: %s. %s",
+                self.db_path,
+                e,
+                self._database_path_diagnostics(),
+            )
             raise
+
+    def _database_path_diagnostics(self) -> str:
+        """Return filesystem details that explain common SQLite open failures."""
+        try:
+            if str(self.db_path) == ":memory:":
+                return "Using in-memory SQLite database."
+            db_file = Path(self.db_path)
+            parent = db_file.parent if db_file.parent != Path("") else Path(".")
+            parent_exists = parent.exists()
+            parent_is_dir = parent.is_dir() if parent_exists else False
+            parent_writable = os.access(str(parent), os.W_OK) if parent_exists else False
+            file_exists = db_file.exists()
+            file_readable = os.access(str(db_file), os.R_OK) if file_exists else False
+            file_writable = os.access(str(db_file), os.W_OK) if file_exists else False
+            return (
+                f"parent={parent} "
+                f"(exists={parent_exists}, is_dir={parent_is_dir}, writable={parent_writable}); "
+                f"file_exists={file_exists}, readable={file_readable}, writable={file_writable}"
+            )
+        except Exception as diag_error:
+            return f"could not inspect database path: {diag_error}"
 
     # Geocoding cache methods
     def get_cached_geocoding(self, query: str) -> tuple[Optional[float], Optional[float]]:
@@ -223,22 +266,30 @@ class DBManager:
         expiration timestamp has passed.
         """
         try:
-            with self.connection() as conn:
-                cursor = conn.cursor()
+            cutoff = (
+                datetime.now(timezone.utc)
+                .replace(tzinfo=None)
+                .isoformat(sep=" ", timespec="seconds")
+            )
+            geocoding_deleted = self.delete_timestamp_rows_in_chunks(
+                'geocoding_cache',
+                'expires_at',
+                cutoff,
+                progress_label='geocoding cache',
+            )
+            generic_deleted = self.delete_timestamp_rows_in_chunks(
+                'generic_cache',
+                'expires_at',
+                cutoff,
+                progress_label='generic cache',
+            )
 
-                # Clean up geocoding cache
-                cursor.execute("DELETE FROM geocoding_cache WHERE expires_at < datetime('now')")
-                geocoding_deleted = cursor.rowcount
-
-                # Clean up generic cache
-                cursor.execute("DELETE FROM generic_cache WHERE expires_at < datetime('now')")
-                generic_deleted = cursor.rowcount
-
-                conn.commit()
-
-                total_deleted = geocoding_deleted + generic_deleted
-                if total_deleted > 0:
-                    self.logger.info(f"Cleaned up {total_deleted} expired cache entries ({geocoding_deleted} geocoding, {generic_deleted} generic)")
+            total_deleted = geocoding_deleted + generic_deleted
+            if total_deleted > 0:
+                self.logger.info(
+                    f"Cleaned up {total_deleted} expired cache entries "
+                    f"({geocoding_deleted} geocoding, {generic_deleted} generic)"
+                )
 
         except Exception as e:
             self.logger.error(f"Error cleaning up expired cache: {e}")
@@ -246,13 +297,21 @@ class DBManager:
     def cleanup_geocoding_cache(self) -> None:
         """Remove expired geocoding cache entries"""
         try:
-            with self.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM geocoding_cache WHERE expires_at < datetime('now')")
-                deleted_count = cursor.rowcount
-                conn.commit()
-                if deleted_count > 0:
-                    self.logger.info(f"Cleaned up {deleted_count} expired geocoding cache entries")
+            cutoff = (
+                datetime.now(timezone.utc)
+                .replace(tzinfo=None)
+                .isoformat(sep=" ", timespec="seconds")
+            )
+            deleted_count = self.delete_timestamp_rows_in_chunks(
+                'geocoding_cache',
+                'expires_at',
+                cutoff,
+                progress_label='geocoding cache',
+            )
+            if deleted_count > 0:
+                self.logger.info(
+                    f"Cleaned up {deleted_count} expired geocoding cache entries"
+                )
         except Exception as e:
             self.logger.error(f"Error cleaning up geocoding cache: {e}")
 
@@ -391,6 +450,35 @@ class DBManager:
             self.logger.error(f"Error executing update: {e}")
             return 0
 
+    def delete_timestamp_rows_in_chunks(
+        self,
+        table: str,
+        timestamp_column: str,
+        cutoff: Any,
+        *,
+        future_cutoff: Any | None = None,
+        progress_label: str | None = None,
+    ) -> int:
+        """Delete retained history without monopolizing SQLite's writer lock."""
+        if table not in self.ALLOWED_TABLES:
+            raise ValueError(
+                f"Table name '{table}' not in allowed tables whitelist"
+            )
+        batch_size, pause_seconds = retention_delete_settings(
+            getattr(self.bot, "config", None)
+        )
+        return delete_timestamp_rows_in_chunks(
+            self.connection,
+            table,
+            timestamp_column,
+            cutoff,
+            batch_size=batch_size,
+            pause_seconds=pause_seconds,
+            future_cutoff=future_cutoff,
+            logger=self.logger,
+            progress_label=progress_label,
+        )
+
     def execute_query_on_connection(self, conn: sqlite3.Connection, query: str, params: tuple = ()) -> list[dict]:
         """Execute a query on an existing connection. Caller owns the connection."""
         cursor = conn.cursor()
@@ -494,16 +582,46 @@ class DBManager:
         foreign_keys = bool(foreign_keys)
         journal_mode = str(journal_mode).strip() or "WAL"
         if journal_mode.upper() not in VALID_JOURNAL_MODES:
-            self.logger.warning(f"Invalid journal_mode {journal_mode!r}, falling back to WAL")
+            # Warn once per section: this runs on every connection, so an
+            # unconditional warning here would flood the log.
+            if section not in self._journal_mode_warned:
+                self._journal_mode_warned.add(section)
+                self.logger.warning(
+                    f"Invalid journal_mode {journal_mode!r} in [{section}], falling back to WAL"
+                )
             journal_mode = "WAL"
 
         try:
             conn.execute(f"PRAGMA foreign_keys={'ON' if foreign_keys else 'OFF'}")
             conn.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
-            conn.execute(f"PRAGMA journal_mode={journal_mode}")
         except sqlite3.OperationalError:
-            # journal_mode can fail if DB is locked; others are best-effort.
+            # Connection-local tuning is best-effort when the database is busy.
             pass
+
+        # Only WAL is recorded in the database header and so survives to later
+        # connections. DELETE/TRUNCATE/PERSIST/MEMORY/OFF are connection-local:
+        # setting one of those just once would leave every subsequent connection
+        # silently running the SQLite default instead of the configured mode.
+        if journal_mode.upper() != "WAL":
+            with suppress(sqlite3.OperationalError):
+                conn.execute(f"PRAGMA journal_mode={journal_mode}")
+            return
+
+        # Tracked per section: [Bot] and [Web_Viewer] are read by different
+        # callers against this same database, so one must not starve the other.
+        if section in self._journal_mode_initialized:
+            return
+
+        # The first successful connection initializes persistent WAL mode.
+        # If SQLite is locked, leave the section clear so a later connection retries.
+        with self._journal_mode_lock:
+            if section in self._journal_mode_initialized:
+                return
+            try:
+                conn.execute(f"PRAGMA journal_mode={journal_mode}")
+            except sqlite3.OperationalError:
+                return
+            self._journal_mode_initialized.add(section)
 
     @contextmanager
     def connection(self) -> Generator[sqlite3.Connection, None, None]:

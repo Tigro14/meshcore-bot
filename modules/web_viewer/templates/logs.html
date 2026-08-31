@@ -137,13 +137,13 @@
                 <button type="button" class="log-level-toggle is-on" data-level="ERROR" aria-pressed="true" title="Toggle ERROR lines">ERROR</button>
                 <button type="button" class="log-level-toggle is-on" data-level="CRITICAL" aria-pressed="true" title="Toggle CRITICAL lines">CRITICAL</button>
             </div>
-            <button class="btn btn-sm btn-outline-secondary" id="pause-btn" onclick="togglePause()">
+            <button class="btn btn-sm btn-outline-secondary" id="pause-btn">
                 <i class="fas fa-pause" id="pause-icon"></i> Pause
             </button>
-            <button class="btn btn-sm btn-outline-secondary" onclick="clearLog()">
+            <button class="btn btn-sm btn-outline-secondary" id="clear-log-btn">
                 <i class="fas fa-trash"></i> Clear
             </button>
-            <button class="btn btn-sm btn-outline-secondary" onclick="scrollToBottom()">
+            <button class="btn btn-sm btn-outline-secondary" id="scroll-log-btn">
                 <i class="fas fa-arrow-down"></i> Bottom
             </button>
         </div>
@@ -159,7 +159,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ g.csp_nonce }}">
 (function () {
     const MAX_LINES = 2000;
     const LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
@@ -295,7 +295,7 @@
     }
 
     function clearLog() {
-        container.innerHTML = '';
+        container.replaceChildren();
         lineCount = 0;
         document.getElementById('line-count').textContent = '0 lines';
     }
@@ -318,10 +318,9 @@
         autoScroll = atBottom;
     });
 
-    // Expose for inline handlers
-    window.togglePause = togglePause;
-    window.clearLog = clearLog;
-    window.scrollToBottom = scrollToBottom;
+    document.getElementById('pause-btn').addEventListener('click', togglePause);
+    document.getElementById('clear-log-btn').addEventListener('click', clearLog);
+    document.getElementById('scroll-log-btn').addEventListener('click', scrollToBottom);
 })();
 </script>
 {% endblock %}

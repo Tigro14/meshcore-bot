@@ -10,19 +10,19 @@ This document provides comprehensive documentation for all repeater management c
 
 ## Table of Contents
 
-- [Repeater Discovery & Cataloging](#repeater-discovery--cataloging)
-- [Listing & Viewing](#listing--viewing)
-- [Location & Geolocation](#location--geolocation)
+- [Repeater Discovery and Cataloging](#repeater-discovery-and-cataloging)
+- [Listing and Viewing](#listing-and-viewing)
+- [Location and Geolocation](#location-and-geolocation)
 - [Purging Repeaters](#purging-repeaters)
 - [Restoring Repeaters](#restoring-repeaters)
-- [Statistics & Status](#statistics--status)
+- [Statistics and Status](#statistics-and-status)
 - [Contact List Management](#contact-list-management)
-- [Auto-Purge Management](#auto-purge-management)
-- [Testing & Debugging](#testing--debugging)
+- [Auto-Purge Management](#repeater-auto-purge)
+- [Testing and Debugging](#testing-and-debugging)
 
 ---
 
-## Repeater Discovery & Cataloging
+## Repeater Discovery and Cataloging
 
 ### `!repeater scan`
 
@@ -66,7 +66,7 @@ Discovers and adds companion contacts to the device.
 
 ---
 
-## Listing & Viewing
+## Listing and Viewing
 
 ### `!repeater list`
 
@@ -103,7 +103,7 @@ Lists repeater contacts stored in the database.
 
 ---
 
-## Location & Geolocation
+## Location and Geolocation
 
 ### `!repeater locations`
 
@@ -332,7 +332,7 @@ Please be more specific with the name.
 
 ---
 
-## Statistics & Status
+## Statistics and Status
 
 ### `!repeater stats`
 
@@ -492,7 +492,7 @@ Toggles manual contact addition setting.
 
 ---
 
-## Testing & Debugging
+## Testing and Debugging
 
 ### `!repeater test`
 
@@ -594,8 +594,8 @@ Shows comprehensive help for all repeater commands.
 
 The repeater management system respects several configuration settings in `config.ini`:
 
-- `auto_manage_contacts` - Controls automatic contact management
-  - `device` - Device handles auto-addition, bot manages capacity
+- `auto_manage_contacts` - Controls automatic contact management (default: `device`)
+  - `device` - Device handles auto-addition, bot manages capacity (default)
   - `bot` - Bot automatically adds companion contacts and manages capacity
   - `false` - Manual mode (use commands to manage contacts)
 

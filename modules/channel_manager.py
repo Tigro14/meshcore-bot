@@ -31,6 +31,18 @@ class ChannelManager:
         self._channels_cache: dict[int, dict[str, Any]] = {}
         self._cache_valid = False
         self._fetch_timeout = 2.0  # Timeout for individual channel fetches
+        # Delay between per-channel reads during the connect-time scan, keeping
+        # the init burst gentle on the firmware. Commands are already serialized
+        # globally; this adds extra spacing for the 40-slot scan specifically.
+        try:
+            self._fetch_interval = max(
+                0.0,
+                bot.config.getfloat(
+                    'Connection', 'channel_fetch_interval_ms', fallback=300.0
+                ) / 1000.0,
+            )
+        except Exception:
+            self._fetch_interval = 0.3
 
     @staticmethod
     def _normalize_channel_name_for_lookup(name: str) -> str:
@@ -113,7 +125,8 @@ class ChannelManager:
                         break
 
                 # Conservative delay to avoid overwhelming the device
-                await asyncio.sleep(0.3)
+                if self._fetch_interval > 0:
+                    await asyncio.sleep(self._fetch_interval)
 
             except Exception as e:
                 consecutive_empty += 1

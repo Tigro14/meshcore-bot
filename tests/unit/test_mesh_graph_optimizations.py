@@ -12,7 +12,7 @@ Covers the optimizations added for low-memory devices (Raspberry Pi Zero 2 W):
 
 import sqlite3
 import time
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
@@ -240,6 +240,20 @@ class TestEdgeExpiration:
         assert ('aa', 'bb') not in graph.edges, "Expired edge should not have been loaded"
         assert ('cc', 'dd') in graph.edges, "Fresh edge must be loaded"
 
+    def test_startup_load_uses_one_parameterized_cutoff_without_sort(self, mock_bot):
+        mock_bot.config.set('Path_Command', 'graph_startup_load_days', '14')
+        mock_bot.config.set('Path_Command', 'graph_edge_expiration_days', '7')
+        mock_bot.db_manager.execute_query = MagicMock(return_value=[])
+
+        MeshGraph(mock_bot)
+
+        query, params = mock_bot.db_manager.execute_query.call_args.args
+        assert 'last_seen >= ?' in query
+        assert 'ORDER BY' not in query.upper()
+        assert len(params) == 1
+        cutoff = datetime.fromisoformat(params[0])
+        assert datetime.now() - timedelta(days=8) < cutoff < datetime.now()
+
 
 # ---------------------------------------------------------------------------
 # 4. Web Viewer Notification Throttle
@@ -337,3 +351,121 @@ class TestCaptureEnabled:
         # Either _batch_thread was never set or it is None
         batch_thread = getattr(graph, '_batch_thread', None)
         assert batch_thread is None, "Batch writer thread should not start when capture is disabled"
+
+
+@pytest.mark.unit
+class TestLowIoPersistence:
+    def test_default_write_strategy_is_batched(self, mock_bot):
+        mock_bot.config.remove_option('Path_Command', 'graph_write_strategy')
+        graph = MeshGraph(mock_bot)
+        try:
+            assert graph.write_strategy == 'batched'
+        finally:
+            graph.shutdown()
+
+    def test_missing_location_is_cached_within_batch(self, mesh_graph):
+        cache = {}
+        mesh_graph.db_manager.execute_query = MagicMock(return_value=[])
+
+        assert mesh_graph._get_location_by_public_key('aa' * 32, location_cache=cache) is None
+        assert mesh_graph._get_location_by_public_key('aa' * 32, location_cache=cache) is None
+
+        mesh_graph.db_manager.execute_query.assert_called_once()
+
+    def test_immediate_update_recalculates_distance_once(self, mock_bot):
+        mock_bot.config.set('Path_Command', 'graph_write_strategy', 'immediate')
+        graph = MeshGraph(mock_bot)
+        graph._recalculate_distance_if_needed = MagicMock(return_value=12.5)
+
+        graph.add_edge(
+            'aa',
+            'bb',
+            from_public_key='aa' * 32,
+            to_public_key='bb' * 32,
+        )
+        graph._recalculate_distance_if_needed.reset_mock()
+
+        graph.add_edge(
+            'aa',
+            'bb',
+            from_public_key='aa' * 32,
+            to_public_key='bb' * 32,
+        )
+
+        graph._recalculate_distance_if_needed.assert_called_once()
+
+    def test_batch_flush_uses_upserts_without_existence_probes(self, mock_bot):
+        mock_bot.config.set('Path_Command', 'graph_write_strategy', 'batched')
+        graph = MeshGraph(mock_bot)
+        graph.add_edge('aa', 'bb')
+        graph.add_edge('cc', 'dd')
+
+        statements = []
+        original_connection = graph.db_manager.connection
+
+        @contextmanager
+        def traced_connection():
+            with original_connection() as conn:
+                conn.set_trace_callback(statements.append)
+                yield conn
+
+        graph.db_manager.connection = traced_connection
+        graph._flush_pending_updates_sync()
+
+        assert not any(
+            statement.lstrip().upper().startswith('SELECT 1 FROM MESH_CONNECTIONS')
+            for statement in statements
+        )
+        assert sum(
+            statement.lstrip().upper().startswith('INSERT INTO MESH_CONNECTIONS')
+            for statement in statements
+        ) == 2
+        graph.shutdown()
+
+    def test_failed_batch_is_requeued(self, mock_bot):
+        mock_bot.config.set('Path_Command', 'graph_write_strategy', 'batched')
+        graph = MeshGraph(mock_bot)
+        graph.add_edge('aa', 'bb')
+
+        @contextmanager
+        def broken_connection():
+            raise sqlite3.OperationalError('simulated write failure')
+            yield  # pragma: no cover
+
+        graph.db_manager.connection = broken_connection
+        graph._flush_pending_updates_sync()
+
+        assert ('aa', 'bb') in graph.pending_updates
+        graph._shutdown_event.set()
+
+    def test_upsert_preserves_filtered_row_history(self, mock_bot):
+        old_first_seen = (datetime.now() - timedelta(days=30)).isoformat()
+        old_last_seen = (datetime.now() - timedelta(days=20)).isoformat()
+        mock_bot.db_manager.execute_update(
+            """
+            INSERT INTO mesh_connections
+                (from_prefix, to_prefix, observation_count, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ('aa', 'bb', 10, old_first_seen, old_last_seen),
+        )
+        mock_bot.config.set('Path_Command', 'graph_write_strategy', 'batched')
+        graph = MeshGraph(mock_bot)
+        assert ('aa', 'bb') not in graph.edges
+
+        graph.add_edge('aa', 'bb', from_public_key='aa' * 32)
+        graph._flush_pending_updates_sync()
+
+        row = mock_bot.db_manager.execute_query(
+            """
+            SELECT observation_count, first_seen, last_seen, from_public_key
+            FROM mesh_connections
+            WHERE from_prefix = ? AND to_prefix = ?
+            """,
+            ('aa', 'bb'),
+        )[0]
+        assert row['observation_count'] == 10
+        assert row['first_seen'] == old_first_seen
+        assert row['last_seen'] > old_last_seen
+        assert row['from_public_key'] == 'aa' * 32
+        graph.shutdown()

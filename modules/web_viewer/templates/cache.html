@@ -104,7 +104,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ g.csp_nonce }}">
 class DatabaseInfoManager {
     constructor() {
         this.dbData = {};
@@ -162,43 +162,61 @@ class DatabaseInfoManager {
     
     renderTablesInfo() {
         const infoElement = document.getElementById('tables-info');
-        
+        infoElement.replaceChildren();
         if (!this.dbData.tables || this.dbData.tables.length === 0) {
-            infoElement.innerHTML = '<div class="text-muted">No tables found</div>';
+            const empty = document.createElement('div');
+            empty.className = 'text-muted';
+            empty.textContent = 'No tables found';
+            infoElement.appendChild(empty);
             return;
         }
-        
-        const tablesHtml = this.dbData.tables.map(table => `
-            <div class="row mb-3 p-3 border rounded">
-                <div class="col-md-4">
-                    <h6 class="mb-1">
-                        <i class="fas fa-table text-primary"></i> ${table.name}
-                    </h6>
-                    <small class="text-muted">${table.description || 'Database table'}</small>
-                </div>
-                <div class="col-md-2">
-                    <div class="text-center">
-                        <h5 class="mb-0 text-primary">${table.record_count || 0}</h5>
-                        <small class="text-muted">Records</small>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="text-center">
-                        <h6 class="mb-0">${table.size || 'Unknown'}</h6>
-                        <small class="text-muted">Size</small>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="text-center">
-                        <span class="badge bg-${this.getTableStatusClass(table)}">${this.getTableStatus(table)}</span>
-                        <br>
-                        <small class="text-muted">Status</small>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-        
-        infoElement.innerHTML = tablesHtml;
+
+        const makeTextElement = (tag, value, classes = '') => {
+            const element = document.createElement(tag);
+            element.className = classes;
+            element.textContent = String(value ?? '');
+            return element;
+        };
+        this.dbData.tables.forEach(table => {
+            const row = document.createElement('div');
+            row.className = 'row mb-3 p-3 border rounded';
+            const identity = document.createElement('div');
+            identity.className = 'col-md-4';
+            identity.append(
+                makeTextElement('h6', table.name, 'mb-1'),
+                makeTextElement('small', table.description || 'Database table', 'text-muted'),
+            );
+            const metric = (value, label, width, valueClass = 'h6 mb-0') => {
+                const column = document.createElement('div');
+                column.className = width;
+                const content = document.createElement('div');
+                content.className = 'text-center';
+                content.append(
+                    makeTextElement('div', value, valueClass),
+                    makeTextElement('small', label, 'text-muted'),
+                );
+                column.appendChild(content);
+                return column;
+            };
+            const statusColumn = document.createElement('div');
+            statusColumn.className = 'col-md-3 text-center';
+            statusColumn.append(
+                makeTextElement(
+                    'span',
+                    this.getTableStatus(table),
+                    `badge bg-${this.getTableStatusClass(table)}`,
+                ),
+                document.createElement('br'),
+                makeTextElement('small', 'Status', 'text-muted'),
+            );
+            row.append(
+                identity,
+                metric(table.record_count || 0, 'Records', 'col-md-2', 'h5 mb-0 text-primary'),
+                metric(table.size || 'Unknown', 'Size', 'col-md-3'),
+                statusColumn,
+            );
+            infoElement.appendChild(row);
+        });
     }
     
     getTableStatus(table) {
