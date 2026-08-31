@@ -1367,11 +1367,11 @@ class RadioManager {
         const alert = document.getElementById('announcementAlert');
         if (!message) {
             alert.style.display = 'none';
-            alert.innerHTML = '';
+            alert.textContent = '';
             return;
         }
         alert.className = `alert alert-${type}`;
-        alert.innerHTML = message;
+        alert.textContent = message;
         alert.style.display = 'block';
     }
 
