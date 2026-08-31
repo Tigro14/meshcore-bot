@@ -4277,32 +4277,6 @@ class BotDataViewer:
                 self.logger.error(f"Error queuing announcement: {e}")
                 return jsonify({'error': str(e)}), 500
 
-                    if not (5 <= cr <= 8):
-                        return jsonify({'error': 'cr must be 5–8'}), 400
-                    payload['cr'] = cr
-                if 'tx_power' in payload:
-                    tx = int(payload['tx_power'])
-                    if not (1 <= tx <= 30):
-                        return jsonify({'error': 'tx_power must be 1–30 dBm'}), 400
-                    payload['tx_power'] = tx
-
-                radio_fields = {'freq', 'bw', 'sf', 'cr'}
-                if radio_fields & set(payload) and not radio_fields <= set(payload):
-                    return jsonify({'error': 'freq, bw, sf, and cr must all be provided together'}), 400
-
-                with self.db_manager.connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "INSERT INTO channel_operations (operation_type, payload_data, status) VALUES ('radio_params_write', ?, 'pending')",
-                        (json.dumps(payload),)
-                    )
-                    conn.commit()
-                    op_id = cursor.lastrowid
-                return jsonify({'success': True, 'operation_id': op_id})
-            except Exception as e:
-                self.logger.error(f"Error queuing radio params write: {e}")
-                return jsonify({'error': str(e)}), 500
-
     def _setup_socketio_handlers(self):
         """Setup SocketIO event handlers using modern patterns"""
 
