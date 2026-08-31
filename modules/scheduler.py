@@ -1250,7 +1250,8 @@ class MessageScheduler:
                       AND operation_type IN (
                           'radio_reboot', 'radio_connect', 'radio_disconnect',
                           'firmware_read', 'firmware_write',
-                          'radio_params_read', 'radio_params_write'
+                          'radio_params_read', 'radio_params_write',
+                          'send_announcement'
                       )
                     ORDER BY created_at ASC
                     LIMIT 1
@@ -1282,6 +1283,9 @@ class MessageScheduler:
                 elif op_type == 'radio_params_write':
                     payload = json.loads(op['payload_data'] or '{}')
                     success, result_payload = await self._radio_params_write_op(payload)
+                elif op_type == 'send_announcement':
+                    payload = json.loads(op['payload_data'] or '{}')
+                    success, result_payload = await self._send_announcement_op(payload)
                 else:
                     success = False
 
@@ -1463,6 +1467,47 @@ class MessageScheduler:
         except Exception as e:
             self.logger.error(f"Radio params write failed: {e}")
             return False, {'error': str(e)}
+
+    async def _send_announcement_op(self, payload: dict):
+        """Send an announcement message to a channel.
+        
+        Args:
+            payload: dict with 'channel' and 'message' keys
+            
+        Returns:
+            tuple: (success: bool, result_payload: dict)
+        """
+        try:
+            channel = payload.get('channel', '').strip()
+            message = payload.get('message', '').strip()
+            
+            if not channel:
+                return False, {'error': 'Channel is required'}
+            if not message:
+                return False, {'error': 'Message is required'}
+            
+            # Check if bot is connected
+            if not self.bot.connected or not self.bot.meshcore:
+                return False, {'error': 'Bot not connected to radio'}
+            
+            # Send the message using the command manager
+            success = await self.bot.command_manager.send_channel_message(
+                channel=channel,
+                content=message,
+                command_id=f"announcement_{int(time.time())}",
+                skip_user_rate_limit=True  # Skip rate limiting for announcements
+            )
+            
+            if success:
+                self.logger.info(f"Announcement sent to {channel}: {message}")
+                return True, {'success': True, 'channel': channel, 'message': message}
+            else:
+                return False, {'error': f'Failed to send announcement to channel {channel}'}
+                
+        except Exception as e:
+            self.logger.error(f"Send announcement failed: {e}")
+            return False, {'error': str(e)}
+
 
     # ── Maintenance (delegates to MaintenanceRunner) ─────────────────────────
 

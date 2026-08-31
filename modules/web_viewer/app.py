@@ -4219,6 +4219,65 @@ class BotDataViewer:
                 if 'cr' in payload:
                     cr = int(payload['cr'])
                     if not (5 <= cr <= 8):
+                        return jsonify({'error': 'cr must be 5–8 (coding rate 4/5 to 4/8)'}), 400
+                    payload['cr'] = cr
+                if 'tx_power' in payload:
+                    tx_power = int(payload['tx_power'])
+                    if not (1 <= tx_power <= 30):
+                        return jsonify({'error': 'tx_power must be 1–30 dBm'}), 400
+                    payload['tx_power'] = tx_power
+
+                with self.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO channel_operations (operation_type, payload_data, status) VALUES ('radio_params_write', ?, 'pending')",
+                        (json.dumps(payload),)
+                    )
+                    conn.commit()
+                    op_id = cursor.lastrowid
+                return jsonify({'success': True, 'operation_id': op_id})
+            except Exception as e:
+                self.logger.error(f"Error queuing radio params write: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/radio/announcement', methods=['POST'])
+        def api_radio_announcement():
+            """Send an announcement message to a channel.
+            Body: {channel: str, message: str}
+            """
+            try:
+                data = request.get_json(silent=True) or {}
+                channel = data.get('channel', '').strip()
+                message = data.get('message', '').strip()
+
+                if not channel:
+                    return jsonify({'error': 'Channel is required'}), 400
+                if not message:
+                    return jsonify({'error': 'Message is required'}), 400
+                if len(message) > 200:
+                    return jsonify({'error': 'Message must be 200 characters or less'}), 400
+
+                # Queue the announcement as a channel operation
+                payload = {
+                    'channel': channel,
+                    'message': message
+                }
+                with self.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO channel_operations (operation_type, payload_data, status) VALUES ('send_announcement', ?, 'pending')",
+                        (json.dumps(payload),)
+                    )
+                    conn.commit()
+                    op_id = cursor.lastrowid
+                
+                self.logger.info(f"Queued announcement to channel {channel}: {message}")
+                return jsonify({'success': True, 'operation_id': op_id, 'message': 'Announcement queued'})
+            except Exception as e:
+                self.logger.error(f"Error queuing announcement: {e}")
+                return jsonify({'error': str(e)}), 500
+
+                    if not (5 <= cr <= 8):
                         return jsonify({'error': 'cr must be 5–8'}), 400
                     payload['cr'] = cr
                 if 'tx_power' in payload:
