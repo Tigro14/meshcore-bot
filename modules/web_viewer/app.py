@@ -5578,7 +5578,7 @@ class BotDataViewer:
                 return jsonify({'success': True, 'operation_id': op_id, 'message': 'Announcement queued'})
             except Exception as e:
                 self.logger.error(f"Error queuing announcement: {e}")
-                return jsonify({'error': str(e)}), 500
+                return jsonify({'error': 'Failed to queue announcement'}), 500
 
                 if 'tx_power' in payload:
                     tx = int(payload['tx_power'])
