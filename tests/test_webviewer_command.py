@@ -164,7 +164,11 @@ class TestHandleStatus:
         _run(cmd.execute(msg))
         bot.command_manager.send_response.assert_called_once()
         call_args = bot.command_manager.send_response.call_args[0]
-        assert "Status" in call_args[1] or "status" in call_args[1].lower() or "enabled" in call_args[1]
+        text = call_args[1]
+        assert text.startswith("WV ")
+        assert "en=" in text
+        assert "run=" in text
+        assert len(text.encode("utf-8")) <= 158
 
     def test_status_without_integration(self):
         bot = _make_bot(has_integration=False)

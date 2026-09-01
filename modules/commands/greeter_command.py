@@ -5,14 +5,37 @@ Greets users on their first public channel message with mesh information
 """
 
 import asyncio
+import re
 import sqlite3
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from ..models import MeshMessage
 from ..utils import decode_escape_sequences
 from .base_command import BaseCommand
+
+# A plausible channel name at the head of a ``channel_greetings`` entry: no
+# whitespace, no punctuation beyond the ones channels actually use.
+_CHANNEL_KEY_RE = re.compile(r"^#?[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
+
+
+def _starts_new_channel_greeting(fragment: str) -> bool:
+    """Whether a comma-separated fragment begins a new ``channel:greeting`` entry.
+
+    ``channel_greetings`` splits entries on commas, but greeting text contains
+    commas ("Welcome to the mesh, {sender}!") and colons (URLs, clock times).
+    Requiring the part before the first colon to look like a channel name keeps
+    ``, see https://…`` and ``, 3:30pm`` attached to the greeting they belong to
+    instead of registering ``see https`` / ``3`` as phantom channels.
+    """
+    head, sep, _ = fragment.partition(':')
+    if not sep:
+        return False
+    head = head.strip()
+    if head.isdigit():  # a clock time, not a channel
+        return False
+    return bool(_CHANNEL_KEY_RE.match(head))
 
 
 class GreeterCommand(BaseCommand):
@@ -23,6 +46,38 @@ class GreeterCommand(BaseCommand):
     keywords = []  # No keywords - this command is triggered automatically
     description = "Greets users on their first public channel message (once globally by default, or per-channel if configured)"
     category = "system"
+
+    # Opt-in command: _load_config reads 'enabled' with fallback=False, so the
+    # settings UI must also show "off" when the key is absent.
+    settings_enabled_default = False
+
+    # Web-viewer settings schema (see modules/settings_schema.py)
+    settings_schema = [
+        {"key": "greeting_message", "label": "Greeting message", "type": "str",
+         "default": "Welcome to the mesh, @[{sender}]!",
+         "help": "Default greeting. {sender} = user; separate multi-part messages with |."},
+        {"key": "rollout_days", "label": "Rollout period", "type": "int",
+         "min": 0, "default": 7, "unit": "days",
+         "help": "Days the greeter rollout runs before auto-ending."},
+        {"key": "channel_greetings", "label": "Per-channel greetings", "type": "str",
+         "default": "",
+         "help": "channel:greeting,channel2:greeting2 — overrides the default per channel."},
+        {"key": "per_channel_greetings", "label": "Greet once per channel", "type": "bool",
+         "default": False,
+         "help": "On: greet each user once per channel. Off: once globally."},
+        {"key": "include_mesh_info", "label": "Include mesh info", "type": "bool",
+         "default": True,
+         "help": "Append mesh statistics to the greeting."},
+        {"key": "mesh_info_format", "label": "Mesh info format", "type": "str",
+         "default": "",
+         "help": "Template for mesh info. Fields: {total_contacts}, {repeaters}, {companions}, {recent_activity_24h}."},
+        {"key": "auto_backfill", "label": "Auto-backfill greeted users", "type": "bool",
+         "default": False,
+         "help": "On first run, mark recently-seen users as already greeted so they aren't greeted retroactively."},
+        {"key": "backfill_lookback_days", "label": "Backfill lookback", "type": "int",
+         "min": 0, "default": 0, "unit": "days",
+         "help": "How far back to look when auto-backfilling. 0 = all time."},
+    ]
 
     def __init__(self, bot: Any):
         """Initialize the greeter command.
@@ -153,15 +208,20 @@ class GreeterCommand(BaseCommand):
 
         # Note: allowed_channels is now loaded by BaseCommand from config
         # Keep greeter_channels for backward compatibility and case-insensitive matching
-        channels_str = self.get_config_value('Greeter_Command', 'channels', fallback='')
-        if channels_str:
-            # Store both original and lowercase versions for case-insensitive matching
-            self.greeter_channels = [ch.strip() for ch in channels_str.split(',') if ch.strip()]
-            self.greeter_channels_lower = [ch.lower() for ch in self.greeter_channels]
-        else:
-            # Fall back to monitor_channels if not specified
+        # ``fallback=None`` distinguishes "key absent" (fall back to
+        # monitor_channels) from "channels =" (BaseCommand reads that as
+        # disabled-on-channels). Collapsing both to '' meant an explicit empty
+        # value silently fell through to monitor_channels and kept greeting.
+        channels_str = self.get_config_value('Greeter_Command', 'channels', fallback=None)
+        if channels_str is None:
+            # Not configured — fall back to monitor_channels.
             self.greeter_channels = None
             self.greeter_channels_lower = None
+        else:
+            # Store both original and lowercase versions for case-insensitive matching.
+            # An explicit empty value yields [], i.e. disabled on all channels.
+            self.greeter_channels = [ch.strip() for ch in channels_str.split(',') if ch.strip()]
+            self.greeter_channels_lower = [ch.lower() for ch in self.greeter_channels]
 
         # Load channel-specific greeting messages
         # Format: channel_name:greeting_message,channel_name2:greeting_message2
@@ -169,7 +229,22 @@ class GreeterCommand(BaseCommand):
         channel_greetings_str = self.get_config_value('Greeter_Command', 'channel_greetings', fallback='')
         self.channel_greetings = {}
         if channel_greetings_str:
-            for entry in channel_greetings_str.split(','):
+            # Entries are comma-separated, but greeting text routinely contains
+            # commas ("Welcome to the mesh, {sender}!"). A bare split would cut
+            # such a greeting in half and silently drop the tail (placeholder and
+            # all), so re-attach any fragment that has no "channel:" of its own.
+            entries: list[str] = []
+            for fragment in channel_greetings_str.split(','):
+                if _starts_new_channel_greeting(fragment):
+                    entries.append(fragment)
+                elif entries:
+                    entries[-1] = f"{entries[-1]},{fragment}"
+                else:
+                    self.logger.warning(
+                        "Greeter: ignoring channel_greetings fragment with no 'channel:' prefix: %r",
+                        fragment,
+                    )
+            for entry in entries:
                 entry = entry.strip()
                 if ':' in entry:
                     channel_name, greeting = entry.split(':', 1)
@@ -318,7 +393,11 @@ class GreeterCommand(BaseCommand):
                 if not result:
                     return
 
-                rollout_start = datetime.fromisoformat(result[0])
+                # rollout_started_at is written by SQLite CURRENT_TIMESTAMP, i.e.
+                # naive UTC. datetime.timestamp() on a naive value assumes local
+                # time, which shifted the cutoff by the host's UTC offset and let
+                # early active users slip through the "already greeted" marking.
+                rollout_start = datetime.fromisoformat(result[0]).replace(tzinfo=timezone.utc)
 
                 # Find all users who posted on public channels since rollout started
                 # Only get messages that are NOT DMs (is_dm = 0) and have a channel
@@ -355,11 +434,15 @@ class GreeterCommand(BaseCommand):
 
                     if not cursor.fetchone():
                         # Mark as greeted with rollout flag
+                        # Store greeted_at in SQLite's own CURRENT_TIMESTAMP shape
+                        # ("YYYY-MM-DD HH:MM:SS" UTC). isoformat()'s "T" separator
+                        # sorts above a space, so mixing the two corrupts every
+                        # ORDER BY greeted_at (duplicate cleanup, "recent greeted").
                         cursor.execute('''
                             INSERT OR IGNORE INTO greeted_users
                             (sender_id, channel, rollout_marked, greeted_at)
                             VALUES (?, ?, 1, ?)
-                        ''', (sender_id, mark_channel, rollout_start.isoformat()))
+                        ''', (sender_id, mark_channel, rollout_start.strftime('%Y-%m-%d %H:%M:%S')))
                         marked_count += 1
 
                 # Update rollout record

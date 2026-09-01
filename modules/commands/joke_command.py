@@ -17,6 +17,8 @@ class JokeCommand(BaseCommand):
     """Handles joke commands with category support"""
 
     # Plugin metadata
+    # Read-only informational output; safe for scheduled {cmd:...} rendering.
+    render_safe = True
     name = "joke"
     keywords = ['joke', 'jokes']
     description = "Get a random joke or joke from specific category (usage: joke [category])"
@@ -48,6 +50,16 @@ class JokeCommand(BaseCommand):
     JOKE_API_BASE = "https://v2.jokeapi.dev/joke"
     BLACKLIST_FLAGS = "nsfw,religious,political,racist,sexist,explicit"
     TIMEOUT = 10  # seconds
+
+    # Web-viewer settings schema (see modules/settings_schema.py)
+    settings_schema = [
+        {"key": "seasonal_jokes", "label": "Seasonal jokes", "type": "bool",
+         "default": True,
+         "help": "Apply seasonal defaults (October: spooky, December: Christmas)."},
+        {"key": "long_jokes", "label": "Allow long jokes", "type": "bool",
+         "default": False,
+         "help": "On: split jokes over 130 chars into multiple messages. Off: fetch a shorter one."},
+    ]
 
     def __init__(self, bot: Any):
         """Initialize the joke command.

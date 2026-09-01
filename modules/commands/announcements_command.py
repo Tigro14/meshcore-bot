@@ -25,6 +25,39 @@ class AnnouncementsCommand(BaseCommand):
     requires_dm = True
     category = "admin"
 
+    # Opt-in command: __init__ reads 'enabled' with fallback=False, so the
+    # settings UI must also show "off" when the key is absent.
+    settings_enabled_default = False
+
+    # Web-viewer settings schema (see modules/settings_schema.py).
+    # announce.<trigger> keys are dynamic and appear under "Other config values".
+    settings_schema = [
+        {"key": "default_announcement_channel", "label": "Default channel", "type": "str",
+         "default": "Public",
+         "help": "Channel used when an announcement specifies none."},
+        {"key": "announcement_cooldown", "label": "Cooldown", "type": "int",
+         "min": 0, "default": 60, "unit": "min",
+         "help": "Minimum minutes between repeats of the same announcement."},
+        {"key": "announcements_acl", "label": "Announcements ACL", "type": "str",
+         "default": "",
+         "help": "Comma-separated 64-char hex pubkeys allowed to announce (inherits Admin_ACL)."},
+    ]
+
+    # Web-viewer dynamic editor for the announce.* trigger keys in this section.
+    settings_dynamic_sections = [
+        {
+            "section": "Announcements_Command",
+            "key_prefix": "announce.",
+            "label": "Announcement triggers",
+            "help": ("Each trigger is sent with 'announce <name> [channel]'. "
+                     "The value is the announcement text."),
+            "key_label": "Trigger name",
+            "value_label": "Announcement text",
+            "key_placeholder": "default",
+            "value_placeholder": "This is the default announcement.",
+        }
+    ]
+
     def __init__(self, bot):
         super().__init__(bot)
 
@@ -233,6 +266,45 @@ class AnnouncementsCommand(BaseCommand):
 
         return elapsed < self.lockout_seconds
 
+    async def _send_trigger_list(self, message: MeshMessage, available: list[str]) -> None:
+        """Send compact trigger names, chunking if over DM budget."""
+        packed = ",".join(available)
+        max_len = self.get_max_message_length(message)
+        header = "Triggers: "
+        body = f"{header}{packed}"
+        if len(body.encode("utf-8")) <= max_len:
+            await self.send_response(message, body)
+            return
+
+        chunks: list[str] = []
+        names = list(available)
+        page = 1
+        while names:
+            prefix = header if page == 1 else f"Triggers p{page}: "
+            current = prefix
+            while names:
+                candidate = (
+                    f"{current}{names[0]}"
+                    if current == prefix
+                    else f"{current},{names[0]}"
+                )
+                if len(candidate.encode("utf-8")) <= max_len:
+                    current = candidate
+                    names.pop(0)
+                else:
+                    break
+            if current == prefix:
+                # Single name longer than budget — hard-split via UTF-8 helper
+                name = names.pop(0)
+                pieces = self.bot.command_manager.split_text_into_utf8_chunks(
+                    f"{prefix}{name}", max_len
+                )
+                chunks.extend(pieces)
+            else:
+                chunks.append(current)
+            page += 1
+        await self.send_response_chunked(message, chunks)
+
     def _parse_command(self, content: str) -> tuple:
         """Parse the announce command.
 
@@ -281,14 +353,10 @@ class AnnouncementsCommand(BaseCommand):
             trigger_name, channel_name, is_override = self._parse_command(message.content)
 
             if not trigger_name:
-                # Show list of available triggers with usage
-                available_triggers = ', '.join(sorted(self.triggers.keys()))
-                if available_triggers:
-                    await self.send_response(
-                        message,
-                        f"Available triggers: {available_triggers}\n"
-                        f"Usage: announce <trigger> [channel] [override]"
-                    )
+                # Show list of available triggers (compact; usage only on unknown)
+                available = sorted(self.triggers.keys())
+                if available:
+                    await self._send_trigger_list(message, available)
                 else:
                     await self.send_response(
                         message,
@@ -298,13 +366,9 @@ class AnnouncementsCommand(BaseCommand):
 
             # Check if user wants to list triggers (special case)
             if trigger_name.lower() == 'list':
-                available_triggers = ', '.join(sorted(self.triggers.keys()))
-                if available_triggers:
-                    await self.send_response(
-                        message,
-                        f"Available triggers: {available_triggers}\n"
-                        f"Usage: announce <trigger> [channel] [override]"
-                    )
+                available = sorted(self.triggers.keys())
+                if available:
+                    await self._send_trigger_list(message, available)
                 else:
                     await self.send_response(
                         message,
@@ -314,11 +378,24 @@ class AnnouncementsCommand(BaseCommand):
 
             # Check if trigger exists
             if trigger_name not in self.triggers:
-                available_triggers = ', '.join(sorted(self.triggers.keys()))
-                await self.send_response(
-                    message,
-                    f"Unknown trigger: {trigger_name}. Available: {available_triggers}"
-                )
+                available = sorted(self.triggers.keys())
+                packed = ",".join(available)
+                max_len = self.get_max_message_length(message)
+                prefix = f"Unknown '{trigger_name}'. Triggers: "
+                # Keep usage only on unknown-trigger path
+                body = f"{prefix}{packed}"
+                if len(body.encode("utf-8")) <= max_len:
+                    await self.send_response(message, body)
+                else:
+                    # Fit as many names as possible in first message with usage hint
+                    usage = " Usage: announce <trigger>"
+                    budget = max_len - len((prefix + usage).encode("utf-8"))
+                    truncated = packed
+                    while truncated and len(truncated.encode("utf-8")) > budget:
+                        truncated = truncated.rsplit(",", 1)[0]
+                    await self.send_response(
+                        message, f"{prefix}{truncated}{usage}" if truncated else f"{prefix}…{usage}"
+                    )
                 return True
 
             # Check lockout (applies even with override - prevents duplicate sends from retries)

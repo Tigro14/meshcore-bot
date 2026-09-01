@@ -30,6 +30,7 @@ def _make_bot(mock_logger, extra_cfg=None):
     bot.command_manager = Mock()
     bot.command_manager.send_channel_message = AsyncMock(return_value=True)
     bot.command_manager.send_dm = AsyncMock(return_value=True)
+    bot.connected = True
     return bot
 
 
@@ -113,6 +114,57 @@ class TestVerifyToken:
         svc, _ = _make_service(mock_logger, {"secret_token": "tok"})
         req = _make_request(headers={"Authorization": "BEARER tok"})
         assert svc._verify_token(req) is True
+
+
+# ---------------------------------------------------------------------------
+# TestHandleWebhook — readiness
+# ---------------------------------------------------------------------------
+
+
+class TestHandleWebhookReadiness:
+    @pytest.mark.asyncio
+    async def test_not_connected_returns_503(self, mock_logger):
+        svc, bot = _make_service(mock_logger)
+        bot.connected = False
+        req = _make_request(body={"channel": "general", "message": "hi"})
+        resp = await svc._handle_webhook(req)
+        assert resp.status == 503
+
+    @pytest.mark.asyncio
+    async def test_not_connected_does_not_dispatch(self, mock_logger):
+        svc, bot = _make_service(mock_logger)
+        bot.connected = False
+        req = _make_request(body={"channel": "general", "message": "hi"})
+        await svc._handle_webhook(req)
+        bot.command_manager.send_channel_message.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_connected_true_proceeds_normally(self, mock_logger):
+        svc, bot = _make_service(mock_logger)
+        bot.connected = True
+        req = _make_request(body={"channel": "general", "message": "hi"})
+        resp = await svc._handle_webhook(req)
+        assert resp.status == 200
+
+    @pytest.mark.asyncio
+    async def test_missing_connected_attr_defaults_to_not_ready(self, mock_logger):
+        """If `bot.connected` isn't present at all, fail safe (503) rather than assume readiness."""
+        svc, bot = _make_service(mock_logger)
+        del bot.connected
+        # Mock() raises AttributeError for deleted attrs, so getattr(..., False) applies.
+        req = _make_request(body={"channel": "general", "message": "hi"})
+        resp = await svc._handle_webhook(req)
+        assert resp.status == 503
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_checked_before_readiness(self, mock_logger):
+        """Rate limiting should still apply even while the bot isn't connected yet."""
+        svc, bot = _make_service(mock_logger, {"rate_limit_per_minute": "1"})
+        bot.connected = False
+        req = _make_request(body={"channel": "general", "message": "hi"})
+        await svc._handle_webhook(req)
+        resp = await svc._handle_webhook(req)
+        assert resp.status == 429
 
 
 # ---------------------------------------------------------------------------

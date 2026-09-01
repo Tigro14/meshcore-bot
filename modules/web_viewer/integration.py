@@ -12,10 +12,14 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import closing, suppress
+from contextlib import closing, contextmanager, suppress
 from pathlib import Path
 from typing import Optional
 
+from ..db_retention import (
+    delete_timestamp_rows_in_chunks,
+    retention_delete_settings,
+)
 from ..utils import resolve_path
 
 
@@ -211,11 +215,21 @@ class BotIntegration:
                 return resolve_path(raw, base_dir)
         return str(Path(self.bot.db_manager.db_path).resolve())
 
+    # Denormalized packet dimensions written alongside the JSON blob.  Order
+    # matters: it is the INSERT column order and the queue tuple order.
+    PACKET_DIM_COLUMNS = ("route_type_name", "payload_type_name", "path_len", "bytes_per_hop")
+
     def _init_packet_stream_table(self):
         """Backward-compatible initializer (now handled by migrations).
 
         Kept for older call sites and tests that patch this method. Safe to call
         multiple times and safe to ignore failures.
+
+        The table-exists path still runs the ALTERs: this process writes to
+        ``[Web_Viewer] db_path``, which in a split-DB install is a file the bot's
+        own MigrationRunner never touches.  If the viewer has not started yet
+        that DB has an old three-column packet_stream, and skipping the ALTERs
+        would leave every insert failing on unknown columns.
         """
         try:
             import sqlite3
@@ -226,6 +240,8 @@ class BotIntegration:
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='packet_stream'"
                 )
                 if cur.fetchone() is not None:
+                    self._add_missing_packet_dim_columns(conn)
+                    conn.commit()
                     return
                 try:
                     foreign_keys = self.bot.config.getboolean("Web_Viewer", "sqlite_foreign_keys", fallback=True)
@@ -247,7 +263,11 @@ class BotIntegration:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp REAL NOT NULL,
                         data TEXT NOT NULL,
-                        type TEXT NOT NULL
+                        type TEXT NOT NULL,
+                        route_type_name TEXT,
+                        payload_type_name TEXT,
+                        path_len INTEGER,
+                        bytes_per_hop INTEGER
                     )
                     """
                 )
@@ -257,9 +277,61 @@ class BotIntegration:
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_packet_stream_type ON packet_stream(type)"
                 )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_packet_stream_dims "
+                    "ON packet_stream(timestamp, bytes_per_hop, route_type_name, payload_type_name) "
+                    "WHERE type = 'packet'"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_packet_stream_undimensioned "
+                    "ON packet_stream(type, id) WHERE route_type_name IS NULL"
+                )
                 conn.commit()
         except Exception:
             pass
+
+    def _add_missing_packet_dim_columns(self, conn) -> None:
+        """ALTER in any denormalized dimension column packet_stream is missing."""
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(packet_stream)")}
+        types = {"path_len": "INTEGER", "bytes_per_hop": "INTEGER"}
+        for column in self.PACKET_DIM_COLUMNS:
+            if column not in existing:
+                conn.execute(
+                    f"ALTER TABLE packet_stream ADD COLUMN {column} {types.get(column, 'TEXT')}"
+                )
+        if self.PACKET_DIM_COLUMNS[0] not in existing:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_packet_stream_dims "
+                "ON packet_stream(timestamp, bytes_per_hop, route_type_name, payload_type_name) "
+                "WHERE type = 'packet'"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_packet_stream_undimensioned "
+                "ON packet_stream(type, id) WHERE route_type_name IS NULL"
+            )
+
+    def _packet_stream_has_dim_columns(self, conn) -> bool:
+        """Probe once per process whether the target DB carries the dimension columns.
+
+        The viewer DB may be a separate file this process never migrates, so the
+        writer cannot assume the wide schema — it falls back to the three-column
+        INSERT rather than failing every flush.
+        """
+        cached = getattr(self, '_packet_dims_supported', None)
+        if cached is not None:
+            return cached
+        try:
+            existing = {row[1] for row in conn.execute("PRAGMA table_info(packet_stream)")}
+            supported = all(c in existing for c in self.PACKET_DIM_COLUMNS)
+        except Exception:
+            supported = False
+        self._packet_dims_supported = supported
+        if not supported:
+            self.bot.logger.info(
+                "packet_stream lacks denormalized dimension columns; "
+                "writing legacy rows (dashboard packet tiles will backfill from JSON)"
+            )
+        return supported
 
     def _start_drain_thread(self) -> None:
         """Start the background thread that flushes the write queue every DRAIN_INTERVAL seconds."""
@@ -276,7 +348,7 @@ class BotIntegration:
             self._drain_stop.wait(timeout=self.DRAIN_INTERVAL)
             self._flush_write_queue()
 
-    def _requeue_rows(self, rows: list[tuple[float, str, str]]) -> None:
+    def _requeue_rows(self, rows: list[tuple]) -> None:
         """Restore rows to the queue after a failed flush (FIFO). Logs if the queue stays full."""
         for i, row in enumerate(rows):
             try:
@@ -296,7 +368,7 @@ class BotIntegration:
         with self._flush_lock:
             if self._write_queue.empty():
                 return
-            rows: list[tuple[float, str, str]] = []
+            rows: list[tuple] = []
             while not self._write_queue.empty():
                 try:
                     rows.append(self._write_queue.get_nowait())
@@ -309,10 +381,18 @@ class BotIntegration:
             for attempt in range(max_retries):
                 try:
                     with closing(sqlite3.connect(str(db_path), timeout=self.sqlite_connect_timeout_sec)) as conn:
-                        conn.executemany(
-                            'INSERT INTO packet_stream (timestamp, data, type) VALUES (?, ?, ?)',
-                            rows,
-                        )
+                        if self._packet_stream_has_dim_columns(conn):
+                            conn.executemany(
+                                'INSERT INTO packet_stream '
+                                '(timestamp, data, type, route_type_name, payload_type_name, '
+                                'path_len, bytes_per_hop) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                                rows,
+                            )
+                        else:
+                            conn.executemany(
+                                'INSERT INTO packet_stream (timestamp, data, type) VALUES (?, ?, ?)',
+                                [row[:3] for row in rows],
+                            )
                         conn.commit()
                     return
                 except sqlite3.OperationalError as e:
@@ -331,9 +411,20 @@ class BotIntegration:
                     self._requeue_rows(rows)
                     return
 
-    def _insert_packet_stream_row(self, data_json: str, row_type: str, log_prefix: str = "packet data"):
-        """Queue one row for batched insertion into packet_stream by the drain thread."""
-        item = (time.time(), data_json, row_type)
+    def _insert_packet_stream_row(
+        self,
+        data_json: str,
+        row_type: str,
+        log_prefix: str = "packet data",
+        dims: tuple | None = None,
+    ):
+        """Queue one row for batched insertion into packet_stream by the drain thread.
+
+        ``dims`` carries the denormalized (route_type_name, payload_type_name,
+        path_len, bytes_per_hop) values for packet rows; command/message/other
+        row types pass None and store NULLs.
+        """
+        item = (time.time(), data_json, row_type, *(dims or (None, None, None, None)))
         try:
             self._write_queue.put(item, timeout=self._WRITE_QUEUE_PUT_TIMEOUT_SEC)
         except queue.Full:
@@ -382,10 +473,49 @@ class BotIntegration:
             serializable_data = self._make_json_serializable(packet_data)
 
             # Store in database for web viewer to read (retries on database is locked)
-            self._insert_packet_stream_row(json.dumps(serializable_data), 'packet', "packet data")
+            self._insert_packet_stream_row(
+                json.dumps(serializable_data),
+                'packet',
+                "packet data",
+                dims=self._packet_dims_from_data(serializable_data),
+            )
 
         except Exception as e:
             self.bot.logger.warning(f"Error storing packet data for web viewer: {e}")
+
+    @staticmethod
+    def _packet_dims_from_data(packet_data: dict) -> tuple:
+        """Pull the denormalized dimension values out of an already-parsed packet.
+
+        Returns (route_type_name, payload_type_name, path_len, bytes_per_hop),
+        with None for anything absent or non-coercible — the dashboard reads
+        these as "unknown" rather than mis-bucketing the packet.
+        """
+        def _text(key: str) -> str | None:
+            value = packet_data.get(key)
+            if value is None or isinstance(value, (dict, list)):
+                return None
+            text = str(value).strip()
+            return text[:32] or None
+
+        def _number(key: str) -> int | None:
+            value = packet_data.get(key)
+            if value is None or isinstance(value, bool):
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        return (
+            # Never NULL: route_type_name is the dashboard's "this row has been
+            # dimensioned" marker, and a NULL would put the row back in the
+            # refresher's backfill queue on every tick.
+            _text('route_type_name') or 'UNKNOWN_ROUTE',
+            _text('payload_type_name'),
+            _number('path_len'),
+            _number('bytes_per_hop'),
+        )
 
     def capture_command(self, message, command_name, response, success, command_id=None):
         """Capture command data and store in database for web viewer"""
@@ -473,7 +603,6 @@ class BotIntegration:
         Uses [Data_Retention] packet_stream_retention_days when days_to_keep is not provided."""
         try:
             import sqlite3
-            import time
 
             if days_to_keep is None:
                 days_to_keep = 3
@@ -484,14 +613,31 @@ class BotIntegration:
             cutoff_time = time.time() - (days_to_keep * 24 * 60 * 60)
 
             db_path = self._get_web_viewer_db_path()
-            with closing(sqlite3.connect(str(db_path), timeout=self.sqlite_connect_timeout_sec)) as conn:
-                cursor = conn.cursor()
+            batch_size, pause_seconds = retention_delete_settings(self.bot.config)
 
-                # Clean up old packet stream data
-                cursor.execute('DELETE FROM packet_stream WHERE timestamp < ?', (cutoff_time,))
-                deleted_count = cursor.rowcount
+            @contextmanager
+            def cleanup_connection():
+                with closing(
+                    sqlite3.connect(
+                        str(db_path),
+                        timeout=self.sqlite_connect_timeout_sec,
+                    )
+                ) as conn:
+                    conn.execute(
+                        f"PRAGMA busy_timeout={int(self.sqlite_connect_timeout_sec * 1000)}"
+                    )
+                    yield conn
 
-                conn.commit()
+            deleted_count = delete_timestamp_rows_in_chunks(
+                cleanup_connection,
+                'packet_stream',
+                'timestamp',
+                cutoff_time,
+                batch_size=batch_size,
+                pause_seconds=pause_seconds,
+                logger=self.bot.logger,
+                progress_label='packet stream',
+            )
 
             if deleted_count > 0:
                 self.bot.logger.info(f"Cleaned up {deleted_count} old packet stream entries (older than {days_to_keep} days)")
@@ -695,10 +841,84 @@ class WebViewerIntegration:
                     "host = 127.0.0.1 for local-only access."
                 )
 
+    def _resolve_viewer_db_path(self) -> Path:
+        """Return the database path the viewer subprocess will use."""
+        config_path = getattr(self.bot, 'config_file', 'config.ini')
+        config_base = Path(config_path).resolve().parent if config_path else Path(".").resolve()
+        if self.bot.config.has_section('Web_Viewer') and self.bot.config.has_option('Web_Viewer', 'db_path'):
+            raw = self.bot.config.get('Web_Viewer', 'db_path', fallback='').strip()
+            if raw:
+                return Path(resolve_path(raw, config_base))
+        return Path(self.bot.db_manager.db_path)
+
+    def _preflight_database_path(self) -> bool:
+        """Validate the web viewer DB path before spawning the subprocess."""
+        try:
+            db_path = self._resolve_viewer_db_path()
+        except Exception as e:
+            self.logger.error("Web viewer database path could not be resolved: %s", e)
+            return False
+
+        parent = db_path.parent if db_path.parent != Path("") else Path(".")
+        parent_exists = parent.exists()
+        parent_is_dir = parent.is_dir() if parent_exists else False
+        parent_writable = os.access(str(parent), os.W_OK) if parent_exists else False
+        file_exists = db_path.exists()
+        file_readable = os.access(str(db_path), os.R_OK) if file_exists else False
+        file_writable = os.access(str(db_path), os.W_OK) if file_exists else False
+
+        self.logger.info("Web viewer database path: %s", db_path)
+
+        if not parent_exists:
+            self.logger.error(
+                "Web viewer database parent directory does not exist: %s. "
+                "Create it, fix [Web_Viewer] db_path, or remove [Web_Viewer] db_path to use [Bot] db_path.",
+                parent,
+            )
+            return False
+        if not parent_is_dir:
+            self.logger.error(
+                "Web viewer database parent path is not a directory: %s. "
+                "Fix [Web_Viewer] db_path or remove it to use [Bot] db_path.",
+                parent,
+            )
+            return False
+        if not parent_writable:
+            self.logger.error(
+                "Web viewer database parent directory is not writable: %s. "
+                "Fix permissions or choose a writable db_path.",
+                parent,
+            )
+            return False
+        if file_exists and (not file_readable or not file_writable):
+            self.logger.error(
+                "Web viewer database file is not readable and writable: %s "
+                "(readable=%s, writable=%s). Fix file permissions.",
+                db_path,
+                file_readable,
+                file_writable,
+            )
+            return False
+
+        if self.bot.config.has_section('Web_Viewer') and self.bot.config.get('Web_Viewer', 'db_path', fallback='').strip():
+            bot_db_path = Path(self.bot.db_manager.db_path)
+            if db_path.resolve() != bot_db_path.resolve():
+                self.logger.warning(
+                    "Web viewer database path differs from bot database: viewer=%s, bot=%s. "
+                    "Remove [Web_Viewer] db_path unless you intentionally use a separate viewer database.",
+                    db_path,
+                    bot_db_path,
+                )
+        return True
+
     def start_viewer(self):
         """Start the web viewer in a separate thread"""
         if self.running:
             self.logger.warning("Web viewer is already running")
+            return
+
+        if not self._preflight_database_path():
+            self.running = False
             return
 
         # Intentional (re)start after stop_viewer / restart_viewer — allow monitor thread to run
@@ -797,10 +1017,30 @@ class WebViewerIntegration:
         except Exception as e:
             self.logger.error(f"Error stopping web viewer: {e}")
 
+    def _viewer_log_dir(self, config_path: str) -> Path | None:
+        """Return directory for viewer stdout/stderr files, or None for journal-only.
+
+        Mirrors the main bot: empty [Logging] log_file means console/journal only
+        (no files under the install tree). When set, use that file's parent
+        (e.g. /var/log/meshcore-bot).
+        """
+        log_file = ''
+        try:
+            if self.bot.config.has_section('Logging'):
+                log_file = self.bot.config.get('Logging', 'log_file', fallback='').strip()
+        except Exception:
+            log_file = ''
+        if not log_file:
+            return None
+        config_base = Path(config_path).parent.resolve()
+        return Path(resolve_path(log_file, config_base)).parent
+
     def _run_viewer(self):
         """Run the web viewer in a separate process"""
         stdout_file = None
         stderr_file = None
+        stdout_path = None
+        stderr_path = None
 
         try:
             # Get the path to the web viewer script
@@ -821,28 +1061,35 @@ class WebViewerIntegration:
             if self.debug:
                 cmd.append("--debug")
 
-            # Ensure logs directory exists
-            os.makedirs('logs', exist_ok=True)
+            # Avoid PIPE deadlock: either inherit stdio (journald under systemd)
+            # or redirect to files beside the configured log_file.
+            log_dir = self._viewer_log_dir(config_path)
+            if log_dir is None:
+                # Inherit parent stdout/stderr so systemd/journald captures them.
+                # Do not create ./logs under the (often read-only) install tree.
+                popen_stdout = None
+                popen_stderr = None
+            else:
+                log_dir.mkdir(parents=True, exist_ok=True)
+                stdout_path = log_dir / 'web_viewer_stdout.log'
+                stderr_path = log_dir / 'web_viewer_stderr.log'
+                # Open in write mode to prevent buffer blocking. Using 'w'
+                # (overwrite) instead of 'a' (append) since:
+                # - The web viewer already has proper logging to web_viewer.log
+                # - stdout/stderr are mainly for immediate debugging
+                # - Prevents unbounded log file growth
+                stdout_file = open(stdout_path, 'w')
+                stderr_file = open(stderr_path, 'w')
+                self._viewer_stdout_file = stdout_file
+                self._viewer_stderr_file = stderr_file
+                popen_stdout = stdout_file
+                popen_stderr = stderr_file
 
-            # Open log files in write mode to prevent buffer blocking
-            # This fixes the issue where subprocess.PIPE buffers (~64KB) fill up
-            # after ~5 minutes and cause the subprocess to hang.
-            # Using 'w' mode (overwrite) instead of 'a' (append) since:
-            # - The web viewer already has proper logging to web_viewer_modern.log
-            # - stdout/stderr are mainly for immediate debugging
-            # - Prevents unbounded log file growth
-            stdout_file = open('logs/web_viewer_stdout.log', 'w')
-            stderr_file = open('logs/web_viewer_stderr.log', 'w')
-
-            # Store file handles for proper cleanup
-            self._viewer_stdout_file = stdout_file
-            self._viewer_stderr_file = stderr_file
-
-            # Start the viewer process with log file redirection
+            # Start the viewer process
             self.viewer_process = subprocess.Popen(
                 cmd,
-                stdout=stdout_file,
-                stderr=stderr_file,
+                stdout=popen_stdout,
+                stderr=popen_stderr,
                 text=True
             )
 
@@ -852,32 +1099,37 @@ class WebViewerIntegration:
             # Check if it started successfully
             if self.viewer_process and self.viewer_process.poll() is not None:
                 # Process failed immediately - read from log files for error reporting
-                stdout_file.flush()
-                stderr_file.flush()
-
-                # Read last few lines from stderr for error reporting
-                try:
-                    stderr_file.close()
-                    with open('logs/web_viewer_stderr.log') as f:
-                        stderr_lines = f.readlines()[-20:]  # Last 20 lines
-                        stderr = ''.join(stderr_lines)
-                except Exception:
-                    stderr = "Could not read stderr log"
-
-                # Read last few lines from stdout for error reporting
-                try:
-                    stdout_file.close()
-                    with open('logs/web_viewer_stdout.log') as f:
-                        stdout_lines = f.readlines()[-20:]  # Last 20 lines
-                        stdout = ''.join(stdout_lines)
-                except Exception:
-                    stdout = "Could not read stdout log"
+                stderr = ""
+                stdout = ""
+                if stderr_file is not None and stderr_path is not None:
+                    with suppress(Exception):
+                        stderr_file.flush()
+                        stderr_file.close()
+                    try:
+                        with open(stderr_path) as f:
+                            stderr = ''.join(f.readlines()[-20:])
+                    except Exception:
+                        stderr = "Could not read stderr log"
+                if stdout_file is not None and stdout_path is not None:
+                    with suppress(Exception):
+                        stdout_file.flush()
+                        stdout_file.close()
+                    try:
+                        with open(stdout_path) as f:
+                            stdout = ''.join(f.readlines()[-20:])
+                    except Exception:
+                        stdout = "Could not read stdout log"
 
                 self.logger.error(f"Web viewer failed to start. Return code: {self.viewer_process.returncode}")
                 if stderr and stderr.strip():
                     self.logger.error(f"Web viewer startup error: {stderr}")
                 if stdout and stdout.strip():
                     self.logger.error(f"Web viewer startup output: {stdout}")
+                elif log_dir is None:
+                    self.logger.error(
+                        "Web viewer startup output is in the service journal "
+                        "(empty [Logging] log_file; stdio inherited)"
+                    )
 
                 self.viewer_process = None
                 self._viewer_stdout_file = None
@@ -912,25 +1164,28 @@ class WebViewerIntegration:
 
             # Process exited - read from log files for error reporting if needed
             if self.viewer_process and self.viewer_process.returncode != 0:
-                stdout_file.flush()
-                stderr_file.flush()
-
-                # Read last few lines from stderr for error reporting
-                try:
-                    stderr_file.close()
-                    with open('logs/web_viewer_stderr.log') as f:
-                        stderr_lines = f.readlines()[-20:]  # Last 20 lines
-                        stderr = ''.join(stderr_lines)
-                except Exception:
-                    stderr = "Could not read stderr log"
-
-                # Close stdout file as well
-                with suppress(Exception):
-                    stdout_file.close()
+                stderr = ""
+                if stderr_file is not None and stderr_path is not None:
+                    with suppress(Exception):
+                        stderr_file.flush()
+                        stderr_file.close()
+                    try:
+                        with open(stderr_path) as f:
+                            stderr = ''.join(f.readlines()[-20:])
+                    except Exception:
+                        stderr = "Could not read stderr log"
+                if stdout_file is not None:
+                    with suppress(Exception):
+                        stdout_file.close()
 
                 self.logger.error(f"Web viewer process exited with code {self.viewer_process.returncode}")
                 if stderr and stderr.strip():
                     self.logger.error(f"Web viewer stderr: {stderr}")
+                elif log_dir is None:
+                    self.logger.error(
+                        "Web viewer stderr is in the service journal "
+                        "(empty [Logging] log_file; stdio inherited)"
+                    )
 
                 self._viewer_stdout_file = None
                 self._viewer_stderr_file = None

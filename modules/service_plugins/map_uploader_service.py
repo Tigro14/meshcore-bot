@@ -55,6 +55,21 @@ class MapUploaderService(BaseServicePlugin):
     config_section = 'MapUploader'  # Explicit config section
     description = "Uploads node adverts to map.meshcore.dev"
 
+    # Web-viewer settings schema (see modules/settings_schema.py)
+    settings_schema = [
+        {"key": "api_url", "label": "API URL", "type": "str",
+         "default": "https://map.meshcore.dev/api/v1/uploader/node",
+         "help": "map.meshcore.dev upload endpoint."},
+        {"key": "private_key_path", "label": "Private key path", "type": "str", "default": "",
+         "help": "Optional file with the device private key for signing uploads. "
+                 "If unset, the service tries to fetch it from the device."},
+        {"key": "min_reupload_interval", "label": "Min re-upload interval", "type": "int",
+         "min": 0, "default": 3600, "unit": "s",
+         "help": "Minimum seconds between re-uploads of the same node."},
+        {"key": "verbose", "label": "Verbose logging", "type": "bool", "default": False,
+         "help": "Detailed debug logging of upload data and signatures."},
+    ]
+
     def __init__(self, bot: Any):
         """Initialize map uploader service.
 
@@ -249,6 +264,14 @@ class MapUploaderService(BaseServicePlugin):
         self.connected = True
         self._running = True
         self.logger.info("Map uploader service started")
+
+    async def on_transport_reconnected(self) -> None:
+        """Re-register RX_LOG_DATA handler on the new meshcore instance."""
+        if not self._running or not self.meshcore:
+            return
+        self._cleanup_event_subscriptions()
+        await self._setup_event_handlers()
+        self.logger.info("Map uploader event handlers re-registered after transport reconnect")
 
     async def stop(self) -> None:
         """Stop the map uploader service.

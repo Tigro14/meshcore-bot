@@ -48,7 +48,7 @@ class StatusCommand(BaseCommand):
         return True
 
     async def execute(self, message: MeshMessage) -> bool:
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         connected = bool(getattr(self.bot, "connected", False))
         radio_zombie = bool(getattr(self.bot, "is_radio_zombie", False))
         radio_offline = bool(getattr(self.bot, "is_radio_offline", False))
@@ -60,14 +60,14 @@ class StatusCommand(BaseCommand):
 
         paused = not bool(getattr(self.bot, "channel_responses_enabled", True))
 
+        # Keep under DM budget (158 UTF-8 bytes); long labels caused ERR_CODE_TABLE_FULL.
         status_text = (
-            "Bot Status\n"
-            f"- time: {now}\n"
-            f"- connected: {connected}\n"
-            f"- radio_zombie: {radio_zombie}\n"
-            f"- radio_offline: {radio_offline}\n"
-            f"- channel_responses_paused: {paused}\n"
-            f"- web_viewer_running: {web_running}"
+            f"Status {now}\n"
+            f"connected: {connected}\n"
+            f"radio_zombie: {radio_zombie}\n"
+            f"radio_offline: {radio_offline}\n"
+            f"ch_paused: {paused}\n"
+            f"web: {web_running}"
         )
         await self.send_response(message, status_text)
         return True

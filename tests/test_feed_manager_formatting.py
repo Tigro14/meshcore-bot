@@ -59,6 +59,43 @@ class TestApplyShortening:
         result = fm._apply_shortening("closed", "if_regex:open:YES:NO")
         assert result == "NO"
 
+    def test_truncate_hard_short_text_unchanged(self, fm):
+        assert fm._apply_shortening("hello", "truncate_hard:20") == "hello"
+
+    def test_truncate_hard_no_ellipsis(self, fm):
+        result = fm._apply_shortening("Hello World", "truncate_hard:5")
+        assert result == "Hello"
+
+    def test_truncate_hard_exact_length_unchanged(self, fm):
+        assert fm._apply_shortening("Hello", "truncate_hard:5") == "Hello"
+
+    def test_truncate_hard_bad_arg_returns_text(self, fm):
+        assert fm._apply_shortening("Hello", "truncate_hard:abc") == "Hello"
+
+    def test_substr_start_and_length(self, fm):
+        # JS-style substr(start, length): offset 6, 5 chars
+        assert fm._apply_shortening("Hello World", "substr:6,5") == "World"
+
+    def test_substr_start_only(self, fm):
+        assert fm._apply_shortening("Hello World", "substr:6") == "World"
+
+    def test_substr_length_beyond_end_clamps(self, fm):
+        assert fm._apply_shortening("Hello", "substr:0,100") == "Hello"
+
+    def test_substr_bad_arg_returns_text(self, fm):
+        assert fm._apply_shortening("Hello", "substr:x,y") == "Hello"
+
+    def test_shorten_chain_applies_truncate_hard(self, fm, monkeypatch):
+        # shorten|truncate_hard:N should shorten first, then hard-truncate the result
+        import modules.feed_format as feed_format
+
+        monkeypatch.setattr(
+            feed_format, "shorten_url_sync", lambda *a, **k: "https://sho.rt/abcdef"
+        )
+        result = fm._apply_shortening("https://example.com/very/long", "shorten|truncate_hard:12")
+        assert result == "https://sho."
+        assert not result.endswith("...")
+
     def test_empty_text_returns_empty(self, fm):
         assert fm._apply_shortening("", "truncate:10") == ""
 

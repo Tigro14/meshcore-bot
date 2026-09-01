@@ -176,6 +176,30 @@ test = ack
         )
 
 
+class TestExampleConfigsHaveNoUnknownSections:
+    """Regression test for #215: shipped example configs must not trigger
+    'Unknown section' info messages, i.e. CANONICAL_NON_COMMAND_SECTIONS must
+    stay in sync with the sections actually used in the example files."""
+
+    def test_example_configs_have_no_unknown_sections(self):
+        base = Path(__file__).resolve().parent.parent
+        example_files = [
+            "config.ini.example",
+            "config.ini.minimal-example",
+            "config.ini.quickstart",
+        ]
+        for filename in example_files:
+            path = base / filename
+            if not path.exists():
+                continue
+            results = validate_config(str(path))
+            unknown = [
+                r for r in results
+                if r[0] == SEVERITY_INFO and "not in canonical list" in r[1]
+            ]
+            assert unknown == [], f"{filename} has unrecognized sections: {unknown}"
+
+
 class TestPathValidation:
     """Tests for path writability validation."""
 

@@ -34,7 +34,8 @@
     }
 
     /**
-     * Poll GET /api/channel-operations/:id until completed, failed, or timeouts.
+     * Poll GET /api/channel-operations/:id until completed, failed,
+     * interrupted, or timeouts.
      * Behavior aligned with legacy radio.html pollOperationStatus.
      *
      * @param {number} operationId
@@ -48,7 +49,7 @@
      * @param {number} [options.maxWaitSeconds=60]
      * @param {number} [options.extendedMaxWaitSeconds=120]
      * @param {number} [options.checkIntervalMs=1000]
-     * @returns {Promise<'completed'|'failed'|'timeout'>}
+     * @returns {Promise<'completed'|'failed'|'interrupted'|'timeout'>}
      */
     function pollChannelOperation(operationId, options) {
         options = options || {};
@@ -95,12 +96,12 @@
                     if (result.status === 'completed') {
                         return 'completed';
                     }
-                    if (result.status === 'failed') {
+                    if (result.status === 'failed' || result.status === 'interrupted') {
                         if (typeof options.onFailed === 'function') {
                             options.onFailed(result.error_message || 'Channel operation failed');
                         }
                         resetButton();
-                        return 'failed';
+                        return result.status;
                     }
                     var elapsed = Math.floor((Date.now() - startTime) / 1000);
                     setBtn(
@@ -122,12 +123,12 @@
                 if (result2.status === 'completed') {
                     return 'completed';
                 }
-                if (result2.status === 'failed') {
+                if (result2.status === 'failed' || result2.status === 'interrupted') {
                     if (typeof options.onFailed === 'function') {
                         options.onFailed(result2.error_message || 'Channel operation failed');
                     }
                     resetButton();
-                    return 'failed';
+                    return result2.status;
                 }
             } catch (error) {
                 console.error('Error checking final status:', error);
@@ -149,12 +150,12 @@
                     if (result3.status === 'completed') {
                         return 'completed';
                     }
-                    if (result3.status === 'failed') {
+                    if (result3.status === 'failed' || result3.status === 'interrupted') {
                         if (typeof options.onFailed === 'function') {
                             options.onFailed(result3.error_message || 'Channel operation failed');
                         }
                         resetButton();
-                        return 'failed';
+                        return result3.status;
                     }
                     var elapsed2 = Math.floor((Date.now() - startTime) / 1000);
                     setBtn(

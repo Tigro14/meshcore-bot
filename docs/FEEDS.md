@@ -30,8 +30,18 @@ feed_manager_enabled = true
 # Default check interval (seconds)
 default_check_interval_seconds = 300
 
-# Maximum items to process per check
+# Maximum items to *examine* per check (the scan window). Filtered-out items count
+# against this, so raise it for feeds with a long back-catalog behind a restrictive
+# filter (e.g. within_days) so the scan can reach the newer passing items.
+# Values below 1 are clamped to 1.
 max_items_per_check = 10
+
+# Maximum items to *post* per check. Defaults to max_items_per_check when unset, so
+# existing installs are unchanged. Cap this (while raising max_items_per_check) to scan
+# deep without flooding a channel in a single poll. Values below 1 are clamped to 1;
+# to stop posting entirely set feed_manager_enabled = false, or disable one feed with
+# `feed disable <id>`.
+max_posts_per_check = 10
 
 # HTTP request timeout (seconds)
 feed_request_timeout = 30
@@ -116,12 +126,24 @@ The web interface provides separate input fields for each configuration option. 
     "id_field": "id",
     "title_field": "title",
     "description_field": "description",
-    "timestamp_field": "created_at"
+    "timestamp_field": "created_at",
+    "emoji_field": "emoji"
   }
 }
 ```
 **Filter Configuration:** (leave empty)  
 **Sort Configuration:** (leave empty)
+
+**`response_parser` fields:**
+
+- `items_path` - Dot path to the list of items in the response (empty if the response is itself a list)
+- `id_field` - Field used to deduplicate items (default `id`)
+- `title_field` - Field for `{title}` (default `title`)
+- `description_field` - Field for `{body}` (default `description`)
+- `timestamp_field` - Field parsed for `{date}` (default `created_at`)
+- `emoji_field` - Field for a per-item emoji used by `{emoji}` (default `emoji`). When present and non-empty it overrides the feed-name emoji heuristic; useful when an upstream/proxy API supplies its own emoji.
+
+All fields support nested paths and array indices (e.g. `roads.0.name`).
 
 ### WSDOT Highway Alerts Example
 
@@ -185,7 +207,7 @@ The output format string controls how feed items are formatted before sending to
 - `{body}` - Item description/body text
 - `{date}` - Relative time (e.g., "5m ago", "2h 30m ago")
 - `{link}` - Item URL
-- `{emoji}` - Auto-selected emoji based on feed name (📢, 🚨, ⚠️, ℹ️)
+- `{emoji}` - Per-item emoji from the API `emoji_field` if present, otherwise auto-selected based on feed name (📢, 🚨, ⚠️, ℹ️)
 - `{raw.field}` - Access raw API data fields (API feeds only)
 - `{raw.nested.field}` - Access nested API fields (e.g., `{raw.StartRoadwayLocation.RoadName}`)
 
@@ -195,7 +217,10 @@ Apply functions to placeholders using the pipe operator:
 
 - `{field|auto}` - Use the **remaining** characters up to `max_message_length` (from `[Feed_Manager]`). The format string is read **left to right**: every placeholder **before** `{field|auto}` is rendered, then every placeholder **after** it; the space left in the message is filled with that field’s text. If the text is longer than that space, it is cut with `...` (same idea as `truncate:N`). Use **at most one** `{field|auto}` per format. If more than one appears, the bot logs a warning, **only the first** expands, and any extra `{field|auto}` render **empty**. If the fixed prefix and suffix already exceed `max_message_length`, the auto segment is empty and the normal end-of-message truncation may still run.
 
-- `{field|truncate:N}` - Truncate to N characters
+- `{field|truncate:N}` - Truncate to N characters (appends `...` if cut)
+- `{field|truncate_hard:N}` - Truncate to N characters without appending `...`
+- `{field|substr:N}` - Substring from offset N to the end
+- `{field|substr:N,M}` - Substring of M characters starting at offset N (JS-style `substr`)
 - `{field|word_wrap:N}` - Wrap at N characters, breaking at word boundaries
 - `{field|first_words:N}` - Take first N words
 

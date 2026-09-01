@@ -11,7 +11,7 @@ import os
 import sys
 import types
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from .service_plugins.base_service import BaseServicePlugin
 
@@ -101,7 +101,7 @@ class ServicePluginLoader:
                 module = importlib.import_module(module_path)
 
             # Find the service class (should inherit from BaseServicePlugin)
-            service_class = None
+            service_class: type[Any] | None = None
             for _name, obj in inspect.getmembers(module, inspect.isclass):
                 if (issubclass(obj, BaseServicePlugin) and
                     obj != BaseServicePlugin and
@@ -163,14 +163,14 @@ class ServicePluginLoader:
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
-            service_class = None
+            service_class: type[Any] | None = None
             # Accept BaseServicePlugin from built-in (modules.service_plugins) or from local_services.base_service
             # (same code loaded as different module when plugin does "from .base_service import BaseServicePlugin")
-            bases = [BaseServicePlugin]
+            bases: list[type[Any]] = [BaseServicePlugin]
             local_base_module = sys.modules.get("local_services.base_service")
             if local_base_module is not None:
                 local_base = getattr(local_base_module, "BaseServicePlugin", None)
-                if local_base is not None:
+                if inspect.isclass(local_base):
                     bases.append(local_base)
             for _name, obj in inspect.getmembers(module, inspect.isclass):
                 if obj in bases:
@@ -195,7 +195,11 @@ class ServicePluginLoader:
                     f"Local service {stem} config section '{config_section}' exists but 'enabled' not set, skipping"
                 )
                 return None
-            service_instance = service_class(self.bot)
+            # A local plugin may inherit from the same base module loaded under
+            # the ``local_services`` namespace.  The runtime checks above prove
+            # it has the BaseServicePlugin interface even though static typing
+            # cannot identify the duplicate import as the canonical class.
+            service_instance = cast(BaseServicePlugin, service_class(self.bot))
             metadata = service_instance.get_metadata()
             if not metadata.get('name'):
                 metadata['name'] = service_class.__name__.lower().replace('service', '')
@@ -320,4 +324,3 @@ class ServicePluginLoader:
             issues.append("Service 'stop' method must be async")
 
         return issues
-

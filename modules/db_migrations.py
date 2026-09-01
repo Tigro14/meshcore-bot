@@ -490,52 +490,315 @@ def _m0012_purging_log_details_column(cursor: sqlite3.Cursor) -> None:
         _add_column(cursor, "purging_log", "details", "TEXT")
 
 
-def _m0013_bbs_messages_table(cursor: sqlite3.Cursor) -> None:
-    """Create bbs_messages table for per-user store-and-forward BBS service."""
-    cursor.execute(
+def _m0013_observed_paths_advert_covering_index(cursor: sqlite3.Cursor) -> None:
+    """Covering index for the contacts-page recent-advert-paths window query.
+
+    Lets the ROW_NUMBER() OVER (PARTITION BY public_key ORDER BY last_seen DESC)
+    scan in the contacts API run as an ordered index scan over advert rows,
+    avoiding a full materialization + temp B-tree sort of observed_paths.
+    """
+    if not _table_exists(cursor, "observed_paths"):
+        return
+    cursor.executescript(
         """
-        CREATE TABLE IF NOT EXISTS bbs_messages (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_id      TEXT NOT NULL,
-            sender_name    TEXT,
-            recipient_name TEXT NOT NULL,
-            message        TEXT NOT NULL,
-            sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            read_at        TIMESTAMP
-        )
+        CREATE INDEX IF NOT EXISTS idx_observed_paths_advert_pk_seen
+            ON observed_paths(public_key, last_seen DESC, path_hex, path_length,
+                              bytes_per_hop, observation_count)
+            WHERE packet_type = 'advert';
         """
-    )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_bbs_recipient "
-        "ON bbs_messages(recipient_name, read_at)"
-    )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_bbs_sent_at ON bbs_messages(sent_at)"
     )
 
 
-def _m0014_clock_sync_admin_log(cursor: sqlite3.Cursor) -> None:
-    """Create clock_sync_admin_log table for tracking sync job success."""
+def _m0014_observed_paths_multibyte_covering_index(cursor: sqlite3.Cursor) -> None:
+    """Partial covering index for the mesh-graph multibyte evidence query.
+
+    /api/mesh/edges?evidence=multibyte reads every multi-byte path row
+    (bytes_per_hop >= 2, roughly a fifth of observed_paths); without an index
+    that is a full scan of the widest table in the database (~2s at 700k
+    rows). This partial index covers the query's columns, so it never touches
+    the table, and last_seen in slot 2 keeps the optional days filter indexed.
+    """
+    if not _table_exists(cursor, "observed_paths"):
+        return
+    cursor.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_observed_paths_multibyte
+            ON observed_paths(bytes_per_hop, last_seen, path_hex,
+                              observation_count, first_seen)
+            WHERE bytes_per_hop >= 2;
+        """
+    )
+
+
+def _m0015_channel_operations_claimed_at(cursor: sqlite3.Cursor) -> None:
+    """Record when a queued hardware/config operation is durably claimed.
+
+    A ``processing`` row is deliberately not auto-requeued: after a process
+    crash the device may already have applied the operation, so retrying it
+    automatically could execute a non-idempotent command twice.  ``claimed_at``
+    gives operators enough information to diagnose and explicitly resolve such
+    an ambiguous operation.
+    """
+    if _table_exists(cursor, "channel_operations"):
+        _add_column(cursor, "channel_operations", "claimed_at", "TIMESTAMP")
+
+
+def _m0016_channel_operations_claim_owner(cursor: sqlite3.Cursor) -> None:
+    """Persist enough local-process identity to recover only provably dead claims."""
+    if not _table_exists(cursor, "channel_operations"):
+        return
+    _add_column(cursor, "channel_operations", "claim_owner_host", "TEXT")
+    _add_column(cursor, "channel_operations", "claim_owner_pid", "INTEGER")
+    _add_column(cursor, "channel_operations", "claim_owner_boot_id", "TEXT")
+
+
+def _m0017_feed_queue_item_uniqueness(cursor: sqlite3.Cursor) -> None:
+    """Deduplicate identifiable queue items and prevent future duplicates.
+
+    Blank and NULL item IDs deliberately remain unconstrained: without a stable
+    provider identifier they cannot safely be treated as the same feed item.
+    For duplicate valid IDs, retain a sent row when one exists (otherwise the
+    oldest queued row) so migration does not resurrect already-delivered work.
+    """
+    if not _table_exists(cursor, "feed_message_queue"):
+        return
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS clock_sync_admin_log (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            public_key     TEXT NOT NULL,
-            target_name    TEXT NOT NULL,
-            success        BOOLEAN NOT NULL,
-            error_message  TEXT,
-            sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        DELETE FROM feed_message_queue
+        WHERE item_id IS NOT NULL AND trim(item_id) <> ''
+          AND id NOT IN (
+              SELECT COALESCE(
+                         MIN(CASE WHEN sent_at IS NOT NULL THEN id END),
+                         MIN(id)
+                     )
+              FROM feed_message_queue
+              WHERE item_id IS NOT NULL AND trim(item_id) <> ''
+              GROUP BY feed_id, item_id
+          )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_fmq_feed_item_unique
+        ON feed_message_queue(feed_id, item_id)
+        WHERE item_id IS NOT NULL AND trim(item_id) <> ''
+        """
+    )
+
+
+def _m0018_dashboard_rollup_tables(cursor: sqlite3.Cursor) -> None:
+    """Durable dashboard storage: per-day rollups plus a current-state snapshot.
+
+    ``daily_rollup`` holds one row per local date for the metrics whose raw
+    sources are pruned long before the dashboard's 30-day window (message_stats
+    and friends at 7 days, packet_stream at 3).  Signal metrics are stored as
+    sums and counts rather than means so an arbitrary window re-aggregates
+    correctly — averaging daily averages weights a quiet day the same as a busy
+    one.  Every numeric column is nullable on purpose: NULL means "no source
+    data for this day", which the UI must render as a gap, while 0 means "the
+    source was present and the count really was zero".
+
+    ``dashboard_snapshot`` is a single row of JSON.  The current-state half of
+    the dashboard is ~40 heterogeneous scalars and small arrays that are read
+    together and never queried by field, so columnizing it would cost a
+    migration per new tile for no query benefit.
+    """
+    cursor.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS daily_rollup (
+            date                     TEXT PRIMARY KEY,
+            messages_total INTEGER, messages_dm INTEGER, messages_channel INTEGER,
+            unique_senders INTEGER, unique_channels INTEGER,
+            commands_total INTEGER, commands_replied INTEGER, unique_command_users INTEGER,
+            path_obs_total INTEGER, path_len_max INTEGER, path_len_sum INTEGER,
+            snr_sum REAL, snr_count INTEGER, rssi_sum REAL, rssi_count INTEGER,
+            hops_sum INTEGER, hops_count INTEGER,
+            packets_total INTEGER, packets_flood INTEGER, packets_direct INTEGER,
+            packets_multibyte INTEGER,
+            adverts_total INTEGER, nodes_active INTEGER, nodes_new INTEGER,
+            adverts_from_multibyte INTEGER, adverts_from_singlebyte INTEGER,
+            contacts_known INTEGER, contacts_tracked INTEGER,
+            sources_present INTEGER NOT NULL DEFAULT 0,
+            is_backfilled   INTEGER NOT NULL DEFAULT 0,
+            is_final        INTEGER NOT NULL DEFAULT 0,
+            computed_at     TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_rollup_computed ON daily_rollup(computed_at);
+
+        CREATE TABLE IF NOT EXISTS dashboard_snapshot (
+            id           INTEGER PRIMARY KEY CHECK (id = 1),
+            generated_at REAL NOT NULL,
+            duration_ms  INTEGER,
+            schema_rev   INTEGER NOT NULL DEFAULT 1,
+            payload      TEXT NOT NULL
+        );
+        """
+    )
+
+
+def _m0019_packet_stream_denorm_dims(cursor: sqlite3.Cursor) -> None:
+    """Denormalize the four packet dimensions the dashboard aggregates on.
+
+    Counting packets by bytes_per_hop or route type via
+    ``json_extract(data, '$.…')`` is a full scan that parses every row's JSON:
+    ~3s for bytes_per_hop and ~6s for route_type_name on a 178k-row table.
+    The writer already holds these values as parsed fields, so storing them as
+    columns removes the parse entirely.
+
+    Deliberately no bulk UPDATE here.  packet_stream rows average ~1KB, so
+    widening 178k of them rewrites ~180MB into the WAL inside MigrationRunner's
+    transaction — a multi-minute stall blocking bot startup on an SD-card Pi.
+    The dashboard refresher backfills a bounded batch per tick instead, and the
+    table's 3-day retention makes the gap self-healing regardless.
+    """
+    if not _table_exists(cursor, "packet_stream"):
+        return
+    _add_column(cursor, "packet_stream", "route_type_name", "TEXT")
+    _add_column(cursor, "packet_stream", "payload_type_name", "TEXT")
+    _add_column(cursor, "packet_stream", "path_len", "INTEGER")
+    _add_column(cursor, "packet_stream", "bytes_per_hop", "INTEGER")
+    cursor.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_packet_stream_dims
+            ON packet_stream(timestamp, bytes_per_hop, route_type_name, payload_type_name)
+            WHERE type = 'packet';
+
+        -- Worklist for the refresher's incremental backfill.  Without it, the
+        -- "any rows left to dimension?" probe is a full table scan that costs
+        -- ~4.6s on a 180MB packet_stream — and it costs that on every tick
+        -- *after* the backlog is empty, because finding nothing still means
+        -- reading everything.  The index shrinks toward empty as rows are
+        -- dimensioned, so the probe converges to a no-op.  It must carry
+        -- ``type`` as well: non-packet rows keep a NULL route type forever and
+        -- would otherwise leave the index permanently non-empty.
+        CREATE INDEX IF NOT EXISTS idx_packet_stream_undimensioned
+            ON packet_stream(type, id)
+            WHERE route_type_name IS NULL;
+        """
+    )
+
+
+def _m0020_mesh_connections_last_seen_index(cursor: sqlite3.Cursor) -> None:
+    """Add the table-specific time index used by graph windows and retention.
+
+    Older migrations attempted to create ``idx_last_seen`` for several tables.
+    SQLite index names are database-global, so the first table claimed that
+    name and ``mesh_connections`` was left without its intended index.
+    """
+    if not _table_exists(cursor, "mesh_connections"):
+        return
+
+    # Some older databases already have the generic ``idx_last_seen`` attached
+    # to this table.  Keep that usable index instead of building an identical
+    # second B-tree (which costs both storage and write amplification).
+    cursor.execute('PRAGMA index_list("mesh_connections")')
+    for index_row in cursor.fetchall():
+        index_name = index_row[1]
+        is_partial = bool(index_row[4]) if len(index_row) > 4 else False
+        cursor.execute(
+            "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
+            (index_name,),
         )
+        indexed_columns = [row[0] for row in cursor.fetchall()]
+        if not is_partial and indexed_columns == ["last_seen"]:
+            return
+
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_mesh_connections_last_seen
+            ON mesh_connections(last_seen)
         """
     )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_clock_sync_admin_log_pubkey "
-        "ON clock_sync_admin_log(public_key, sent_at DESC)"
+
+
+def _m0021_daily_rollup_packet_type_encoding(cursor: sqlite3.Cursor) -> None:
+    """Record the per-payload-type multibyte split on each rollup day.
+
+    ``packet_stream`` is pruned at three days, so the dashboard's 30-day
+    encoding trend cannot be recomputed from it after the fact — the split has
+    to be written as each day is rolled up, the same accumulate-forward shape
+    the advert share already uses.
+
+    One JSON column rather than a count pair per type: the payload-type
+    vocabulary belongs to the firmware, not to us, so a type appearing on the
+    mesh should not need a schema migration to be charted.
+    """
+    if not _table_exists(cursor, "daily_rollup"):
+        return
+    _add_column(cursor, "daily_rollup", "packet_type_encoding", "TEXT")
+
+
+def _m0022_neighbor_tables(cursor: sqlite3.Cursor) -> None:
+    """Tables for zero-hop neighbor discovery (see modules/neighbors_discovery.py).
+
+    A discover response is the strongest link evidence this codebase has: a
+    confirmed direct RF reception between two *full* 32-byte public keys, with a
+    measured SNR. Every other edge source is weaker — ``observed_paths`` carries
+    1–3 byte prefixes and no keys, and ``complete_contact_tracking.hop_count``
+    over-claims zero-hop. So these keep the full keys rather than prefixes, and
+    stay separate from ``mesh_connections``, which cannot represent provenance
+    (its ``confirmed_2byte`` flag is memory-only and never persisted).
+
+    Two tables because they answer different questions: ``neighbor_links`` is the
+    current adjacency the mesh graph reads, ``neighbor_observations`` is the
+    per-cycle history a signal trend needs. SNR is stored as sum+count rather
+    than a mean, matching ``daily_rollup``, so any window re-aggregates exactly.
+
+    Index names are database-global in SQLite (see the note on migration 20), so
+    every name here is table-qualified.
+    """
+    cursor.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS neighbor_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            self_public_key TEXT NOT NULL,
+            neighbor_public_key TEXT NOT NULL,
+            first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            observation_count INTEGER DEFAULT 1,
+            snr_sum REAL DEFAULT 0,
+            snr_count INTEGER DEFAULT 0,
+            best_snr REAL,
+            last_snr REAL,
+            last_status TEXT,
+            scopes TEXT,
+            UNIQUE(self_public_key, neighbor_public_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS neighbor_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            observed_at TIMESTAMP NOT NULL,
+            self_public_key TEXT NOT NULL,
+            neighbor_public_key TEXT NOT NULL,
+            snr REAL,
+            heard_secs_ago INTEGER,
+            scopes TEXT,
+            status TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_neighbor_links_last_seen
+            ON neighbor_links(last_seen);
+        CREATE INDEX IF NOT EXISTS idx_neighbor_links_neighbor
+            ON neighbor_links(neighbor_public_key);
+        CREATE INDEX IF NOT EXISTS idx_neighbor_observations_observed_at
+            ON neighbor_observations(observed_at);
+        CREATE INDEX IF NOT EXISTS idx_neighbor_observations_neighbor
+            ON neighbor_observations(neighbor_public_key, observed_at);
+        """
     )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_clock_sync_admin_log_sent_at "
-        "ON clock_sync_admin_log(sent_at)"
-    )
+
+
+def _m0023_observed_paths_zero_hop_signal(cursor: sqlite3.Cursor) -> None:
+    """SNR/RSSI on observed_paths for direct (zero-hop) advert rows.
+
+    Empty-path adverts are a confirmed last-hop-is-originator measurement, so
+    the figure belongs on the path row rather than on complete_contact_tracking
+    (whose hop_count over-claims zero-hop). Multi-hop rows leave these NULL.
+    """
+    if not _table_exists(cursor, "observed_paths"):
+        return
+    _add_column(cursor, "observed_paths", "snr", "REAL")
+    _add_column(cursor, "observed_paths", "rssi", "REAL")
 
 
 # ---------------------------------------------------------------------------
@@ -557,8 +820,17 @@ MIGRATIONS: list[MigrationEntry] = [
     (10, "create repeater/graph tables", _m0010_create_repeater_and_graph_tables),
     (11, "repeater/graph indexes", _m0011_repeater_and_graph_indexes),
     (12, "purging_log: add details column", _m0012_purging_log_details_column),
-    (13, "bbs_messages table", _m0013_bbs_messages_table),
-    (14, "clock_sync_admin_log table", _m0014_clock_sync_admin_log),
+    (13, "observed_paths: advert covering index for contacts page", _m0013_observed_paths_advert_covering_index),
+    (14, "observed_paths: multibyte covering index for mesh graph", _m0014_observed_paths_multibyte_covering_index),
+    (15, "channel_operations: claimed_at", _m0015_channel_operations_claimed_at),
+    (16, "channel_operations: claim owner identity", _m0016_channel_operations_claim_owner),
+    (17, "feed_message_queue: unique identifiable items", _m0017_feed_queue_item_uniqueness),
+    (18, "dashboard rollup and snapshot tables", _m0018_dashboard_rollup_tables),
+    (19, "packet_stream: denormalized packet dimensions", _m0019_packet_stream_denorm_dims),
+    (20, "mesh_connections: table-specific last_seen index", _m0020_mesh_connections_last_seen_index),
+    (21, "daily_rollup: per-payload-type multibyte split", _m0021_daily_rollup_packet_type_encoding),
+    (22, "neighbor discovery tables", _m0022_neighbor_tables),
+    (23, "observed_paths: snr/rssi for zero-hop adverts", _m0023_observed_paths_zero_hop_signal),
 ]
 
 

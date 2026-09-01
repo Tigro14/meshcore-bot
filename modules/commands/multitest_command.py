@@ -265,6 +265,25 @@ def _shrink_display_lcp(maximal: list[list[str]], lcp: list[str]) -> list[str]:
     return lcp
 
 
+def _cluster_head(common: str, suffix_tokens: list[list[str]]) -> str:
+    """Trunk line above a cluster's branch rows.
+
+    A path that stops exactly at the display LCP has an empty suffix, and the
+    branch renderers drop empty suffixes — so the trunk itself has to carry that
+    route. ``├ common`` (no ``┐``) is this file's marker for "a route ends here
+    and others continue"; ``common ┐`` means "everything continues past here".
+    Emitting ``┐`` in the first case silently lost the shortest path while the
+    header still counted it.
+
+    ``_shrink_display_lcp`` cannot cover this: it refuses to shrink below one
+    token, so a single-token LCP (the common case for ``96`` / ``96,e0``) always
+    lands here.
+    """
+    if any(len(t) == 0 for t in suffix_tokens):
+        return f"{_BRANCH_INTER} {common}"
+    return f"{common} {_BRANCH_CORNER}"
+
+
 def _format_path_cluster(token_lists: list[list[str]], use_brackets: bool) -> list[str]:
     """Format a cluster into condensed lines (common prefix + ┐ + ├/└, nested tails indented with 　).
 
@@ -293,7 +312,7 @@ def _format_path_cluster(token_lists: list[list[str]], use_brackets: bool) -> li
         common = ",".join(lcp)
         branch_lines = _format_suffix_branch_lines(suffix_tokens)
         if branch_lines:
-            lines = [f"{common} {_BRANCH_CORNER}"]
+            lines = [_cluster_head(common, suffix_tokens)]
             lines.extend(branch_lines)
         else:
             lines = [common]
@@ -328,7 +347,7 @@ def _format_path_cluster_flat(token_lists: list[list[str]], use_brackets: bool) 
         common = ",".join(lcp)
         branch_lines = _format_suffix_branch_lines_flat(suffix_tokens)
         if branch_lines:
-            lines = [f"{common} {_BRANCH_CORNER}"]
+            lines = [_cluster_head(common, suffix_tokens)]
             lines.extend(branch_lines)
         else:
             lines = [common]
@@ -486,13 +505,16 @@ def _format_path_cluster_nested(token_lists: list[list[str]], use_brackets: bool
     if len(lcp) > 0:
         suffix_tokens = [t[len(lcp) :] for t in token_lists]
         common = ",".join(lcp)
-        branch_lines = _nested_format_suffix_lines(suffix_tokens)
+        # Hand the branch renderer only the suffixes that actually continue.
+        # It strips its own LCP off every suffix, which maps an *empty* suffix
+        # (a route ending at ``common``) onto the same [] as a route ending at
+        # that inner LCP — making it emit a ``├ inner`` row for a route that
+        # does not exist. _cluster_head already represents the ends-at-common
+        # route on the trunk, so the empty suffix has no business here.
+        continuing = [s for s in suffix_tokens if s]
+        branch_lines = _nested_format_suffix_lines(continuing)
         if branch_lines:
-            nonempty_sfx = [s for s in suffix_tokens if s]
-            ne_lcp = _longest_common_prefix(nonempty_sfx) if nonempty_sfx else []
-            if any(len(t) == 0 for t in suffix_tokens) and len(ne_lcp) == 0:
-                return [f"{_BRANCH_INTER} {common}", *branch_lines]
-            return [f"{common} {_BRANCH_CORNER}", *branch_lines]
+            return [_cluster_head(common, suffix_tokens), *branch_lines]
         return [common]
 
     groups: dict[str, list[list[str]]] = defaultdict(list)
@@ -559,6 +581,21 @@ class MultitestCommand(BaseCommand):
     usage = "multitest"
     examples = ["multitest", "mt"]
 
+    # Web-viewer settings schema (see modules/settings_schema.py)
+    settings_schema = [
+        {"key": "response_format", "label": "Response format", "type": "str",
+         "default": "",
+         "help": "Result template. Fields: {sender}, {path_count}, {paths}, {listening_duration}. Empty = default."},
+        {"key": "condense_paths", "label": "Path layout", "type": "enum",
+         "options": [
+             {"value": "true", "label": "Condensed tree (default)"},
+             {"value": "false", "label": "One full path per line"},
+             {"value": "nested", "label": "Nested/indented tree"},
+         ],
+         "default": "true",
+         "help": "How collected paths are displayed."},
+    ]
+
     def __init__(self, bot):
         super().__init__(bot)
         self.multitest_enabled = self.get_config_value('Multitest_Command', 'enabled', fallback=True, value_type='bool')
@@ -616,25 +653,6 @@ class MultitestCommand(BaseCommand):
 
     def get_help_text(self) -> str:
         return self.translate('commands.multitest.help', fallback="Listens for 6 seconds and collects all unique paths from incoming messages")
-
-    def matches_keyword(self, message: MeshMessage) -> bool:
-        """Check if message matches multitest keyword"""
-        content_lower = self.cleanup_message_for_matching(message)
-
-        # Check for exact match or keyword followed by space
-        for keyword in self.keywords:
-            if content_lower == keyword or content_lower.startswith(keyword + ' '):
-                return True
-
-        # Check for variants: "mt long", "mt xlong", "multitest long", "multitest xlong"
-        if content_lower.startswith('mt ') or content_lower.startswith('multitest '):
-            parts = content_lower.split()
-            if len(parts) >= 2 and parts[0] in ['mt', 'multitest']:
-                variant = parts[1]
-                if variant in ['long', 'xlong']:
-                    return True
-
-        return False
 
     def extract_path_from_rf_data(self, rf_data: dict) -> Optional[str]:
         """Extract path in prefix string format from RF data routing_info.
@@ -959,27 +977,16 @@ class MultitestCommand(BaseCommand):
             self.record_execution(user_id)
 
             # Determine listening duration based on command variant
-            content = message.content.strip()
-            if content.startswith('!'):
-                content = content[1:].strip()
-
-            content_lower = content.lower()
+            _trigger, args = self.split_trigger_and_args(message.content)
             listening_duration = 6.0  # Default
-            # Check for variants: "mt long", "mt xlong", "multitest long", "multitest xlong"
-            if content_lower.startswith('mt ') or content_lower.startswith('multitest '):
-                parts = content_lower.split()
-                if len(parts) >= 2 and parts[0] in ['mt', 'multitest']:
-                    variant = parts[1]
-                    if variant == 'long':
-                        listening_duration = 10.0
-                        self.logger.info(f"Multitest command (long) executed by {user_id} - starting 10 second listening window")
-                    elif variant == 'xlong':
-                        listening_duration = 14.0
-                        self.logger.info(f"Multitest command (xlong) executed by {user_id} - starting 14 second listening window")
-                    else:
-                        self.logger.info(f"Multitest command executed by {user_id} - starting 6 second listening window")
-                else:
-                    self.logger.info(f"Multitest command executed by {user_id} - starting 6 second listening window")
+            # Variants: "<trigger> long" / "<trigger> xlong" (trigger = multitest, mt, or alias)
+            variant = args.split()[0].lower() if args else ""
+            if variant == 'long':
+                listening_duration = 10.0
+                self.logger.info(f"Multitest command (long) executed by {user_id} - starting 10 second listening window")
+            elif variant == 'xlong':
+                listening_duration = 14.0
+                self.logger.info(f"Multitest command (xlong) executed by {user_id} - starting 14 second listening window")
             else:
                 self.logger.info(f"Multitest command executed by {user_id} - starting 6 second listening window")
 
@@ -1094,10 +1101,10 @@ class MultitestCommand(BaseCommand):
                 except (KeyError, ValueError) as e:
                     # If formatting fails, fall back to default
                     self.logger.debug(f"Error formatting multitest response: {e}, using default format")
-                    response = f"Found {path_count} unique path(s):\n{paths_text}"
+                    response = f"Paths({path_count}):\n{paths_text}"
             else:
                 # Default format
-                response = f"Found {path_count} unique path(s):\n{paths_text}"
+                response = f"Paths({path_count}):\n{paths_text}"
         else:
             # Provide more helpful error message with diagnostic info
             matching_packets = 0
@@ -1128,8 +1135,13 @@ class MultitestCommand(BaseCommand):
                 self.logger.info(f"Waiting {wait_time:.1f} seconds for rate limiter")
                 await asyncio.sleep(wait_time + 0.1)  # Small buffer
 
-        # Send the response
-        await self.send_response(message, response)
+        # Send without truncating path tokens; chunk if over DM/channel budget
+        max_len = self.get_max_message_length(message)
+        if len(response.encode("utf-8")) <= max_len:
+            await self.send_response(message, response)
+        else:
+            chunks = self.bot.command_manager.split_text_into_utf8_chunks(response, max_len)
+            await self.send_response_chunked(message, chunks)
 
         return True
 

@@ -47,6 +47,11 @@ class TransmissionTracker:
 
         # Cleanup old records after this time (seconds)
         self.cleanup_after = 300  # 5 minutes
+        # Records that collected repeats are held longer, so a late repeat still
+        # lands on the same record — but they must expire too. Repeat counts are
+        # already persisted to packet_stream, so nothing is lost, and keeping
+        # them forever grew memory for the whole process lifetime.
+        self.repeat_cleanup_after = 1800  # 30 minutes
         self._cleanup_interval = 60  # Run cleanup check every 60 seconds
         self._last_cleanup_time = 0.0
 
@@ -364,11 +369,13 @@ class TransmissionTracker:
         for key in keys_to_remove:
             del self.pending_transmissions[key]
 
-        # Clean up confirmed transmissions (keep ones with repeats, remove others)
+        # Clean up confirmed transmissions. Repeated records get a longer grace
+        # period than plain ones, but both eventually age out.
+        repeat_cutoff_time = current_time - self.repeat_cleanup_after
         hashes_to_remove = []
         for packet_hash, record in self.confirmed_transmissions.items():
-            # Keep if it has repeats or is recent
-            if record.repeat_count == 0 and record.timestamp < cutoff_time:
+            expiry = repeat_cutoff_time if record.repeat_count > 0 else cutoff_time
+            if record.timestamp < expiry:
                 hashes_to_remove.append(packet_hash)
 
         for hash_val in hashes_to_remove:

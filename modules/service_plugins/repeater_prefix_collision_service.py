@@ -35,6 +35,23 @@ class RepeaterPrefixCollisionService(BaseServicePlugin):
     config_section = "RepeaterPrefixCollision_Service"
     description = "Notifies when a newly heard repeater prefix collides with an existing repeater"
 
+    # Web-viewer settings schema (see modules/settings_schema.py)
+    settings_schema = [
+        {"key": "channels", "label": "Alert channels", "type": "list", "default": "",
+         "help": "Channels to post collision alerts to (comma-separated)."},
+        {"key": "notify_on_prefix_bytes", "label": "Notify on prefix bytes", "type": "int",
+         "min": 1, "max": 3, "default": 1,
+         "help": "Prefix length that counts as a collision: 1 byte (01), 2 (0101), or 3 (010101)."},
+        {"key": "heard_window_days", "label": "Heard window", "type": "int", "min": 0, "default": 30, "unit": "days",
+         "help": "Only treat an existing prefix as in-use if heard within this window."},
+        {"key": "prefix_free_days", "label": "Free window", "type": "int", "min": 0, "default": 30, "unit": "days",
+         "help": "Window for the 'free prefixes remain' count. 0 = all history."},
+        {"key": "include_prefix_free_hint", "label": "Include 'prefix free' hint", "type": "bool", "default": True,
+         "help": "Append a hint to find a free prefix (1-byte notifications only)."},
+        {"key": "cooldown_minutes_per_prefix", "label": "Per-prefix cooldown", "type": "int", "min": 0, "default": 60, "unit": "min",
+         "help": "Cooldown to reduce repeat alerts for the same prefix."},
+    ]
+
     def __init__(self, bot: Any) -> None:
         super().__init__(bot)
 
@@ -116,6 +133,17 @@ class RepeaterPrefixCollisionService(BaseServicePlugin):
             self._running = True
 
         self.logger.info("RepeaterPrefixCollision service started")
+
+    async def on_transport_reconnected(self) -> None:
+        """Re-subscribe to NEW_CONTACT on the new meshcore instance."""
+        if not self._running or not getattr(self.bot, "meshcore", None):
+            return
+        async with self._handler_lock:
+            self.bot.meshcore.subscribe(EventType.NEW_CONTACT, self._on_new_contact)
+            self._handler_installed = True
+        self.logger.info(
+            "RepeaterPrefixCollision re-subscribed to NEW_CONTACT after transport reconnect"
+        )
 
     async def stop(self) -> None:
         self._running = False

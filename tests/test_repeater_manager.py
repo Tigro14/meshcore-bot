@@ -10,9 +10,36 @@ import pytest
 from meshcore import EventType
 
 from modules.repeater_manager import (
+    REQUIRED_REPEATER_TABLES,
     RepeaterManager,
     collect_protected_pubkeys_for_device_mode,
+    validate_repeater_tables,
 )
+
+
+class TestValidateRepeaterTables:
+    """Callable without a RepeaterManager so lazy callers can still fail fast."""
+
+    def test_passes_on_a_migrated_database(self, test_db, mock_logger):
+        validate_repeater_tables(test_db, mock_logger)
+
+    def test_names_every_missing_table(self, test_db, mock_logger):
+        with test_db.connection() as conn:
+            conn.execute("DROP TABLE observed_paths")
+            conn.execute("DROP TABLE purging_log")
+            conn.commit()
+
+        with pytest.raises(RuntimeError) as excinfo:
+            validate_repeater_tables(test_db, mock_logger)
+
+        message = str(excinfo.value)
+        assert "observed_paths" in message
+        assert "purging_log" in message
+        assert "Run the bot once to apply migrations" in message
+
+    def test_covers_the_tables_the_manager_depends_on(self):
+        assert "mesh_connections" in REQUIRED_REPEATER_TABLES
+        assert "repeater_contacts" in REQUIRED_REPEATER_TABLES
 
 
 @pytest.fixture
@@ -346,7 +373,11 @@ class TestCleanupRepeaterRetention:
 
     def test_does_not_raise_when_db_raises(self, rm):
         from unittest.mock import patch as _patch
-        with _patch.object(rm.db_manager, "execute_update", side_effect=Exception("db error")):
+        with _patch.object(
+            rm.db_manager,
+            "delete_timestamp_rows_in_chunks",
+            side_effect=Exception("db error"),
+        ):
             rm.cleanup_repeater_retention()  # Should not raise
         rm.logger.error.assert_called()
 
@@ -1637,3 +1668,207 @@ class TestUpdateContactLimitFromDevice:
 
         assert rm.contact_limit == 300
         assert rm.auto_purge_threshold == 280
+
+
+class TestStaleContactRemovalStorm:
+    """Issue #176: a contact the device refuses stays in the list, so every sweep
+    re-selected it and logged the same failure forever."""
+
+    @staticmethod
+    def _manager(contacts):
+        mgr = object.__new__(RepeaterManager)
+        mgr.bot = SimpleNamespace(
+            meshcore=SimpleNamespace(contacts=contacts, commands=SimpleNamespace()),
+        )
+        mgr.logger = Mock()
+        mgr._stale_removal_failures = {}
+        mgr._is_repeater_device = lambda contact_data: False
+        mgr.log_purging_action = Mock()
+        return mgr
+
+    @staticmethod
+    def _contact(name, key, days_ago):
+        seen = (datetime.now() - timedelta(days=days_ago)).timestamp()
+        return {'name': name, 'public_key': key, 'last_seen': seen}
+
+    @staticmethod
+    def _result(ok):
+        if ok:
+            return SimpleNamespace(type=EventType.OK, payload={})
+        return SimpleNamespace(type=EventType.ERROR, payload={'error_code': 2})
+
+    def _refusing_device(self, mgr):
+        mgr.bot.meshcore.commands.remove_contact = AsyncMock(return_value=self._result(False))
+
+    @pytest.mark.asyncio
+    async def test_refused_contact_is_dropped_after_the_attempt_limit(self):
+        contacts = {'a': self._contact('variable', 'KEY_A', 30)}
+        mgr = self._manager(contacts)
+        self._refusing_device(mgr)
+
+        with patch('asyncio.sleep', new=AsyncMock()):
+            for _ in range(RepeaterManager.MAX_STALE_REMOVAL_ATTEMPTS):
+                stale = await mgr._get_stale_contacts()
+                assert stale, "should still be attempted before the limit"
+                await mgr._remove_stale_contacts(stale)
+
+            # The storm stops: the contact is no longer selected at all.
+            assert await mgr._get_stale_contacts() == []
+
+    @pytest.mark.asyncio
+    async def test_gives_up_message_is_logged_once(self):
+        contacts = {'a': self._contact('variable', 'KEY_A', 30)}
+        mgr = self._manager(contacts)
+        self._refusing_device(mgr)
+
+        with patch('asyncio.sleep', new=AsyncMock()):
+            for _ in range(RepeaterManager.MAX_STALE_REMOVAL_ATTEMPTS):
+                stale = await mgr._get_stale_contacts()
+                if stale:
+                    await mgr._remove_stale_contacts(stale)
+
+        warnings = [str(c) for c in mgr.logger.warning.call_args_list]
+        assert sum('Giving up' in w for w in warnings) == 1
+
+    @pytest.mark.asyncio
+    async def test_successful_removal_clears_the_failure_count(self):
+        contacts = {'a': self._contact('flaky', 'KEY_A', 30)}
+        mgr = self._manager(contacts)
+        mgr.bot.meshcore.commands.remove_contact = AsyncMock(
+            side_effect=[self._result(False), self._result(True)]
+        )
+
+        with patch('asyncio.sleep', new=AsyncMock()):
+            await mgr._remove_stale_contacts(await mgr._get_stale_contacts())
+            assert mgr._stale_removal_failures.get('KEY_A') == 1
+            removed = await mgr._remove_stale_contacts(await mgr._get_stale_contacts())
+
+        assert removed == 1
+        assert 'KEY_A' not in mgr._stale_removal_failures
+
+    @pytest.mark.asyncio
+    async def test_other_contacts_are_unaffected_by_one_bad_apple(self):
+        contacts = {
+            'a': self._contact('stubborn', 'KEY_A', 40),
+            'b': self._contact('removable', 'KEY_B', 30),
+        }
+        mgr = self._manager(contacts)
+
+        async def remove(public_key):
+            return self._result(public_key != 'KEY_A')
+
+        mgr.bot.meshcore.commands.remove_contact = AsyncMock(side_effect=remove)
+
+        with patch('asyncio.sleep', new=AsyncMock()):
+            removed = await mgr._remove_stale_contacts(await mgr._get_stale_contacts())
+
+        assert removed == 1
+        assert mgr._stale_removal_failures == {'KEY_A': 1}
+
+
+class TestStaleContactTimestampSanity:
+    """MeshCore seeds an unset clock with a hardcoded time, so a never-synced device
+    advertises that seed rather than a real observation. Treating it as staleness put
+    unsynced-but-active contacts at the top of the removal list."""
+
+    @staticmethod
+    def _manager(contacts):
+        return TestStaleContactRemovalStorm._manager(contacts)
+
+    @pytest.mark.asyncio
+    async def test_zero_timestamp_is_ignored(self):
+        mgr = self._manager({'a': {'name': 'never-heard', 'public_key': 'K', 'last_seen': 0}})
+        assert await mgr._get_stale_contacts() == []
+
+    @pytest.mark.asyncio
+    async def test_future_timestamp_is_ignored(self):
+        future = (datetime.now() + timedelta(days=5)).timestamp()
+        mgr = self._manager({'a': {'name': 'clock-skew', 'public_key': 'K', 'last_seen': future}})
+        assert await mgr._get_stale_contacts() == []
+
+    @pytest.mark.parametrize("seed", RepeaterManager.FIRMWARE_CLOCK_SEEDS)
+    @pytest.mark.asyncio
+    async def test_firmware_clock_seed_is_ignored(self, seed):
+        """1715770351 (15 May 2024) and 1772323200 (1 Mar 2026) are unset-clock seeds."""
+        mgr = self._manager({'a': {'name': 'never-synced', 'public_key': 'K', 'last_seen': seed}})
+        assert await mgr._get_stale_contacts() == []
+
+    @pytest.mark.asyncio
+    async def test_the_reported_722_day_contacts_are_ignored(self):
+        """Issue #176: every affected contact reported exactly 722 days, which is the
+        15 May 2024 firmware seed measured from the date in the report. They were
+        unsynced clocks, not contacts genuinely last heard in 2024."""
+        mgr = self._manager(
+            {'a': {'name': 'variable', 'public_key': 'K', 'last_seen': 1715770351}}
+        )
+        assert await mgr._get_stale_contacts() == []
+
+    @pytest.mark.asyncio
+    async def test_a_real_observation_near_a_seed_is_still_selected(self):
+        """Only the seed itself is a sentinel; a real advert a day later is not."""
+        just_after = 1715770351 + 86400
+        mgr = self._manager({'a': {'name': 'early', 'public_key': 'K', 'last_seen': just_after}})
+        stale = await mgr._get_stale_contacts()
+        assert len(stale) == 1
+
+    @pytest.mark.asyncio
+    async def test_recent_contact_is_not_stale(self):
+        """Control: the filter is not simply rejecting everything."""
+        mgr = self._manager({'a': TestStaleContactRemovalStorm._contact('recent', 'K', 30)})
+        assert len(await mgr._get_stale_contacts()) == 1
+
+    @pytest.mark.asyncio
+    async def test_junk_timestamps_no_longer_crowd_out_real_candidates(self):
+        contacts = {f'junk{i}': {'name': f'j{i}', 'public_key': f'J{i}', 'last_seen': 0}
+                    for i in range(12)}
+        contacts['real'] = TestStaleContactRemovalStorm._contact('real', 'REAL', 30)
+        mgr = self._manager(contacts)
+
+        stale = await mgr._get_stale_contacts()
+
+        # Without the guard the twelve 1970 entries sort first and fill max_remove=10.
+        assert [c['public_key'] for c in stale] == ['REAL']
+
+
+class TestUnsetClockIsNotGroundsForPurging:
+    """An unset clock ranks a node as the oldest thing on the mesh. Every purge path
+    has to refuse it, or active unsynced nodes get evicted first (#176)."""
+
+    SEED = 1715770351  # 15 May 2024, VolatileRTCClock base_time
+
+    def test_helper_recognises_both_firmware_seeds(self):
+        for seed in RepeaterManager.FIRMWARE_CLOCK_SEEDS:
+            assert RepeaterManager._is_unset_device_clock(datetime.fromtimestamp(seed))
+
+    def test_helper_recognises_raw_zero(self):
+        assert RepeaterManager._is_unset_device_clock(datetime.fromtimestamp(0))
+
+    def test_helper_accepts_a_real_recent_observation(self):
+        assert not RepeaterManager._is_unset_device_clock(datetime.now() - timedelta(days=30))
+
+    def test_helper_accepts_a_real_observation_just_after_a_seed(self):
+        assert not RepeaterManager._is_unset_device_clock(
+            datetime.fromtimestamp(self.SEED + 86400)
+        )
+
+    @pytest.mark.asyncio
+    async def test_repeaters_for_purging_skips_unset_clocks(self):
+        mgr = object.__new__(RepeaterManager)
+        mgr.logger = Mock()
+        mgr._is_repeater_device = lambda c: True
+        mgr.bot = SimpleNamespace(meshcore=SimpleNamespace(contacts={
+            'a': {'public_key': 'A', 'adv_name': 'unsynced', 'type': 2, 'last_advert': self.SEED},
+        }))
+        assert await mgr._get_repeaters_for_purging(5) == []
+
+    @pytest.mark.asyncio
+    async def test_repeaters_for_purging_still_offers_a_real_old_repeater(self):
+        """Control: the guard is not simply rejecting every repeater."""
+        old = (datetime.now() - timedelta(days=40)).timestamp()
+        mgr = object.__new__(RepeaterManager)
+        mgr.logger = Mock()
+        mgr._is_repeater_device = lambda c: True
+        mgr.bot = SimpleNamespace(meshcore=SimpleNamespace(contacts={
+            'a': {'public_key': 'A', 'adv_name': 'genuinely-old', 'type': 2, 'last_advert': old},
+        }))
+        assert len(await mgr._get_repeaters_for_purging(5)) == 1

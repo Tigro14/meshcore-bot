@@ -10,9 +10,9 @@ import configparser
 import json
 import logging
 import sqlite3
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -33,6 +33,30 @@ def _write_config(path: Path, db_path: str) -> None:
     }
     with open(path, "w") as f:
         cfg.write(f)
+
+
+@contextmanager
+def _temp_config_option(config, section: str, option: str, value: str):
+    """Set a config option for the body of a test, restoring prior state after.
+
+    Patching ConfigParser.get is not a substitute: getboolean/getint delegate to
+    it internally, so a stubbed get breaks every other option read too.
+    """
+    added_section = not config.has_section(section)
+    if added_section:
+        config.add_section(section)
+    had_option = config.has_option(section, option)
+    previous = config.get(section, option) if had_option else None
+    config.set(section, option, value)
+    try:
+        yield
+    finally:
+        if added_section:
+            config.remove_section(section)
+        elif had_option:
+            config.set(section, option, previous)
+        else:
+            config.remove_option(section, option)
 
 
 def _fake_setup_logging(self: BotDataViewer) -> None:
@@ -65,6 +89,7 @@ def viewer(tmp_path_factory):
         patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
         patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
         patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+        patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
     ):
         v = BotDataViewer(db_path=db_path, config_path=config_path)
 
@@ -103,6 +128,7 @@ def auth_viewer(tmp_path_factory):
         patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
         patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
         patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+        patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
     ):
         v = BotDataViewer(db_path=db_path, config_path=config_path)
 
@@ -163,22 +189,27 @@ class TestPageRoutes:
         resp = client.get("/")
         assert resp.status_code == 200
 
-    def test_index_live_activity_controls(self, client):
-        """Dashboard index page contains scroll buttons and type-filter checkboxes."""
+    def test_index_loads_the_external_dashboard_script(self, client):
         resp = client.get("/")
         assert resp.status_code == 200
-        html = resp.data.decode()
-        # Scroll buttons
-        assert 'id="live-scroll-top"' in html
-        assert 'id="live-scroll-bottom"' in html
-        assert 'scrollLiveFeed' in html
-        # Filter checkboxes with data-type attributes
-        assert 'data-type="packet"' in html
-        assert 'data-type="command"' in html
-        assert 'data-type="message"' in html
-        assert 'live-filter-cb' in html
-        # [#channel] prefix logic present in JS
-        assert 'applyFilters' in html
+        assert 'js/dashboard.js' in resp.data.decode()
+
+    def test_dashboard_does_not_subscribe_to_live_streams(self, client):
+        """The live feed moved to /realtime; the dashboard must not re-add it.
+
+        It opened three SocketIO subscriptions and re-rendered on every packet,
+        duplicating a page that already exists, so the dashboard now costs one
+        snapshot read per poll and nothing else.
+        """
+        html = client.get("/").data.decode()
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "modules" / "web_viewer" / "static" / "js" / "dashboard.js"
+        ).read_text(encoding="utf-8")
+        for marker in ("live-feed", "live-filter-cb", "live-scroll-top"):
+            assert marker not in html, marker
+        for marker in ("subscribe_packets", "subscribe_commands", "subscribe_messages"):
+            assert marker not in script, marker
 
     def test_realtime(self, client):
         resp = client.get("/realtime")
@@ -223,9 +254,10 @@ class TestPageRoutes:
         assert resp.status_code == 302
         assert resp.headers["Location"].endswith("/config#database")
 
-    def test_stats(self, client):
+    def test_stats_page_removed(self, client):
+        """The orphaned /stats stub page was folded into the dashboard."""
         resp = client.get("/stats")
-        assert resp.status_code == 200
+        assert resp.status_code == 404
 
     def test_greeter(self, client):
         resp = client.get("/greeter")
@@ -431,6 +463,7 @@ class TestContactRoutes:
         assert resp.status_code == 200
         data = resp.get_json()
         assert isinstance(data, dict)
+        assert "pagination" not in data
 
     def test_api_contacts_since_7d(self, client):
         resp = client.get("/api/contacts?since=7d")
@@ -443,6 +476,414 @@ class TestContactRoutes:
     def test_api_contacts_invalid_since_uses_default(self, client):
         resp = client.get("/api/contacts?since=forever")
         assert resp.status_code == 200
+
+    def test_api_contacts_paginates_searches_and_sorts(self, client, viewer):
+        contacts = [
+            ("f001" * 16, "PerfContact Charlie"),
+            ("f002" * 16, "PerfContact Alpha"),
+            ("f003" * 16, "PerfContact Bravo"),
+        ]
+        for public_key, name in contacts:
+            _insert_contact(viewer, public_key, name)
+
+        first = client.get(
+            "/api/contacts?since=all&page=1&page_size=2&search=PerfContact"
+            "&sort=username&direction=asc"
+        ).get_json()
+        assert "filtered_stats" in first
+        assert first["pagination"] == {
+            "page": 1,
+            "page_size": 2,
+            "total_items": 3,
+            "total_pages": 2,
+            "has_previous": False,
+            "has_next": True,
+        }
+        assert [row["username"] for row in first["tracking_data"]] == [
+            "PerfContact Alpha",
+            "PerfContact Bravo",
+        ]
+
+        second = client.get(
+            "/api/contacts?since=all&page=2&page_size=2&search=PerfContact"
+            "&sort=username&direction=asc"
+        ).get_json()
+        assert [row["username"] for row in second["tracking_data"]] == [
+            "PerfContact Charlie"
+        ]
+        assert second["pagination"]["has_previous"] is True
+        assert second["pagination"]["has_next"] is False
+
+    def test_api_contacts_caps_page_size_and_normalizes_sort(self, client):
+        data = client.get(
+            "/api/contacts?page=not-a-number&page_size=9999&sort=not-a-column"
+            "&direction=not-a-direction"
+        ).get_json()
+        assert data["pagination"]["page"] == 1
+        assert data["pagination"]["page_size"] == 200
+
+    def test_api_contacts_filters_and_sorts_by_path_bytes(self, client, viewer):
+        rows = [
+            ("d801" * 16, "PathBytes One", 1),
+            ("d802" * 16, "PathBytes Three", 3),
+            ("d803" * 16, "PathBytes Two", 2),
+        ]
+        for public_key, name, _bytes_per_hop in rows:
+            _insert_contact(viewer, public_key, name)
+        with closing(sqlite3.connect(viewer.db_path)) as conn:
+            for public_key, _name, bytes_per_hop in rows:
+                conn.execute(
+                    """UPDATE complete_contact_tracking
+                       SET out_bytes_per_hop = ?, role = ?, hop_count = ?, city = ?, is_starred = ?
+                       WHERE public_key = ?""",
+                    (
+                        bytes_per_hop,
+                        'repeater' if bytes_per_hop == 2 else 'companion',
+                        2 if bytes_per_hop == 2 else 0,
+                        'Test City' if bytes_per_hop == 2 else None,
+                        1 if bytes_per_hop == 2 else 0,
+                        public_key,
+                    ),
+                )
+            conn.commit()
+
+        filtered = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "all", "page": 1, "page_size": 10,
+                "search": "PathBytes", "path_bytes": "2", "sort": "path_bytes",
+                "direction": "asc",
+            },
+        ).get_json()
+        assert [row["username"] for row in filtered["tracking_data"]] == ["PathBytes Two"]
+        assert filtered["tracking_data"][0]["path_bytes_per_hop"] == 2
+
+        combined_filters = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "all", "page": 1, "page_size": 10, "search": "PathBytes",
+                "device_role": "repeater", "hop_filter": "2", "location_filter": "known",
+                "starred": "yes",
+            },
+        ).get_json()
+        assert [row["username"] for row in combined_filters["tracking_data"]] == ["PathBytes Two"]
+
+        sorted_rows = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "all", "page": 1, "page_size": 10,
+                "search": "PathBytes", "sort": "path_bytes", "direction": "desc",
+            },
+        ).get_json()["tracking_data"]
+        assert [row["path_bytes_per_hop"] for row in sorted_rows] == [3, 2, 1]
+
+    def test_api_contacts_path_bytes_ignores_invalid_observed_encodings(self, client, viewer):
+        """NULL/invalid observed_paths.bytes_per_hop must not become 1-byte.
+
+        Those rows should be ignored so the contact falls back to out_bytes_per_hop.
+        """
+        public_key = "d804" * 16
+        _insert_contact(viewer, public_key, "PathBytes Fallback")
+        with closing(sqlite3.connect(viewer.db_path)) as conn:
+            conn.execute(
+                """UPDATE complete_contact_tracking
+                   SET out_bytes_per_hop = 3, last_heard = datetime('now', 'localtime')
+                   WHERE public_key = ?""",
+                (public_key,),
+            )
+            conn.execute(
+                """INSERT INTO observed_paths
+                   (public_key, from_prefix, to_prefix, path_hex, path_length,
+                    bytes_per_hop, packet_type, first_seen, last_seen, observation_count)
+                   VALUES (?, 'abcd', 'ef01', 'abcdef01', 4, NULL, 'advert',
+                           datetime('now', 'localtime'), datetime('now', 'localtime'), 1)""",
+                (public_key,),
+            )
+            conn.commit()
+
+        rows = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "all", "page": 1, "page_size": 10,
+                "search": "PathBytes Fallback", "sort": "path_bytes",
+            },
+        ).get_json()["tracking_data"]
+        assert len(rows) == 1
+        assert rows[0]["path_bytes_per_hop"] == 3
+
+        filtered = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "all", "page": 1, "page_size": 10,
+                "search": "PathBytes Fallback", "path_bytes": "3",
+            },
+        ).get_json()["tracking_data"]
+        assert [row["username"] for row in filtered] == ["PathBytes Fallback"]
+
+        as_one_byte = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "all", "page": 1, "page_size": 10,
+                "search": "PathBytes Fallback", "path_bytes": "1",
+            },
+        ).get_json()["tracking_data"]
+        assert as_one_byte == []
+
+    @pytest.mark.parametrize(
+        ("sort", "ascending_names"),
+        [
+            ("username", ["SortMatrix A", "SortMatrix B", "SortMatrix C"]),
+            ("device_type", ["SortMatrix B", "SortMatrix C", "SortMatrix A"]),
+            ("location", ["SortMatrix B", "SortMatrix C", "SortMatrix A"]),
+            ("distance", ["SortMatrix A", "SortMatrix C", "SortMatrix B"]),
+            ("snr", ["SortMatrix B", "SortMatrix C", "SortMatrix A"]),
+            ("hop_count", ["SortMatrix B", "SortMatrix C", "SortMatrix A"]),
+            ("first_heard", ["SortMatrix B", "SortMatrix C", "SortMatrix A"]),
+            ("last_seen", ["SortMatrix C", "SortMatrix A", "SortMatrix B"]),
+            ("advert_count", ["SortMatrix B", "SortMatrix C", "SortMatrix A"]),
+        ],
+    )
+    @pytest.mark.parametrize("direction", ["asc", "desc"])
+    def test_api_contacts_preserves_global_sort_semantics(
+        self, client, viewer, monkeypatch, sort, ascending_names, direction
+    ):
+        with closing(sqlite3.connect(viewer.db_path)) as conn:
+            conn.execute(
+                "DELETE FROM complete_contact_tracking WHERE name LIKE 'SortMatrix %'"
+            )
+            conn.commit()
+
+        rows = [
+            (
+                "d101" * 16, "SortMatrix A", "Zulu", "Zurich", 30.0, 3,
+                "2026-01-03 00:00:00", "2026-02-02 00:00:00", 30, 0.1, 0.0,
+            ),
+            (
+                "d102" * 16, "SortMatrix B", "Alpha", "Austin", 10.0, 1,
+                "2026-01-01 00:00:00", "2026-02-03 00:00:00", 10, 2.0, 0.0,
+            ),
+            (
+                "d103" * 16, "SortMatrix C", "Middle", "Boston", 20.0, 2,
+                "2026-01-02 00:00:00", "2026-02-01 00:00:00", 20, 1.0, 0.0,
+            ),
+        ]
+        for row in rows:
+            _insert_contact(viewer, row[0], row[1])
+        with closing(sqlite3.connect(viewer.db_path)) as conn:
+            for row in rows:
+                conn.execute(
+                    """
+                    UPDATE complete_contact_tracking
+                    SET device_type = ?, city = ?, snr = ?, hop_count = ?,
+                        first_heard = ?, last_heard = ?, advert_count = ?,
+                        latitude = ?, longitude = ?
+                    WHERE public_key = ?
+                    """,
+                    (*row[2:], row[0]),
+                )
+            conn.commit()
+
+        original_getfloat = viewer.config.getfloat
+
+        def getfloat(section, option, *, fallback=None):
+            if section == "Bot" and option in {"bot_latitude", "bot_longitude"}:
+                return 0.0
+            return original_getfloat(section, option, fallback=fallback)
+
+        monkeypatch.setattr(viewer.config, "getfloat", getfloat)
+        data = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "all",
+                "page": 1,
+                "page_size": 10,
+                "search": "SortMatrix",
+                "sort": sort,
+                "direction": direction,
+            },
+        ).get_json()
+        expected = ascending_names if direction == "asc" else list(reversed(ascending_names))
+        assert [row["username"] for row in data["tracking_data"]] == expected
+
+    @pytest.mark.parametrize("sort", ["location", "distance", "snr", "hop_count"])
+    def test_api_contacts_sorts_missing_values_as_zero_or_empty(
+        self, client, viewer, monkeypatch, sort
+    ):
+        original_getfloat = viewer.config.getfloat
+
+        def getfloat(section, option, *, fallback=None):
+            if section == "Bot" and option in {"bot_latitude", "bot_longitude"}:
+                return 0.0
+            return original_getfloat(section, option, fallback=fallback)
+
+        monkeypatch.setattr(viewer.config, "getfloat", getfloat)
+
+        with closing(sqlite3.connect(viewer.db_path)) as conn:
+            conn.execute(
+                "DELETE FROM complete_contact_tracking WHERE name LIKE 'SortNull %'"
+            )
+            conn.commit()
+
+        rows = [
+            ("d201" * 16, "SortNull Missing", None, None, None, None),
+            ("d202" * 16, "SortNull Low", "Alpha", 1.0, 1.0, 1),
+            ("d203" * 16, "SortNull High", "Zulu", 2.0, 2.0, 2),
+        ]
+        for public_key, name, *_ in rows:
+            _insert_contact(viewer, public_key, name)
+        with closing(sqlite3.connect(viewer.db_path)) as conn:
+            for public_key, _name, city, latitude, snr, hop_count in rows:
+                conn.execute(
+                    """
+                    UPDATE complete_contact_tracking
+                    SET city = ?, latitude = ?, longitude = ?, snr = ?, hop_count = ?
+                    WHERE public_key = ?
+                    """,
+                    (city, latitude, latitude, snr, hop_count, public_key),
+                )
+            conn.commit()
+
+        data = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "all",
+                "page": 1,
+                "page_size": 10,
+                "search": "SortNull",
+                "sort": sort,
+                "direction": "asc",
+            },
+        ).get_json()
+        assert [row["username"] for row in data["tracking_data"]][0] == "SortNull Missing"
+
+    def test_api_contacts_empty_and_out_of_range_pages(self, client, viewer):
+        empty = client.get(
+            "/api/contacts",
+            query_string={"page": 999, "page_size": 2, "search": "NoSuchContact"},
+        ).get_json()
+        assert empty["tracking_data"] == []
+        assert empty["pagination"] == {
+            "page": 1,
+            "page_size": 2,
+            "total_items": 0,
+            "total_pages": 1,
+            "has_previous": False,
+            "has_next": False,
+        }
+
+        for index in range(3):
+            _insert_contact(
+                viewer,
+                f"d30{index}" * 16,
+                f"ClampMatrix {index}",
+            )
+        clamped = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "all",
+                "page": 999,
+                "page_size": 2,
+                "search": "ClampMatrix",
+                "sort": "username",
+                "direction": "asc",
+            },
+        ).get_json()
+        assert clamped["pagination"]["page"] == 2
+        assert clamped["pagination"]["total_pages"] == 2
+        assert [row["username"] for row in clamped["tracking_data"]] == [
+            "ClampMatrix 2"
+        ]
+
+    def test_api_contacts_search_treats_sql_wildcards_literally(self, client, viewer):
+        _insert_contact(viewer, "d401" * 16, "WildcardMatrix 100%")
+        _insert_contact(viewer, "d402" * 16, "WildcardMatrix 100X")
+        data = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "all",
+                "page": 1,
+                "page_size": 10,
+                "search": "100%",
+            },
+        ).get_json()
+        assert [row["username"] for row in data["tracking_data"]] == [
+            "WildcardMatrix 100%"
+        ]
+
+    def test_api_contacts_filtered_stats_cover_all_matching_rows(self, client, viewer):
+        rows = [
+            ("d501" * 16, "StatsMatrix Companion", "Companion Device", "-1 hour", "-1 day"),
+            ("d502" * 16, "StatsMatrix Repeater", "Repeater", "-2 days", "-2 days"),
+            ("d503" * 16, "StatsMatrix Room", "Room Server", "-10 days", "-10 days"),
+        ]
+        for public_key, name, *_ in rows:
+            _insert_contact(viewer, public_key, name)
+        with closing(sqlite3.connect(viewer.db_path)) as conn:
+            for public_key, _name, device_type, last_offset, first_offset in rows:
+                conn.execute(
+                    """
+                    UPDATE complete_contact_tracking
+                    SET device_type = ?,
+                        last_heard = datetime('now', 'localtime', ?),
+                        first_heard = datetime('now', 'localtime', ?)
+                    WHERE public_key = ?
+                    """,
+                    (device_type, last_offset, first_offset, public_key),
+                )
+            conn.commit()
+
+        data = client.get(
+            "/api/contacts",
+            query_string={
+                "since": "30d",
+                "page": 1,
+                "page_size": 1,
+                "search": "StatsMatrix",
+            },
+        ).get_json()
+        assert len(data["tracking_data"]) == 1
+        assert data["filtered_stats"] == {
+            "contacts_24h": 1,
+            "contacts_7d": 2,
+            "contacts_total": 3,
+            "new_companions": 1,
+            "new_repeaters": 1,
+            "new_room_servers": 0,
+        }
+
+    def test_api_contacts_scopes_path_query_to_visible_page(
+        self, client, viewer, monkeypatch
+    ):
+        _insert_contact(viewer, "f101" * 16, "PerfScoped One")
+        _insert_contact(viewer, "f102" * 16, "PerfScoped Two")
+        statements = []
+        original_get_connection = viewer._get_db_connection
+
+        def traced_connection():
+            conn = original_get_connection()
+            conn.set_trace_callback(statements.append)
+            return conn
+
+        monkeypatch.setattr(viewer, "_get_db_connection", traced_connection)
+        data = client.get(
+            "/api/contacts?since=all&page=1&page_size=1&search=PerfScoped"
+        ).get_json()
+
+        assert len(data["tracking_data"]) == 1
+        recent_path_queries = [
+            sql for sql in statements
+            if "WITH recent_paths AS" in sql
+        ]
+        assert len(recent_path_queries) == 1
+        assert "public_key IN (" in recent_path_queries[0]
+
+    def test_contacts_page_uses_bounded_server_loading(self, client):
+        html = client.get("/contacts").get_data(as_text=True)
+        assert 'id="contacts-pagination"' in html
+        assert 'id="contacts-page-previous"' in html
+        assert 'id="contacts-page-next"' in html
+        assert "page_size: String(this.pageSize)" in html
+        assert "new AbortController()" in html
 
     def test_toggle_star_missing_public_key(self, client):
         resp = client.post(
@@ -742,6 +1183,37 @@ class TestChannelRoutes:
     def test_api_channel_operation_status_not_found(self, client):
         resp = client.get("/api/channel-operations/99999")
         assert resp.status_code in (200, 404)
+
+    def test_api_interrupted_operation_is_terminal_and_exposes_claim_time(
+        self, client, viewer
+    ):
+        with sqlite3.connect(viewer.db_path) as conn:
+            cursor = conn.execute(
+                """INSERT INTO channel_operations
+                   (operation_type, status, error_message, claimed_at, processed_at)
+                   VALUES ('remove', 'interrupted', 'Verify device state',
+                           CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"""
+            )
+            operation_id = cursor.lastrowid
+            conn.commit()
+
+        resp = client.get(f"/api/channel-operations/{operation_id}")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "interrupted"
+        assert data["error_message"] == "Verify device state"
+        assert data["claimed_at"] is not None
+
+    def test_shared_operation_poller_recognizes_interrupted_as_terminal(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "modules/web_viewer/static/js/channel_operations.js"
+        ).read_text(encoding="utf-8")
+
+        assert source.count("result.status === 'interrupted'") == 1
+        assert source.count("result2.status === 'interrupted'") == 1
+        assert source.count("result3.status === 'interrupted'") == 1
 
 
 # ===========================================================================
@@ -1283,6 +1755,107 @@ class TestFeedManagementRoutes:
         resp = client.post("/api/feeds/1/refresh")
         assert resp.status_code in (200, 404, 500)
 
+    # --- Preview formatting parity with feed_manager (Skye feedback) ---
+
+    def test_preview_emoji_field_overrides_heuristic(self, viewer):
+        item = {"title": "Road closed", "description": "", "emoji": "🔥"}
+        result = viewer._format_feed_item(item, "{emoji}", feed_name="emergency alerts")
+        assert result == "🔥"
+
+    def test_preview_emoji_field_absent_falls_back(self, viewer):
+        item = {"title": "Road closed", "description": ""}
+        result = viewer._format_feed_item(item, "{emoji}", feed_name="emergency alerts")
+        assert result == "🚨"
+
+    def test_preview_truncate_hard_no_ellipsis(self, viewer):
+        item = {"title": "Roadwork", "description": ""}
+        result = viewer._format_feed_item(item, "{title|truncate_hard:4}", feed_name="x")
+        assert result == "Road"
+
+    def test_preview_substr_start_and_length(self, viewer):
+        item = {"title": "Roadwork ahead", "description": ""}
+        result = viewer._format_feed_item(item, "{title|substr:0,4}", feed_name="x")
+        assert result == "Road"
+
+    def test_preview_sanitize_strips_control_chars(self, viewer):
+        item = {"title": "Hi\x00there", "description": ""}
+        result = viewer._format_feed_item(item, "{title}", feed_name="x")
+        assert "\x00" not in result
+        assert "Hi" in result and "there" in result
+
+    def test_preview_shorten_urls_honors_config(self, viewer, monkeypatch):
+        if not viewer.config.has_section("Feed_Manager"):
+            viewer.config.add_section("Feed_Manager")
+        viewer.config.set("Feed_Manager", "shorten_urls", "true")
+        item = {"title": "t", "description": "", "link": "https://example.com/long-path"}
+
+        def _fake_shorten(url, config=None, logger=None):
+            return "https://v.gd/ab"
+
+        monkeypatch.setattr(
+            "modules.feed_format.shorten_url_sync", _fake_shorten
+        )
+        result = viewer._format_feed_item(item, "{link}", feed_name="x")
+        assert result == "https://v.gd/ab"
+
+    # --- Reset feed errors (global + per-feed) ---
+
+    def _seed_feed_errors(self, viewer):
+        """Create two feeds each with one error; return their (real) feed ids."""
+        import uuid
+
+        conn = viewer._get_db_connection()
+        try:
+            cur = conn.cursor()
+            ids = []
+            for _ in range(2):
+                url = f"http://example.com/{uuid.uuid4().hex}.xml"
+                cur.execute(
+                    "INSERT INTO feed_subscriptions (feed_type, feed_url, channel_name, enabled) "
+                    "VALUES ('rss', ?, 'general', 1)",
+                    (url,),
+                )
+                fid = cur.execute("SELECT last_insert_rowid()").fetchone()[0]
+                cur.execute(
+                    "INSERT INTO feed_errors (feed_id, error_type, error_message) VALUES (?, 'network', 'boom')",
+                    (fid,),
+                )
+                ids.append(fid)
+            conn.commit()
+            return ids
+        finally:
+            conn.close()
+
+    def _error_count(self, viewer, feed_id=None):
+        conn = viewer._get_db_connection()
+        try:
+            cur = conn.cursor()
+            if feed_id is None:
+                cur.execute("SELECT COUNT(*) FROM feed_errors")
+            else:
+                cur.execute("SELECT COUNT(*) FROM feed_errors WHERE feed_id = ?", (feed_id,))
+            return cur.fetchone()[0]
+        finally:
+            conn.close()
+
+    def test_reset_single_feed_errors(self, client, viewer):
+        fid1, fid2 = self._seed_feed_errors(viewer)
+        assert self._error_count(viewer, fid1) > 0
+        resp = client.post(f"/api/feeds/{fid1}/errors/reset")
+        assert resp.status_code == 200
+        assert json.loads(resp.data)["success"] is True
+        # Target feed cleared, the other untouched
+        assert self._error_count(viewer, fid1) == 0
+        assert self._error_count(viewer, fid2) > 0
+
+    def test_reset_all_feed_errors(self, client, viewer):
+        self._seed_feed_errors(viewer)
+        assert self._error_count(viewer) > 0
+        resp = client.post("/api/feeds/errors/reset")
+        assert resp.status_code == 200
+        assert json.loads(resp.data)["success"] is True
+        assert self._error_count(viewer) == 0
+
 
 # ===========================================================================
 # Channel management API
@@ -1680,27 +2253,50 @@ class TestWerkzeugWebSocketFix:
 
 
 # ===========================================================================
-# TASK-01: Radio page — firmware config + reboot UI removed
+# TASK-01: Radio page — old firmware config card + reboot UI removed.
+# The Node Settings card later reintroduced firmware settings (path hash mode)
+# with new element ids; only the old card must stay absent.
 # ===========================================================================
 
 class TestRadioPageFirmwareRemoval:
-    """Assert that firmware config and reboot UI are absent from /radio (TASK-01)."""
+    """Assert that the old firmware config card and reboot UI are absent from /radio (TASK-01)."""
 
     def test_radio_page_loads(self, client):
         resp = client.get("/radio")
         assert resp.status_code == 200
 
-    def test_firmware_config_card_absent(self, client):
+    def test_old_firmware_config_card_absent(self, client):
         resp = client.get("/radio")
         html = resp.data.decode()
         assert 'id="firmware-config"' not in html
-        assert "readFirmwareConfig" not in html
-        assert "writeFirmwareConfig" not in html
         assert "readFirmwareBtn" not in html
         assert "writeFirmwareBtn" not in html
         assert "firmwareStatusAlert" not in html
         assert "firmwareLastRead" not in html
         assert "Firmware Configuration" not in html
+
+    def test_node_settings_card_present(self, client):
+        resp = client.get("/radio")
+        html = resp.data.decode()
+        assert 'id="node-settings-card"' in html
+        assert 'id="nodePathHashMode"' in html
+        # loop.detect is repeater/room-server CLI config, not a companion
+        # setting — it must not appear on this page.
+        assert 'nodeLoopDetect' not in html
+        assert 'loop_detect' not in html
+        assert 'id="nodeName"' in html
+        assert 'id="sendAdvertFloodBtn"' in html
+        assert 'id="nodeTelemBase"' in html
+        assert 'id="nodeRxDelay"' in html
+
+    def test_new_contacts_mode_is_config_managed(self, client):
+        """manual_add_contacts is owned by [Bot] auto_manage_contacts — the
+        panel shows the scheme read-only instead of offering a device toggle."""
+        resp = client.get("/radio")
+        html = resp.data.decode()
+        assert 'id="nodeManualAdd"' not in html
+        assert 'id="nodeNewContactsMode"' in html
+        assert "auto_manage_contacts" in html
 
     def test_reboot_ui_absent(self, client):
         resp = client.get("/radio")
@@ -1753,6 +2349,7 @@ def socketio_viewer(tmp_path_factory):
         _patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
         _patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
         _patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+        _patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
     ):
         v = BotDataViewer(db_path=db_path, config_path=config_path)
 
@@ -1883,6 +2480,214 @@ class TestSubscribeCommandsHistoryReplay:
             "last_timestamp must be initialized to time.time()-300, not 0"
         )
 
+    def test_mesh_graph_is_not_built_at_startup(self, tmp_path):
+        """Uses its own viewer: the shared one may already have decoded a path."""
+        db_path = str(tmp_path / "startup.db")
+        config_path = str(tmp_path / "config.ini")
+        _write_config(Path(config_path), db_path)
+
+        factory = Mock()
+        with (
+            patch("modules.mesh_graph.MeshGraph", factory),
+            patch.object(BotDataViewer, "_setup_logging", _fake_setup_logging),
+            patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
+            patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
+            patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+            patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
+        ):
+            v = BotDataViewer(db_path=db_path, config_path=config_path)
+
+        assert v.mesh_graph is None
+        factory.assert_not_called()
+
+    def test_mesh_graph_is_lazy_singleton_and_read_only(self, viewer, monkeypatch):
+        graph = object()
+        factory = Mock(return_value=graph)
+        monkeypatch.setattr("modules.mesh_graph.MeshGraph", factory)
+        viewer.mesh_graph = None
+        try:
+            assert viewer._get_mesh_graph() is graph
+            assert viewer._get_mesh_graph() is graph
+            # capture=False keeps edge writes and the batch-writer thread in the
+            # bot process, which owns capture.
+            factory.assert_called_once_with(viewer._mesh_graph_bot, capture=False)
+        finally:
+            viewer.mesh_graph = None
+
+    def test_path_decoding_passes_mesh_graph_to_shared_engine(self, viewer, monkeypatch):
+        """Without the graph, decoding silently disagrees with the bot's `path` command."""
+        graph = object()
+        monkeypatch.setattr(
+            "modules.mesh_graph.MeshGraph", Mock(return_value=graph)
+        )
+        decode = Mock(return_value=[])
+        monkeypatch.setattr("modules.path_inference.decode_path_nodes", decode)
+        viewer.mesh_graph = None
+        try:
+            viewer._decode_path_hex("aabb")
+            assert decode.call_args.kwargs["mesh_graph"] is graph
+
+            decode.reset_mock()
+            viewer._resolve_path("aabb")
+            assert decode.call_args.kwargs["mesh_graph"] is graph
+        finally:
+            viewer.mesh_graph = None
+
+    def test_path_decoding_degrades_when_mesh_graph_fails_to_load(self, viewer, monkeypatch):
+        monkeypatch.setattr(
+            "modules.mesh_graph.MeshGraph", Mock(side_effect=RuntimeError("no table"))
+        )
+        decode = Mock(return_value=[])
+        monkeypatch.setattr("modules.path_inference.decode_path_nodes", decode)
+        viewer.mesh_graph = None
+        try:
+            viewer._decode_path_hex("aabb")
+            assert decode.call_args.kwargs["mesh_graph"] is None
+        finally:
+            viewer.mesh_graph = None
+
+    def test_missing_migrations_fail_at_startup_not_in_a_request(self, tmp_path):
+        """RepeaterManager is lazy now, so the viewer must validate up front.
+
+        Otherwise a migration problem first surfaces as a 500 from whichever
+        request happens to need the manager.
+        """
+        db_path = str(tmp_path / "unmigrated.db")
+        config_path = str(tmp_path / "config.ini")
+        _write_config(Path(config_path), db_path)
+
+        boom = Mock(side_effect=RuntimeError("Missing repeater/graph database tables: purging_log"))
+        with (
+            patch("modules.web_viewer.app.validate_repeater_tables", boom),
+            patch.object(BotDataViewer, "_setup_logging", _fake_setup_logging),
+            patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
+            patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
+            patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+            patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
+            pytest.raises(RuntimeError, match="Missing repeater/graph database tables"),
+        ):
+            BotDataViewer(db_path=db_path, config_path=config_path)
+
+    def test_repeater_manager_is_lazy_and_singleton(self, viewer, monkeypatch):
+        manager = object()
+        factory = Mock(return_value=manager)
+        monkeypatch.setattr("modules.web_viewer.app.RepeaterManager", factory)
+        viewer.repeater_manager = None
+        try:
+            assert viewer._get_repeater_manager() is manager
+            assert viewer._get_repeater_manager() is manager
+            factory.assert_called_once_with(viewer._repeater_manager_bot)
+        finally:
+            viewer.repeater_manager = None
+
+    def test_live_stream_polling_is_idle_without_relevant_subscribers(self, viewer):
+        with viewer._clients_lock:
+            original_clients = dict(viewer.connected_clients)
+            viewer.connected_clients.clear()
+            viewer.connected_clients["mesh-only"] = {"subscribed_mesh": True}
+        try:
+            assert viewer._has_live_stream_subscribers() is False
+            with viewer._clients_lock:
+                viewer.connected_clients["packet-client"] = {
+                    "subscribed_packets": True
+                }
+            assert viewer._has_live_stream_subscribers() is True
+        finally:
+            with viewer._clients_lock:
+                viewer.connected_clients.clear()
+                viewer.connected_clients.update(original_clients)
+
+    def test_viewer_journal_mode_is_initialized_once(self, viewer, monkeypatch):
+        statements = []
+        real_connect = sqlite3.connect
+
+        class TracingConnection(sqlite3.Connection):
+            def execute(self, sql, parameters=()):
+                statements.append(sql)
+                return super().execute(sql, parameters)
+
+        def tracing_connect(*args, **kwargs):
+            kwargs["factory"] = TracingConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr(sqlite3, "connect", tracing_connect)
+        viewer.db_manager._journal_mode_initialized.discard("Web_Viewer")
+        for _ in range(3):
+            with closing(viewer._get_db_connection()):
+                pass
+
+        journal_statements = [
+            sql for sql in statements if sql.upper().startswith("PRAGMA JOURNAL_MODE=")
+        ]
+        foreign_key_statements = [
+            sql for sql in statements if sql.upper().startswith("PRAGMA FOREIGN_KEYS=")
+        ]
+        assert journal_statements == ["PRAGMA journal_mode=WAL"]
+        assert len(foreign_key_statements) == 3
+
+    def test_viewer_connections_use_the_shared_dbmanager_implementation(self, viewer):
+        """The viewer must not carry its own copy of the pragma logic."""
+        conn = Mock()
+        with patch.object(viewer.db_manager, "_apply_sqlite_pragmas") as shared:
+            viewer._configure_db_connection(conn)
+        shared.assert_called_once_with(conn, for_web_viewer=True)
+
+        # The DBManager it delegates to must own the same file every viewer
+        # connection opens, or its journal-mode bookkeeping would be tracking
+        # a different database.
+        assert str(viewer.db_manager.db_path) == str(viewer.db_path)
+
+    def test_rollback_journal_mode_is_applied_to_every_connection(self, viewer):
+        """DELETE/TRUNCATE/PERSIST/MEMORY/OFF are connection-local, not persistent.
+
+        Caching them like WAL would leave every connection after the first
+        silently running SQLite's default mode instead of the configured one.
+        """
+        applied = []
+        conn = Mock()
+        conn.execute.side_effect = lambda sql: applied.append(sql)
+        viewer.db_manager._journal_mode_initialized.discard("Web_Viewer")
+
+        with _temp_config_option(
+            viewer.config, "Web_Viewer", "sqlite_journal_mode", "MEMORY"
+        ):
+            viewer._configure_db_connection(conn)
+            viewer._configure_db_connection(conn)
+
+        assert [s for s in applied if s.upper().startswith("PRAGMA JOURNAL_MODE=")] == [
+            "PRAGMA journal_mode=MEMORY",
+            "PRAGMA journal_mode=MEMORY",
+        ]
+        # A non-persistent mode must not consume the WAL-only fast path.
+        assert "Web_Viewer" not in viewer.db_manager._journal_mode_initialized
+
+    def test_invalid_journal_mode_warns_once_and_falls_back(self, viewer):
+        """The mode is read per connection now, so the warning must not repeat."""
+        viewer.db_manager._journal_mode_warned.discard("Web_Viewer")
+        viewer.db_manager._journal_mode_initialized.discard("Web_Viewer")
+        applied = []
+        conn = Mock()
+        conn.execute.side_effect = lambda sql: applied.append(sql)
+        fake_logger = Mock()
+        try:
+            with (
+                _temp_config_option(
+                    viewer.config, "Web_Viewer", "sqlite_journal_mode", "BOGUS"
+                ),
+                patch.object(viewer.db_manager, "logger", fake_logger),
+            ):
+                for _ in range(3):
+                    viewer._configure_db_connection(conn)
+        finally:
+            viewer.db_manager._journal_mode_warned.discard("Web_Viewer")
+
+        assert fake_logger.warning.call_count == 1
+        assert "BOGUS" in str(fake_logger.warning.call_args)
+        # Falls back to WAL rather than sending an invalid pragma to SQLite.
+        assert [s for s in applied if s.upper().startswith("PRAGMA JOURNAL_MODE=")] == [
+            "PRAGMA journal_mode=WAL"
+        ]
+
 
 # ---------------------------------------------------------------------------
 # TASK-03: GET /api/connected_clients
@@ -1967,7 +2772,7 @@ class TestConnectedClientsApi:
         html = resp.data.decode()
         assert "connectedClientsModal" in html
         assert "connected-clients-table" in html
-        assert "loadConnectedClients" in html
+        assert 'id="health-clients-link"' in html
 
 
 # ---------------------------------------------------------------------------
@@ -2177,29 +2982,32 @@ class TestRestoreRoute:
                           json={"db_file": str(bad)},
                           content_type="application/json")
         assert resp.status_code == 400
-        assert "valid SQLite" in resp.get_json()["error"]
+        assert "sqlite" in resp.get_json()["error"].lower()
 
-    def test_valid_sqlite_restore_returns_200(self, viewer, tmp_path):
-        """Returns 200 with warning when a valid SQLite backup is restored."""
+    def test_valid_sqlite_restore_is_staged_without_replacing_active_db(self, viewer, tmp_path):
+        """Returns 202 and stages a valid MeshCore backup for service restart."""
         import sqlite3 as _sql
         backup_dir = tmp_path / "backups"
         backup_dir.mkdir()
         viewer.db_manager.set_metadata('maint.db_backup_dir', str(backup_dir))
         backup = backup_dir / "backup.db"
-        conn = _sql.connect(str(backup))
-        conn.execute("CREATE TABLE t (id INTEGER)")
-        conn.commit()
-        conn.close()
-        # Patch db_path to a temp destination so the real test DB is not overwritten
-        dest = str(tmp_path / "restored.db")
-        with patch.object(viewer, "db_path", dest):
+        with _sql.connect(viewer.db_path) as source_conn:
+            with _sql.connect(str(backup)) as destination_conn:
+                source_conn.backup(destination_conn)
+        # Patch db_path to a temp destination and verify the request does not create it.
+        dest = tmp_path / "restored.db"
+        with patch.object(viewer, "db_path", str(dest)):
             with viewer.app.test_client() as c:
                 resp = c.post("/api/maintenance/restore",
                               json={"db_file": str(backup)},
                               content_type="application/json")
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.get_json()
         assert data["success"] is True
+        assert data["requires_restart"] is True
+        assert data["pending_path"] == str(tmp_path / ".restored.db.restore-pending")
+        assert not dest.exists()
+        assert Path(data["pending_path"]).exists()
         assert "warning" in data
         assert "Restart" in data["warning"]
 
@@ -3130,6 +3938,7 @@ class TestDbPathResolutionFromConfigDir:
             patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
             patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
             patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+            patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
         ):
             return BotDataViewer(config_path=config_path)
 
@@ -3189,6 +3998,121 @@ class TestDbPathResolutionFromConfigDir:
         assert any("Using database:" in msg for msg in logged), (
             f"Expected 'Using database:' INFO log at startup; got: {logged}"
         )
+
+
+class TestWebViewerLoggingRespectsLogFile:
+    """Web viewer file logging follows [Logging] log_file like the main bot."""
+
+    def _write_config(
+        self,
+        config_dir: Path,
+        log_file: str | None,
+        log_level: str = "INFO",
+    ) -> str:
+        cfg = configparser.ConfigParser()
+        cfg["Connection"] = {"connection_type": "serial", "serial_port": "/dev/ttyUSB0"}
+        cfg["Bot"] = {"bot_name": "TestBot", "db_path": "bot.db", "prefix_bytes": "1"}
+        cfg["Channels"] = {"monitor_channels": "general"}
+        cfg["Path_Command"] = {"max_hops": "5", "timeout": "30"}
+        if log_file is not None:
+            cfg["Logging"] = {
+                "log_file": log_file,
+                "log_level": log_level,
+            }
+        config_path = str(config_dir / "config.ini")
+        with open(config_path, "w") as fh:
+            cfg.write(fh)
+        return config_path
+
+    def _make_viewer(self, config_path: str) -> BotDataViewer:
+        with (
+            patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
+            patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
+            patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+            patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
+        ):
+            return BotDataViewer(config_path=config_path)
+
+    def test_empty_log_file_is_console_only(self, tmp_path: Path) -> None:
+        from logging.handlers import RotatingFileHandler
+
+        config_dir = tmp_path / "cfg"
+        config_dir.mkdir()
+        config_path = self._write_config(config_dir, log_file="")
+        v = self._make_viewer(config_path)
+        assert not any(isinstance(h, RotatingFileHandler) for h in v.logger.handlers)
+        assert not (config_dir / "logs").exists()
+        assert not (config_dir / "web_viewer.log").exists()
+        assert not (tmp_path / "logs").exists()
+
+    def test_log_file_writes_beside_bot_log(self, tmp_path: Path) -> None:
+        from logging.handlers import RotatingFileHandler
+
+        config_dir = tmp_path / "cfg"
+        log_dir = tmp_path / "varlog"
+        config_dir.mkdir()
+        log_dir.mkdir()
+        bot_log = log_dir / "meshcore_bot.log"
+        config_path = self._write_config(config_dir, log_file=str(bot_log))
+        v = self._make_viewer(config_path)
+        assert any(isinstance(h, RotatingFileHandler) for h in v.logger.handlers)
+        assert (log_dir / "web_viewer.log").exists()
+        assert not (config_dir / "logs").exists()
+        assert not (tmp_path / "logs").exists()
+
+    def test_handlers_respect_configured_log_level(self, tmp_path: Path) -> None:
+        import logging
+
+        config_dir = tmp_path / "cfg"
+        log_dir = tmp_path / "varlog"
+        config_dir.mkdir()
+        log_dir.mkdir()
+        config_path = self._write_config(
+            config_dir,
+            log_file=str(log_dir / "meshcore_bot.log"),
+            log_level="WARNING",
+        )
+
+        viewer = self._make_viewer(config_path)
+
+        assert viewer.logger.level == logging.WARNING
+        assert viewer.logger.handlers
+        assert all(
+            handler.level == logging.WARNING
+            for handler in viewer.logger.handlers
+        )
+
+    def test_debug_file_logging_keeps_info_floor_for_journal(
+        self, tmp_path: Path
+    ) -> None:
+        import logging
+        from logging.handlers import RotatingFileHandler
+
+        config_dir = tmp_path / "cfg"
+        log_dir = tmp_path / "varlog"
+        config_dir.mkdir()
+        log_dir.mkdir()
+        config_path = self._write_config(
+            config_dir,
+            log_file=str(log_dir / "meshcore_bot.log"),
+            log_level="DEBUG",
+        )
+
+        viewer = self._make_viewer(config_path)
+        file_handlers = [
+            handler
+            for handler in viewer.logger.handlers
+            if isinstance(handler, RotatingFileHandler)
+        ]
+        console_handlers = [
+            handler
+            for handler in viewer.logger.handlers
+            if not isinstance(handler, RotatingFileHandler)
+        ]
+
+        assert viewer.logger.level == logging.DEBUG
+        assert [handler.level for handler in file_handlers] == [logging.DEBUG]
+        assert [handler.level for handler in console_handlers] == [logging.INFO]
 
 
 class TestRadioDebugConfig:
@@ -3325,6 +4249,73 @@ class TestRestoreEndpointSecurity:
 # ===========================================================================
 
 
+class TestFeedPreviewResponseLimits:
+    def test_chunked_body_over_cap_is_streamed_closed_and_rejected(self, viewer):
+        response = Mock()
+        response.headers = {"Content-Type": "application/rss+xml"}
+        response.raise_for_status = Mock()
+        response.close = Mock()
+
+        def chunks(*_args, **_kwargs):
+            yield b"x" * (1024 * 1024)
+            yield b"y" * (1024 * 1024 + 1)
+
+        response.iter_content = Mock(side_effect=chunks)
+        session_context = MagicMock()
+        session_context.__enter__.return_value = Mock()
+        with (
+            patch("modules.web_viewer.app.SafeUrlPolicy.validate", return_value=True),
+            patch(
+                "modules.web_viewer.app.create_safe_requests_session",
+                return_value=session_context,
+            ),
+            patch(
+                "modules.web_viewer.app.safe_requests_request",
+                return_value=response,
+            ) as request_mock,
+            pytest.raises(ValueError, match="exceeds .* byte limit"),
+        ):
+            viewer._preview_feed_items(
+                "https://example.com/feed.xml", "rss", "{title}"
+            )
+
+        assert request_mock.call_args.kwargs["stream"] is True
+        response.close.assert_called_once()
+
+    def test_content_length_over_cap_is_rejected_without_reading(self, viewer):
+        response = Mock()
+        response.headers = {
+            "Content-Type": "application/json",
+            "Content-Length": str(2 * 1024 * 1024 + 1),
+        }
+        response.raise_for_status = Mock()
+        response.close = Mock()
+        response.iter_content = Mock()
+        session_context = MagicMock()
+        session_context.__enter__.return_value = Mock()
+        with (
+            patch("modules.web_viewer.app.SafeUrlPolicy.validate", return_value=True),
+            patch(
+                "modules.web_viewer.app.create_safe_requests_session",
+                return_value=session_context,
+            ),
+            patch(
+                "modules.web_viewer.app.safe_requests_request",
+                return_value=response,
+            ),
+            pytest.raises(ValueError, match="exceeds .* byte limit"),
+        ):
+            viewer._preview_feed_items(
+                "https://example.com/feed.json",
+                "api",
+                "{title}",
+                api_config={},
+            )
+
+        response.iter_content.assert_not_called()
+        response.close.assert_called_once()
+
+
 class TestFeedPreviewSecurity:
     """POST /api/feeds/preview and /api/feeds/test must reject SSRF-able URLs.
 
@@ -3397,13 +4388,13 @@ class TestFeedPreviewSecurity:
         )
         assert resp.status_code == 400
 
-    def test_validate_external_url_called_for_preview(self, client):
-        """validate_external_url is invoked — not bypassed — in the preview handler."""
-        with patch("modules.web_viewer.app.validate_external_url", return_value=False) as mock_veu:
+    def test_safe_url_policy_called_for_preview(self, client):
+        """The strict feed URL policy is invoked before preview fetches."""
+        with patch("modules.web_viewer.app.SafeUrlPolicy.validate", return_value=False) as validate:
             resp = client.post(
                 "/api/feeds/preview",
                 json={"feed_url": "http://192.168.1.1/feed.rss", "feed_type": "rss"},
                 content_type="application/json",
             )
-        mock_veu.assert_called()
+        validate.assert_called_once()
         assert resp.status_code == 400

@@ -205,7 +205,10 @@ class RepeaterCommand(BaseCommand):
             return "Repeater manager not initialized. Please check bot configuration."
 
         if not args:
-            return "Usage: !repeater purge [all|days|name|companions] [reason]\nExamples:\n  !repeater purge all 'Clear all repeaters'\n  !repeater purge companions 'Clear inactive companions'\n  !repeater purge companions 30 'Purge companions inactive 30+ days'\n  !repeater purge 30 'Auto-cleanup old repeaters'\n  !repeater purge 'Hillcrest' 'Remove specific repeater'"
+            return (
+                "purge: all|days|name|companions [reason]\n"
+                "ex: purge all | companions 30 | 30 | Hillcrest"
+            )
 
         try:
             # Check if purging companions
@@ -335,12 +338,10 @@ class RepeaterCommand(BaseCommand):
                     else:
                         return f"❌ Failed to purge repeater: {repeater['name']}"
                 else:
-                    # Multiple matches - show options
-                    lines = [f"Multiple repeaters found matching '{name_pattern}':"]
+                    # Multiple matches - show options (compact for DM budget)
+                    lines = [f"Matches '{name_pattern}' (pick exact):"]
                     for i, repeater in enumerate(matching_repeaters, 1):
-                        lines.append(f"{i}. {repeater['name']} ({repeater['device_type']})")
-                    lines.append("")
-                    lines.append("Please be more specific with the name.")
+                        lines.append(f"{i}.{repeater['name']}")
                     return "\n".join(lines)
 
         except ValueError:

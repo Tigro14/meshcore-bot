@@ -1,6 +1,6 @@
 # Data retention
 
-The bot stores data in a SQLite database for the web viewer, stats, repeater management, and path routing. To limit database size, **data retention** controls how long rows are kept. Cleanup runs **daily** from the bot’s scheduler, so retention is enforced even when the standalone web viewer is not running.
+The bot stores data in a SQLite database for the web viewer, stats, repeater management, and path routing. To limit database size, **data retention** controls how long rows are kept. Cleanup runs **daily** from the bot’s APScheduler-based maintenance loop, so retention is enforced even when the standalone web viewer is not running.
 
 ## Configuration
 
@@ -15,7 +15,7 @@ purging_log_retention_days = 90
 mesh_connections_retention_days = 7
 ```
 
-Stats tables (message_stats, command_stats, path_stats) use **`[Stats_Command]`** `data_retention_days` (default 7); the scheduler runs that cleanup daily as well. Stats are **collected** when the stats command is enabled, or when the optional **`collect_stats = true`** is set under `[Stats_Command]` (so the web viewer dashboard can show message/command/path stats even if the `stats` chat command is disabled).
+Stats tables (message_stats, command_stats, path_stats) use **`[Stats_Command]`** `data_retention_days` (default 7); the scheduler runs that cleanup daily as well. Stats are **collected** by default with **`collect_stats = true`** under `[Stats_Command]`, even if the user-facing `stats` chat command is disabled with `enabled = false`. Set **`collect_stats = false`** only if you want to stop writing those dashboard stats tables.
 
 ## Tables and defaults
 
@@ -28,7 +28,21 @@ Stats tables (message_stats, command_stats, path_stats) use **`[Stats_Command]`*
 | **purging_log** | Audit trail for repeater purges | 90 days |
 | **mesh_connections** | Path graph edges (in-memory + DB); should be ≥ Path_Command `graph_edge_expiration_days` | 7 days |
 | **message_stats, command_stats, path_stats** | Stats command data | 7 days (`[Stats_Command]` `data_retention_days`) |
+| **daily_rollup** | Per-day dashboard rollups, so trends outlive the tables above | 400 days (`[Web_Viewer]` `dashboard_snapshot_history_days`) |
+| **dashboard_snapshot** | Single-row current-state payload for the dashboard | Overwritten in place |
 | **geocoding_cache, generic_cache** | Expired entries removed by scheduler | By expiry time |
+
+`daily_rollup` exists precisely because the retention above is short: the
+dashboard charts 30 days of message and packet activity from tables pruned at 7
+and 3 days respectively. One row per day is roughly 200 bytes, so a year of
+history costs well under a megabyte. Pruning it is handled by the web viewer's
+snapshot refresher rather than the bot scheduler, because the viewer may point
+at a different database file.
+
+Note that cleanup also removes rows dated implausibly far in the **future**.
+A node with a bad clock can write a timestamp years ahead; because such a row is
+never older than the cutoff, a lower-bound-only delete would keep it forever and
+stretch every chart axis to match.
 
 Shorter retention (e.g. 2–3 days for `packet_stream`) is enough for the web viewer and transmission_tracker; longer retention is only needed if you want more history.
 

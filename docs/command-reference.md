@@ -97,36 +97,6 @@ cmd
 
 ---
 
-### `llm`
-
-Ask a local llama.cpp instance for a short AI response.
-
-**Aliases:** `ia`, `ai`, `chat`
-
-**Usage:**
-```
-llm <question>
-```
-
-**Note:** If `command_prefix` is set in your `config.ini` (e.g. `command_prefix = /`), prefix the command accordingly (e.g. `/llm <question>`). All aliases (`ia`, `ai`, `chat`) also work with the configured prefix.
-
-**Examples:**
-```
-llm What is LoRa?
-llm summarize mesh routing in one sentence
-```
-
-**Response:** Short AI-generated response from your locally configured llama.cpp endpoint.
-
-**Configuration:** The LLM command supports optional pagination for long responses. Enable it in `config.ini` under `[Llm_Command]`:
-- `pagination_enabled` - Enable/disable pagination (default: false)
-- `page_count` - Maximum number of message pages (1-10, default: 2)
-- `chars_per_page` - Maximum characters per page (50-500, default: 160)
-
-When pagination is enabled and a response exceeds `chars_per_page`, it will be split across multiple messages.
-
----
-
 ### `version`
 
 Show the bot's current software version.
@@ -272,9 +242,47 @@ aqi help
 
 ---
 
+### `rain <location>`
+
+Minute-level rain nowcast — tells you when precipitation is about to **start** or **stop** in the next couple hours, using Open-Meteo's 15-minutely precipitation forecast. Works worldwide with no API key.
+
+**Aliases:** `nowcast`, `snow`
+
+**Usage:**
+```
+rain [city|zipcode|lat,lon]
+nowcast [city|zipcode|lat,lon]
+snow [city|zipcode|lat,lon]
+```
+
+**Examples:**
+```
+rain
+rain seattle
+rain 98101
+rain 47.6,-122.3
+snow denver
+```
+
+**Response:** A single line describing the upcoming precipitation, for example:
+- `🌧️ Rain starting in ~25min for Seattle (~45min)` — dry now, rain expected (with rough duration)
+- `🌧️ Rain easing in ~20min for Seattle` — raining now, clearing soon
+- `🌧️ Heavy rain steady for 2h+ in Seattle` — raining now, no break in the window
+- `☀️ No rain expected in next 2h for Seattle` — dry through the window
+
+The keyword sets which precipitation the answer leads with: `rain`/`nowcast` lead with rain (liquid amount), while `snow` leads with snowfall (reported as depth, e.g. `🌨️ Snow starting in ~40min (~1.5 in snow)`). Either keyword still mentions the other type when it's in the window, and snow/ice changeovers are called out. Bare countries or US states (e.g. `rain france`, `snow texas`) default to the region's capital with a heads-up, since one centroid isn't representative.
+
+When no location is given, uses the sender's companion location if known, then the bot's configured location.
+
+**Configuration:** `[Rain_Command]` — `enabled`, `window_minutes` (how far ahead to look, default 120), `precip_threshold_mm` (sensitivity, default 0.1), and optional `default_lat`/`default_lon`. Temperature/precipitation source units are shared via `[Weather]` (`weather_model` is honored).
+
+**Note:** Falls back to hourly precipitation when a weather model doesn't provide 15-minute data for the area.
+
+---
+
 ### `airplanes [location] [options]` / `overhead [lat,lon]`
 
-Get aircraft tracking information using ADS-B data from airplanes.live or compatible APIs.
+Get aircraft tracking information using ADS-B data from adsb.lol or any compatible readsb/ADSBExchange v2 API.
 
 **Aliases:** `aircraft`, `planes`, `adsb`, `overhead`
 
@@ -334,12 +342,12 @@ airplanes 47.6,-122.3 radius=25 closest
 **Configuration:**
 The command can be configured in `config.ini` under `[Airplanes_Command]`:
 - `enabled` - Enable/disable the command
-- `api_url` - API endpoint URL (default: `http://api.airplanes.live/v2/`)
+- `api_url` - API endpoint URL (default: `https://api.adsb.lol/v2/`). Existing configs that still point at `api.airplanes.live` are remapped to this default. A local readsb instance or any other host is left as-is.
 - `default_radius` - Default search radius in nautical miles
 - `max_results` - Maximum number of results to return
 - `url_timeout` - API request timeout in seconds
 
-**Note:** Uses companion location from database if available, otherwise falls back to bot location from config. The API is rate-limited to 1 request per second.
+**Note:** Uses companion location from database if available, otherwise falls back to bot location from config. Keep the command cooldown at 2 seconds to stay within typical public ADS-B rate limits.
 
 ---
 
@@ -402,6 +410,10 @@ solar
 - A-index and K-index
 - HF band conditions (Open/Closed/Marginal)
 - Solar activity summary
+
+Data comes from HamQSL and NOAA SWPC. For the provenance of the underlying
+`modules/solar_conditions.py` implementation, see
+[Solar conditions rewrite provenance](solar-conditions-provenance.md).
 
 ---
 
@@ -680,6 +692,29 @@ sports mlb
 
 **Response:** Current scores and game information for the requested teams or league.
 
+> World Cup scores are also available year-round here, e.g. `sports fifa`.
+
+---
+
+### `wc` or `worldcup`
+
+FIFA World Cup scores and schedule. Responds **only while a World Cup (men's or women's) is actually in progress** — the active tournament is auto-detected from the ESPN schedule, so no dates need to be configured. Outside a tournament it replies that none is in progress.
+
+**Usage:**
+- `wc` - Live/most recent scores and upcoming fixtures
+- `wc <nation>` - Focus on a specific nation's match
+
+**Examples:**
+```
+wc
+worldcup
+wc argentina
+```
+
+**Response:** Current scores, match state, and upcoming fixtures for the active tournament.
+
+**Configuration:** `[Worldcup_Command]` — `enabled`, `api_timeout`, `cache_ttl_minutes`. For proactive live match announcements posted to a channel, see the [World Cup Live Service](service-plugins.md).
+
 ---
 
 ## MeshCore Utility Commands
@@ -744,6 +779,27 @@ prefix free
 - Status (active/inactive)
 - Last seen time
 - Location (if available)
+
+**Data source:** By default the bot answers from its own database of repeaters it has
+heard. No external service is required, and `[External_Data] repeater_prefix_api_url`
+should be left **empty** — leaving it empty does not disable the command.
+
+Setting that option adds an optional external dataset on top: node counts come from the
+API while names and locations still come from the local database. The setting dates from
+when the project fetched data from `map.w0z.is`, which is defunct, and there is no
+drop-in public replacement. To serve your own, answer a plain `GET` with HTTP 200 and:
+
+```json
+{
+  "data": [
+    {"prefix": "AB", "node_count": 3, "node_names": ["Node One", "Node Two", "Node Three"]}
+  ]
+}
+```
+
+`prefix` is upper-cased by the bot, `node_count` is an integer, and `node_names` is a
+list of strings. The request times out after 10 seconds, and responses are cached for
+`repeater_prefix_cache_hours` (default 1).
 
 ---
 
@@ -923,7 +979,7 @@ repeater stats
 - NEW_CONTACT events are automatically monitored
 - Repeaters are automatically cataloged when discovered
 - Contact list capacity is monitored in real-time
-- `auto_manage_contacts = device`: Firmware auto-adds **chat (companion)** peers only, with **overwrite oldest non-favourite** when the contact table is full; the bot schedules delayed jobs to set that firmware policy and to **favourite** keys in `Admin_ACL` plus the effective announcements ACL (same rules as the announcements command), then clear **favourite** on other contacts. The bot still runs capacity management on NEW_CONTACT (near-limit `manage_contact_list`) and does **not** call `add_contact` for new companions itself. **Contact limit** for logging and capacity is taken from the radio’s `max_contacts` and, if the live table is larger (under-reported max), raised to match the mesh so counts are not shown as over-capacity. **Companion auto-purge** never runs on the radio in this mode. Count-based **repeater** auto-purge only runs if the table grows **strictly above** that synced limit (normally off while the firmware manages slots).
+- `auto_manage_contacts = device` (default): Firmware auto-adds **chat (companion)** peers only, with **overwrite oldest non-favourite** when the contact table is full; the bot schedules delayed jobs to set that firmware policy and to **favourite** keys in `Admin_ACL` plus the effective announcements ACL (same rules as the announcements command), then clear **favourite** on other contacts. The bot still runs capacity management on NEW_CONTACT (near-limit `manage_contact_list`) and does **not** call `add_contact` for new companions itself. **Contact limit** for logging and capacity is taken from the radio’s `max_contacts` and, if the live table is larger (under-reported max), raised to match the mesh so counts are not shown as over-capacity. **Companion auto-purge** never runs on the radio in this mode. Count-based **repeater** auto-purge only runs if the table grows **strictly above** that synced limit (normally off while the firmware manages slots).
 - `auto_manage_contacts = bot`: Bot adds new companions via `add_contact` (full NEW_CONTACT payload), runs **manage-before-add** when the list is near limit, and **retries once** after `manage_contact_list` if the radio returns `TABLE_FULL`.
 - `auto_manage_contacts = false`: Manual mode - NEW_CONTACT companions are tracked in the database only; use `!repeater` commands to manage the device list.
 
@@ -1052,12 +1108,32 @@ schedule
 
 **Response:** Lists configured scheduled posts (each line shows the cron or preset schedule, or legacy `HH:MM` if you still use deprecated HHMM keys) plus current advert timing.
 
-Related scheduler config:
-- `[Scheduled_Messages]` for channel posts (`<schedule> = channel[:#scope]:message`)
-- `[Clock_Sync_Admin]` for repeater-targeted admin DMs (`targets = name,pubkey,prefix` with `schedule = <cron>` and optional `command_payload`)
+**Note:** DM-only command by default. Cron day-of-week uses APScheduler numbering (0=Monday), not Vixie cron — see [Scheduled messages](configuration.md#scheduled-messages-scheduled_messages).
 
-**Note:** DM-only command by default.
+---
+
+### `webviewer` or `web` or `viewer` or `wv`
+
+Manage the web viewer integration.
+
+**Usage:**
+```
+webviewer <subcommand>
+```
+
+**Subcommands:**
+
+| Subcommand | Description |
+|------------|-------------|
+| `status` | Report enabled/running state, URL, circuit-breaker state, failure count, and shutdown state |
+| `reset` | Reset the integration's circuit breaker after repeated failures |
+| `restart` | Restart the web viewer process |
+
+**Response:** A compact status line, or confirmation that the reset or restart was initiated.
+
+**Note:** DM-only command. Disable with `enabled = false` under `[WebViewer_Command]`.
 
 ---
 
 For more information about configuring the bot, see the main [README](https://github.com/agessaman/meshcore-bot/blob/main/README.md) file.
+

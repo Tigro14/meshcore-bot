@@ -518,3 +518,41 @@ class TestSnocoScopedPingRegression:
         cm.send_channel_message.assert_awaited_once()
         _, kwargs = cm.send_channel_message.call_args
         assert kwargs.get("scope") == "#snoco"
+
+
+class TestWildcardOnlyAllowlist:
+    """flood_scopes = "*" leaves scope_keys empty but still configures an allowlist
+    (global only). Gating on scope_keys alone let that configuration skip
+    authorisation entirely."""
+
+    @staticmethod
+    def _cmd_mgr(raw):
+        from unittest.mock import Mock
+
+        from modules.command_manager import CommandManager
+
+        mgr = object.__new__(CommandManager)
+        mgr.logger = Mock()
+        mgr._flood_scopes_config_raw = lambda: raw
+        mgr.flood_scope_allow_global = False
+        keys = mgr._load_flood_scope_keys()
+        return keys, mgr.flood_scope_allow_global
+
+    def test_wildcard_only_yields_no_keys_but_allows_global(self):
+        keys, allow_global = self._cmd_mgr("*")
+        assert keys == {}
+        assert allow_global is True
+
+    def test_wildcard_only_still_counts_as_a_configured_allowlist(self):
+        """The gate condition the handler uses must be true here, or '*' bypasses it."""
+        keys, allow_global = self._cmd_mgr("*")
+        assert bool(keys or allow_global) is True
+
+    def test_named_scope_plus_wildcard(self):
+        keys, allow_global = self._cmd_mgr("#west, *")
+        assert list(keys) == ["#west"]
+        assert allow_global is True
+
+    def test_unset_config_configures_no_allowlist(self):
+        keys, allow_global = self._cmd_mgr("")
+        assert bool(keys or allow_global) is False

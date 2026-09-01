@@ -1,12 +1,19 @@
 """Tests for modules.security_utils."""
 
+import asyncio
 import os
 import socket
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from modules.security_utils import (
+    SafeAiohttpResolver,
+    SafeUrlPolicy,
+    UnsafeUrlError,
+    create_safe_requests_session,
+    safe_aiohttp_request,
+    safe_requests_request,
     sanitize_input,
     validate_api_key_format,
     validate_external_url,
@@ -15,6 +22,15 @@ from modules.security_utils import (
     validate_pubkey_format,
     validate_safe_path,
 )
+
+
+def _addrinfo(*addresses: str, port: int = 80):
+    records = []
+    for address in addresses:
+        family = socket.AF_INET6 if ":" in address else socket.AF_INET
+        sockaddr = (address, port, 0, 0) if family == socket.AF_INET6 else (address, port)
+        records.append((family, socket.SOCK_STREAM, 6, "", sockaddr))
+    return records
 
 
 class TestValidatePubkeyFormat:
@@ -72,63 +88,243 @@ class TestValidateExternalUrl:
         assert validate_external_url("file:///etc/passwd") is False
 
     def test_http_https_scheme_allowed(self):
-        with patch("socket.gethostbyname", return_value="93.184.216.34"):
+        with patch("socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
             assert validate_external_url("https://example.com/") is True
             assert validate_external_url("http://example.com/") is True
 
     def test_loopback_rejected_by_default(self):
-        with patch("socket.gethostbyname", return_value="127.0.0.1"):
+        with patch("socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")):
             assert validate_external_url("http://localhost/") is False
 
     def test_rfc1918_rejected_by_default(self):
         for ip in ("10.0.0.1", "172.16.0.1", "192.168.1.1"):
-            with patch("socket.gethostbyname", return_value=ip):
+            with patch("socket.getaddrinfo", return_value=_addrinfo(ip)):
                 assert validate_external_url("http://example.com/") is False, f"{ip} should be blocked"
 
     def test_rfc6598_cgn_rejected_by_default(self):
-        with patch("socket.gethostbyname", return_value="100.64.0.1"):
+        with patch("socket.getaddrinfo", return_value=_addrinfo("100.64.0.1")):
             assert validate_external_url("http://example.com/") is False
 
     # --- allow_loopback: permits 127.x/::1 only, not RFC 1918 ---
 
     def test_allow_loopback_permits_loopback(self):
-        with patch("socket.gethostbyname", return_value="127.0.0.1"):
+        with patch("socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")):
             assert validate_external_url("http://localhost/", allow_loopback=True) is True
 
     def test_allow_loopback_still_blocks_rfc1918(self):
         for ip in ("10.0.0.1", "172.16.0.1", "192.168.1.1"):
-            with patch("socket.gethostbyname", return_value=ip):
+            with patch("socket.getaddrinfo", return_value=_addrinfo(ip)):
                 assert validate_external_url(
                     "http://example.com/", allow_loopback=True
                 ) is False, f"allow_loopback must not permit RFC 1918 addr {ip}"
 
     def test_allow_loopback_still_blocks_cgn(self):
-        with patch("socket.gethostbyname", return_value="100.64.0.1"):
+        with patch("socket.getaddrinfo", return_value=_addrinfo("100.64.0.1")):
             assert validate_external_url("http://example.com/", allow_loopback=True) is False
 
     # --- allow_private: permits all internal ranges including loopback ---
 
     def test_allow_private_permits_loopback(self):
-        with patch("socket.gethostbyname", return_value="127.0.0.1"):
+        with patch("socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")):
             assert validate_external_url("http://localhost/", allow_private=True) is True
 
     def test_allow_private_permits_rfc1918(self):
         for ip in ("10.0.0.1", "172.16.0.1", "192.168.1.1"):
-            with patch("socket.gethostbyname", return_value=ip):
+            with patch("socket.getaddrinfo", return_value=_addrinfo(ip)):
                 assert validate_external_url(
                     "http://example.com/", allow_private=True
                 ) is True, f"allow_private must permit RFC 1918 addr {ip}"
 
     def test_allow_private_permits_cgn(self):
-        with patch("socket.gethostbyname", return_value="100.64.0.1"):
+        with patch("socket.getaddrinfo", return_value=_addrinfo("100.64.0.1")):
             assert validate_external_url("http://example.com/", allow_private=True) is True
 
     def test_allow_private_permits_link_local(self):
-        with patch("socket.gethostbyname", return_value="169.254.0.1"):
+        with patch("socket.getaddrinfo", return_value=_addrinfo("169.254.0.1")):
             assert validate_external_url("http://example.com/", allow_private=True) is True
 
     def test_missing_netloc_rejected(self):
         assert validate_external_url("http://") is False
+
+
+class TestSafeUrlPolicy:
+    def test_rejects_credentials_and_ambiguous_authorities(self):
+        policy = SafeUrlPolicy()
+        for url in (
+            "http://user:secret@example.com/",
+            "http://example.com\\@127.0.0.1/",
+            "http://2130706433/",
+            "http://0177.0.0.1/",
+            "http://example.com../",
+        ):
+            with pytest.raises(UnsafeUrlError):
+                policy.parse(url)
+
+    def test_accepts_public_ipv6_answer(self):
+        with patch(
+            "socket.getaddrinfo",
+            return_value=_addrinfo("2606:4700:4700::1111"),
+        ):
+            assert validate_external_url("https://ipv6.example/") is True
+
+    def test_rejects_private_ipv6_answer(self):
+        with patch("socket.getaddrinfo", return_value=_addrinfo("fd00::1")):
+            assert validate_external_url("https://ipv6.example/") is False
+
+    def test_rejects_mixed_public_private_answers(self):
+        with patch(
+            "socket.getaddrinfo",
+            return_value=_addrinfo("93.184.216.34", "127.0.0.1"),
+        ):
+            assert validate_external_url("https://mixed.example/") is False
+
+    @pytest.mark.parametrize(
+        "resolved",
+        [
+            "169.254.169.254",  # AWS/Azure/GCP IMDS
+            "169.254.170.2",  # AWS ECS task credentials
+            "100.100.100.200",  # Alibaba Cloud
+            # IPv4-mapped IPv6 spellings must not bypass the metadata block:
+            # the mapped form is a distinct address object absent from the
+            # metadata set and reports is_reserved=False.
+            "::ffff:169.254.169.254",
+            "::ffff:169.254.170.2",
+            "::ffff:100.100.100.200",
+        ],
+    )
+    def test_allow_private_does_not_allow_metadata(self, resolved):
+        with patch("socket.getaddrinfo", return_value=_addrinfo(resolved)):
+            assert validate_external_url(
+                "http://metadata.example/",
+                allow_private=True,
+            ) is False
+
+    @pytest.mark.asyncio
+    async def test_async_resolution_honors_policy_timeout(self):
+        policy = SafeUrlPolicy(timeout=0.01)
+
+        async def stalled_resolution(*_args, **_kwargs):
+            await asyncio.sleep(1)
+
+        loop = asyncio.get_running_loop()
+        with patch.object(loop, "getaddrinfo", side_effect=stalled_resolution):
+            with pytest.raises(UnsafeUrlError, match="Failed to resolve"):
+                await policy.validate_async("https://slow.example/")
+
+    @pytest.mark.asyncio
+    async def test_aiohttp_connect_resolver_rejects_rebound_mixed_answers(self):
+        policy = SafeUrlPolicy()
+        resolver = SafeAiohttpResolver(policy)
+        loop = asyncio.get_running_loop()
+        records = _addrinfo("93.184.216.34", "127.0.0.1")
+
+        with patch.object(loop, "getaddrinfo", return_value=records):
+            with pytest.raises(OSError, match="Private or non-global"):
+                await resolver.resolve("rebind.example", 443, socket.AF_UNSPEC)
+
+    def test_sync_redirect_to_private_target_is_blocked_before_second_request(self):
+        policy = SafeUrlPolicy()
+        first = Mock(status_code=302, headers={"Location": "http://internal.example/"})
+        first.close = Mock()
+        session = Mock()
+        session.request.return_value = first
+        with (
+            patch(
+                "socket.getaddrinfo",
+                side_effect=[
+                    _addrinfo("93.184.216.34"),
+                    _addrinfo("127.0.0.1"),
+                ],
+            ),
+            pytest.raises(UnsafeUrlError),
+        ):
+            safe_requests_request(
+                session,
+                "GET",
+                "https://public.example/start",
+                policy=policy,
+            )
+        assert session.request.call_count == 1
+        first.close.assert_called_once()
+
+    def test_requests_adapter_revalidates_at_connect_time(self):
+        policy = SafeUrlPolicy()
+        session = create_safe_requests_session(policy)
+        adapter = session.get_adapter("http://")
+        pool = adapter.poolmanager.connection_from_host("rebind.example", port=80)
+        connection = pool.ConnectionCls(host="rebind.example", port=80)
+        with (
+            patch.object(policy, "resolve", side_effect=UnsafeUrlError("rebound private")),
+            patch("modules.security_utils.create_connection") as connect,
+            pytest.raises(Exception, match="rebound private"),
+        ):
+            connection._new_conn()
+        connect.assert_not_called()
+        session.close()
+
+    def test_cross_origin_redirect_strips_query_and_secret_headers(self):
+        policy = SafeUrlPolicy()
+        policy.validate = Mock(return_value=True)
+        first = Mock(status_code=302, headers={"Location": "https://other.example/next"})
+        first.close = Mock()
+        second = Mock(status_code=200, headers={})
+        session = Mock()
+        session.request.side_effect = [first, second]
+
+        result = safe_requests_request(
+            session,
+            "GET",
+            "https://public.example/start",
+            policy=policy,
+            headers={"X-Api-Key": "secret", "User-Agent": "test"},
+            params={"token": "query-secret"},
+        )
+
+        assert result is second
+        second_call = session.request.call_args_list[1]
+        assert second_call.kwargs["headers"] == {"User-Agent": "test"}
+        assert "params" not in second_call.kwargs
+        first.close.assert_called_once()
+
+    def test_cross_origin_redirect_rejects_request_body(self):
+        policy = SafeUrlPolicy()
+        policy.validate = Mock(return_value=True)
+        first = Mock(status_code=307, headers={"Location": "https://other.example/next"})
+        first.close = Mock()
+        session = Mock()
+        session.request.return_value = first
+
+        with pytest.raises(UnsafeUrlError, match="request bodies"):
+            safe_requests_request(
+                session,
+                "POST",
+                "https://public.example/start",
+                policy=policy,
+                json={"token": "body-secret"},
+            )
+
+        assert session.request.call_count == 1
+        first.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_redirect_to_private_target_is_blocked(self):
+        policy = SafeUrlPolicy()
+        first = Mock(status=302, headers={"Location": "http://internal.example/"})
+        first.release = Mock()
+        session = Mock()
+        session.request = AsyncMock(return_value=first)
+        policy.validate_async = AsyncMock(
+            side_effect=[True, UnsafeUrlError("private redirect")]
+        )
+        with pytest.raises(UnsafeUrlError, match="private redirect"):
+            await safe_aiohttp_request(
+                session,
+                "GET",
+                "https://public.example/start",
+                policy=policy,
+            )
+        assert session.request.await_count == 1
+        first.release.assert_called_once()
 
 
 class TestSanitizeInput:
@@ -265,15 +461,15 @@ class TestValidateExternalUrlExtra:
     """Additional coverage for validate_external_url() socket exception paths."""
 
     def test_dns_resolution_failure_returns_false(self):
-        with patch("socket.gethostbyname", side_effect=socket.gaierror("no such host")):
+        with patch("socket.getaddrinfo", side_effect=socket.gaierror("no such host")):
             assert validate_external_url("http://nonexistent.invalid.example") is False
 
     def test_dns_timeout_returns_false(self):
-        with patch("socket.gethostbyname", side_effect=socket.timeout("timeout")):
+        with patch("socket.getaddrinfo", side_effect=socket.timeout("timeout")):
             assert validate_external_url("http://slow.example.com") is False
 
     def test_allow_loopback_permits_loopback(self):
-        with patch("socket.gethostbyname", return_value="127.0.0.1"):
+        with patch("socket.getaddrinfo", return_value=_addrinfo("127.0.0.1")):
             result = validate_external_url("http://localhost", allow_loopback=True)
             assert result is True
 

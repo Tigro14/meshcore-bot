@@ -1,471 +1,412 @@
 #!/usr/bin/env python3
-"""
-Solar and Astronomical Conditions Module
-Provides functions for HF band conditions, solar data, moon phases, and satellite passes
-Adapted from MeshLink bot by K7MHI Kelly Keeton 2024
+"""Solar, lunar, and satellite condition helpers.
+
+This module is an independent implementation based on the public data formats
+documented by HamQSL, NOAA SWPC, N2YO, and PyEphem:
+
+* https://www.hamqsl.com/solarxml.php
+* https://services.swpc.noaa.gov/text/drap_global_frequencies.txt
+* https://www.n2yo.com/api/
+* https://rhodesmill.org/pyephem/quick.html
+
+The short text formats are retained for compatibility with MeshCore Bot's
+command handlers and constrained radio messages.
 """
 
+from __future__ import annotations
+
+import configparser
 import logging
-import xml.dom.minidom
+from collections.abc import Iterable
 from datetime import datetime, timezone
+from time import time
+from typing import Any
+from xml.etree import ElementTree
 
 import ephem
 import requests
 
 logger = logging.getLogger(__name__)
 
-# Default values (can be overridden via config)
-DEFAULT_LATITUDE = 40.7128  # New York City
+DEFAULT_LATITUDE = 40.7128
 DEFAULT_LONGITUDE = -74.0060
+DEFAULT_N2YO_API_KEY = ""
 DEFAULT_URL_TIMEOUT = 10
 DEFAULT_ZULU_TIME = False
-DEFAULT_N2YO_API_KEY = ""
+ERROR_FETCHING_DATA = "Error fetching data"
 
-# Global config reference (will be set by bot initialization)
-_config = None
+HAMQSL_SOLAR_URL = "https://www.hamqsl.com/solarxml.php"
+NOAA_DRAP_URL = "https://services.swpc.noaa.gov/text/drap_global_frequencies.txt"
+N2YO_BASE_URL = "https://api.n2yo.com/rest/v1/satellite"
 
-def set_config(config):
-    """Set the global config reference"""
+_config: configparser.ConfigParser | None = None
+
+
+def set_config(config: configparser.ConfigParser | None) -> None:
+    """Set the application configuration used by subsequent calls."""
+
     global _config
     _config = config
 
-def get_config_value(section, key, fallback):
-    """Get config value with fallback"""
-    if _config and _config.has_section(section):
-        value = _config.get(section, key, fallback=fallback)
 
-        # Convert numeric values to appropriate types
-        if key in ['url_timeout', 'bot_latitude', 'bot_longitude']:
-            try:
-                if key == 'url_timeout':
-                    return int(value)
-                else:
-                    return float(value)
-            except (ValueError, TypeError):
-                return fallback
+def get_config_value(section: str, key: str, fallback: Any) -> Any:
+    """Read and type-convert a configuration value using ``fallback``'s type."""
 
-        # Handle boolean values
-        if key == 'use_zulu_time':
-            if isinstance(value, str):
-                return value.lower() in ['true', '1', 'yes', 'on']
-            return bool(value)
+    if _config is None or not _config.has_section(section):
+        return fallback
 
-        return value
-    return fallback
+    raw_value = _config.get(section, key, fallback=None)
+    if raw_value is None:
+        return fallback
 
-# Error message for failed data fetching
-ERROR_FETCHING_DATA = "Error fetching data"
-
-def hf_band_conditions():
-    """Get ham radio HF band conditions from hamsql.com"""
     try:
-        hf_cond = ""
-        timeout = get_config_value('Solar_Config', 'url_timeout', DEFAULT_URL_TIMEOUT)
-        band_cond = requests.get("https://www.hamqsl.com/solarxml.php", timeout=timeout)
-        if band_cond.ok:
-            solarxml = xml.dom.minidom.parseString(band_cond.text)
-            for i in solarxml.getElementsByTagName("band"):
-                hf_cond += i.getAttribute("time")[0] + i.getAttribute("name") + "=" + str(i.childNodes[0].data) + "\n"
-            hf_cond = hf_cond[:-1]  # remove the last newline
-        else:
-            logger.error("Solar: Error fetching HF band conditions")
-            hf_cond = ERROR_FETCHING_DATA
+        if isinstance(fallback, bool):
+            return str(raw_value).strip().lower() in {"1", "yes", "true", "on"}
+        if isinstance(fallback, int):
+            return int(raw_value)
+        if isinstance(fallback, float):
+            return float(raw_value)
+        return raw_value
+    except (TypeError, ValueError):
+        logger.warning("Invalid value for [%s] %s; using default", section, key)
+        return fallback
 
-        return hf_cond
-    except Exception as e:
-        logger.error(f"Solar: Exception in hf_band_conditions: {e}")
+
+def _request_timeout() -> int:
+    timeout = get_config_value("Solar_Config", "url_timeout", DEFAULT_URL_TIMEOUT)
+    return max(1, int(timeout))
+
+
+def _fetch_solar_data() -> ElementTree.Element:
+    response = requests.get(HAMQSL_SOLAR_URL, timeout=_request_timeout())
+    response.raise_for_status()
+    root = ElementTree.fromstring(response.text)
+    solar_data = root.find("solardata")
+    if solar_data is None:
+        raise ValueError("HamQSL response has no solardata element")
+    return solar_data
+
+
+def _element_text(parent: ElementTree.Element, tag: str) -> str:
+    element = parent.find(tag)
+    if element is None or element.text is None:
+        return ""
+    return element.text
+
+
+def _band_rows(solar_data: ElementTree.Element) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    for element in solar_data.findall("./calculatedconditions/band"):
+        period = element.get("time", "").strip().lower()
+        name = element.get("name", "").strip()
+        condition = (element.text or "").strip()
+        if period and name and condition:
+            rows.append((period, name, condition))
+    return rows
+
+
+def hf_band_conditions() -> str:
+    """Return HamQSL HF conditions as one compact assignment per band."""
+
+    try:
+        rows = _band_rows(_fetch_solar_data())
+        if not rows:
+            raise ValueError("HamQSL response has no band conditions")
+        return "\n".join(f"{period[0]}{name}={condition}" for period, name, condition in rows)
+    except Exception:
+        logger.exception("Unable to retrieve HamQSL HF propagation report")
         return ERROR_FETCHING_DATA
 
-def solar_conditions():
-    """Get radio related solar conditions from hamsql.com"""
+
+def solar_conditions() -> str:
+    """Return the primary HamQSL solar indices in a readable multiline form."""
+
     try:
-        solar_cond = ""
-        timeout = get_config_value('Solar_Config', 'url_timeout', DEFAULT_URL_TIMEOUT)
-        solar_cond = requests.get("https://www.hamqsl.com/solarxml.php", timeout=timeout)
-        if solar_cond.ok:
-            solar_xml = xml.dom.minidom.parseString(solar_cond.text)
-            for i in solar_xml.getElementsByTagName("solardata"):
-                solar_a_index = i.getElementsByTagName("aindex")[0].childNodes[0].data
-                solar_k_index = i.getElementsByTagName("kindex")[0].childNodes[0].data
-                solar_xray = i.getElementsByTagName("xray")[0].childNodes[0].data
-                solar_flux = i.getElementsByTagName("solarflux")[0].childNodes[0].data
-                sunspots = i.getElementsByTagName("sunspots")[0].childNodes[0].data
-                signalnoise = i.getElementsByTagName("signalnoise")[0].childNodes[0].data
-            solar_cond = f"A-Index: {solar_a_index}\nK-Index: {solar_k_index}\nSunspots: {sunspots}\nX-Ray Flux: {solar_xray}\nSolar Flux: {solar_flux}\nSignal Noise: {signalnoise}"
-        else:
-            logger.error("Solar: Error fetching solar conditions")
-            solar_cond = ERROR_FETCHING_DATA
-        return solar_cond
-    except Exception as e:
-        logger.error(f"Solar: Exception in solar_conditions: {e}")
+        data = _fetch_solar_data()
+        fields = (
+            ("A-Index", "aindex"),
+            ("K-Index", "kindex"),
+            ("Sunspots", "sunspots"),
+            ("X-Ray Flux", "xray"),
+            ("Solar Flux", "solarflux"),
+            ("Signal Noise", "signalnoise"),
+        )
+        return "\n".join(f"{label}: {_element_text(data, tag)}" for label, tag in fields)
+    except Exception:
+        logger.exception("Solar: Unable to retrieve current solar indices")
         return ERROR_FETCHING_DATA
 
-def solar_conditions_condensed():
-    """Get condensed solar conditions optimized for 140 character limit"""
-    try:
-        timeout = get_config_value('Solar_Config', 'url_timeout', DEFAULT_URL_TIMEOUT)
-        solar_cond = requests.get("https://www.hamqsl.com/solarxml.php", timeout=timeout)
-        if solar_cond.ok:
-            solar_xml = xml.dom.minidom.parseString(solar_cond.text)
-            for i in solar_xml.getElementsByTagName("solardata"):
-                solar_a_index = i.getElementsByTagName("aindex")[0].childNodes[0].data
-                solar_k_index = i.getElementsByTagName("kindex")[0].childNodes[0].data
-                solar_xray = i.getElementsByTagName("xray")[0].childNodes[0].data
-                solar_flux = i.getElementsByTagName("solarflux")[0].childNodes[0].data
-                sunspots = i.getElementsByTagName("sunspots")[0].childNodes[0].data
-                signalnoise = i.getElementsByTagName("signalnoise")[0].childNodes[0].data
 
-            # Condensed format: A:K:Sun:Flux:Xray:Noise
-            solar_cond = f"A:{solar_a_index} K:{solar_k_index} Sun:{sunspots} Flux:{solar_flux} Xray:{solar_xray} Noise:{signalnoise}"
-        else:
-            logger.error("Solar: Error fetching solar conditions")
-            solar_cond = ERROR_FETCHING_DATA
-        return solar_cond
-    except Exception as e:
-        logger.error(f"Solar: Exception in solar_conditions_condensed: {e}")
+def solar_conditions_condensed() -> str:
+    """Return the primary HamQSL indices on one line."""
+
+    try:
+        data = _fetch_solar_data()
+        return (
+            f"A:{_element_text(data, 'aindex')} "
+            f"K:{_element_text(data, 'kindex')} "
+            f"Sun:{_element_text(data, 'sunspots')} "
+            f"Flux:{_element_text(data, 'solarflux')} "
+            f"Xray:{_element_text(data, 'xray')} "
+            f"Noise:{_element_text(data, 'signalnoise')}"
+        )
+    except Exception:
+        logger.exception("Solar: Error fetching condensed solar conditions")
         return ERROR_FETCHING_DATA
 
-def hf_band_conditions_condensed():
-    """Get condensed HF band conditions optimized for 140 character limit"""
+
+def _group_bands(rows: Iterable[tuple[str, str, str]], period: str) -> str:
+    grouped: dict[str, list[str]] = {}
+    for row_period, name, condition in rows:
+        if row_period == period:
+            grouped.setdefault(condition, []).append(name)
+    ranges = []
+    for condition, names in grouped.items():
+        band_range = names[0] if len(names) == 1 else f"{names[0]}-{names[-1]}"
+        ranges.append(f"{band_range}{condition}")
+    return " ".join(ranges)
+
+
+def hf_band_conditions_condensed() -> str:
+    """Group bands with equal conditions into a single day/night line."""
+
     try:
-        hf_cond = ""
-        timeout = get_config_value('Solar_Config', 'url_timeout', DEFAULT_URL_TIMEOUT)
-        band_cond = requests.get("https://www.hamqsl.com/solarxml.php", timeout=timeout)
-        if band_cond.ok:
-            solarxml = xml.dom.minidom.parseString(band_cond.text)
-
-            # Group bands by condition and time
-            day_bands = {}
-            night_bands = {}
-
-            for i in solarxml.getElementsByTagName("band"):
-                time_period = i.getAttribute("time")[0]  # 'd' for day, 'n' for night
-                band_name = i.getAttribute("name")
-                condition = str(i.childNodes[0].data)
-
-                if time_period == 'd':
-                    if condition not in day_bands:
-                        day_bands[condition] = []
-                    day_bands[condition].append(band_name)
-                else:
-                    if condition not in night_bands:
-                        night_bands[condition] = []
-                    night_bands[condition].append(band_name)
-
-            # Build condensed output
-            if day_bands:
-                hf_cond += "D:"
-                for condition, bands in day_bands.items():
-                    if len(bands) > 1:
-                        hf_cond += f"{bands[0]}-{bands[-1]}{condition}"
-                    else:
-                        hf_cond += f"{bands[0]}{condition}"
-                    hf_cond += " "
-
-            if night_bands:
-                hf_cond += "N:"
-                for condition, bands in night_bands.items():
-                    if len(bands) > 1:
-                        hf_cond += f"{bands[0]}-{bands[-1]}{condition}"
-                    else:
-                        hf_cond += f"{bands[0]}{condition}"
-                    hf_cond += " "
-
-            hf_cond = hf_cond.strip()
-        else:
-            logger.error("Solar: Error fetching HF band conditions")
-            hf_cond = ERROR_FETCHING_DATA
-
-        return hf_cond
-    except Exception as e:
-        logger.error(f"Solar: Exception in hf_band_conditions_condensed: {e}")
+        rows = _band_rows(_fetch_solar_data())
+        if not rows:
+            raise ValueError("HamQSL response has no band conditions")
+        day = _group_bands(rows, "day")
+        night = _group_bands(rows, "night")
+        return f"D:{day} N:{night}"
+    except Exception:
+        logger.exception("Solar: Error fetching condensed HF band conditions")
         return ERROR_FETCHING_DATA
 
-def drap_xray_conditions():
-    """Get DRAP X-ray flux conditions from NOAA direct"""
+
+def drap_xray_conditions() -> str:
+    """Return NOAA SWPC's current global DRAP X-ray message."""
+
     try:
-        timeout = get_config_value('Solar_Config', 'url_timeout', DEFAULT_URL_TIMEOUT)
-        drap_cond = requests.get("https://services.swpc.noaa.gov/text/drap_global_frequencies.txt", timeout=timeout)
-        if drap_cond.ok:
-            drap_list = drap_cond.text.split('\n')
-            x_filter = '#  X-RAY Message :'
-            for line in drap_list:
-                if x_filter in line:
-                    xray_flux = line.split(": ")[1]
-                    return xray_flux
-            return "No X-ray data found"
-        else:
-            logger.error("Error fetching DRAP X-ray flux")
-            return ERROR_FETCHING_DATA
-    except Exception as e:
-        logger.error(f"Exception in drap_xray_conditions: {e}")
+        response = requests.get(NOAA_DRAP_URL, timeout=_request_timeout())
+        response.raise_for_status()
+        for line in response.text.splitlines():
+            label, separator, value = line.partition(":")
+            if separator and label.lstrip("# ").strip().upper() == "X-RAY MESSAGE":
+                return value.strip() or "No X-ray data found"
+        return "No X-ray data found"
+    except Exception:
+        logger.exception("Solar: Error fetching NOAA DRAP X-ray conditions")
         return ERROR_FETCHING_DATA
 
-def get_sun(lat=None, lon=None):
-    """Get sunrise and sunset times using specified location or defaults"""
+
+def _observer(lat: float, lon: float) -> ephem.Observer:
+    observer = ephem.Observer()
+    # PyEphem interprets strings as degrees and floats as radians.
+    observer.lat = str(lat)
+    observer.lon = str(lon)
+    observer.date = ephem.now()
+    return observer
+
+
+def _coordinates(lat: float | None, lon: float | None) -> tuple[float, float]:
+    latitude = get_config_value("Bot", "bot_latitude", DEFAULT_LATITUDE) if lat is None else lat
+    longitude = get_config_value("Bot", "bot_longitude", DEFAULT_LONGITUDE) if lon is None else lon
+    latitude = float(latitude)
+    longitude = float(longitude)
+    if not -90 <= latitude <= 90:
+        raise ValueError("latitude must be between -90 and 90")
+    if not -180 <= longitude <= 180:
+        raise ValueError("longitude must be between -180 and 180")
+    return latitude, longitude
+
+
+def _local_datetime(value: ephem.Date) -> datetime:
+    utc_value = ephem.Date(value).datetime()
+    if utc_value.tzinfo is None:
+        utc_value = utc_value.replace(tzinfo=timezone.utc)
+    return utc_value.astimezone()
+
+
+def _format_event(value: ephem.Date, *, include_month: bool = False) -> str:
+    use_24_hour = get_config_value("Solar_Config", "use_zulu_time", DEFAULT_ZULU_TIME)
+    if include_month:
+        pattern = "%a %b %d %H:%M" if use_24_hour else "%a %b %d %I:%M%p"
+    else:
+        pattern = "%a %d %H:%M" if use_24_hour else "%a %d %I:%M%p"
+    return _local_datetime(value).strftime(pattern)
+
+
+def _duration_parts(seconds: float) -> tuple[int, int]:
+    total_minutes = max(0, int(seconds // 60))
+    return divmod(total_minutes, 60)
+
+
+def get_sun(lat: float | None = None, lon: float | None = None) -> str:
+    """Calculate the next solar events and current position for a location."""
+
     try:
-        obs = ephem.Observer()
-        obs.date = datetime.now(timezone.utc)
-        sun = ephem.Sun()
+        latitude, longitude = _coordinates(lat, lon)
+        observer = _observer(latitude, longitude)
+        sun = ephem.Sun(observer)
+        sun_is_up = float(sun.alt) >= 0
 
-        if lat is not None and lon is not None:
-            obs.lat = str(lat)
-            obs.lon = str(lon)
+        sunrise = observer.next_rising(sun)
+        sunset = observer.next_setting(sun)
+        previous_sunrise = observer.previous_rising(sun)
+        next_sunset = observer.next_setting(sun, start=sunrise)
+
+        if sun_is_up:
+            daylight_seconds = float(sunset - previous_sunrise) * 86400
+            remaining_seconds = float(sunset - observer.date) * 86400
         else:
-            lat = get_config_value('Bot', 'bot_latitude', DEFAULT_LATITUDE)
-            lon = get_config_value('Bot', 'bot_longitude', DEFAULT_LONGITUDE)
-            obs.lat = str(lat)
-            obs.lon = str(lon)
+            daylight_seconds = float(next_sunset - sunrise) * 86400
 
-        sun.compute(obs)
-        sun_table = {}
+        # Rise/set searches leave the body positioned at the event; restore the
+        # current position before reporting azimuth and altitude.
+        sun.compute(observer)
+        daylight_hours, daylight_minutes = _duration_parts(daylight_seconds)
+        azimuth = float(sun.az) * 180.0 / ephem.pi
+        altitude = float(sun.alt) * 180.0 / ephem.pi
 
-        # Get the sun azimuth and altitude
-        sun_table['azimuth'] = sun.az
-        sun_table['altitude'] = sun.alt
-
-        # Sun is up include altitude
-        if sun_table['altitude'] > 0:
-            sun_table['altitude'] = sun.alt
+        if sun_is_up:
+            remaining_hours, remaining_minutes = _duration_parts(remaining_seconds)
+            lines = [
+                f"SunSet: {_format_event(sunset)}",
+                f"Rise: {_format_event(sunrise)}",
+                f"Daylight: {daylight_hours}h {daylight_minutes}m",
+                f"Remaining: {remaining_hours}h {remaining_minutes}m",
+                f"Azimuth: {azimuth:.2f}°",
+                f"Altitude: {altitude:.2f}°",
+            ]
         else:
-            sun_table['altitude'] = 0
-
-        # Get the next rise and set times
-        local_sunrise = ephem.localtime(obs.next_rising(sun))
-        local_sunset = ephem.localtime(obs.next_setting(sun))
-
-        use_zulu = get_config_value('Solar_Config', 'use_zulu_time', DEFAULT_ZULU_TIME)
-        if use_zulu:
-            sun_table['rise_time'] = local_sunrise.strftime('%a %d %H:%M')
-            sun_table['set_time'] = local_sunset.strftime('%a %d %H:%M')
-        else:
-            sun_table['rise_time'] = local_sunrise.strftime('%a %d %I:%M%p')
-            sun_table['set_time'] = local_sunset.strftime('%a %d %I:%M%p')
-
-        # If sunset is before sunrise, then data will be for tomorrow format sunset first and sunrise second
-        if local_sunset < local_sunrise:
-            sun_data = f"SunSet: {sun_table['set_time']}\nRise: {sun_table['rise_time']}"
-        else:
-            sun_data = f"SunRise: {sun_table['rise_time']}\nSet: {sun_table['set_time']}"
-
-        daylight_seconds = (local_sunset - local_sunrise).seconds
-        daylight_hours = daylight_seconds // 3600
-        daylight_minutes = (daylight_seconds // 60) % 60
-        sun_data += f"\nDaylight: {daylight_hours}h {daylight_minutes}m"
-
-        if sun_table['altitude'] > 0:
-            remaining_seconds = (local_sunset - datetime.now()).seconds
-            remaining_hours = remaining_seconds // 3600
-            remaining_minutes = (remaining_seconds // 60) % 60
-            sun_data += f"\nRemaining: {remaining_hours}h {remaining_minutes}m"
-
-        sun_data += f"\nAzimuth: {sun_table['azimuth'] * 180 / ephem.pi:.2f}°"
-        if sun_table['altitude'] > 0:
-            sun_data += f"\nAltitude: {sun_table['altitude'] * 180 / ephem.pi:.2f}°"
-
-        return sun_data
-    except Exception as e:
-        logger.error(f"Exception in get_sun: {e}")
+            lines = [
+                f"SunRise: {_format_event(sunrise)}",
+                f"Set: {_format_event(next_sunset)}",
+                f"Daylight: {daylight_hours}h {daylight_minutes}m",
+                f"Azimuth: {azimuth:.2f}°",
+            ]
+        return "\n".join(lines)
+    except Exception:
+        logger.exception("Solar: Error calculating Sun conditions")
         return ERROR_FETCHING_DATA
 
-def get_moon(lat=None, lon=None):
-    """Get moon phase and rise/set times using specified location or defaults"""
+
+_MOON_PHASES = (
+    (0.0625, "New Moon🌑"),
+    (0.1875, "Waxing Crescent🌒"),
+    (0.3125, "First Quarter🌓"),
+    (0.4375, "Waxing Gibbous🌔"),
+    (0.5625, "Full Moon🌕"),
+    (0.6875, "Waning Gibbous🌖"),
+    (0.8125, "Last Quarter🌗"),
+    (0.9375, "Waning Crescent🌘"),
+    (1.0, "New Moon🌑"),
+)
+
+
+def _moon_phase_name(moment: ephem.Date) -> str:
+    previous_new = ephem.previous_new_moon(moment)
+    next_new = ephem.next_new_moon(moment)
+    cycle_fraction = float(moment - previous_new) / float(next_new - previous_new)
+    for upper_bound, name in _MOON_PHASES:
+        if cycle_fraction < upper_bound:
+            return name
+    return _MOON_PHASES[-1][1]
+
+
+def get_moon(lat: float | None = None, lon: float | None = None) -> str:
+    """Calculate lunar rise/set times, phase, and upcoming principal phases."""
+
     try:
-        obs = ephem.Observer()
-        moon = ephem.Moon()
+        latitude, longitude = _coordinates(lat, lon)
+        observer = _observer(latitude, longitude)
+        moon = ephem.Moon(observer)
+        illumination = float(moon.phase)
+        moonrise = observer.next_rising(moon)
+        moonset = observer.next_setting(moon)
+        full_moon = ephem.next_full_moon(observer.date)
+        new_moon = ephem.next_new_moon(observer.date)
 
-        if lat is not None and lon is not None:
-            obs.lat = str(lat)
-            obs.lon = str(lon)
-        else:
-            lat = get_config_value('Bot', 'bot_latitude', DEFAULT_LATITUDE)
-            lon = get_config_value('Bot', 'bot_longitude', DEFAULT_LONGITUDE)
-            obs.lat = str(lat)
-            obs.lon = str(lon)
-
-        obs.date = datetime.now(timezone.utc)
-        moon.compute(obs)
-        moon_table = {}
-        illum = moon.phase  # 0 = new, 50 = first/last quarter, 100 = full
-
-        if illum < 1.0:
-            moon_phase = 'New Moon🌑'
-        elif illum < 49:
-            moon_phase = 'Waxing Crescent🌒'
-        elif 49 <= illum < 51:
-            moon_phase = 'First Quarter🌓'
-        elif illum < 99:
-            moon_phase = 'Waxing Gibbous🌔'
-        elif illum >= 99:
-            moon_phase = 'Full Moon🌕'
-        elif illum > 51:
-            moon_phase = 'Waning Gibbous🌖'
-        elif 51 >= illum > 49:
-            moon_phase = 'Last Quarter🌗'
-        else:
-            moon_phase = 'Waning Crescent🌘'
-
-        moon_table['phase'] = moon_phase
-        moon_table['illumination'] = moon.phase
-        moon_table['azimuth'] = moon.az
-        moon_table['altitude'] = moon.alt
-
-        local_moonrise = ephem.localtime(obs.next_rising(moon))
-        local_moonset = ephem.localtime(obs.next_setting(moon))
-
-        use_zulu = get_config_value('Solar_Config', 'use_zulu_time', DEFAULT_ZULU_TIME)
-        if use_zulu:
-            moon_table['rise_time'] = local_moonrise.strftime('%a %d %H:%M')
-            moon_table['set_time'] = local_moonset.strftime('%a %d %H:%M')
-        else:
-            moon_table['rise_time'] = local_moonrise.strftime('%a %d %I:%M%p')
-            moon_table['set_time'] = local_moonset.strftime('%a %d %I:%M%p')
-
-        local_next_full_moon = ephem.localtime(ephem.next_full_moon(obs.date))
-        local_next_new_moon = ephem.localtime(ephem.next_new_moon(obs.date))
-
-        if use_zulu:
-            moon_table['next_full_moon'] = local_next_full_moon.strftime('%a %b %d %H:%M')
-            moon_table['next_new_moon'] = local_next_new_moon.strftime('%a %b %d %H:%M')
-        else:
-            moon_table['next_full_moon'] = local_next_full_moon.strftime('%a %b %d %I:%M%p')
-            moon_table['next_new_moon'] = local_next_new_moon.strftime('%a %b %d %I:%M%p')
-
-        moon_data = f"MoonRise:{moon_table['rise_time']}\nSet:{moon_table['set_time']}\nPhase:{moon_table['phase']} @:{moon_table['illumination']:.2f}%\nFullMoon:{moon_table['next_full_moon']}\nNewMoon:{moon_table['next_new_moon']}"
-
-        # If moon is in the sky, add azimuth and altitude
-        if moon_table['altitude'] > 0:
-            moon_data += f"\nAz: {moon_table['azimuth'] * 180 / ephem.pi:.2f}°\nAlt: {moon_table['altitude'] * 180 / ephem.pi:.2f}°"
-
-        return moon_data
-    except Exception as e:
-        logger.error(f"Exception in get_moon: {e}")
+        return "\n".join(
+            (
+                f"MoonRise:{_format_event(moonrise)}",
+                f"Set:{_format_event(moonset)}",
+                f"Phase:{_moon_phase_name(observer.date)} @:{illumination:.2f}%",
+                f"FullMoon:{_format_event(full_moon, include_month=True)}",
+                f"NewMoon:{_format_event(new_moon, include_month=True)}",
+            )
+        )
+    except Exception:
+        logger.exception("Solar: Error calculating Moon conditions")
         return ERROR_FETCHING_DATA
 
-def get_next_satellite_pass(satellite, lat=None, lon=None, use_visual=False):
-    """Get the next satellite pass for a given satellite
 
-    Args:
-        satellite: NORAD ID or satellite identifier
-        lat: Observer latitude (optional, uses config if not provided)
-        lon: Observer longitude (optional, uses config if not provided)
-        use_visual: If True, use visualpasses endpoint (only visually observable passes)
-                   If False, use radiopasses endpoint (all passes above horizon, default)
-    """
+def _unix_local(timestamp: int | float) -> str:
+    use_24_hour = get_config_value("Solar_Config", "use_zulu_time", DEFAULT_ZULU_TIME)
+    pattern = "%a %d %H:%M" if use_24_hour else "%a %d %I:%M%p"
+    return datetime.fromtimestamp(timestamp).strftime(pattern)
+
+
+def get_next_satellite_pass(
+    satellite: str,
+    lat: float | None = None,
+    lon: float | None = None,
+    use_visual: bool = False,
+) -> str:
+    """Return the next N2YO visual or radio pass in the legacy compact format."""
+
     try:
-        pass_data = ''
+        satellite_text = str(satellite).strip()
+        try:
+            satellite_number = int(satellite_text)
+        except (TypeError, ValueError):
+            return "Provide NORAD# example use:🛰️satpass 25544,33591"
+        if satellite_number <= 0:
+            return "Provide NORAD# example use:🛰️satpass 25544,33591"
+        satellite_id = str(satellite_number)
 
-        if lat is None and lon is None:
-            lat = get_config_value('Bot', 'bot_latitude', DEFAULT_LATITUDE)
-            lon = get_config_value('Bot', 'bot_longitude', DEFAULT_LONGITUDE)
-
-        # API URL
-        n2yo_key = get_config_value('External_Data', 'n2yo_api_key', DEFAULT_N2YO_API_KEY)
-        if not n2yo_key:
-            logger.error("System: Missing API key free at https://www.n2yo.com/login/")
+        latitude, longitude = _coordinates(lat, lon)
+        api_key = str(get_config_value("External_Data", "n2yo_api_key", DEFAULT_N2YO_API_KEY)).strip()
+        if not api_key:
+            logger.error("System: Missing N2YO API key; get one at https://www.n2yo.com/login/")
             return "not configured, bug your sysop"
 
-        # Choose endpoint based on use_visual parameter
-        if use_visual:
-            # Visual passes: requires satellite to be visually observable (illuminated, dark sky)
-            # Format: /visualpasses/{id}/{lat}/{lng}/{alt}/{days}/{min_visibility_seconds}
-            api_base = "https://api.n2yo.com/rest/v1/satellite/visualpasses/"
-            url = f"{api_base}{satellite}/{lat}/{lon}/0/10/60/&apiKey={n2yo_key}"
-            endpoint_type = "visual"
-        else:
-            # Radio passes: all passes above horizon (default, matches N2YO website)
-            # Format: /radiopasses/{id}/{lat}/{lng}/{alt}/{days}/{min_elevation_degrees}
-            api_base = "https://api.n2yo.com/rest/v1/satellite/radiopasses/"
-            url = f"{api_base}{satellite}/{lat}/{lon}/0/10/0/&apiKey={n2yo_key}"
-            endpoint_type = "radio"
+        pass_kind = "visualpasses" if use_visual else "radiopasses"
+        threshold = 60 if use_visual else 0
+        url = (
+            f"{N2YO_BASE_URL}/{pass_kind}/{satellite_id}/{latitude}/{longitude}"
+            f"/0/10/{threshold}/&apiKey={api_key}"
+        )
+        response = requests.get(url, timeout=DEFAULT_URL_TIMEOUT)
+        response.raise_for_status()
+        payload = response.json()
 
-        logger.debug(f"Satellite pass request: NORAD {satellite}, {endpoint_type} passes, location: {lat}, {lon}")
+        info = payload.get("info") or {}
+        passes = payload.get("passes") or []
+        satellite_name = info.get("satname") or satellite_id
+        if not passes:
+            qualifier = "visual" if use_visual else "radio"
+            return f"{satellite_name} has no {qualifier} passes in the next 10 days from this location"
 
-        # Get the next pass data
-        try:
-            if not int(satellite):
-                raise Exception("Invalid satellite number")
-            next_pass_data = requests.get(url, timeout=DEFAULT_URL_TIMEOUT)
-            if next_pass_data.ok:
-                pass_json = next_pass_data.json()
-                passes_count = pass_json.get('info', {}).get('passescount', 0)
-                logger.debug(f"N2YO API response: {passes_count} {endpoint_type} passes found")
+        now = time()
+        next_pass = next((candidate for candidate in passes if int(candidate["startUTC"]) >= now), None)
+        if next_pass is None:
+            qualifier = "visual" if use_visual else "radio"
+            return f"{satellite_name} has no {qualifier} passes in the next 10 days from this location"
 
-                if 'info' in pass_json and passes_count > 0:
-                    satname = pass_json['info']['satname']
+        start = int(next_pass["startUTC"])
+        end = int(next_pass["endUTC"])
+        duration = int(next_pass.get("duration", end - start))
+        if duration > 7200:
+            return f"{satellite_name}: GEO (no LEO pass)"
 
-                    # Find the first pass that hasn't occurred yet (startUTC is in the future)
-                    current_time_utc = datetime.now(timezone.utc).timestamp()
-
-                    # Find the first future pass
-                    next_pass = None
-                    for idx, pass_entry in enumerate(pass_json['passes']):
-                        pass_utc_time = pass_entry['startUTC']
-                        if pass_utc_time >= current_time_utc:
-                            next_pass = pass_entry
-                            logger.debug(f"Selected pass {idx} for {satname}: {datetime.fromtimestamp(pass_utc_time, tz=timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M')}, maxEl={pass_entry['maxEl']}°")
-                            break
-
-                    # If no future pass found, use the first one (shouldn't happen with 10-day lookahead)
-                    if next_pass is None:
-                        next_pass = pass_json['passes'][0]
-                        logger.warning(f"All passes for {satname} appear to be in the past, using first pass")
-
-                    pass_time = next_pass['startUTC']
-                    # Calculate duration from endUTC - startUTC if duration field not present (radiopasses)
-                    if 'duration' in next_pass:
-                        pass_duration = next_pass['duration']
-                    else:
-                        pass_duration = next_pass['endUTC'] - next_pass['startUTC']
-                    pass_max_el = next_pass['maxEl']
-                    pass_start_az_compass = next_pass['startAzCompass']
-                    pass_end_az_compass = next_pass['endAzCompass']
-
-                    # Validate duration - LEO passes are typically 5-15 minutes, max under 1 hour
-                    # Geostationary satellites don't have traditional passes
-                    MAX_REASONABLE_PASS_DURATION = 7200  # 2 hours in seconds (very generous upper bound)
-                    if pass_duration > MAX_REASONABLE_PASS_DURATION:
-                        logger.warning(f"Satellite {satname} has unreasonable pass duration: {pass_duration}s. May be geostationary or invalid data.")
-                        pass_data = f"{satname} appears to be geostationary or has invalid pass data. Geostationary satellites don't have traditional passes - they remain in a fixed position relative to Earth."
-                        return pass_data
-
-                    # Convert UTC timestamp to local time
-                    pass_utc = datetime.fromtimestamp(pass_time, tz=timezone.utc)
-                    pass_local = pass_utc.astimezone()
-                    set_utc = datetime.fromtimestamp(pass_time + pass_duration, tz=timezone.utc)
-                    set_local = set_utc.astimezone()
-
-                    # Format times based on zulu time preference
-                    use_zulu = get_config_value('Solar_Config', 'use_zulu_time', DEFAULT_ZULU_TIME)
-                    if use_zulu:
-                        pass_rise_time = pass_local.strftime('%a %d %H:%M')
-                        pass_set_time = set_local.strftime('%a %d %H:%M')
-                    else:
-                        pass_rise_time = pass_local.strftime('%a %d %I:%M%p')
-                        pass_set_time = set_local.strftime('%a %d %I:%M%p')
-
-                    # Format duration nicely (duration is in seconds from N2YO)
-                    duration_minutes = pass_duration // 60
-                    duration_seconds = pass_duration % 60
-                    if duration_minutes > 0:
-                        duration_str = f"{duration_minutes}m{duration_seconds}s"
-                    else:
-                        duration_str = f"{duration_seconds}s"
-
-                    pass_data = f"{satname} @{pass_rise_time} Az:{pass_start_az_compass} for{duration_str}, MaxEl:{pass_max_el}° Set@{pass_set_time} Az:{pass_end_az_compass}"
-                elif passes_count == 0:
-                    satname = pass_json['info']['satname']
-                    pass_type = "visible" if use_visual else ""
-                    logger.debug(f"Satellite {satname} (NORAD {satellite}) has no {pass_type} passes in next 10 days")
-                    pass_data = f"{satname} has no {pass_type} passes in the next 10 days from this location"
-            else:
-                logger.error(f"System: Error fetching satellite pass data {satellite}")
-                pass_data = ERROR_FETCHING_DATA
-        except Exception:
-            logger.warning(f"System: User supplied value {satellite} unknown or invalid")
-            pass_data = "Provide NORAD# example use:🛰️satpass 25544,33591"
-
-        return pass_data
-    except Exception as e:
-        logger.error(f"Exception in get_next_satellite_pass: {e}")
+        minutes, seconds = divmod(max(0, duration), 60)
+        duration_text = f"{minutes}m{seconds}s" if minutes else f"{seconds}s"
+        return (
+            f"{satellite_name} @{_unix_local(start)} "
+            f"Az:{next_pass['startAzCompass']} for{duration_text}, "
+            f"MaxEl:{next_pass['maxEl']}° "
+            f"Set@{_unix_local(end)} Az:{next_pass['endAzCompass']}"
+        )
+    except Exception:
+        logger.exception("Solar: Error fetching satellite pass")
         return ERROR_FETCHING_DATA

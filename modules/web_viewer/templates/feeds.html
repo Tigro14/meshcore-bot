@@ -50,9 +50,14 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">Feed Subscriptions</h5>
-                    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addFeedModal">
-                        <i class="fas fa-plus"></i> Add Feed
-                    </button>
+                    <div>
+                        <button type="button" id="resetAllErrorsBtn" class="btn btn-outline-secondary me-2" title="Clear recorded errors for all feeds">
+                            <i class="fas fa-eraser"></i> Reset Errors
+                        </button>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addFeedModal">
+                            <i class="fas fa-plus"></i> Add Feed
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
@@ -212,7 +217,8 @@
     &quot;id_field&quot;: &quot;AlertID&quot;,
     &quot;title_field&quot;: &quot;HeadlineDescription&quot;,
     &quot;description_field&quot;: &quot;ExtendedDescription&quot;,
-    &quot;timestamp_field&quot;: &quot;LastUpdatedTime&quot;
+    &quot;timestamp_field&quot;: &quot;LastUpdatedTime&quot;,
+    &quot;emoji_field&quot;: &quot;emoji&quot;
   }
 }"></textarea>
                                     <small class="form-text text-muted mt-2 d-block">
@@ -307,7 +313,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ g.csp_nonce }}">
 class FeedManager {
     constructor() {
         this.feeds = [];
@@ -490,7 +496,11 @@ class FeedManager {
     
     updateChannelSelect() {
         const select = document.getElementById('channelSelect');
-        select.innerHTML = '<option value="">Select channel...</option>';
+        select.replaceChildren();
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Select channel...';
+        select.appendChild(placeholder);
         
         this.channels.forEach(channel => {
             const option = document.createElement('option');
@@ -502,17 +512,20 @@ class FeedManager {
     
     renderFeeds() {
         const tbody = document.getElementById('feedsTableBody');
+        tbody.replaceChildren();
         
         if (this.feeds.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="text-center">No feed subscriptions</td></tr>';
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 9;
+            cell.className = 'text-center';
+            cell.textContent = 'No feed subscriptions';
+            row.appendChild(cell);
+            tbody.appendChild(row);
             return;
         }
         
-        tbody.innerHTML = this.feeds.map(feed => {
-            const statusBadge = feed.enabled 
-                ? '<span class="badge bg-success">Enabled</span>'
-                : '<span class="badge bg-secondary">Disabled</span>';
-            
+        this.feeds.forEach(feed => {
             // Parse timestamp and convert to local time
             let lastCheck = 'Never';
             if (feed.last_check_time) {
@@ -531,34 +544,70 @@ class FeedManager {
                     lastCheck = feed.last_check_time; // Fallback to raw value
                 }
             }
-            
-            return `
-                <tr>
-                    <td>${feed.id}</td>
-                    <td>${feed.feed_name || feed.feed_url.substring(0, 30)}</td>
-                    <td><span class="badge bg-info">${feed.feed_type.toUpperCase()}</span></td>
-                    <td>${feed.channel_name}</td>
-                    <td>${statusBadge}</td>
-                    <td>${lastCheck}</td>
-                    <td>${feed.item_count || 0}</td>
-                    <td>${feed.error_count > 0 ? `<span class="badge bg-danger">${feed.error_count}</span>` : '0'}</td>
-                    <td>
-                        <button class="btn btn-sm btn-info" onclick="feedManager.viewFeed(${feed.id})" title="View Details">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                        <button class="btn btn-sm btn-primary" onclick="feedManager.editFeed(${feed.id})" title="Edit">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn btn-sm btn-${feed.enabled ? 'warning' : 'success'}" onclick="feedManager.toggleFeed(${feed.id}, ${!feed.enabled})" title="${feed.enabled ? 'Disable' : 'Enable'}">
-                            <i class="fas fa-${feed.enabled ? 'pause' : 'play'}"></i>
-                        </button>
-                        <button class="btn btn-sm btn-danger" onclick="feedManager.deleteFeed(${feed.id})" title="Delete">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
+
+            const row = document.createElement('tr');
+            const addTextCell = (value) => {
+                const cell = document.createElement('td');
+                cell.textContent = String(value ?? '');
+                row.appendChild(cell);
+                return cell;
+            };
+
+            addTextCell(feed.id);
+            addTextCell(feed.feed_name || String(feed.feed_url || '').substring(0, 30));
+
+            const typeCell = addTextCell('');
+            const typeBadge = document.createElement('span');
+            typeBadge.className = 'badge bg-info';
+            typeBadge.textContent = String(feed.feed_type || '').toUpperCase();
+            typeCell.appendChild(typeBadge);
+
+            addTextCell(feed.channel_name);
+
+            const statusCell = addTextCell('');
+            const statusBadge = document.createElement('span');
+            statusBadge.className = `badge ${feed.enabled ? 'bg-success' : 'bg-secondary'}`;
+            statusBadge.textContent = feed.enabled ? 'Enabled' : 'Disabled';
+            statusCell.appendChild(statusBadge);
+
+            addTextCell(lastCheck);
+            addTextCell(feed.item_count || 0);
+
+            const errorCell = addTextCell('');
+            if (Number(feed.error_count) > 0) {
+                const errorBadge = document.createElement('span');
+                errorBadge.className = 'badge bg-danger';
+                errorBadge.textContent = String(feed.error_count);
+                errorCell.appendChild(errorBadge);
+            } else {
+                errorCell.textContent = '0';
+            }
+
+            const actions = addTextCell('');
+            const addAction = (classes, iconClass, title, handler) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = `btn btn-sm ${classes}`;
+                button.title = title;
+                const icon = document.createElement('i');
+                icon.className = `fas ${iconClass}`;
+                button.appendChild(icon);
+                button.addEventListener('click', handler);
+                actions.appendChild(button);
+                actions.appendChild(document.createTextNode(' '));
+            };
+            addAction('btn-info', 'fa-eye', 'View Details', () => this.viewFeed(feed.id));
+            addAction('btn-primary', 'fa-edit', 'Edit', () => this.editFeed(feed.id));
+            addAction(
+                feed.enabled ? 'btn-warning' : 'btn-success',
+                feed.enabled ? 'fa-pause' : 'fa-play',
+                feed.enabled ? 'Disable' : 'Enable',
+                () => this.toggleFeed(feed.id, !feed.enabled),
+            );
+            addAction('btn-danger', 'fa-trash', 'Delete', () => this.deleteFeed(feed.id));
+
+            tbody.appendChild(row);
+        });
     }
     
     setupEventHandlers() {
@@ -590,7 +639,13 @@ class FeedManager {
         
         // Preview button
         document.getElementById('previewBtn').addEventListener('click', () => this.previewFormat());
-        
+
+        // Reset-all-errors button (inline onclick removed for the nonce CSP)
+        const resetAllErrorsBtn = document.getElementById('resetAllErrorsBtn');
+        if (resetAllErrorsBtn) {
+            resetAllErrorsBtn.addEventListener('click', () => this.resetAllErrors());
+        }
+
         // Load default format when opening add modal
         document.getElementById('addFeedModal').addEventListener('show.bs.modal', () => {
             this.loadChannelStats();
@@ -798,7 +853,14 @@ class FeedManager {
         const previewResults = document.getElementById('previewResults');
         const previewContent = document.getElementById('previewContent');
         previewResults.style.display = 'block';
-        previewContent.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Loading...</span></div>';
+        const spinner = document.createElement('div');
+        spinner.className = 'spinner-border spinner-border-sm';
+        spinner.setAttribute('role', 'status');
+        const spinnerText = document.createElement('span');
+        spinnerText.className = 'visually-hidden';
+        spinnerText.textContent = 'Loading...';
+        spinner.appendChild(spinnerText);
+        previewContent.replaceChildren(spinner);
         
         try {
             const data = {
@@ -849,21 +911,37 @@ class FeedManager {
             const result = await response.json();
             
             if (response.ok && result.items) {
+                previewContent.replaceChildren();
                 if (result.items.length === 0) {
-                    previewContent.innerHTML = '<p class="text-muted small mb-0">No items found in feed</p>';
+                    const empty = document.createElement('p');
+                    empty.className = 'text-muted small mb-0';
+                    empty.textContent = 'No items found in feed';
+                    previewContent.appendChild(empty);
                 } else {
-                    previewContent.innerHTML = result.items.map((item, index) => `
-                        <div class="mb-2 p-2 border rounded">
-                            <small class="text-muted d-block mb-1"><strong>Item ${index + 1}:</strong></small>
-                            <pre class="mb-1 bg-light p-2 rounded small" style="white-space: pre-wrap; word-wrap: break-word; font-size: 0.8rem; background-color: var(--bg-secondary) !important; color: var(--text-color) !important;">${item.formatted}</pre>
-                        </div>
-                    `).join('');
+                    result.items.forEach((item, index) => {
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'mb-2 p-2 border rounded';
+                        const label = document.createElement('small');
+                        label.className = 'text-muted d-block mb-1 fw-bold';
+                        label.textContent = `Item ${index + 1}:`;
+                        const formatted = document.createElement('pre');
+                        formatted.className = 'mb-1 bg-light p-2 rounded small feed-preview-text';
+                        formatted.textContent = String(item.formatted ?? '');
+                        wrapper.append(label, formatted);
+                        previewContent.appendChild(wrapper);
+                    });
                 }
             } else {
-                previewContent.innerHTML = `<p class="text-danger small mb-0">Error: ${result.error || 'Failed to preview feed'}</p>`;
+                const errorMessage = document.createElement('p');
+                errorMessage.className = 'text-danger small mb-0';
+                errorMessage.textContent = `Error: ${result.error || 'Failed to preview feed'}`;
+                previewContent.replaceChildren(errorMessage);
             }
         } catch (error) {
-            previewContent.innerHTML = `<p class="text-danger">Error: ${error.message}</p>`;
+            const errorMessage = document.createElement('p');
+            errorMessage.className = 'text-danger';
+            errorMessage.textContent = `Error: ${error.message}`;
+            previewContent.replaceChildren(errorMessage);
         }
     }
     
@@ -885,43 +963,88 @@ class FeedManager {
         try {
             const response = await fetch(`/api/feeds/${feedId}`);
             const feed = await response.json();
-            
-            const content = `
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>Configuration</h6>
-                        <p><strong>Name:</strong> ${feed.feed_name || 'N/A'}</p>
-                        <p><strong>Type:</strong> ${feed.feed_type.toUpperCase()}</p>
-                        <p><strong>URL:</strong> ${feed.feed_url}</p>
-                        <p><strong>Channel:</strong> ${feed.channel_name}</p>
-                        <p><strong>Check Interval:</strong> ${feed.check_interval_seconds}s</p>
-                        <p><strong>Send Interval:</strong> ${feed.message_send_interval_seconds || 2.0}s</p>
-                        <p><strong>Status:</strong> ${feed.enabled ? 'Enabled' : 'Disabled'}</p>
-                        ${feed.output_format ? `<p><strong>Output Format:</strong><br><code class="small">${feed.output_format.replace(/\n/g, '<br>')}</code></p>` : ''}
-                    </div>
-                    <div class="col-md-6">
-                        <h6>Activity</h6>
-                        <p><strong>Last Check:</strong> ${(() => {
-                            if (!feed.last_check_time) return 'Never';
-                            try {
-                                let dateStr = feed.last_check_time;
-                                if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(dateStr)) {
-                                    dateStr = dateStr.replace(' ', 'T') + 'Z';
-                                }
-                                const date = new Date(dateStr);
-                                return !isNaN(date.getTime()) ? date.toLocaleString() : feed.last_check_time;
-                            } catch (e) {
-                                return feed.last_check_time;
-                            }
-                        })()}</p>
-                        <p><strong>Last Item:</strong> ${feed.last_item_id ? feed.last_item_id.substring(0, 30) + '...' : 'None'}</p>
-                        <p><strong>Total Items:</strong> ${feed.activity?.length || 0}</p>
-                        <p><strong>Errors:</strong> ${feed.errors?.length || 0}</p>
-                    </div>
-                </div>
-            `;
-            
-            document.getElementById('feedDetailsContent').innerHTML = content;
+
+            let lastCheck = 'Never';
+            if (feed.last_check_time) {
+                try {
+                    let dateStr = feed.last_check_time;
+                    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(dateStr)) {
+                        dateStr = dateStr.replace(' ', 'T') + 'Z';
+                    }
+                    const date = new Date(dateStr);
+                    lastCheck = !isNaN(date.getTime()) ? date.toLocaleString() : feed.last_check_time;
+                } catch (e) {
+                    lastCheck = feed.last_check_time;
+                }
+            }
+
+            const content = document.getElementById('feedDetailsContent');
+            const row = document.createElement('div');
+            row.className = 'row';
+            const configColumn = document.createElement('div');
+            configColumn.className = 'col-md-6';
+            const activityColumn = document.createElement('div');
+            activityColumn.className = 'col-md-6';
+            const addHeading = (parent, text) => {
+                const heading = document.createElement('h6');
+                heading.textContent = text;
+                parent.appendChild(heading);
+            };
+            const addDetail = (parent, label, value) => {
+                const paragraph = document.createElement('p');
+                const strong = document.createElement('strong');
+                strong.textContent = `${label}:`;
+                paragraph.append(strong, document.createTextNode(` ${String(value ?? '')}`));
+                parent.appendChild(paragraph);
+            };
+
+            addHeading(configColumn, 'Configuration');
+            addDetail(configColumn, 'Name', feed.feed_name || 'N/A');
+            addDetail(configColumn, 'Type', String(feed.feed_type || '').toUpperCase());
+            addDetail(configColumn, 'URL', feed.feed_url);
+            addDetail(configColumn, 'Channel', feed.channel_name);
+            addDetail(configColumn, 'Check Interval', `${feed.check_interval_seconds}s`);
+            addDetail(configColumn, 'Send Interval', `${feed.message_send_interval_seconds || 2.0}s`);
+            addDetail(configColumn, 'Status', feed.enabled ? 'Enabled' : 'Disabled');
+            if (feed.output_format) {
+                const paragraph = document.createElement('p');
+                const strong = document.createElement('strong');
+                strong.textContent = 'Output Format:';
+                const format = document.createElement('code');
+                format.className = 'small d-block feed-output-format';
+                format.textContent = String(feed.output_format);
+                paragraph.append(strong, format);
+                configColumn.appendChild(paragraph);
+            }
+
+            addHeading(activityColumn, 'Activity');
+            addDetail(activityColumn, 'Last Check', lastCheck);
+            addDetail(activityColumn, 'Last Item', feed.last_item_id ? String(feed.last_item_id).substring(0, 30) + '...' : 'None');
+            addDetail(activityColumn, 'Total Items', feed.activity?.length || 0);
+
+            // Errors row: value plus, when non-zero, a per-feed reset button.
+            // Wired via addEventListener because /feeds runs under a nonce CSP
+            // (no unsafe-inline), so an inline onclick handler would be blocked.
+            const errorCount = feed.errors?.length || 0;
+            const errorParagraph = document.createElement('p');
+            const errorStrong = document.createElement('strong');
+            errorStrong.textContent = 'Errors:';
+            errorParagraph.append(errorStrong, document.createTextNode(` ${errorCount}`));
+            if (errorCount > 0) {
+                const resetButton = document.createElement('button');
+                resetButton.type = 'button';
+                resetButton.className = 'btn btn-sm btn-outline-secondary ms-2';
+                resetButton.title = 'Clear recorded errors for this feed';
+                const eraseIcon = document.createElement('i');
+                eraseIcon.className = 'fas fa-eraser';
+                resetButton.append(eraseIcon, document.createTextNode(' Reset'));
+                resetButton.addEventListener('click', () => this.resetFeedErrors(feed.id));
+                errorParagraph.append(document.createTextNode(' '), resetButton);
+            }
+            activityColumn.appendChild(errorParagraph);
+
+            row.append(configColumn, activityColumn);
+            content.replaceChildren(row);
             const modal = new bootstrap.Modal(document.getElementById('feedDetailsModal'));
             modal.show();
         } catch (error) {
@@ -975,23 +1098,69 @@ class FeedManager {
             this.showError('Error deleting feed: ' + error.message);
         }
     }
-    
+
+    async resetAllErrors() {
+        if (!confirm('Reset error counts for ALL feeds? This clears the recorded error history.')) {
+            return;
+        }
+        try {
+            const response = await fetch('/api/feeds/errors/reset', {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            if (response.ok) {
+                this.showSuccess('Feed errors reset');
+                await this.loadFeeds();
+            } else {
+                const result = await response.json();
+                this.showError(result.error || 'Failed to reset feed errors');
+            }
+        } catch (error) {
+            this.showError('Error resetting feed errors: ' + error.message);
+        }
+    }
+
+    async resetFeedErrors(feedId) {
+        try {
+            const response = await fetch(`/api/feeds/${feedId}/errors/reset`, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            if (response.ok) {
+                this.showSuccess('Feed errors reset');
+                await this.loadFeeds();
+                await this.viewFeed(feedId);
+            } else {
+                const result = await response.json();
+                this.showError(result.error || 'Failed to reset feed errors');
+            }
+        } catch (error) {
+            this.showError('Error resetting feed errors: ' + error.message);
+        }
+    }
+
     showError(message) {
-        const alert = document.createElement('div');
-        alert.className = 'alert alert-danger alert-dismissible fade show position-fixed';
-        alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 300px;';
-        alert.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
-        document.body.appendChild(alert);
-        setTimeout(() => alert.remove(), 5000);
+        this.showAlert(message, 'danger', 5000);
     }
     
     showSuccess(message) {
+        this.showAlert(message, 'success', 3000);
+    }
+
+    showAlert(message, kind, timeout) {
         const alert = document.createElement('div');
-        alert.className = 'alert alert-success alert-dismissible fade show position-fixed';
+        alert.className = `alert alert-${kind} alert-dismissible fade show position-fixed`;
         alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 300px;';
-        alert.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+        const messageNode = document.createElement('span');
+        messageNode.textContent = String(message ?? '');
+        const closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.className = 'btn-close';
+        closeButton.setAttribute('data-bs-dismiss', 'alert');
+        closeButton.setAttribute('aria-label', 'Close');
+        alert.append(messageNode, closeButton);
         document.body.appendChild(alert);
-        setTimeout(() => alert.remove(), 3000);
+        setTimeout(() => alert.remove(), timeout);
     }
 }
 
@@ -1003,6 +1172,19 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 
 <style>
+.feed-preview-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.8rem;
+    background-color: var(--bg-secondary) !important;
+    color: var(--text-color) !important;
+}
+
+.feed-output-format {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 /* Dark mode table styling with better contrast - matching contacts page */
 [data-theme="dark"] .table-striped > tbody > tr:nth-of-type(odd) > td {
     background-color: #3a3a3a; /* Slightly lighter than even rows, but not too light */
@@ -1044,4 +1226,3 @@ document.addEventListener('DOMContentLoaded', () => {
 }
 </style>
 {% endblock %}
-

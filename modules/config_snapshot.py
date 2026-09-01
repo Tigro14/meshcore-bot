@@ -11,12 +11,24 @@ _REDACT_KEY_PARTS: tuple[str, ...] = (
     "token",
     "secret",
     "smtp_user",
+    # A Discord webhook URL is a bearer credential: anyone holding it can post
+    # to the channel. Covers ``discord_webhook_urls``.
+    "webhook",
+)
+
+# Keys whose *prefix* marks a secret. [DiscordBridge] maps channels as
+# ``bridge.<meshcore_channel> = <discord webhook url>``, so the varying part is
+# the channel name and there is no fixed stem for the substring rule to catch.
+_REDACT_KEY_PREFIXES: tuple[str, ...] = (
+    "bridge.",
 )
 
 
 def is_sensitive_key(key: str) -> bool:
     """Return True when a config key should be redacted."""
     key_lower = key.lower()
+    if any(key_lower.startswith(prefix) for prefix in _REDACT_KEY_PREFIXES):
+        return True
     return any(part in key_lower for part in _REDACT_KEY_PARTS)
 
 

@@ -203,16 +203,24 @@ feed status 1"""
                     response += f" for channel '{channel_filter}'"
                 return await self.send_response(message, response)
 
-            response = f"Feed Subscriptions ({len(feeds)}):\n"
-            for feed in feeds[:10]:  # Limit to 10 for mesh message
-                status = "enabled" if feed['enabled'] else "disabled"
-                name = feed.get('feed_name') or feed['feed_url'][:30]
-                response += f"{feed['id']}. {name} ({feed['feed_type']}) -> {feed['channel_name']} [{status}]\n"
-
-            if len(feeds) > 10:
-                response += f"({len(feeds) - 10} more...)"
-
-            return await self.send_response(message, response)
+            max_len = self.get_max_message_length(message)
+            header = f"Feeds({len(feeds)}):"
+            chunks: list[str] = []
+            current = header
+            for feed in feeds:
+                status = "on" if feed['enabled'] else "off"
+                raw_name = feed.get('feed_name') or feed['feed_url']
+                name = raw_name if len(raw_name) <= 20 else raw_name[:17] + "..."
+                row = f"{feed['id']}:{name} {feed['feed_type']}->{feed['channel_name']} [{status}]"
+                candidate = f"{current}\n{row}"
+                if len(candidate.encode('utf-8')) <= max_len:
+                    current = candidate
+                else:
+                    chunks.append(current)
+                    page = len(chunks) + 1
+                    current = f"Feeds({len(feeds)}) p{page}:\n{row}"
+            chunks.append(current)
+            return await self.send_response_chunked(message, chunks)
 
         except Exception as e:
             self.logger.error(f"Error listing feeds: {e}")
@@ -230,20 +238,23 @@ feed status 1"""
             if not feed:
                 return await self.send_response(message, f"Feed subscription {feed_id} not found")
 
-            status = "enabled" if feed['enabled'] else "disabled"
-            last_check = feed.get('last_check_time') or "Never"
-            last_item = feed.get('last_item_id') or "None"
-
-            response = f"Feed {feed_id} Status:\n"
-            response += f"Name: {feed.get('feed_name') or 'N/A'}\n"
-            response += f"Type: {feed['feed_type']}\n"
-            response += f"URL: {feed['feed_url']}\n"
-            response += f"Channel: {feed['channel_name']}\n"
-            response += f"Status: {status}\n"
-            response += f"Interval: {feed.get('check_interval_seconds', 300)}s\n"
-            response += f"Last check: {last_check}\n"
-            response += f"Last item: {last_item[:30] if last_item != 'None' else 'None'}"
-
+            status = "on" if feed['enabled'] else "off"
+            last_check = str(feed.get('last_check_time') or "Never")
+            if len(last_check) > 16:
+                last_check = last_check[:16]
+            last_item = str(feed.get('last_item_id') or "None")
+            if last_item != "None" and len(last_item) > 20:
+                last_item = last_item[:17] + "..."
+            url = feed['feed_url']
+            if len(url) > 40:
+                url = url[:37] + "..."
+            interval = feed.get('check_interval_seconds', 300)
+            response = (
+                f"Feed#{feed_id} {status} {feed['feed_type']} "
+                f"ch={feed['channel_name']} int={interval}s\n"
+                f"{url}\n"
+                f"chk={last_check} last={last_item}"
+            )
             return await self.send_response(message, response)
 
         except ValueError:
@@ -295,6 +306,14 @@ feed status 1"""
         try:
             feed_id = int(args[0])
             interval = int(args[1]) if len(args) > 1 else None
+
+            # A non-positive interval makes every poll cycle see the feed as due
+            # (current_time - last_check >= interval always holds), so the poller
+            # would hammer the URL forever.
+            if interval is not None and interval <= 0:
+                return await self.send_response(
+                    message, "Interval must be a positive number of seconds"
+                )
 
             success = self._update_subscription(feed_id, interval)
 
@@ -407,7 +426,9 @@ feed status 1"""
         with self.bot.db_manager.connection() as conn:
             cursor = conn.cursor()
 
-            if interval:
+            # ``is not None``, not truthiness: 0 must not be mistaken for
+            # "no interval given" (callers reject it before reaching here).
+            if interval is not None:
                 cursor.execute('''
                     UPDATE feed_subscriptions
                     SET check_interval_seconds = ?, updated_at = CURRENT_TIMESTAMP

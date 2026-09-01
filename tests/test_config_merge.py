@@ -1,6 +1,8 @@
 """Tests for config loading and merging of local/config.ini."""
 
+import threading
 from pathlib import Path
+from unittest.mock import patch
 
 from modules.core import MeshCoreBot
 
@@ -77,3 +79,225 @@ class TestReloadConfigMerge:
         success, _ = bot.reload_config()
         assert success
         assert bot.config.get("LocalExtra", "my_option") == "updated_after_reload"
+
+    def test_reload_rejects_radio_change_from_local_overlay(self, tmp_path):
+        db_path = tmp_path / "bot.db"
+        main_config = tmp_path / "config.ini"
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path),
+            encoding="utf-8",
+        )
+        local_dir = tmp_path / "local"
+        local_dir.mkdir(parents=True)
+        local_config = local_dir / "config.ini"
+        local_config.write_text("[LocalExtra]\nvalue = original\n", encoding="utf-8")
+        bot = MeshCoreBot(config_file=str(main_config))
+        old_config = bot.config
+
+        local_config.write_text(
+            "[Connection]\nconnection_type = tcp\nhostname = radio.example\n",
+            encoding="utf-8",
+        )
+        success, message = bot.reload_config()
+
+        assert success is False
+        assert "restart required" in message.lower()
+        assert bot.config is old_config
+        assert bot.config.get("Connection", "connection_type") == "ble"
+
+    def test_malformed_local_overlay_leaves_snapshot_untouched(self, tmp_path):
+        db_path = tmp_path / "bot.db"
+        main_config = tmp_path / "config.ini"
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path),
+            encoding="utf-8",
+        )
+        local_dir = tmp_path / "local"
+        local_dir.mkdir(parents=True)
+        local_config = local_dir / "config.ini"
+        local_config.write_text("[LocalExtra]\nvalue = original\n", encoding="utf-8")
+        bot = MeshCoreBot(config_file=str(main_config))
+        old_config = bot.config
+
+        local_config.write_text("this is not an ini section\n", encoding="utf-8")
+        success, message = bot.reload_config()
+
+        assert success is False
+        assert "error reloading" in message.lower()
+        assert bot.config is old_config
+        assert bot.config.get("LocalExtra", "value") == "original"
+
+    def test_invalid_typed_value_in_overlay_leaves_snapshot_untouched(self, tmp_path):
+        db_path = tmp_path / "bot.db"
+        main_config = tmp_path / "config.ini"
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path),
+            encoding="utf-8",
+        )
+        local_dir = tmp_path / "local"
+        local_dir.mkdir(parents=True)
+        local_config = local_dir / "config.ini"
+        local_config.write_text("[LocalExtra]\nvalue = original\n", encoding="utf-8")
+        bot = MeshCoreBot(config_file=str(main_config))
+        old_config = bot.config
+
+        local_config.write_text("[Web_Viewer]\nport = not-a-port\n", encoding="utf-8")
+        success, message = bot.reload_config()
+
+        assert success is False
+        assert "invalid literal" in message.lower()
+        assert bot.config is old_config
+
+    def test_cached_service_change_requires_restart(self, tmp_path):
+        db_path = tmp_path / "bot.db"
+        main_config = tmp_path / "config.ini"
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path)
+            + "\n[Cached_Local_Service]\ninterval = 10\n",
+            encoding="utf-8",
+        )
+        bot = MeshCoreBot(config_file=str(main_config))
+        cached_service = type(
+            "CachedService", (), {"config_section": "Cached_Local_Service"}
+        )()
+        bot.services["cached"] = cached_service
+        old_config = bot.config
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path)
+            + "\n[Cached_Local_Service]\ninterval = 20\n",
+            encoding="utf-8",
+        )
+
+        success, message = bot.reload_config()
+
+        assert success is False
+        assert "cached service" in message.lower()
+        assert "Cached_Local_Service" in message
+        assert bot.config is old_config
+
+    def test_component_failure_rolls_back_config_and_components(self, tmp_path):
+        db_path = tmp_path / "bot.db"
+        main_config = tmp_path / "config.ini"
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path).replace(
+                "db_path =", "rate_limit_seconds = 10\ndb_path ="
+            ),
+            encoding="utf-8",
+        )
+        bot = MeshCoreBot(config_file=str(main_config))
+        old_config = bot.config
+        old_manager = bot.command_manager
+        old_limiter = bot.rate_limiter
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path).replace(
+                "db_path =", "rate_limit_seconds = 25\ndb_path ="
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.object(
+            bot.scheduler,
+            "setup_scheduled_messages",
+            side_effect=RuntimeError("scheduler rejected candidate"),
+        ):
+            success, message = bot.reload_config()
+
+        assert success is False
+        assert "scheduler rejected candidate" in message
+        assert bot.config is old_config
+        assert bot.command_manager is old_manager
+        assert bot.rate_limiter is old_limiter
+        assert bot.config.getint("Bot", "rate_limit_seconds") == 10
+
+    def test_system_exit_during_command_reload_rolls_back_state(self, tmp_path):
+        db_path = tmp_path / "bot.db"
+        main_config = tmp_path / "config.ini"
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path).replace(
+                "db_path =", "rate_limit_seconds = 10\ndb_path ="
+            ),
+            encoding="utf-8",
+        )
+        bot = MeshCoreBot(config_file=str(main_config))
+        old_config = bot.config
+        old_manager = bot.command_manager
+        old_limiter = bot.rate_limiter
+        old_translator = bot.translator
+        old_scheduler = bot.scheduler._apscheduler
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path).replace(
+                "db_path =", "rate_limit_seconds = 25\ndb_path ="
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("modules.core.CommandManager", side_effect=SystemExit("bad plugin")):
+            success, message = bot.reload_config()
+
+        assert success is False
+        assert "bad plugin" in message
+        assert bot.config is old_config
+        assert bot.command_manager is old_manager
+        assert bot.rate_limiter is old_limiter
+        assert bot.translator is old_translator
+        assert bot.scheduler._apscheduler is old_scheduler
+        assert bot.config.getint("Bot", "rate_limit_seconds") == 10
+
+    def test_nested_command_objects_keep_real_bot_after_reload(self, tmp_path):
+        db_path = tmp_path / "bot.db"
+        main_config = tmp_path / "config.ini"
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path)
+            + "\n[Weather]\nweather_provider = openmeteo\n",
+            encoding="utf-8",
+        )
+        bot = MeshCoreBot(config_file=str(main_config))
+
+        success, _ = bot.reload_config()
+
+        assert success is True
+        wx_command = bot.command_manager.commands["wx"]
+        assert wx_command.bot is bot
+        assert wx_command.delegate_command is not None
+        assert wx_command.delegate_command.bot is bot
+
+    def test_concurrent_reader_observes_only_complete_snapshots(self, tmp_path):
+        db_path = tmp_path / "bot.db"
+        main_config = tmp_path / "config.ini"
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path)
+            + "\n[Atomic]\ngeneration = old\nleft = old\nright = old\n",
+            encoding="utf-8",
+        )
+        bot = MeshCoreBot(config_file=str(main_config))
+        main_config.write_text(
+            _minimal_main_config(tmp_path, db_path)
+            + "\n[Atomic]\ngeneration = new\nleft = new\nright = new\n",
+            encoding="utf-8",
+        )
+
+        stop = threading.Event()
+        observed: set[tuple[str, str, str]] = set()
+
+        def read_snapshots() -> None:
+            while not stop.is_set():
+                snapshot = bot.config
+                observed.add(
+                    (
+                        snapshot.get("Atomic", "generation"),
+                        snapshot.get("Atomic", "left"),
+                        snapshot.get("Atomic", "right"),
+                    )
+                )
+
+        reader = threading.Thread(target=read_snapshots)
+        reader.start()
+        try:
+            success, _ = bot.reload_config()
+            assert success is True
+        finally:
+            stop.set()
+            reader.join(timeout=2)
+
+        assert observed
+        assert observed <= {("old", "old", "old"), ("new", "new", "new")}

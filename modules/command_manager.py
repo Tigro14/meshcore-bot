@@ -10,10 +10,19 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
+from importlib import resources
+from pathlib import Path
 from typing import Any
 
 from meshcore import EventType
 
+from .command_prefix import (
+    load_command_prefix_settings,
+    parse_command_prefixes,
+)
+from .command_prefix import (
+    normalize_command_content as normalize_command_content_text,
+)
 from .commands.base_command import BaseCommand
 from .config_validation import (
     PUBLIC_CHANNEL_KEY_HEX,  # noqa: F401 — re-exported; used by core.py
@@ -92,7 +101,12 @@ class CommandManager:
         self.banned_users = self.load_banned_users()
         self.monitor_channels = self.load_monitor_channels()
         self.channel_keywords = self.load_channel_keywords()
-        self.command_prefix = self.load_command_prefix()
+        self.command_prefixes, self.require_command_prefix = load_command_prefix_settings(
+            self.bot.config
+        )
+        self._command_prefix_default = (
+            self.command_prefixes[0] if self.command_prefixes else ''
+        )
 
         # Initialize plugin loader and load all plugins
         local_commands_dir = (
@@ -165,11 +179,18 @@ class CommandManager:
     @staticmethod
     def _normalize_scope_name(scope: str) -> str:
         """Return scope with '#' prepended if it is a non-global named region without one."""
-        if scope in ("", "*", "0", "None"):
+        if scope in ("", "*", "0", "None") or scope.lower() == "none":
+            if scope.lower() == "none":
+                return "None"
             return scope
         if not scope.startswith("#"):
             return "#" + scope
         return scope
+
+    @staticmethod
+    def _normalize_channel_name_for_scope_config(channel: str) -> str:
+        """Normalize channel names for [Channels] flood_scope.<channel> lookups."""
+        return channel.strip().removeprefix("#").lower()
 
     def _outgoing_flood_scope_override(self) -> str:
         """[Channels] outgoing_flood_scope_override when set, else empty string."""
@@ -179,18 +200,33 @@ class CommandManager:
             return (self.bot.config.get("Channels", "outgoing_flood_scope_override") or "").strip()
         return ""
 
+    def _channel_flood_scope(self, channel: str | None) -> str | None:
+        """Return [Channels] flood_scope.<channel> when configured, including global markers."""
+        if not channel or not self.bot.config.has_section("Channels"):
+            return None
+        channel_key = self._normalize_channel_name_for_scope_config(channel)
+        for key, value in self.bot.config.items("Channels"):
+            if not key.startswith("flood_scope."):
+                continue
+            configured_channel = key[len("flood_scope."):]
+            if self._normalize_channel_name_for_scope_config(configured_channel) == channel_key:
+                return self._normalize_scope_name((value or "").strip())
+        return None
+
     def resolve_channel_send_scope(
         self,
         *,
         scope: str | None = None,
         message: MeshMessage | None = None,
         config_section: str | None = None,
+        channel: str | None = None,
     ) -> str | None:
         """Resolve explicit regional scope before send_channel_message applies override.
 
         Precedence: explicit ``scope`` arg → ``message.reply_scope`` (mirror incoming) →
-        ``flood_scope`` in ``config_section``. Returns ``None`` when unset so
-        ``send_channel_message`` falls back to ``outgoing_flood_scope_override``.
+        ``flood_scope`` in ``config_section`` → per-channel ``flood_scope.<channel>``.
+        Returns ``None`` when unset so ``send_channel_message`` falls back to
+        ``outgoing_flood_scope_override``.
         """
         if scope is not None:
             return scope
@@ -200,6 +236,9 @@ class CommandManager:
             raw = (self.bot.config.get(config_section, "flood_scope", fallback="") or "").strip()
             if raw:
                 return self._normalize_scope_name(raw)
+        channel_scope = self._channel_flood_scope(channel or (message.channel if message else None))
+        if channel_scope is not None:
+            return channel_scope
         return None
 
     def _should_queue_command(self, command: BaseCommand, message: MeshMessage) -> tuple[bool, float]:
@@ -595,14 +634,30 @@ class CommandManager:
             return True
         return trigger.lower() in self.channel_keywords
 
-    def load_command_prefix(self) -> str:
-        """Load command prefix from config.
+    @property
+    def command_prefix(self) -> str:
+        """Default command prefix (first configured prefix) for backward compatibility."""
+        return self._command_prefix_default
+
+    @command_prefix.setter
+    def command_prefix(self, value: str) -> None:
+        """Update prefix list when tests or callers assign ``command_prefix`` directly."""
+        self.command_prefixes = parse_command_prefixes(value.strip() if value else '')
+        self._command_prefix_default = (
+            self.command_prefixes[0] if self.command_prefixes else ''
+        )
+
+    def normalize_command_content(self, raw: str) -> str | None:
+        """Strip configured prefix(es) from raw message text.
 
         Returns:
-            str: The command prefix, or empty string if not configured.
+            Normalized content, or ``None`` if the message should be ignored.
         """
-        prefix = self.bot.config.get('Bot', 'command_prefix', fallback='')
-        return prefix.strip() if prefix else ''
+        return normalize_command_content_text(
+            raw,
+            self.command_prefixes,
+            require_prefix=self.require_command_prefix,
+        )
 
     def format_keyword_response(self, response_format: str, message: MeshMessage) -> str:
         """Format a keyword response string with message data.
@@ -664,60 +719,74 @@ class CommandManager:
             List[tuple]: List of (trigger, response) tuples for matched keywords.
         """
         matches: list[tuple[str, str | None]] = []
-        content = message.content.strip()
-
-        # Check for command prefix if configured
-        if self.command_prefix:
-            # If prefix is configured, message must start with it
-            if not content.startswith(self.command_prefix):
-                return matches  # No prefix, no match
-            # Strip the prefix
-            content = content[len(self.command_prefix):].strip()
-        else:
-            # If no prefix configured, strip legacy "!" prefix for backward compatibility
-            if content.startswith('!'):
-                content = content[1:].strip()
-
+        normalized = self.normalize_command_content(message.content)
+        if normalized is None:
+            return matches
+        content = normalized
         content_lower = content.lower()
 
-        # Check for help requests first (special handling)
-        # Check both English "help" and translated help keywords
-        help_keywords = ['help']
-        if 'help' in self.commands:
-            help_command = self.commands['help']
-            if hasattr(help_command, 'keywords'):
+        # Persist the normalized (prefix-stripped) content to the shared message once,
+        # before iterating commands. Each command's cleanup_message_for_matching would
+        # otherwise re-strip/re-reject the prefix off this same object; the first
+        # keyword command would consume the prefix and break matching for every command
+        # after it. The flag tells per-command cleanup the prefix is already handled.
+        message.content = content
+        message.content_lower = content_lower
+        message.prefix_normalized = True
+
+        # Check for help requests first (special handling).
+        # Check both English "help" and translated help keywords.
+        #
+        # Respect the [Help_Command] enabled flag: this special path bypasses the
+        # plugin loop (where can_execute() normally enforces enablement), so without
+        # this guard it would respond to "help" even when the command is disabled.
+        # When no help command is loaded we keep the legacy default of responding to
+        # the literal "help" keyword (help defaults to enabled).
+        help_command = self.commands.get('help')
+        help_enabled = getattr(help_command, 'help_enabled', True) if help_command is not None else True
+        if help_enabled:
+            help_keywords = ['help']
+            if help_command is not None and hasattr(help_command, 'keywords'):
                 help_keywords = [k.lower() for k in help_command.keywords]
 
-        # Check if message starts with any help keyword
-        for help_keyword in help_keywords:
-            if content_lower.startswith(help_keyword + ' ') or content_lower == help_keyword:
-                # Check channel restrictions for help keyword (same as other keywords/commands)
-                # DMs are allowed if respond_to_dms is enabled
-                if message.is_dm:
-                    if not self.bot.config.getboolean('Channels', 'respond_to_dms', fallback=True):
-                        break  # DMs disabled, skip help keyword
-                else:
-                    # For channel messages, check if channel is in monitor_channels
-                    if message.channel not in self.monitor_channels:
-                        break  # Channel not monitored, skip help keyword
-                    # When channel_keywords is set, only allow listed triggers in channel
-                    if not self._is_channel_trigger_allowed('help', message):
-                        break
+            # Check if message starts with any help keyword
+            for help_keyword in help_keywords:
+                if content_lower.startswith(help_keyword + ' ') or content_lower == help_keyword:
+                    # Check channel restrictions for help keyword (same as other keywords/commands)
+                    # DMs are allowed if respond_to_dms is enabled
+                    if message.is_dm:
+                        if not self.bot.config.getboolean('Channels', 'respond_to_dms', fallback=True):
+                            break  # DMs disabled, skip help keyword
+                    else:
+                        # For channel messages, honor the help command's channel access:
+                        # its per-command `channels` override when set, otherwise the
+                        # global monitor_channels. Without this the special path would
+                        # ignore [Help_Command] channels = ... (it bypasses the plugin
+                        # loop where is_channel_allowed is normally enforced). Fall back
+                        # to a bare monitor_channels check when no help command is loaded.
+                        if help_command is not None and hasattr(help_command, 'is_channel_allowed'):
+                            if not help_command.is_channel_allowed(message):
+                                break  # Not allowed in this channel, skip help keyword
+                        elif message.channel not in self.monitor_channels:
+                            break  # Channel not monitored, skip help keyword
+                        # When channel_keywords is set, only allow listed triggers in channel
+                        if not self._is_channel_trigger_allowed('help', message):
+                            break
 
-                # Channel check passed, process help request
-                if content_lower.startswith(help_keyword + ' '):
-                    command_name = content_lower[len(help_keyword):].strip()  # Remove help keyword prefix
-                    help_text = self.get_help_for_command(command_name, message)
-                    # Format the help response with message data (same as other keywords)
-                    help_text = self.format_keyword_response(help_text, message)
-                    matches.append(('help', help_text))
-                    return matches
-                elif content_lower == help_keyword:
-                    help_text = self.get_general_help(message)
-                    # Format the help response with message data (same as other keywords)
-                    help_text = self.format_keyword_response(help_text, message)
-                    matches.append(('help', help_text))
-                    return matches
+                    # Channel check passed, process help request
+                    if content_lower.startswith(help_keyword + ' '):
+                        command_name = content_lower[len(help_keyword):].strip()  # Remove help keyword prefix
+                        help_text = self.get_help_for_command(command_name, message)
+                        # Format the help response with message data (same as other keywords)
+                        help_text = self.format_keyword_response(help_text, message)
+                        matches.append(('help', help_text))
+                        return matches
+                    elif content_lower == help_keyword:
+                        help_text = self.get_general_help(message)
+                        # Format the help response with message data (same as other keywords)
+                        help_text = self.format_keyword_response(help_text, message)
+                        matches.append(('help', help_text))
+                        return matches
 
         # Check all loaded plugins for matches
         for command_name, command in self.commands.items():
@@ -811,20 +880,12 @@ class CommandManager:
         """
         if raw is None:
             return ""
-        text = raw.strip()
-
-        # Mirror check_keywords() prefix handling
-        if self.command_prefix:
-            if not text.startswith(self.command_prefix):
-                return ""  # No prefix -> treat as non-matchable
-            text = text[len(self.command_prefix):].strip()
-        else:
-            # Backward compatibility
-            if text.startswith('!'):
-                text = text[1:].strip()
+        normalized = self.normalize_command_content(raw)
+        if normalized is None:
+            return ""
 
         # case-insensitive + ignore extra spaces
-        return " ".join(text.lower().split())
+        return " ".join(normalized.lower().split())
 
     def match_randomline(self, message: MeshMessage) -> tuple[str, str] | None:
         """
@@ -835,18 +896,13 @@ class CommandManager:
         if not self.bot.config.has_section('RandomLine'):
             return None
 
-        # Start with the same content + prefix stripping logic as check_keywords()
-        content = (message.content or "").strip()
-
-        # Check for command prefix if configured
-        if self.command_prefix:
-            if not content.startswith(self.command_prefix):
-                return None
-            content = content[len(self.command_prefix):].strip()
+        if getattr(message, 'prefix_normalized', False):
+            content = (message.content or "").strip()
         else:
-            # Legacy "!" prefix compatibility
-            if content.startswith('!'):
-                content = content[1:].strip()
+            normalized = self.normalize_command_content(message.content or "")
+            if normalized is None:
+                return None
+            content = normalized
 
         # Normalize: lowercase + collapse whitespace
         content_norm = " ".join(content.lower().split())
@@ -901,24 +957,43 @@ class CommandManager:
             if not self._is_channel_trigger_allowed(key, message):
                 return None
 
-        file_path = self.bot.config.get('RandomLine', f'file.{key}', fallback='').strip()
-        if not file_path:
+        configured_file_path = self.bot.config.get('RandomLine', f'file.{key}', fallback='').strip()
+        if not configured_file_path:
             self.logger.warning(f"RandomLine matched '{key}' but missing config file.{key}")
             return None
 
         try:
-            validated_path = validate_safe_path(file_path, allow_absolute=True)
+            validated_path = validate_safe_path(configured_file_path, allow_absolute=True)
         except ValueError:
             validated_path = None
         if validated_path is None:
-            self.logger.warning(f"RandomLine: unsafe or restricted path rejected for '{key}': {file_path}")
+            self.logger.warning(
+                f"RandomLine: unsafe or restricted path rejected for '{key}': {configured_file_path}"
+            )
             return None
         file_path = str(validated_path)
 
         # Read usable lines
         try:
-            with open(file_path, encoding="utf-8") as f:
-                lines = [ln.strip() for ln in f.readlines()]
+            if Path(file_path).is_file():
+                with open(file_path, encoding="utf-8") as f:
+                    lines = [ln.strip() for ln in f.readlines()]
+            else:
+                # Shipped RandomLine defaults live in package data in wheels.
+                # Only map the documented data/randomlines path; arbitrary
+                # missing custom files must still fail instead of silently
+                # selecting a same-named bundled file.
+                normalized = configured_file_path.replace("\\", "/").lstrip("./")
+                marker = "data/randomlines/"
+                if not normalized.startswith(marker):
+                    raise FileNotFoundError(file_path)
+                resource_name = normalized.removeprefix(marker)
+                if not resource_name or "/" in resource_name:
+                    raise FileNotFoundError(file_path)
+                bundled = resources.files("data.randomlines").joinpath(resource_name)
+                if not bundled.is_file():
+                    raise FileNotFoundError(file_path)
+                lines = [ln.strip() for ln in bundled.read_text(encoding="utf-8").splitlines()]
             lines = [ln for ln in lines if ln]  # drop blank lines
         except Exception as e:
             self.logger.error(f"RandomLine error reading {file_path} for '{key}': {e}", exc_info=True)
@@ -1005,23 +1080,36 @@ class CommandManager:
             return False
 
         try:
-            # Name lookup first (backward compatible), then fallback to pubkey/prefix.
+            # Name lookup first (backward compatible), then pubkey/prefix in the
+            # radio snapshot and NEW_CONTACT pending list (not yet in contacts).
             contact = self.bot.meshcore.get_contact_by_name(recipient_id)
             lookup_type = "name"
-            if not contact and hasattr(self.bot.meshcore, "contacts"):
+            if not contact:
                 recipient_key = (recipient_id or "").strip()
-                contacts = self.bot.meshcore.contacts or {}
-                for contact_data in contacts.values():
-                    public_key = (contact_data.get("public_key", "") or "").strip()
-                    if not public_key:
-                        continue
-                    if public_key == recipient_key or public_key.startswith(recipient_key):
-                        contact = contact_data
-                        lookup_type = "pubkey_prefix"
-                        self.logger.debug(
-                            "Resolved DM recipient '%s' via public key prefix lookup",
-                            sanitize_name(recipient_key),
-                        )
+                sources: list[tuple[str, dict[str, Any]]] = []
+                contacts = getattr(self.bot.meshcore, "contacts", None)
+                if isinstance(contacts, dict) and contacts:
+                    sources.append(("pubkey_prefix", contacts))
+                pending = getattr(self.bot.meshcore, "pending_contacts", None)
+                if isinstance(pending, dict) and pending:
+                    sources.append(("pending_contact", pending))
+                for source_name, source in sources:
+                    for contact_data in source.values():
+                        if not isinstance(contact_data, dict):
+                            continue
+                        public_key = (contact_data.get("public_key", "") or "").strip()
+                        if not public_key:
+                            continue
+                        if public_key == recipient_key or public_key.startswith(recipient_key):
+                            contact = contact_data
+                            lookup_type = source_name
+                            self.logger.debug(
+                                "Resolved DM recipient '%s' via %s lookup",
+                                sanitize_name(recipient_key),
+                                source_name,
+                            )
+                            break
+                    if contact:
                         break
 
             if not contact:
@@ -1057,6 +1145,63 @@ class CommandManager:
                 self.logger.debug(f"Error recording transmission for repeat tracking: {e}")
                 # Don't fail the send if transmission tracking fails
 
+            # Central DM length guard: firmware MAX_TEXT_LEN is 160; bot budget is 158.
+            dm_max_bytes = 158
+            content_bytes = len(content.encode("utf-8"))
+            if content_bytes > dm_max_bytes:
+                chunks = self.split_text_into_utf8_chunks(content, dm_max_bytes)
+                self.logger.warning(
+                    "DM to %s exceeds %d UTF-8 bytes (%d); auto-splitting into %d chunk(s)",
+                    sanitize_name(contact_name),
+                    dm_max_bytes,
+                    content_bytes,
+                    len(chunks),
+                )
+                rate_limit_seconds = self.bot.config.getfloat(
+                    "Bot", "bot_tx_rate_limit_seconds", fallback=1.0
+                )
+                sleep_time = max(rate_limit_seconds + 0.5, 1.0)
+                for i, chunk in enumerate(chunks):
+                    if i > 0:
+                        await self.bot.bot_tx_rate_limiter.wait_for_tx()
+                        await asyncio.sleep(sleep_time)
+                        can_send_chunk, reason = await self._check_rate_limits(
+                            skip_user_rate_limit=True, rate_limit_key=rate_limit_key
+                        )
+                        if not can_send_chunk:
+                            if reason:
+                                self.logger.warning(reason)
+                            return False
+                    if not await self._send_dm_payload(
+                        contact, contact_name, chunk, rate_limit_key=rate_limit_key
+                    ):
+                        self.logger.warning(
+                            "Auto-split DM failed at chunk %d of %d to %s",
+                            i + 1,
+                            len(chunks),
+                            sanitize_name(contact_name),
+                        )
+                        return False
+                return True
+
+            return await self._send_dm_payload(
+                contact, contact_name, content, rate_limit_key=rate_limit_key
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to send DM: {e}")
+            return False
+
+    async def _send_dm_payload(
+        self,
+        contact: Any,
+        contact_name: str,
+        content: str,
+        *,
+        rate_limit_key: str | None = None,
+    ) -> bool:
+        """Send a single DM payload that is already within the RF byte budget."""
+        try:
             # Try to use send_msg_with_retry if available (meshcore-2.1.6+)
             try:
                 # Use the meshcore commands interface for send_msg_with_retry
@@ -1096,9 +1241,8 @@ class CommandManager:
             return self._handle_send_result(
                 result, "DM", contact_name, used_retry_method, rate_limit_key=rate_limit_key
             )
-
         except Exception as e:
-            self.logger.error(f"Failed to send DM: {e}")
+            self.logger.error(f"Failed to send DM payload: {e}")
             return False
 
     async def send_channel_message(
@@ -1167,7 +1311,7 @@ class CommandManager:
                 # Don't fail the send if transmission tracking fails
 
             # Optional flood scope (region): set before send, restore after
-            resolved = self.resolve_channel_send_scope(scope=scope)
+            resolved = self.resolve_channel_send_scope(scope=scope, channel=channel)
             scope_to_use = (
                 resolved if resolved is not None else self._outgoing_flood_scope_override()
             ) or ""
@@ -1537,6 +1681,13 @@ class CommandManager:
             bool: True if response was sent successfully, False otherwise.
         """
         try:
+            # Render-only invocation (see render_command_output): collect the text and
+            # transmit nothing. Checked before _last_response so a background render
+            # cannot overwrite the response captured for a real user's command.
+            if getattr(message, 'capture_sink', None) is not None:
+                message.capture_sink.append(content)
+                return True
+
             # Store the response content for web viewer capture
             if hasattr(self, '_last_response'):
                 self._last_response = content
@@ -1596,6 +1747,53 @@ class CommandManager:
             text = text[split_at:].lstrip()
         return chunks
 
+    @staticmethod
+    def split_text_into_utf8_chunks(text: str, max_bytes: int) -> list[str]:
+        """Split *text* into chunks each at most *max_bytes* UTF-8 bytes.
+
+        Prefers splitting on newlines, then spaces; never splits mid-codepoint.
+        Returns ``[""]`` when *text* is empty.
+        """
+        if max_bytes < 1:
+            max_bytes = 1
+        if len(text.encode("utf-8")) <= max_bytes:
+            return [text]
+
+        chunks: list[str] = []
+        remaining = text
+        while remaining:
+            if len(remaining.encode("utf-8")) <= max_bytes:
+                chunks.append(remaining)
+                break
+
+            # Binary-search the largest prefix that fits in max_bytes
+            low, high = 1, len(remaining)
+            fit = 1
+            while low <= high:
+                mid = (low + high) // 2
+                if len(remaining[:mid].encode("utf-8")) <= max_bytes:
+                    fit = mid
+                    low = mid + 1
+                else:
+                    high = mid - 1
+
+            window = remaining[:fit]
+            # Prefer newline, then space, within the fitting window
+            split_at = window.rfind("\n")
+            if split_at <= 0:
+                split_at = window.rfind(" ")
+            if split_at <= 0:
+                split_at = fit
+
+            chunk = remaining[:split_at].rstrip("\n ")
+            if not chunk:
+                # Hard split — still codepoint-safe via fit
+                chunk = remaining[:fit]
+                split_at = fit
+            chunks.append(chunk)
+            remaining = remaining[split_at:].lstrip("\n ")
+        return chunks if chunks else [""]
+
     async def send_response_chunked(
         self, message: MeshMessage, chunks: list[str], *, skip_user_rate_limit_first: bool = True
     ) -> bool:
@@ -1616,6 +1814,14 @@ class CommandManager:
         """
         if not chunks:
             return True
+
+        # Render-only invocation: collect the chunks and transmit nothing. Without
+        # this a chunked command would put its output on the air while being
+        # "rendered" for a scheduled message.
+        if getattr(message, 'capture_sink', None) is not None:
+            message.capture_sink.extend(chunk for chunk in chunks if chunk)
+            return True
+
         rate_limit_key = self.get_rate_limit_key(message)
         if message.is_dm:
             rate_limit_seconds = self.bot.config.getfloat('Bot', 'bot_tx_rate_limit_seconds', fallback=1.0)
@@ -1646,6 +1852,127 @@ class CommandManager:
             scope=getattr(message, 'reply_scope', None),
         )
 
+    def resolve_command_by_trigger(self, trigger: str):
+        """Find the command a trigger word would invoke, or None.
+
+        Matches the command's registered name first, then its keywords, so
+        ``wx`` and ``weather`` both resolve to the same command.
+        """
+        wanted = (trigger or "").strip().lower()
+        if not wanted:
+            return None
+        for command_name, command in self.commands.items():
+            if wanted == command_name.lower():
+                return command
+            keywords = getattr(command, 'keywords', None) or []
+            if wanted in [str(k).lower() for k in keywords]:
+                return command
+        return None
+
+    async def render_command_output(
+        self,
+        spec: str,
+        *,
+        channel: str | None = None,
+        timeout: float = 30.0,
+    ) -> str | None:
+        """Run a command for its reply text without transmitting it.
+
+        Used by ``{cmd:...}`` placeholders in scheduled messages, so an operator can
+        broadcast the output of any command on a cron schedule instead of each service
+        growing its own schedule parser.
+
+        Args:
+            spec: Full invocation as an operator would type it, e.g. ``wx Seattle``.
+            channel: Channel the rendered text is destined for, so channel-scoped
+                behavior in the command sees the right context.
+            timeout: Seconds to wait before abandoning the render.
+
+        Returns:
+            The reply text, or None when the command is unknown, disabled, admin-only,
+            not renderable, times out, or produces nothing.
+        """
+        spec = (spec or "").strip()
+        if not spec:
+            return None
+
+        trigger = spec.split()[0]
+        command = self.resolve_command_by_trigger(trigger)
+        if command is None:
+            self.logger.warning("Scheduled {cmd:...} placeholder: unknown command %r", trigger)
+            return None
+
+        command_name = getattr(command, 'name', trigger)
+        # Opt-in, not a denylist. Capture only intercepts send_response and
+        # send_response_chunked, so a command that transmits by other means (advert),
+        # posts its own messages (announcements), or is DM-only (schedule) would spend
+        # airtime or leak configuration if rendered. Anything not explicitly marked
+        # render_safe is refused, so a new command is never renderable by accident.
+        if not getattr(command, 'render_safe', False):
+            self.logger.warning(
+                "Scheduled {cmd:...} placeholder: %r is not marked render_safe, so it "
+                "cannot be run for its text alone", command_name,
+            )
+            return None
+
+        section = command._derive_config_section_name()
+        if not command.get_config_value(section, 'enabled', fallback=True, value_type='bool'):
+            self.logger.warning(
+                "Scheduled {cmd:...} placeholder: %r is disabled in config", command_name
+            )
+            return None
+
+        if command.requires_admin_access():
+            self.logger.warning(
+                "Scheduled {cmd:...} placeholder: refusing to run admin command %r",
+                command_name,
+            )
+            return None
+
+        # The command's own cooldown still governs it. A schedule is not a licence to
+        # run something more often than the operator configured it to run.
+        allowed, remaining = command.check_cooldown()
+        if not allowed:
+            self.logger.warning(
+                "Scheduled {cmd:...} placeholder: %r is on cooldown for another %.0fs; skipped",
+                command_name, remaining,
+            )
+            return None
+        # Recorded before execution, matching execute_commands, so a slow or failing
+        # render cannot be retried straight past the cooldown.
+        command.record_execution()
+
+        sink: list[str] = []
+        synthetic = MeshMessage(
+            content=spec,
+            sender_id=None,
+            channel=channel,
+            is_dm=False,
+            timestamp=int(time.time()),
+            capture_sink=sink,
+        )
+
+        try:
+            await asyncio.wait_for(command.execute(synthetic), timeout=timeout)
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                "Scheduled {cmd:...} placeholder: %r timed out after %ss", command_name, timeout
+            )
+            return None
+        except Exception as e:
+            self.logger.warning(
+                "Scheduled {cmd:...} placeholder: %r failed: %s: %s",
+                command_name, type(e).__name__, e,
+            )
+            return None
+
+        if not sink:
+            self.logger.warning(
+                "Scheduled {cmd:...} placeholder: %r produced no output", command_name
+            )
+            return None
+        return "\n".join(part for part in sink if part)
+
     async def execute_commands(self, message):
         """Execute command objects that handle their own responses.
 
@@ -1655,21 +1982,16 @@ class CommandManager:
         Args:
             message: The message triggering the command execution.
         """
-        content = message.content.strip()
-
-        # Check for command prefix if configured
-        if self.command_prefix:
-            # If prefix is configured, message must start with it
-            if not content.startswith(self.command_prefix):
-                return  # No prefix, no match
-            # Strip the prefix
-            content = content[len(self.command_prefix):].strip()
+        if getattr(message, 'prefix_normalized', False):
+            content = message.content.strip().lower()
         else:
-            # If no prefix configured, strip legacy "!" prefix for backward compatibility
-            if content.startswith('!'):
-                content = content[1:].strip()
-
-        content = content.lower()
+            normalized = self.normalize_command_content(message.content)
+            if normalized is None:
+                return
+            content = normalized.lower()
+            message.content = normalized
+            message.content_lower = content
+            message.prefix_normalized = True
 
         # Check each command to see if it should execute
         for command_name, command in self.commands.items():
@@ -1686,8 +2008,6 @@ class CommandManager:
                 if response_format is not None:
                     # This command was already handled by keyword matching
                     continue
-
-                self.logger.info(f"Command '{command_name}' matched, executing")
 
                 # Check if we should queue instead of reject (for global cooldowns near expiring)
                 should_queue, remaining = self._should_queue_command(command, message)
@@ -1732,13 +2052,25 @@ class CommandManager:
                             await self.send_response(message, error_msg)
                             response_sent = True
 
-                    # Record command execution in stats database (even if it failed checks)
+                    # Soft rejection (e.g. enabled=false): do not claim the keyword.
+                    # Matches check_keywords(), which continues so another command's
+                    # alias can handle the same trigger (e.g. test aliases=path with
+                    # Path_Command disabled).
+                    if not response_sent:
+                        self.logger.debug(
+                            f"Command '{command_name}' matched but cannot execute; trying next"
+                        )
+                        continue
+
+                    # Record command execution in stats database (hard rejection with user feedback)
                     if 'stats' in self.commands:
                         stats_command = self.commands['stats']
                         if stats_command:
                             stats_command.record_command(message, command_name, response_sent)
 
                     return
+
+                self.logger.info(f"Command '{command_name}' matched, executing")
 
                 # Check network connectivity for commands that require internet
                 if command.requires_internet:

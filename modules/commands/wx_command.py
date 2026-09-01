@@ -4,10 +4,12 @@ Weather command for the MeshCore Bot
 Provides weather information using zip codes and NOAA APIs
 """
 
+import asyncio
 import re
+import threading
 import xml.dom.minidom
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Callable, Optional, ParamSpec, TypeVar
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -44,15 +46,21 @@ from ..clients.mqtt_weather import (
     load_mqtt_weather_format_config,
     mqtt_weather_display_for_topic,
 )
+from .rain_command import nws_http_means_no_coverage
 
 # Multiday: plain digits (e.g. 7), 7day/7-day, or suffix form 7d/10d (min 2, max below).
 WX_MULTIDAY_MAX_DAYS = 16
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 class WxCommand(BaseCommand):
     """Handles weather commands with zipcode support"""
 
     # Plugin metadata
+    # Read-only informational output; safe for scheduled {cmd:...} rendering.
+    render_safe = True
     name = "wx"
     keywords = ['wx', 'weather', 'wxa', 'wxalert']
     description = "Get weather information for a zip code (usage: wx 12345)"
@@ -68,6 +76,44 @@ class WxCommand(BaseCommand):
     parameters = [
         {"name": "location", "description": "US zip code or city name"},
         {"name": "option", "description": "tomorrow, Nd (e.g. 7d, 10d), hourly, or alerts (optional)"}
+    ]
+
+    # Web-viewer settings schema (see modules/settings_schema.py)
+    settings_schema = [
+        {
+            "key": "temperature_unit",
+            "label": "Temperature unit",
+            "type": "enum",
+            "options": [
+                {"value": "fahrenheit", "label": "Fahrenheit (°F)"},
+                {"value": "celsius", "label": "Celsius (°C)"},
+            ],
+            "default": "fahrenheit",
+            "help": "Unit used when reporting temperatures.",
+        },
+        {
+            "key": "wind_speed_unit",
+            "label": "Wind speed unit",
+            "type": "enum",
+            "options": [
+                {"value": "mph", "label": "Miles per hour (mph)"},
+                {"value": "kmh", "label": "Kilometers per hour (km/h)"},
+            ],
+            "default": "mph",
+            "help": "Unit used when reporting wind speed.",
+        },
+        {"key": "weather_provider", "label": "Weather provider", "type": "enum", "section": "Weather",
+         "options": [
+             {"value": "noaa", "label": "NOAA (US, includes alerts)"},
+             {"value": "openmeteo", "label": "Open-Meteo (global)"},
+         ],
+         "default": "noaa", "help": "API used for forecasts. Shared weather setting."},
+        {"key": "default_city", "label": "Default city", "type": "str", "section": "Weather",
+         "default": "", "help": "City used for a bare 'wx' when no location is given. Shared weather setting."},
+        {"key": "default_state", "label": "Default state", "type": "str", "section": "Weather",
+         "default": "", "help": "2-letter state for city disambiguation (e.g. WA). Shared weather setting."},
+        {"key": "default_country", "label": "Default country", "type": "str", "section": "Weather",
+         "default": "US", "help": "2-letter country code (e.g. US). Shared weather setting."},
     ]
 
     # Error constants
@@ -90,8 +136,8 @@ class WxCommand(BaseCommand):
         if weather_provider == 'openmeteo' and WX_INTERNATIONAL_AVAILABLE:
             # Delegate to international weather command
             self.delegate_command = GlobalWxCommand(bot)
-            # Update keywords to match wx command for compatibility
-            self.delegate_command.keywords = ['wx', 'weather', 'wxa', 'wxalert']
+            # Use wx triggers plus any [Wx_Command] aliases loaded by BaseCommand.
+            self.delegate_command.keywords = list(self.keywords)
             self.delegate_command.description = "Get weather information for any location (usage: wx Tokyo)"
             self.logger.info("Weather provider set to 'openmeteo', delegating wx command to wx_international")
         else:
@@ -120,6 +166,14 @@ class WxCommand(BaseCommand):
             # Create a retry-enabled session for NOAA API calls
             # This makes the API more resilient to timeouts and transient errors
             self.noaa_session = self._create_retry_session()
+
+            # requests.Session and WXSIM parser instances are shared by this command.
+            # Keep provider calls serialized as they were before moving them to worker
+            # threads. The lock is acquired inside the worker, never on the event loop.
+            self._sync_provider_lock = threading.Lock()
+
+            # Lazy: None = unknown, False = NOAA alerts unavailable (non-US / no coverage)
+            self._nws_alerts_available = None
 
     def _format_high_low(self, high: Optional[float], low: Optional[float], temp_symbol: str) -> str:
         """Format high/low using [Weather] temperature_*_format templates."""
@@ -157,6 +211,25 @@ class WxCommand(BaseCommand):
         session.mount("http://", adapter)
 
         return session
+
+    def _run_sync_provider(
+        self,
+        operation: Callable[_P, _T],
+        *args: _P.args,
+        **kwargs: _P.kwargs,
+    ) -> _T:
+        """Run one shared synchronous provider operation under its worker lock."""
+        with self._sync_provider_lock:
+            return operation(*args, **kwargs)
+
+    async def _run_sync_provider_async(
+        self,
+        operation: Callable[_P, _T],
+        *args: _P.args,
+        **kwargs: _P.kwargs,
+    ) -> _T:
+        """Move blocking provider work off-loop without concurrent Session use."""
+        return await asyncio.to_thread(self._run_sync_provider, operation, *args, **kwargs)
 
     def get_help_text(self) -> str:
         """Get help text, delegating to international command if using Open-Meteo"""
@@ -370,9 +443,12 @@ class WxCommand(BaseCommand):
             # Still return the forecast, but log the warning
             # Optionally, we could return an error message here instead
 
-        # Get unit preferences from config
-        temp_unit = self.bot.config.get('Weather', 'temperature_unit', fallback='fahrenheit').lower()
-        wind_unit = self.bot.config.get('Weather', 'wind_speed_unit', fallback='mph').lower()
+        # Get unit preferences from config. Canonical section is [Wx_Command];
+        # get_config_value falls back to legacy [Weather] for existing setups.
+        temp_unit = self.get_config_value(
+            'Wx_Command', 'temperature_unit', fallback='fahrenheit', value_type='str').lower()
+        wind_unit = self.get_config_value(
+            'Wx_Command', 'wind_speed_unit', fallback='mph', value_type='str').lower()
 
         # Format based on forecast type
         if forecast_type == "tomorrow":
@@ -433,6 +509,23 @@ class WxCommand(BaseCommand):
                 return f"{location_name}: {current}"
             return current
 
+    async def _get_wxsim_weather_async(
+        self,
+        source_url: str,
+        forecast_type: str = "default",
+        num_days: int = 7,
+        message: MeshMessage = None,
+        location_name: Optional[str] = None,
+    ) -> str:
+        return await self._run_sync_provider_async(
+            self._get_wxsim_weather,
+            source_url,
+            forecast_type,
+            num_days,
+            message,
+            location_name,
+        )
+
     def _coordinates_to_location_string(self, lat: float, lon: float) -> Optional[str]:
         """Convert coordinates to a location string (city name) using reverse geocoding.
 
@@ -471,6 +564,13 @@ class WxCommand(BaseCommand):
             self.logger.debug(f"Error reverse geocoding coordinates {lat}, {lon}: {e}")
             return None
 
+    async def _coordinates_to_location_string_async(
+        self, lat: float, lon: float
+    ) -> Optional[str]:
+        return await self._run_sync_provider_async(
+            self._coordinates_to_location_string, lat, lon
+        )
+
     async def execute(self, message: MeshMessage) -> bool:
         """Execute the weather command"""
         # Delegate to international command if using Open-Meteo provider
@@ -506,7 +606,9 @@ class WxCommand(BaseCommand):
                 # Use custom WXSIM default source
                 try:
                     self.record_execution(message.sender_id)
-                    weather_data = self._get_wxsim_weather(wxsim_source, "default", 7, message)
+                    weather_data = await self._get_wxsim_weather_async(
+                        wxsim_source, "default", 7, message
+                    )
                     await self.send_response(message, weather_data)
                     return True
                 except Exception as e:
@@ -522,7 +624,9 @@ class WxCommand(BaseCommand):
                 parts = [parts[0], location_str]
                 using_companion_location = True
                 # Get city name for display
-                display_name = self._coordinates_to_location_string(companion_location[0], companion_location[1])
+                display_name = await self._coordinates_to_location_string_async(
+                    companion_location[0], companion_location[1]
+                )
                 if display_name:
                     self.logger.info(f"Using companion location: {display_name} ({companion_location[0]}, {companion_location[1]})")
                 else:
@@ -550,7 +654,9 @@ class WxCommand(BaseCommand):
                     if bot_loc:
                         location_str = f"{bot_loc[0]},{bot_loc[1]}"
                         parts = [parts[0], location_str]
-                        display_name = self._coordinates_to_location_string(bot_loc[0], bot_loc[1])
+                        display_name = await self._coordinates_to_location_string_async(
+                            bot_loc[0], bot_loc[1]
+                        )
                         if display_name:
                             self.logger.info(
                                 f"Using bot location (no args): {display_name} ({bot_loc[0]}, {bot_loc[1]})"
@@ -642,7 +748,13 @@ class WxCommand(BaseCommand):
             # Use custom WXSIM source
             try:
                 self.record_execution(message.sender_id)
-                weather_data = self._get_wxsim_weather(wxsim_source, forecast_type, num_days, message, location_name=location)
+                weather_data = await self._get_wxsim_weather_async(
+                    wxsim_source,
+                    forecast_type,
+                    num_days,
+                    message,
+                    location_name=location,
+                )
                 if forecast_type == "multiday":
                     await self._send_multiday_forecast(message, weather_data)
                 else:
@@ -659,8 +771,8 @@ class WxCommand(BaseCommand):
         if re.match(r'^\s*-?\d+\.?\d*\s*,\s*-?\d+\.?\d*\s*$', location):
             # It's coordinates (lat,lon format)
             location_type = "coordinates"
-        elif re.match(r'^\d{5}$', location):
-            # It's a zipcode
+        elif re.match(r'^\s*\d{5}\s*$', location):
+            # It's a zipcode (allow surrounding whitespace; strip later in geocode)
             location_type = "zipcode"
         else:
             # It's a city name (possibly with state)
@@ -686,12 +798,12 @@ class WxCommand(BaseCommand):
                         await self.send_response(message, self.translate('commands.wx.error', error=f"Invalid coordinates format: {location}"))
                         return True
                 elif location_type == "zipcode":
-                    lat, lon = self.zipcode_to_lat_lon(location)
+                    lat, lon = await self._zipcode_to_lat_lon_async(location)
                     if lat is None or lon is None:
                         await self.send_response(message, self.translate('commands.wx.no_location_zipcode', location=location))
                         return True
                 else:  # city
-                    result = self.city_to_lat_lon(location)
+                    result = await self._city_to_lat_lon_async(location)
                     if len(result) == 3:
                         lat, lon, address_info = result
                     else:
@@ -714,7 +826,6 @@ class WxCommand(BaseCommand):
                 await self.send_response(message, weather_data[1])
 
                 # Wait for bot TX rate limiter to allow next message
-                import asyncio
                 rate_limit = self.bot.config.getfloat('Bot', 'bot_tx_rate_limit_seconds', fallback=1.0)
                 # Use a conservative sleep time to avoid rate limiting
                 sleep_time = max(rate_limit + 1.0, 2.0)  # At least 2 seconds, or rate_limit + 1 second
@@ -739,6 +850,18 @@ class WxCommand(BaseCommand):
             return True
 
     async def get_weather_for_location(self, location: str, location_type: str, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, using_companion_location: bool = False) -> str:
+        """Run the ordered synchronous geocode/NOAA workflow off the event loop."""
+        return await self._run_sync_provider_async(
+            self._get_weather_for_location_sync,
+            location,
+            location_type,
+            forecast_type,
+            num_days,
+            message,
+            using_companion_location,
+        )
+
+    def _get_weather_for_location_sync(self, location: str, location_type: str, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, using_companion_location: bool = False) -> str:
         """Get weather data for a location (coordinates, zipcode, or city)
 
         Args:
@@ -917,6 +1040,9 @@ class WxCommand(BaseCommand):
             self.logger.error(f"Error geocoding zipcode {zipcode}: {e}")
             return None, None
 
+    async def _zipcode_to_lat_lon_async(self, zipcode: str) -> tuple:
+        return await self._run_sync_provider_async(self.zipcode_to_lat_lon, zipcode)
+
     def city_to_lat_lon(self, city: str) -> tuple:
         """Convert city name to latitude and longitude using default state"""
         try:
@@ -935,6 +1061,9 @@ class WxCommand(BaseCommand):
         except Exception as e:
             self.logger.error(f"Error geocoding city {city}: {e}")
             return None, None, None
+
+    async def _city_to_lat_lon_async(self, city: str) -> tuple:
+        return await self._run_sync_provider_async(self.city_to_lat_lon, city)
 
     def get_noaa_weather(self, lat: float, lon: float, return_periods: bool = False, max_length: int = 130) -> tuple:
         """Get weather forecast from NOAA and return both weather string and points data
@@ -1861,8 +1990,6 @@ class WxCommand(BaseCommand):
 
     async def _send_multiday_forecast(self, message: MeshMessage, forecast_text: str):
         """Send multi-day forecast response, splitting into multiple messages if needed"""
-        import asyncio
-
         # Get max message length dynamically
         max_length = self.get_max_message_length(message)
 
@@ -1940,6 +2067,9 @@ class WxCommand(BaseCommand):
             If return_full_data=True: (list of alert dicts, alert_count)
         """
         try:
+            if getattr(self, "_nws_alerts_available", None) is False:
+                return self.ERROR_FETCHING_DATA
+
             # Round coordinates to 4 decimal places to avoid API redirects
             lat_rounded = round(lat, 4)
             lon_rounded = round(lon, 4)
@@ -1949,11 +2079,23 @@ class WxCommand(BaseCommand):
             try:
                 alert_data = self.noaa_session.get(alert_url, timeout=self.url_timeout)
                 if not alert_data.ok:
-                    self.logger.warning(f"Error fetching weather alerts from NOAA: HTTP {alert_data.status_code}")
+                    if nws_http_means_no_coverage(alert_data.status_code):
+                        self._nws_alerts_available = False
+                        self.logger.warning(
+                            "NWS weather alerts unavailable (HTTP %s); NOAA alerts are US-only — "
+                            "skipping future alert requests",
+                            alert_data.status_code,
+                        )
+                    else:
+                        self.logger.warning(
+                            f"Error fetching weather alerts from NOAA: HTTP {alert_data.status_code}"
+                        )
                     return self.ERROR_FETCHING_DATA
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 self.logger.warning(f"Timeout/connection error fetching weather alerts from NOAA: {e}")
                 return self.ERROR_FETCHING_DATA
+
+            self._nws_alerts_available = True
 
             alerts = []  # Store structured alert data
             alertxml = xml.dom.minidom.parseString(alert_data.text)
@@ -2310,6 +2452,16 @@ class WxCommand(BaseCommand):
         except Exception as e:
             self.logger.error(f"Error fetching NOAA weather alerts: {e}")
             return self.ERROR_FETCHING_DATA
+
+    async def _get_weather_alerts_noaa_async(
+        self, lat: float, lon: float, return_full_data: bool = False
+    ) -> tuple:
+        return await self._run_sync_provider_async(
+            self.get_weather_alerts_noaa,
+            lat,
+            lon,
+            return_full_data,
+        )
 
 
     def _differentiate_duplicate_statements(self, alerts: list) -> list:
@@ -2821,10 +2973,10 @@ class WxCommand(BaseCommand):
 
     async def _send_full_alert_list(self, message: MeshMessage, lat: float, lon: float):
         """Send full list of alerts with details, splitting across multiple messages if needed"""
-        import asyncio
-
         # Get full alert data
-        alerts_result = self.get_weather_alerts_noaa(lat, lon, return_full_data=True)
+        alerts_result = await self._get_weather_alerts_noaa_async(
+            lat, lon, return_full_data=True
+        )
         if alerts_result == self.ERROR_FETCHING_DATA:
             await self.send_response(message, self.translate('commands.wx.error_fetching'))
             return

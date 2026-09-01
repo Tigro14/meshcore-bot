@@ -134,6 +134,17 @@ class TestSetupScheduledMessages:
             except Exception:
                 pass
 
+    def _message_jobs(self, scheduler):
+        """Jobs registered for [Scheduled_Messages] entries.
+
+        setup_scheduled_messages() also registers device-mode housekeeping jobs
+        because auto_manage_contacts defaults to 'device', so a raw get_jobs()
+        count conflates the two.
+        """
+        return [
+            j for j in scheduler._apscheduler.get_jobs() if j.id.startswith("schedmsg_")
+        ]
+
     def test_valid_entry_is_registered_and_stored(self, scheduler):
         scheduler.bot.config.add_section("Scheduled_Messages")
         scheduler.bot.config.set("Scheduled_Messages", "0900", "general: Good morning!")
@@ -144,7 +155,7 @@ class TestSetupScheduledMessages:
         assert channel == "general"
         assert "Good morning!" in message
         assert label == "09:00"
-        assert len(scheduler._apscheduler.get_jobs()) == 1
+        assert len(self._message_jobs(scheduler)) == 1
         self._teardown(scheduler)
 
     def test_deprecated_hhmm_logs_migration_warning(self, scheduler):
@@ -168,10 +179,8 @@ class TestSetupScheduledMessages:
         assert ch == "general"
         assert "Morning cron" in msg
         assert label == "0 9 * * *"
-        assert len(scheduler._apscheduler.get_jobs()) == 1
-        msg_jobs = [
-            j for j in scheduler._apscheduler.get_jobs() if j.id.startswith("schedmsg_")
-        ]
+        msg_jobs = self._message_jobs(scheduler)
+        assert len(msg_jobs) == 1
         assert msg_jobs[0].kwargs == {"schedule_key": "0 9 * * *", "scope": None}
         self._teardown(scheduler)
 
@@ -188,9 +197,7 @@ class TestSetupScheduledMessages:
         assert ch == "Public"
         assert scope == "#sea"
         assert msg.startswith("Hello!")
-        msg_jobs = [
-            j for j in scheduler._apscheduler.get_jobs() if j.id.startswith("schedmsg_")
-        ]
+        msg_jobs = self._message_jobs(scheduler)
         assert len(msg_jobs) == 1
         assert msg_jobs[0].kwargs == {"schedule_key": "0 18 * * *", "scope": "#sea"}
         self._teardown(scheduler)
@@ -203,7 +210,7 @@ class TestSetupScheduledMessages:
         self._setup_and_call(scheduler)
         assert "@weekly" in scheduler.scheduled_messages
         assert scheduler.scheduled_messages["@weekly"][2] == "@weekly"
-        assert len(scheduler._apscheduler.get_jobs()) == 1
+        assert len(self._message_jobs(scheduler)) == 1
         self._teardown(scheduler)
 
     def test_invalid_cron_skipped(self, scheduler):
@@ -213,13 +220,7 @@ class TestSetupScheduledMessages:
         )
         self._setup_and_call(scheduler)
         assert "not-a-cron" not in scheduler.scheduled_messages
-        # Only non-message jobs (e.g. device-mode) could exist; no scheduled message job
-        msg_jobs = [
-            j
-            for j in scheduler._apscheduler.get_jobs()
-            if j.id.startswith("schedmsg_")
-        ]
-        assert len(msg_jobs) == 0
+        assert len(self._message_jobs(scheduler)) == 0
         self._teardown(scheduler)
 
     def test_invalid_time_format_is_skipped(self, scheduler):
@@ -249,7 +250,7 @@ class TestSetupScheduledMessages:
         scheduler.bot.config.set("Scheduled_Messages", "1800", "general: Evening")
         self._setup_and_call(scheduler)
         assert len(scheduler.scheduled_messages) == 3
-        assert len(scheduler._apscheduler.get_jobs()) == 3
+        assert len(self._message_jobs(scheduler)) == 3
         self._teardown(scheduler)
 
     def test_message_escape_sequences_decoded(self, scheduler):
@@ -269,7 +270,7 @@ class TestSetupScheduledMessages:
         scheduler.bot.config.set("Scheduled_Messages", "0700", "general: Morning")
         self._setup_and_call(scheduler)
         self._setup_and_call(scheduler)  # second call — should replace, not add
-        assert len(scheduler._apscheduler.get_jobs()) == 1
+        assert len(self._message_jobs(scheduler)) == 1
         self._teardown(scheduler)
 
     def test_clock_sync_admin_job_registered_when_enabled(self, scheduler):

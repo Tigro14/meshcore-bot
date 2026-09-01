@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
-from .utils import message_path_bytes_per_hop
+from .utils import message_hop_count, message_path_bytes_per_hop
 
 FilterFn = Callable[[str, dict[str, Any], str], str]
 
@@ -33,6 +33,33 @@ def _filter_pathbytes_min(value: str, ctx: dict[str, Any], args: str) -> str:
     return value
 
 
+def _filter_hops_min(value: str, ctx: dict[str, Any], args: str) -> str:
+    """Clear *value* unless the message travelled at least *N* hops.
+
+    Asks about the route rather than how it is encoded, which is what separates
+    this from ``pathbytes_min``: a one-byte multi-hop path has a real, measurable
+    distance, and ``pathbytes_min:2`` would throw it away along with the direct
+    messages it was aimed at. ``hops_min:1`` is the way to drop a clause on a
+    direct message and nothing else.
+
+    An unknown hop count clears the value: a gate that cannot confirm the route
+    should suppress rather than guess, matching ``pathbytes_min``.
+    """
+    message = ctx.get('message')
+    if message is None:
+        return ''
+    try:
+        n = int(args.strip())
+    except ValueError:
+        return value
+    if n < 0:
+        return value
+    hops = message_hop_count(message)
+    if hops is None or hops < n:
+        return ''
+    return value
+
+
 def _filter_prefix_if_nonempty(value: str, ctx: dict[str, Any], args: str) -> str:
     """Prepend *args* literal to *value* only when *value* is non-empty after prior filters."""
     if not value:
@@ -43,6 +70,7 @@ def _filter_prefix_if_nonempty(value: str, ctx: dict[str, Any], args: str) -> st
 RESPONSE_TEMPLATE_FILTERS: dict[str, FilterFn] = {
     'pathbytes_min': _filter_pathbytes_min,
     'pathbytes': _filter_pathbytes_min,
+    'hops_min': _filter_hops_min,
     'prefix_if_nonempty': _filter_prefix_if_nonempty,
 }
 
@@ -84,7 +112,7 @@ def _field_and_filter_specs(inner: str) -> tuple[str, list[tuple[str, str]]]:
 
 def format_piped_template(
     template: str,
-    fields: dict[str, str],
+    fields: dict[str, Any],
     *,
     message: Any = None,
     logger: Any = None,
@@ -94,7 +122,9 @@ def format_piped_template(
 
     Args:
         template: Raw template string from config.
-        fields: Mapping of placeholder names to string values (e.g. ``sender``, ``path_distance``).
+        fields: Mapping of placeholder names to values (e.g. ``sender``, ``path_distance``).
+            An unavailable field is an empty string, which renders as nothing and
+            lets ``prefix_if_nonempty`` drop its literal label too.
         message: Triggering mesh message; required for ``pathbytes`` / ``pathbytes_min`` filters.
         logger: Optional logger for unknown filter warnings.
         prefix_hex_chars: Bot prefix width for inferring bytes per hop from legacy path text.

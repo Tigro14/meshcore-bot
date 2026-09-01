@@ -31,17 +31,36 @@ class MeshMessage:
     reply_scope: Optional[str] = None
     # Lowercased content set by base_command.cleanup_message_for_matching
     content_lower: str = ""
+    # Transient flag: True once CommandManager.check_keywords has stripped the
+    # configured command prefix (and legacy "!") from content. Prevents per-command
+    # cleanup_message_for_matching from re-stripping/re-rejecting an already-normalized
+    # message, which previously broke matching for all-but-the-first command.
+    prefix_normalized: bool = False
+    # Transient: when not None, CommandManager.send_response appends the reply here
+    # and transmits nothing. Set by CommandManager.render_command_output so a command
+    # can be run for its text alone (e.g. a {cmd:...} placeholder in a scheduled
+    # message) without spending airtime. A synthetic message only.
+    capture_sink: Optional[list[str]] = None
 
     def effective_outgoing_flood_scope(self, bot: Any) -> str:
         """Resolve outbound flood scope the same way as ``CommandManager.send_channel_message``.
 
-        For channel replies: ``reply_scope`` when set, else ``[Channels] outgoing_flood_scope_override``.
+        For channel replies: ``reply_scope`` when set, else per-channel
+        ``[Channels] flood_scope.<channel>``, else ``[Channels] outgoing_flood_scope_override``.
         Empty string means global flood. DMs return ``""`` (not applicable).
         """
         if self.is_dm:
             return ""
         if self.reply_scope is not None:
             return (self.reply_scope or "").strip()
+        if self.channel and bot.config.has_section("Channels"):
+            channel_key = self.channel.strip().removeprefix("#").lower()
+            for key, value in bot.config.items("Channels"):
+                if not key.startswith("flood_scope."):
+                    continue
+                configured_channel = key[len("flood_scope."):].strip().removeprefix("#").lower()
+                if configured_channel == channel_key:
+                    return (value or "").strip()
         scope_cfg = ""
         if bot.config.has_section("Channels") and bot.config.has_option(
             "Channels", "outgoing_flood_scope_override"
@@ -52,4 +71,4 @@ class MeshMessage:
     @staticmethod
     def is_global_flood_scope(scope: str) -> bool:
         """Match ``send_channel_message`` global markers (before ``_normalize_scope_name``)."""
-        return scope in ("", "*", "0", "None")
+        return scope in ("", "*", "0", "None") or scope.lower() == "none"

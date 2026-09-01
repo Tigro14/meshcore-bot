@@ -23,8 +23,10 @@ class PrefixCommand(BaseCommand):
     """Handles repeater prefix lookups (1-, 2-, or 3-byte hex; longer input truncated to 3 bytes)."""
 
     # Plugin metadata
+    # Read-only informational output; safe for scheduled {cmd:...} rendering.
+    render_safe = True
     name = "prefix"
-    keywords = ['prefix', 'repeater', 'lookup']
+    keywords = ['prefix', 'lookup']
     description = "Look up repeaters by prefix (2, 4, or 6 hex chars = 1–3 bytes; longer input truncated)"
     category = "meshcore_info"
     requires_dm = False
@@ -43,6 +45,50 @@ class PrefixCommand(BaseCommand):
     # Multi-byte prefix lookup: accept 1-, 2-, or 3-byte hex strings only; longer input truncated
     MAX_PREFIX_HEX_CHARS = 6
     ALLOWED_PREFIX_LENGTHS = (2, 4, 6)
+
+    # Web-viewer settings schema (see modules/settings_schema.py).
+    # The repeater-prefix API lives in the shared [External_Data] section.
+    settings_schema = [
+        {"key": "show_repeater_locations", "label": "Show repeater locations", "type": "bool",
+         "default": True,
+         "help": "Show city names with repeaters when location data is available."},
+        {"key": "use_reverse_geocoding", "label": "Use reverse geocoding", "type": "bool",
+         "default": True,
+         "help": "Look up city names from GPS coordinates when missing."},
+        {"key": "hide_source", "label": "Hide source line", "type": "bool",
+         "default": False,
+         "help": "Hide the 'Source: domain' line from prefix output."},
+        {"key": "prefix_heard_days", "label": "Heard window", "type": "int",
+         "min": 0, "default": 7, "unit": "days",
+         "help": "Only show repeaters heard within this window by default."},
+        {"key": "prefix_free_days", "label": "Free window", "type": "int",
+         "min": 0, "default": 7, "unit": "days",
+         "help": "Window used to decide which prefixes count as 'used'."},
+        {"key": "max_prefix_range", "label": "Max prefix range", "type": "float",
+         "min": 0, "default": 200.0, "unit": "km",
+         "help": "Exclude repeaters beyond this distance from the bot. 0 disables."},
+        {"key": "prefix_best_enabled", "label": "Enable 'prefix best'", "type": "bool",
+         "default": True,
+         "help": "Enable the 'prefix best <location>' suggestion feature."},
+        {"key": "prefix_best_min_edge_observations", "label": "Best: min edge observations", "type": "int",
+         "min": 1, "default": 2,
+         "help": "Minimum mesh-graph observations for a neighbour edge to count."},
+        {"key": "prefix_best_max_edge_age_days", "label": "Best: max edge age", "type": "int",
+         "min": 1, "default": 30, "unit": "days",
+         "help": "Ignore neighbour edges not observed within this many days."},
+        {"key": "prefix_best_location_radius_km", "label": "Best: location radius", "type": "float",
+         "min": 0, "default": 50.0, "unit": "km",
+         "help": "Search radius when finding repeaters at a location."},
+        {"key": "prefix_best_do_not_suggest", "label": "Best: never suggest", "type": "list",
+         "default": "",
+         "help": "Comma-separated prefixes the 'prefix best' command should never suggest."},
+        {"key": "repeater_prefix_api_url", "label": "Repeater prefix API URL", "type": "str",
+         "section": "External_Data", "default": "",
+         "help": "Regional API endpoint supplying prefix data. Empty disables prefix lookups."},
+        {"key": "repeater_prefix_cache_hours", "label": "Prefix cache duration", "type": "int",
+         "section": "External_Data", "min": 0, "default": 1, "unit": "h",
+         "help": "How long to cache prefix data before refreshing from the API."},
+    ]
 
     def __init__(self, bot: Any):
         """Initialize the prefix command.
@@ -131,11 +177,6 @@ class PrefixCommand(BaseCommand):
         if not self.api_url or self.api_url.strip() == "":
             return self.translate('commands.prefix.help_no_api', location_note=location_note)
         return self.translate('commands.prefix.help_api', location_note=location_note)
-
-    def matches_keyword(self, message: MeshMessage) -> bool:
-        """Check if message starts with 'prefix' keyword"""
-        content_lower = self.cleanup_message_for_matching(message)
-        return content_lower == 'prefix' or content_lower.startswith('prefix ')
 
     async def _parse_location_to_lat_lon(self, location: str) -> tuple[Optional[float], Optional[float], Optional[str]]:
         """Parse location string to latitude/longitude coordinates.
@@ -1046,11 +1087,22 @@ class PrefixCommand(BaseCommand):
     async def get_prefix_data_from_db(self, prefix: str, include_all: bool = False) -> Optional[dict[str, Any]]:
         """Get prefix data from the bot's SQLite database as fallback.
 
+        Offloaded whole: the body is a SQLite query followed by a reverse geocode
+        *per matching repeater* — each up to a 1.1s rate-limit wait plus a 10s
+        socket timeout. Run inline, a `!prefix ab` matching a dozen repeaters on a
+        cold cache froze the event loop for the sum of all of them.
+
         Args:
             prefix: The prefix to look up (2, 4, or 6 hex chars = 1–3 bytes).
             include_all: If True, show all repeaters regardless of last_heard time.
                         If False (default), only show repeaters heard within prefix_heard_days.
         """
+        return await asyncio.to_thread(self._get_prefix_data_from_db_sync, prefix, include_all)
+
+    def _get_prefix_data_from_db_sync(
+        self, prefix: str, include_all: bool = False
+    ) -> Optional[dict[str, Any]]:
+        """Blocking body of :meth:`get_prefix_data_from_db` (runs off the event loop)."""
         try:
             if include_all:
                 self.logger.info(f"Looking up prefix '{prefix}' in local database (all entries)")

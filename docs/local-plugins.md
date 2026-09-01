@@ -124,11 +124,35 @@ for i, chunk in enumerate(chunks):
 
 So you are allowed to send multiple messages in sequence; you do **not** need 10 seconds between chunks. Use `skip_user_rate_limit=True` and about 1–1.5 seconds (or your configured `bot_tx_rate_limit_seconds` + buffer) between chunks.
 
+## Resolving locations (shared API)
+
+For place lookup (coords, ZIP, city, neighborhoods, optional repeater names), use **`modules.location`** rather than calling Nominatim directly:
+
+```python
+from modules.location import OPTIONS_AQI, classify_location, resolve_location
+
+# Pure classify (no network):
+normalized, location_type = classify_location("mexico city")  # -> ("mexico city, mexico", "city")
+
+# Best-effort resolve (uses bot Nominatim rate limiter + geocode cache):
+resolved = resolve_location(self.bot, "seattle", options=OPTIONS_AQI)
+if resolved.error:
+    ...
+else:
+    lat, lon = resolved.lat, resolved.lon
+    label = resolved.display_name
+```
+
+**Presets** (`OPTIONS_AQI`, `OPTIONS_WX`, `OPTIONS_AURORA`, `OPTIONS_RAIN`, `OPTIONS_PREFIX`, `OPTIONS_SOLARFORECAST`) encode command-specific semantics via `ResolveOptions` flags (intl cities, neighborhoods, structured ZIP, region capitals, Zippopotam labels, repeater names, label style). Low-level helpers remain in **`modules.utils`** (`geocode_city_sync`, `geocode_zipcode_sync`, rate-limited Nominatim). Alert-style agency/street/county parsing stays command-local; only the geocode subset should call `resolve_location`.
+
+Built-in commands other than AQI will migrate onto this API over time; new plugins should prefer it now.
+
 ## References
 
 - [Service plugins](service-plugins.md) — built-in services and how they are enabled.
 - [Check-in API](checkin-api.md) — contract for the optional check-in submission API (local check-in service).
 - Built-in command plugins live in **modules/commands/** and **modules/commands/alternatives/**; you can use them as examples for `BaseCommand`, `get_config_value`, `handle_keyword_match`, etc.
+- Location helpers: **modules/location.py** (high-level), **modules/utils.py** (Nominatim / geocode_*).
 - Base classes: **modules/commands/base_command.py** (`BaseCommand`), **modules/service_plugins/base_service.py** (`BaseServicePlugin`).
 
 ## Check-in service (local)

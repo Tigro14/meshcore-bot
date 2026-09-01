@@ -35,6 +35,23 @@ class ChannelsCommand(BaseCommand):
         {"name": "#channel", "description": "Get info on a specific channel"}
     ]
 
+    # Web-viewer dynamic section editor (see modules/settings_schema.py).
+    # Channel data lives in its own [Channels_List] section as a free-form list
+    # of "name = description" entries; users add channels by appending rows.
+    settings_dynamic_sections = [
+        {
+            "section": "Channels_List",
+            "label": "Channel list",
+            "help": ("Channels listed by this command. Use 'name' for a general "
+                     "channel or 'category.name' to group it (e.g. weather.seattle). "
+                     "The value is the channel's description."),
+            "key_label": "Channel (or category.channel)",
+            "value_label": "Description",
+            "key_placeholder": "seattle   or   weather.seattle",
+            "value_placeholder": "Seattle regional chat",
+        }
+    ]
+
     def __init__(self, bot):
         """Initialize the channels command.
 
@@ -76,9 +93,11 @@ class ChannelsCommand(BaseCommand):
 
         # Don't match if this looks like a subcommand of another command
         # (e.g., "stats channels" should not match "channels" command)
+        # First word must be one of our keywords (including config aliases).
         if ' ' in content_lower:
             parts = content_lower.split()
-            if len(parts) > 1 and parts[0] not in ['channels', 'channel']:
+            keyword_stems = {k.lower() for k in self.keywords}
+            if len(parts) > 1 and parts[0] not in keyword_stems:
                 return False
 
         for keyword in self.keywords:
@@ -110,40 +129,36 @@ class ChannelsCommand(BaseCommand):
             bool: True if execution was successful.
         """
         try:
-            # Parse the command to check for sub-commands
-            content = message.content.strip()
-            if content.startswith('!'):
-                content = content[1:].strip()
+            # Remainder after trigger (built-in stem or config alias), e.g.
+            # "channels seattle", "channel seahawks", "ch list", "channels #bot"
+            _trigger, args = self.split_trigger_and_args(message.content)
 
-            # Check for sub-command (e.g., "channels seattle", "channel seahawks", "channels list", "channels #bot")
             sub_command = None
             specific_channel = None
-            if content.lower().startswith('channels ') or content.lower().startswith('channel '):
-                parts = content.split(' ', 1)
-                if len(parts) > 1:
-                    sub_command = parts[1].strip().lower()
+            if args:
+                sub_command = args.lower()
 
-                    # Handle special "list" command to show all categories
-                    if sub_command == 'list':
-                        await self._show_all_categories(message)
-                        return True
+                # Handle special "list" command to show all categories
+                if sub_command == 'list':
+                    await self._show_all_categories(message)
+                    return True
 
-                    # Check if user is asking for a specific channel (starts with #)
-                    if sub_command.startswith('#'):
-                        specific_channel = sub_command
-                        sub_command = None
+                # Check if user is asking for a specific channel (starts with #)
+                if sub_command.startswith('#'):
+                    specific_channel = sub_command
+                    sub_command = None
+                else:
+                    # First check if this is a valid category
+                    if self._is_valid_category(sub_command):
+                        # It's a category, keep it as sub_command
+                        pass
                     else:
-                        # First check if this is a valid category
-                        if self._is_valid_category(sub_command):
-                            # It's a category, keep it as sub_command
-                            pass
-                        else:
-                            # Check if this might be a channel search (not a category)
-                            # Try to find a channel that matches this name across all categories
-                            found_channel = self._find_channel_by_name(sub_command)
-                            if found_channel:
-                                specific_channel = '#' + found_channel
-                                sub_command = None
+                        # Check if this might be a channel search (not a category)
+                        # Try to find a channel that matches this name across all categories
+                        found_channel = self._find_channel_by_name(sub_command)
+                        if found_channel:
+                            specific_channel = '#' + found_channel
+                            sub_command = None
 
             # Handle specific channel request
             if specific_channel:

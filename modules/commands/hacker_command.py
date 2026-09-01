@@ -15,6 +15,8 @@ class HackerCommand(BaseCommand):
     """Handles hacker-style responses to Linux commands"""
 
     # Plugin metadata
+    # Read-only informational output; safe for scheduled {cmd:...} rendering.
+    render_safe = True
     name = "hacker"
     keywords = ['sudo', 'ps aux', 'grep', 'ls -l', 'ls -la', 'echo $PATH', 'rm', 'rm -rf',
                 'cat', 'whoami', 'top', 'htop', 'netstat', 'ss', 'kill', 'killall', 'chmod',
@@ -64,8 +66,16 @@ class HackerCommand(BaseCommand):
         if content.startswith('!'):
             content = content[1:].strip()
 
+        # Config aliases are extra stems; strip them so "hack sudo ls" routes like "sudo ls".
+        # Built-in comedy keywords stay in the routed text (get_hacker_error matches on prefix).
+        trigger, args = self.split_trigger_and_args(message.content)
+        builtin_stems = {k.lower() for k in type(self).keywords}
+        routed = content
+        if trigger is not None and trigger not in builtin_stems:
+            routed = args
+
         # Get the appropriate error message
-        error_msg = self.get_hacker_error(content)
+        error_msg = self.get_hacker_error(routed)
 
         # Send the response
         return await self.send_response(message, error_msg)
@@ -507,5 +517,14 @@ class HackerCommand(BaseCommand):
                 # Check if it's followed by a space or is the end of the message
                 if len(content_lower) == len(keyword.lower()) or content_lower[len(keyword.lower())] == ' ':
                     return True
+
+        # Config aliases (keywords not already covered by the comedy lists above)
+        known = {k.lower() for k in exact_match_commands + prefix_match_commands}
+        for keyword in self.keywords:
+            kw = keyword.lower()
+            if kw in known:
+                continue
+            if content_lower == kw or content_lower.startswith(kw + ' '):
+                return True
 
         return False

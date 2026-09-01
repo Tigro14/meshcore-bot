@@ -4,12 +4,18 @@ Documentation=https://github.com/agessaman/meshcore-bot
 After=network.target
 Wants=network.target
 
+# Restart policy. These belong in [Unit], not [Service] — systemd 230 moved them,
+# and it silently ignores them anywhere else. Give up after 3 starts in 60 s so a
+# bot that cannot reach its radio lands in `failed` instead of looping forever.
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
 [Service]
 Type=simple
 User=meshcore
 Group=meshcore
 WorkingDirectory=/opt/meshcore-bot
-ExecStart=/opt/meshcore-bot/venv/bin/python /opt/meshcore-bot/meshcore_bot.py
+ExecStart=/opt/meshcore-bot/venv/bin/python /opt/meshcore-bot/meshcore_bot.py --config /etc/meshcore-bot/config.ini
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10
@@ -26,17 +32,21 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/meshcore-bot
+UMask=0077
+ConfigurationDirectory=meshcore-bot
+ConfigurationDirectoryMode=0700
+StateDirectory=meshcore-bot
+StateDirectoryMode=0700
+LogsDirectory=meshcore-bot
+LogsDirectoryMode=0750
+ReadWritePaths=/etc/meshcore-bot
+ReadWritePaths=/var/lib/meshcore-bot
 ReadWritePaths=/var/log/meshcore-bot
 
 # Resource limits
 LimitNOFILE=65536
-MemoryMax=512M
-CPUQuota=50%
-
-# Restart policy
-StartLimitInterval=60
-StartLimitBurst=3
+MemoryMax=1G
+CPUQuota=200%
 
 [Install]
 WantedBy=multi-user.target

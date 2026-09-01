@@ -118,10 +118,33 @@ class WXSIMParser:
         'CHNC. T-STM': 'Chance Thunderstorm',
     }
 
+    # Longest abbreviation first: matching is a substring test, so a short key
+    # would otherwise shadow every longer key that contains it ("RAIN" swallowing
+    # "CHNC. RAIN", dropping the chance qualifier — likewise SNOW/T-STM/DRZL).
+    _CONDITIONS_BY_SPECIFICITY: Optional[list[tuple[str, str]]] = None
+
+    @classmethod
+    def _condition_matches(cls) -> list[tuple[str, str]]:
+        if cls._CONDITIONS_BY_SPECIFICITY is None:
+            cls._CONDITIONS_BY_SPECIFICITY = sorted(
+                cls.WEATHER_CONDITIONS.items(), key=lambda kv: len(kv[0]), reverse=True
+            )
+        return cls._CONDITIONS_BY_SPECIFICITY
+
     def __init__(self):
         """Initialize the parser"""
-        self.current_year = datetime.now().year
-        self.current_date = datetime.now()
+        self._refresh_clock()
+
+    def _refresh_clock(self) -> None:
+        """Re-anchor 'now'.
+
+        Instances are long-lived (wx_command builds one at startup), so caching
+        this at construction made forecast dates roll back a year and staleness
+        checks read permanently true once the process had been up for a while.
+        """
+        now = datetime.now()
+        self.current_year = now.year
+        self.current_date = now
 
     def parse(self, text: str) -> WXSIMForecast:
         """Parse WXSIM plaintext content.
@@ -132,6 +155,9 @@ class WXSIMParser:
         Returns:
             WXSIMForecast: Parsed forecast data
         """
+        # Re-anchor "now" per parse — this instance may be days old.
+        self._refresh_clock()
+
         forecast = WXSIMForecast()
         forecast.raw_text = text
 
@@ -486,8 +512,8 @@ class WXSIMParser:
             # Normalize condition text
             condition = data.weather.strip().upper()
             if condition:
-                # Expand abbreviations
-                for abbrev, full in self.WEATHER_CONDITIONS.items():
+                # Expand abbreviations (longest match first)
+                for abbrev, full in self._condition_matches():
                     if abbrev in condition:
                         condition = full
                         break
@@ -646,8 +672,8 @@ class WXSIMParser:
         """
         condition_upper = condition.strip().upper()
 
-        # Try to match abbreviations
-        for abbrev, full in self.WEATHER_CONDITIONS.items():
+        # Try to match abbreviations (longest match first)
+        for abbrev, full in self._condition_matches():
             if abbrev in condition_upper:
                 return full
 

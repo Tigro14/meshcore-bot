@@ -155,6 +155,9 @@ class MaintenanceRunner:
         daily_stats_days = get_retention_days('Data_Retention', 'daily_stats_retention_days', 90)
         observed_paths_days = get_retention_days('Data_Retention', 'observed_paths_retention_days', 90)
         mesh_connections_days = get_retention_days('Data_Retention', 'mesh_connections_retention_days', 7)
+        neighbor_observations_days = get_retention_days(
+            'Data_Retention', 'neighbor_observations_retention_days', 365
+        )
         stats_days = get_retention_days('Stats_Command', 'data_retention_days', 7)
 
         try:
@@ -197,6 +200,11 @@ class MaintenanceRunner:
             if hasattr(self.bot, 'mesh_graph') and self.bot.mesh_graph and hasattr(self.bot.mesh_graph, 'delete_expired_edges_from_db'):
                 self.bot.mesh_graph.delete_expired_edges_from_db(mesh_connections_days)
 
+            # neighbor_observations is per-cycle history; neighbor_links is the
+            # aggregate adjacency the mesh graph reads and is deliberately not
+            # pruned here (losing it would silently drop confirmed direct links).
+            self._cleanup_neighbor_observations(neighbor_observations_days)
+
             ran_at = _utc_now().isoformat()
             self._last_retention_stats['ran_at'] = ran_at
             try:
@@ -214,6 +222,36 @@ class MaintenanceRunner:
                 self.bot.db_manager.set_metadata('maint.status.data_retention_outcome', f'error: {e}')
             except Exception:
                 pass
+
+    def _cleanup_neighbor_observations(self, retention_days: int) -> None:
+        """Prune zero-hop neighbor observation history past the retention window.
+
+        Volume is tiny (at most one row per neighbor per cycle, and cycles are
+        12h apart at minimum), so the default window is generous — the point of
+        this table is the long-run signal history.
+        """
+        if retention_days <= 0:
+            return
+        db_manager = getattr(self.bot, 'db_manager', None)
+        if not db_manager or not hasattr(db_manager, 'delete_timestamp_rows_in_chunks'):
+            return
+        try:
+            cutoff = (_utc_now() - datetime.timedelta(days=retention_days)).isoformat()
+            deleted = db_manager.delete_timestamp_rows_in_chunks(
+                'neighbor_observations',
+                'observed_at',
+                cutoff,
+                progress_label='neighbor observations',
+            )
+            if deleted > 0:
+                self.logger.info(
+                    f"Cleaned up {deleted} old neighbor_observations entries "
+                    f"(older than {retention_days} days)"
+                )
+        except Exception as e:
+            # A missing table (pre-migration-22 database) must not abort the rest
+            # of the retention run.
+            self.logger.debug(f"Neighbor observation retention skipped: {e}")
 
     def collect_email_stats(self) -> dict[str, Any]:
         """Gather summary stats for the nightly digest."""

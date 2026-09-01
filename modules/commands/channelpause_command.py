@@ -4,6 +4,7 @@ Channel pause command
 DM-only admin: pause or resume bot responses on public channels (in-memory only).
 """
 
+from ..command_prefix import normalize_command_content
 from ..models import MeshMessage
 from .base_command import BaseCommand
 
@@ -39,13 +40,17 @@ class ChannelPauseCommand(BaseCommand):
         )
 
     def _stripped_content_lower(self, message: MeshMessage) -> str:
-        content = message.content.strip()
-        if self._command_prefix:
-            if not content.startswith(self._command_prefix):
+        if getattr(message, 'prefix_normalized', False):
+            content = message.content.strip()
+        else:
+            normalized = normalize_command_content(
+                message.content,
+                self._command_prefixes,
+                require_prefix=self._require_command_prefix,
+            )
+            if normalized is None:
                 return ""
-            content = content[len(self._command_prefix) :].strip()
-        elif content.startswith("!"):
-            content = content[1:].strip()
+            content = normalized
         content = self._strip_mentions(content)
         return content.lower()
 

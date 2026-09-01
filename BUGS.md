@@ -1,14 +1,69 @@
 # BUGS
 
-Tracking of known bugs, fixed issues, and outstanding defects in meshcore-bot.
+Known defects and outstanding issues in meshcore-bot. Fixes that have shipped
+are listed in [CHANGELOG.md](CHANGELOG.md); the archive at the bottom of this
+file is kept only for historical reference.
 
 ---
 
-## Fixed Bugs
+## Outstanding known issues
+
+As of **v1.0.0**.
+
+### High priority
+
+_None outstanding._
+
+### Medium priority
+
+| ID | Module | Description | Workaround |
+|----|--------|-------------|------------|
+| BUG-004 | `message_handler` | RF data correlation (SNR/RSSI) can miss messages if the RF log event arrives more than `rf_data_timeout` (default 15 s) after the message | Increase `rf_data_timeout` in `[Bot]` |
+| BUG-005 | `scheduler` | Memory headroom is tight on 512 MB boards such as the Raspberry Pi Zero 2 W when the bot and web viewer run together. v1.0.0 reduced the load substantially — the dashboard is served from a background snapshot rather than recomputing ~50 aggregate queries per request, and retention now prunes on schedule — but the ceiling is still close on the smallest boards | Disable the web viewer (`[Web_Viewer] enabled = false`) or tune the mesh graph (`graph_startup_load_days = 7`) |
+| BUG-006 | `feed_manager` | Stale rows in `feed_message_queue` from an old install can cause repeated queue-processing errors after a database migration | Clear the pending queue: `DELETE FROM feed_message_queue WHERE sent_at IS NULL` |
+| BUG-008 | `telegram_bridge_service` | Telegram `message_thread_id` (forum/topic support) is not implemented — messages go to the main group channel only | None; tracked in [TODO.md](TODO.md) with the two-way Telegram bridge work |
+
+### Low priority / by design
+
+| ID | Module | Description | Notes |
+|----|--------|-------------|-------|
+| BUG-011 | `repeater_manager` | MeshCore devices hard-limit contacts to 300; the auto-purge threshold is 280, so purging 20 at a time may not keep up on very busy meshes | Tune `auto_purge_threshold` and ensure `auto_manage_contacts` is enabled |
+| BUG-014 | `packet_capture_service` | Packet hash calculation silently falls back to a default value on failure (`packet_capture_service.py:1347`) | Low impact; affects deduplication accuracy only |
+| BUG-026 | `message_handler` | Keyword-dispatched help and command responses are sent as a single message with no auto-chunking, so long responses may be truncated by transport limits rather than split into extra multipart messages | Design choice. Commands can call `send_response_chunked()` explicitly if they want multi-part replies |
+
+### Closed as won't fix
+
+| ID | Module | Description |
+|----|--------|-------------|
+| BUG-007 | `discord_bridge_service` | Discord webhook rate limiting is expected behavior. Keep bridged channels low-traffic or rate-limit upstream |
+
+---
+
+## Reporting new bugs
+
+Open an issue at the [project repository](https://github.com/agessaman/meshcore-bot/issues)
+and include:
+
+- Bot version (`git describe --tags`)
+- The relevant section of `config.ini`, with keys and tokens redacted
+- Log output (`logs/meshcore_bot.log`) from around the time of the issue
+- Steps to reproduce
+
+**Security issues should not be filed publicly** — see [SECURITY.md](SECURITY.md)
+for private reporting.
+
+---
+
+## Archive: fixed bugs
+
+Historical record only. This section is not maintained going forward — see
+[CHANGELOG.md](CHANGELOG.md) for what shipped in each release.
+
+Note: the `26d18c1` and `ab72be9` references below predate a history rewrite and
+no longer resolve to commits in this repository. The descriptions are still
+accurate; only the hashes are stale.
 
 ### v0.9.0 (2026-04-17)
-
-Issues closed in this release. See `CHANGELOG.md` for the full feature/infra list.
 
 | Reference | Summary |
 |-----------|---------|
@@ -55,40 +110,4 @@ Issues closed in this release. See `CHANGELOG.md` for the full feature/infra lis
 | `36a8a67` | Fixed prefix handling incompatibility when transitioning from 1-byte to 2-byte prefixes |
 | `0c060a5` | Fixed chunked message sending race with rate limiter — second chunk could be blocked |
 | `58deb12` | Fixed `RepeaterManager` ignoring `auto_manage_contacts = false` |
-| `unreleased` | Fixed BUG-028: `decode_meshcore_packet()` no longer throws `UnboundLocalError` when `bytes.fromhex()` fails (invalid hex input now cleanly returns `None`) |
-
----
-
-## Outstanding Known Issues
-
-### High Priority
-
-_No outstanding high-priority bugs at v0.9.0 release. See the v0.9.0 Fixed Bugs table above._
-
-### Medium Priority
-
-| ID | Task | Module | Description | Workaround |
-|----|------|--------|-------------|------------|
-| BUG-004 | `message_handler` | RF data correlation (SNR/RSSI) can miss messages if the RF log event arrives more than `rf_data_timeout` (default 15s) after the message | Increase `rf_data_timeout` in `[Bot]` config |
-| BUG-005 | `scheduler` | On Raspberry Pi Zero 2 W, bot + web viewer together use ~300 MB RAM, leaving little headroom under load | Disable web viewer (`[Web_Viewer] enabled = false`) or tune mesh graph settings (`graph_startup_load_days = 7`) |
-| BUG-006 | `feed_manager` | Stale rows in `feed_message_queue` from an old install can cause repeated queue-processing errors after a database migration (note: scheduler `TimeoutError` spam from the same area is fixed — see BUG-015) | Clear pending queue: `DELETE FROM feed_message_queue WHERE sent_at IS NULL` |
-| ~~BUG-007~~ | `discord_bridge_service` | Closed / won’t fix — no changes planned | Non-issue; Discord webhook rate limit is expected behavior—keep bridged channels low-traffic or rate-limit upstream |
-| BUG-008 | `telegram_bridge_service` | Telegram `message_thread_id` (forum/topic support) is not implemented — messages go to the main group channel only | Manual: add thread ID mapping in a future plugin iteration |
-
-### Low Priority / By Design
-
-| ID | Module | Description | Notes |
-|----|--------|-------------|-------|
-| BUG-026 | `message_handler` | Keyword-dispatched help/command responses are sent as a single message (no auto-chunking). Long responses may be truncated by transport limits to avoid sending extra multipart messages. | Design choice. Commands can explicitly use `send_response_chunked()` if they want multi-part replies. |
-| BUG-011 | `repeater_manager` | MeshCore device hard-limits contacts to 300; auto-purge threshold is 280 — purging 20 contacts at a time may not be enough on very busy meshes | Tune `auto_purge_threshold` and ensure `auto_manage_contacts` is enabled |
-| BUG-014 | `packet_capture_service` | Packet hash calculation silently uses a default hash value on failure (`pass  # Use default hash if calculation fails`) | Low impact; affects deduplication accuracy only |
-
----
-
-## Reporting New Bugs
-
-Open an issue at the project repository. Include:
-- Bot version (`git describe --tags`)
-- Relevant section of `config.ini` (redact keys/tokens)
-- Log output (`logs/meshcore_bot.log`) around the time of the issue
-- Steps to reproduce
+| `8186648` | Fixed BUG-028: `decode_meshcore_packet()` no longer throws `UnboundLocalError` when `bytes.fromhex()` fails (invalid hex input now cleanly returns `None`) |

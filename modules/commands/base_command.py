@@ -6,12 +6,36 @@ Provides common functionality and interface for command implementations
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, Optional
 
+from ..command_prefix import (
+    DECORATIVE_PREFIX_CHARS,
+    find_matching_prefix,
+    load_command_prefix_settings,
+    normalize_command_content,
+)
+from ..config_schema import LEGACY_ENABLED_ALIASES
 from ..models import CHANNEL_REGIONAL_FLOOD_SCOPE_BODY_OVERHEAD, MeshMessage
 from ..security_utils import validate_pubkey_format
-from ..utils import format_elapsed_display, get_config_timezone
+from ..utils import (
+    format_elapsed_display,
+    get_config_timezone,
+    get_packet_hash_placeholder,
+    message_hop_count,
+)
+
+# Task-local override for the active translator.  When set (via
+# ``BaseCommand.respond_in_sender_language``), ``translate`` / ``translate_get_value``
+# render against this translator instead of the bot default.  A ContextVar keeps
+# the override isolated to the current asyncio task, so concurrent commands can
+# each answer in a different language without interfering with one another.
+_response_translator: ContextVar[Optional[Any]] = ContextVar(
+    "meshcore_response_translator", default=None
+)
 
 
 class BaseCommand(ABC):
@@ -29,6 +53,15 @@ class BaseCommand(ABC):
     requires_dm: bool = False
     requires_internet: bool = False  # Set to True if command needs internet access
     cooldown_seconds: int = 0
+
+    # Whether this command may be run by CommandManager.render_command_output for a
+    # {cmd:...} placeholder in a scheduled message. Opt-in, because rendering is only
+    # airtime-free for commands whose entire output goes through send_response /
+    # send_response_chunked. A command that transmits directly (advert), posts its own
+    # messages (announcements), changes device or bot state, or is restricted to DMs
+    # (schedule leaks configuration if broadcast) must stay False. A denylist cannot be
+    # safe here: a new command defaults to not renderable rather than to transmitting.
+    render_safe: bool = False
     category: str = "general"
 
     # Documentation fields - to be overridden by subclasses for website generation
@@ -36,6 +69,12 @@ class BaseCommand(ABC):
     usage: str = ""  # Usage syntax, e.g., "wx <zipcode|city> [tomorrow|7d|hourly|alerts]"
     examples: list[str] = []  # Example commands, e.g., ["wx 98101", "wx seattle tomorrow"]
     parameters: list[dict[str, str]] = []  # Parameter definitions, e.g., [{"name": "location", "description": "US zip code or city name"}]
+
+    # Optional machine-readable description of this command's configurable
+    # settings, used by the web viewer to render typed widgets and validate
+    # input.  See modules/settings_schema.py for the field format.  Plugins that
+    # leave this empty get a generic enable-toggle + raw key/value editor.
+    settings_schema: list[dict[str, Any]] = []
 
     def __init__(self, bot: Any) -> None:
         self.bot = bot
@@ -48,14 +87,19 @@ class BaseCommand(ABC):
         # Load allowed channels from config (standardized channel override)
         self.allowed_channels = self._load_allowed_channels()
 
+        # Cache command prefix settings before aliases (alias normalization uses prefixes)
+        self._command_prefixes, self._require_command_prefix = load_command_prefix_settings(
+            self.bot.config
+        )
+        self._command_prefix = (
+            self._command_prefixes[0] if self._command_prefixes else ''
+        )
+
         # Load aliases from this command's config section and extend keywords
         self._load_aliases_from_config()
 
         # Load translated keywords after initialization
         self._load_translated_keywords()
-
-        # Cache command prefix from config
-        self._command_prefix = self._load_command_prefix()
 
     def translate(self, key: str, **kwargs: Any) -> str:
         """Translate a key using the bot's translator.
@@ -67,8 +111,9 @@ class BaseCommand(ABC):
         Returns:
             str: Translated string, or key if translation not found.
         """
-        if hasattr(self.bot, 'translator'):
-            return self.bot.translator.translate(key, **kwargs)
+        translator = _response_translator.get() or getattr(self.bot, 'translator', None)
+        if translator is not None:
+            return translator.translate(key, **kwargs)
         # Fallback if translator not available
         return key
 
@@ -81,9 +126,83 @@ class BaseCommand(ABC):
         Returns:
             Any: The value at the key path, or None if not found.
         """
-        if hasattr(self.bot, 'translator'):
-            return self.bot.translator.get_value(key)
+        translator = _response_translator.get() or getattr(self.bot, 'translator', None)
+        if translator is not None:
+            return translator.get_value(key)
         return None
+
+    def detect_response_language(self, message: MeshMessage) -> Optional[str]:
+        """Detect the language to answer ``message`` in, or None to keep default.
+
+        Gated by ``[Localization] auto_detect_language`` (off by default).  Only
+        languages with a translation file on disk are considered, and None is
+        returned when detection matches the bot's current default (no switch
+        needed) or when the feature is disabled / unavailable.
+
+        Args:
+            message: The incoming message to classify.
+
+        Returns:
+            A language code to switch to, or None to use the default translator.
+        """
+        try:
+            if not self.bot.config.getboolean(
+                'Localization', 'auto_detect_language', fallback=False
+            ):
+                return None
+        except (ValueError, AttributeError):
+            return None
+
+        if not getattr(message, 'content', None):
+            return None
+
+        get_translator = getattr(self.bot, 'get_translator', None)
+        available = getattr(self.bot, 'available_languages', None)
+        if get_translator is None or available is None:
+            return None  # bot without caching support (e.g. dummy translator)
+
+        current = str(
+            getattr(self.bot.translator, 'base_language', None)
+            or getattr(self.bot.translator, 'language', 'en')
+            or 'en'
+        )
+        try:
+            from ..lang_detector import detect_language
+            text = self._strip_mentions(message.content)
+            detected = detect_language(
+                text, supported=available(), fallback=current
+            )
+        except Exception as e:  # pragma: no cover - detection must never break a reply
+            self.logger.debug(f"Language detection failed: {e}")
+            return None
+
+        return detected if detected != current else None
+
+    @contextmanager
+    def respond_in_sender_language(self, message: MeshMessage) -> Iterator[None]:
+        """Context manager that renders ``translate`` calls in the sender's language.
+
+        Detects the message language and, if it differs from the default and has
+        translations available, binds a task-local translator for the duration of
+        the block.  Build the full response string inside the ``with`` block;
+        network I/O (``send_response``) can happen after it.
+
+        Example:
+            with self.respond_in_sender_language(message):
+                response = self.translate('commands.hello.response_format')
+            return await self.send_response(message, response)
+        """
+        lang = self.detect_response_language(message)
+        token = None
+        if lang:
+            translator = self.bot.get_translator(lang)
+            if translator is not None:
+                token = _response_translator.set(translator)
+        try:
+            yield
+        finally:
+            if token is not None:
+                _response_translator.reset(token)
 
     def get_config_value(self, section: str, key: str, fallback: Any = None, value_type: str = 'str') -> Any:
         """Get config value with backward compatibility for section name changes.
@@ -108,25 +227,6 @@ class BaseCommand(ABC):
             'Weather': 'Wx_Command',  # wx command reads from [Wx_Command]; [Weather] is legacy
         }
         # Legacy [Jokes] -> [Joke_Command] / [DadJoke_Command]: (requested_section, key) -> legacy section
-        # For 'enabled', also try legacy key: (section, key) -> (legacy_section, legacy_key) or list of same
-        legacy_key_alias = {
-            ('Joke_Command', 'enabled'): ('Jokes', 'joke_enabled'),
-            ('DadJoke_Command', 'enabled'): ('Jokes', 'dadjoke_enabled'),
-            # Standard enabled with *_enabled fallback (same section, then old section)
-            ('Stats_Command', 'enabled'): [
-                ('Stats_Command', 'stats_enabled'),
-                ('Stats', 'stats_enabled'),
-            ],
-            ('Sports_Command', 'enabled'): [
-                ('Sports_Command', 'sports_enabled'),
-                ('Sports', 'sports_enabled'),
-            ],
-            ('Hacker_Command', 'enabled'): [
-                ('Hacker_Command', 'hacker_enabled'),
-                ('Hacker', 'hacker_enabled'),
-            ],
-            ('Alert_Command', 'enabled'): [('Alert_Command', 'alert_enabled')],
-        }
         legacy_section_fallback = {
             ('Joke_Command', 'joke_enabled'): 'Jokes',
             ('Joke_Command', 'seasonal_jokes'): 'Jokes',
@@ -192,10 +292,10 @@ class BaseCommand(ABC):
                     self.logger.debug(f"Error reading config {sec}.{key}: {e}")
                     continue
 
-        # Try legacy key alias (e.g. [Jokes] joke_enabled when requesting Joke_Command enabled)
-        alias = legacy_key_alias.get((section, key))
-        if alias:
-            aliases = [alias] if isinstance(alias, tuple) else alias
+        # Try legacy enabled aliases (e.g. [Jokes] joke_enabled when requesting
+        # Joke_Command enabled); shared map in modules/config_schema.py.
+        aliases = LEGACY_ENABLED_ALIASES.get(section, ()) if key == 'enabled' else ()
+        if aliases:
             for legacy_sec, legacy_key in aliases:
                 if self.bot.config.has_section(legacy_sec) and self.bot.config.has_option(legacy_sec, legacy_key):
                     try:
@@ -374,22 +474,22 @@ class BaseCommand(ABC):
         """
         if not alias:
             return ''
-        command_prefix = self.bot.config.get('Bot', 'command_prefix', fallback='').strip()
-        cp_lower = command_prefix.lower() if command_prefix else ''
+        prefixes = self._command_prefixes
 
         # Legacy / mistaken leading punctuation (prefer stem-only in config)
-        decorative = frozenset('!.,/')
+        decorative = DECORATIVE_PREFIX_CHARS
 
         for _ in range(32):
             if not alias:
                 break
-            if cp_lower and alias.startswith(cp_lower):
-                alias = alias[len(cp_lower):].strip()
+            matched = find_matching_prefix(alias, prefixes) if prefixes else None
+            if matched:
+                alias = alias[len(matched):].strip()
                 continue
-            if not cp_lower and alias and alias[0] in decorative:
+            if not prefixes and alias and alias[0] in decorative:
                 alias = alias[1:].strip()
                 continue
-            if cp_lower and alias and alias[0] in decorative:
+            if prefixes and alias and alias[0] in decorative:
                 alias = alias[1:].strip()
                 continue
             break
@@ -502,7 +602,9 @@ class BaseCommand(ABC):
             'cooldown_seconds': self.cooldown_seconds,
             'category': self.category,
             'class_name': self.__class__.__name__,
-            'module_name': self.__class__.__module__
+            'module_name': self.__class__.__module__,
+            'settings_schema': self.settings_schema,
+            'has_schema': bool(self.settings_schema),
         }
 
     async def send_response(
@@ -710,13 +812,13 @@ class BaseCommand(ABC):
             self.logger.debug(f"Could not load translated keywords for {self.name}: {e}")
 
     def _load_command_prefix(self) -> str:
-        """Load command prefix from config.
+        """Load default command prefix from config (first configured prefix).
 
         Returns:
-            str: The command prefix, or empty string if not configured.
+            str: The default command prefix, or empty string if not configured.
         """
-        prefix = self.bot.config.get('Bot', 'command_prefix', fallback='')
-        return prefix.strip() if prefix else ''
+        prefixes, _require = load_command_prefix_settings(self.bot.config)
+        return prefixes[0] if prefixes else ''
 
     def _get_bot_name(self) -> str:
         """Get bot name from device or config.
@@ -833,13 +935,19 @@ class BaseCommand(ABC):
         """
         content = message.content.strip()
 
-        if self._command_prefix:
-            if not content.startswith(self._command_prefix):
+        # When CommandManager.check_keywords has already stripped the configured prefix
+        # (and legacy "!") from this message, skip prefix handling entirely: the content
+        # is canonical and re-stripping/re-rejecting it here would break matching for
+        # every command after the first in the check_keywords scan.
+        if not getattr(message, 'prefix_normalized', False):
+            normalized = normalize_command_content(
+                content,
+                self._command_prefixes,
+                require_prefix=self._require_command_prefix,
+            )
+            if normalized is None:
                 return ""
-            content = content[len(self._command_prefix):].strip()
-        else:
-            if content.startswith('!'):
-                content = content[1:].strip()
+            content = normalized
 
         mention_mode = self.bot.config.get('Bot', 'respond_to_mentions', fallback='also').strip().lower()
         if mention_mode != 'false':
@@ -850,6 +958,49 @@ class BaseCommand(ABC):
         message.content = content
         message.content_lower = content.lower()
         return message.content_lower
+
+    def split_trigger_and_args(self, content: str) -> tuple[Optional[str], str]:
+        """Split message content into ``(matched_keyword, args)``.
+
+        Matches against ``self.keywords`` (built-in stems plus config ``aliases``),
+        preferring the longest keyword so multi-word triggers win. The configured
+        command prefix is stripped for execute paths that still see raw
+        command-style text.
+
+        Args:
+            content: Raw or partially cleaned message text.
+
+        Returns:
+            ``(keyword, args)`` when a keyword matches as the first token(s);
+            ``(None, content)`` (after prefix stripping) otherwise.
+        """
+        text = content.strip()
+        # Strip the configured prefix; bare "!" only in legacy no-prefix mode, so a
+        # bot configured with command_prefix = / does not silently accept "!test".
+        matched = find_matching_prefix(text, self._command_prefixes)
+        if matched is not None:
+            text = text[len(matched):].strip()
+        elif not self._command_prefixes and text.startswith('!'):
+            text = text[1:].strip()
+        if not text or not self.keywords:
+            return None, text
+
+        # Longest first (word count, then length) so "dad joke" wins over a shorter
+        # stem. Compare word by word rather than slicing the lowered copy by keyword
+        # length: str.lower() can change length for non-ASCII aliases, which would
+        # misalign the offset and cut the args in the wrong place.
+        for keyword in sorted(self.keywords, key=lambda k: (len(k.split()), len(k)), reverse=True):
+            kw_words = keyword.lower().split()
+            if not kw_words:
+                continue
+            parts = text.split(maxsplit=len(kw_words))
+            if len(parts) < len(kw_words):
+                continue
+            if [part.lower() for part in parts[:len(kw_words)]] != kw_words:
+                continue
+            args = parts[len(kw_words)].strip() if len(parts) > len(kw_words) else ""
+            return keyword.lower(), args
+        return None, text
 
     def matches_keyword(self, message: MeshMessage) -> bool:
         """Check if this command matches the message content based on keywords.
@@ -1074,20 +1225,54 @@ class BaseCommand(ABC):
         translator = getattr(self.bot, 'translator', None)
         return format_elapsed_display(message.timestamp, translator)
 
-    def format_response(self, message: MeshMessage, response_format: str) -> str:
-        """Format a response string with message data"""
-        try:
-            connection_info = self.build_enhanced_connection_info(message)
-            timestamp = self.format_timestamp(message)
+    def get_hops_display_values(self, message: MeshMessage) -> tuple[str, str]:
+        """Return hop count placeholders as numeric and pluralized strings."""
+        hops_val = message_hop_count(message)
+        if hops_val is None:
+            return "?", "?"
 
-            return response_format.format(
-                sender=message.sender_id or "Unknown",
-                connection_info=connection_info,
-                path=message.path or "Unknown",
-                timestamp=timestamp,
-                snr=message.snr or "Unknown",
-                rssi=message.rssi or "Unknown"
-            )
+        hops_str = str(hops_val)
+        hops_label = "1 hop" if hops_val == 1 else f"{hops_val} hops"
+        return hops_str, hops_label
+
+    def get_standard_placeholder_fields(self, message: MeshMessage) -> dict[str, Any]:
+        """Standard response placeholders shared by every command template.
+
+        Subclasses that render templates through
+        :func:`~modules.response_template.format_piped_template` start from this
+        mapping and add their own fields, so the common names stay identical
+        across commands.
+        """
+        hops, hops_label = self.get_hops_display_values(message)
+        return {
+            'sender': message.sender_id or "Unknown",
+            'connection_info': self.build_enhanced_connection_info(message),
+            'path': self.get_path_display_string(message),
+            'hops': hops,
+            'hops_label': hops_label,
+            'timestamp': self.format_timestamp(message),
+            'snr': message.snr or "Unknown",
+            'rssi': message.rssi or "Unknown",
+            'packet_hash': get_packet_hash_placeholder(message),
+        }
+
+    def format_response(self, message: MeshMessage, response_format: str,
+                        extra: Optional[dict[str, Any]] = None) -> str:
+        """Format a response string with message data.
+
+        Args:
+            message: The message the placeholders describe.
+            response_format: Template string using ``{placeholder}`` names.
+            extra: Additional command-specific placeholders. Values here are
+                merged over the standard set, so a command can expose fields
+                only it can compute (e.g. the path command's ``{distance}``).
+        """
+        try:
+            fields = self.get_standard_placeholder_fields(message)
+            if extra:
+                fields.update(extra)
+
+            return response_format.format(**fields)
         except (KeyError, ValueError) as e:
             self.logger.warning(f"Error formatting response: {e}")
             return response_format

@@ -20,6 +20,7 @@ try:
     # Add project root to path
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+    from modules.command_prefix import parse_command_prefixes
     from modules.config_validation import strip_optional_quotes
     from modules.db_manager import DBManager
     from modules.plugin_loader import PluginLoader
@@ -1006,7 +1007,9 @@ def get_randomline_commands(config: configparser.ConfigParser) -> dict[str, Any]
     if not config.has_section('RandomLine'):
         return randomline_commands
 
-    command_prefix = config.get('Bot', 'command_prefix', fallback='').strip()
+    raw_prefix = config.get('Bot', 'command_prefix', fallback='').strip()
+    prefixes = parse_command_prefixes(raw_prefix)
+    command_prefix = prefixes[0] if prefixes else ''
 
     for option, value in config.items('RandomLine'):
         if not option.startswith('triggers.'):

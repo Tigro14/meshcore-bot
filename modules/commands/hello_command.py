@@ -297,14 +297,19 @@ class HelloCommand(BaseCommand):
         # Strip mentions from content for processing
         content = self._strip_mentions(message.content)
 
-        # Check if message is emoji-only (after stripping mentions)
-        if self.is_emoji_only_message(content):
-            response = self.get_emoji_response(content, bot_name)
-        else:
-            # Get random robot greeting
-            random_greeting = self.get_random_greeting()
-            response_format = self.translate('commands.hello.response_format')
-            response = f"{random_greeting} {response_format}".format(bot_name=bot_name)
+        # Build the reply in the sender's language when auto-detection is enabled.
+        # The full response string is assembled inside the context manager; the
+        # await (send_response) happens after it, keeping the override window
+        # free of suspension points.
+        with self.respond_in_sender_language(message):
+            # Check if message is emoji-only (after stripping mentions)
+            if self.is_emoji_only_message(content):
+                response = self.get_emoji_response(content, bot_name)
+            else:
+                # Get random robot greeting
+                random_greeting = self.get_random_greeting()
+                response_format = self.translate('commands.hello.response_format')
+                response = f"{random_greeting} {response_format}".format(bot_name=bot_name)
 
         return await self.send_response(message, response)
 

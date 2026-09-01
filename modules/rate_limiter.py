@@ -214,6 +214,7 @@ class NominatimRateLimiter:
         self.last_request: float = 0.0
         self._lock: Optional[asyncio.Lock] = None
         self._lock_init = threading.Lock()  # Guards lazy creation of asyncio.Lock
+        self._sync_lock = threading.Lock()  # Serializes the worker-thread path
         self._total_requests = 0
         self._total_throttled = 0
 
@@ -239,8 +240,9 @@ class NominatimRateLimiter:
 
     def record_request(self):
         """Record that we made a Nominatim request"""
-        self.last_request = time.monotonic()
-        self._total_requests += 1
+        with self._sync_lock:
+            self.last_request = time.monotonic()
+            self._total_requests += 1
 
     async def wait_for_request(self):
         """Wait until we can make a Nominatim request (async)"""
@@ -250,21 +252,48 @@ class NominatimRateLimiter:
                 await asyncio.sleep(wait_time + 0.05)  # Small buffer
 
     async def wait_and_request(self) -> None:
-        """Wait until a request can be made, then mark request time (thread-safe)"""
+        """Atomically reserve an async request slot shared with sync callers."""
         async with self._get_lock():
-            current_time = time.monotonic()
-            time_since_last = current_time - self.last_request
-            if time_since_last < self.seconds:
-                await asyncio.sleep(self.seconds - time_since_last)
-            self.last_request = time.monotonic()
-            self._total_requests += 1
+            while True:
+                with self._sync_lock:
+                    elapsed = time.monotonic() - self.last_request
+                    if elapsed >= self.seconds:
+                        self.last_request = time.monotonic()
+                        self._total_requests += 1
+                        return
+                    self._total_throttled += 1
+                    wait_time = self.seconds - elapsed + 0.05
+                await asyncio.sleep(wait_time)
 
     def wait_for_request_sync(self):
-        """Wait until we can make a Nominatim request (synchronous)"""
+        """Wait until we can make a Nominatim request (synchronous).
+
+        Prefer :meth:`wait_and_request_sync`: this only waits, so a caller that
+        records the request afterwards leaves a check-then-act window.
+        """
         while not self.can_request():
             wait_time = self.time_until_next()
             if wait_time > 0:
                 time.sleep(wait_time + 0.05)  # Small buffer
+
+    def wait_and_request_sync(self) -> None:
+        """Wait until a request may be made, then reserve the slot (thread-safe).
+
+        The sync twin of :meth:`wait_and_request`. Reserving *before* the caller's
+        HTTP request, under a lock, is what keeps the 1 req/s policy: geocoding now
+        runs on worker threads, and a wait-then-record-after pattern let several
+        threads clear the gate together and hit Nominatim simultaneously.
+        """
+        while True:
+            with self._sync_lock:
+                elapsed = time.monotonic() - self.last_request
+                if elapsed >= self.seconds:
+                    self.last_request = time.monotonic()
+                    self._total_requests += 1
+                    return
+                self._total_throttled += 1
+                wait_time = self.seconds - elapsed + 0.05
+            time.sleep(wait_time)  # Small buffer
 
     def get_stats(self) -> dict:
         """Get rate limiter statistics"""

@@ -4,11 +4,16 @@
 <dict>
     <key>Label</key>
     <string>com.meshcore.bot</string>
+
+    <key>UserName</key>
+    <string>__MESHCORE_SERVICE_USER__</string>
     
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/meshcore-bot/venv/bin/python</string>
         <string>/usr/local/meshcore-bot/meshcore_bot.py</string>
+        <string>--config</string>
+        <string>/usr/local/etc/meshcore-bot/config.ini</string>
     </array>
     
     <key>WorkingDirectory</key>
@@ -47,4 +52,3 @@
     <integer>1</integer>
 </dict>
 </plist>
-

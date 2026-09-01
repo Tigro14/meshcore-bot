@@ -1,0 +1,96 @@
+name: Bug report
+description: Something is not working as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report.
+
+        **Do not report security issues here** — see
+        [SECURITY.md](https://github.com/agessaman/meshcore-bot/blob/main/SECURITY.md)
+        for private reporting.
+
+        Please redact API keys, tokens, and webhook URLs from anything you paste.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Set '...' in config.ini
+        2. Send '!...' on channel '...'
+        3. Observe '...'
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Bot version
+      description: Output of `git describe --tags`, or the version in the web viewer footer.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Connection method
+      options:
+        - Serial
+        - BLE
+        - TCP/IP
+        - Not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: Radio hardware and firmware
+      description: e.g. Heltec V3, MeshCore firmware 1.x.x
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Host platform and Python version
+      description: e.g. Raspberry Pi 4 / Debian bookworm / Python 3.11, or Docker
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - Source checkout
+        - systemd service (install-service.sh)
+        - .deb package
+        - Docker
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config.ini section
+      description: Redact keys and tokens.
+      render: ini
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: From `logs/meshcore_bot.log` around the time of the issue. Redact keys and tokens.
+      render: shell

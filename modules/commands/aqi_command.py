@@ -4,21 +4,29 @@ AQI command for the MeshCore Bot
 Provides Air Quality Index information using OpenMeteo API
 """
 
-import re
+import asyncio
+from pathlib import Path
+from typing import Optional
 
 import openmeteo_requests
 import requests_cache
 from retry_requests import retry
 
+from ..location import (
+    OPTIONS_AQI,
+    ResolveOptions,
+    geocode_city_best_effort,
+    resolve_location,
+)
+from ..location import (
+    get_neighborhood_queries as location_neighborhood_queries,
+)
 from ..models import MeshMessage
 from ..utils import (
     abbreviate_location,
-    geocode_city_sync,
-    geocode_zipcode_sync,
     get_nominatim_geocoder,
     is_valid_timezone,
-    rate_limited_nominatim_geocode_sync,
-    rate_limited_nominatim_reverse_sync,
+    normalize_us_state,
 )
 from .base_command import BaseCommand
 
@@ -32,6 +40,8 @@ class AqiCommand(BaseCommand):
     """
 
     # Plugin metadata
+    # Read-only informational output; safe for scheduled {cmd:...} rendering.
+    render_safe = True
     name = "aqi"
     keywords = ['aqi', 'air', 'airquality', 'air_quality']
     description = "Get Air Quality Index for a location (usage: aqi seattle, aqi greenwood, aqi vancouver canada, aqi 47.6,-122.3, or aqi help)"
@@ -50,6 +60,15 @@ class AqiCommand(BaseCommand):
     # Error constants
     ERROR_FETCHING_DATA = "Error fetching AQI data"
     NO_DATA_AVAILABLE = "No AQI data available"
+
+    # Web-viewer settings schema (see modules/settings_schema.py).
+    # These are shared [Weather] defaults used by all weather commands.
+    settings_schema = [
+        {"key": "default_state", "label": "Default state", "type": "str", "section": "Weather",
+         "default": "", "help": "2-letter state for city disambiguation (e.g. WA). Shared weather setting."},
+        {"key": "default_country", "label": "Default country", "type": "str", "section": "Weather",
+         "default": "US", "help": "2-letter country code (e.g. US). Shared weather setting."},
+    ]
 
     def __init__(self, bot):
         super().__init__(bot)
@@ -75,8 +94,13 @@ class AqiCommand(BaseCommand):
         # Get database manager for geocoding cache
         self.db_manager = bot.db_manager
 
-        # Setup the Open-Meteo API client with cache and retry on error
-        cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
+        # Setup the Open-Meteo API client with cache and retry on error.
+        # requests_cache backs this with a SQLite file, so keep it beside the bot
+        # database in the service-writable state directory. A relative path lands
+        # in the working directory, which is read-only under the hardened service
+        # unit and fails plugin load with "unable to open database file".
+        cache_path = Path(self.db_manager.db_path).parent / 'aqi_http_cache'
+        cache_session = requests_cache.CachedSession(str(cache_path), expire_after=3600)
         retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
         self.openmeteo = openmeteo_requests.Client(session=retry_session)
 
@@ -168,156 +192,12 @@ class AqiCommand(BaseCommand):
             await self.send_response(message, self.astronomical_responses[location_lower])
             return True
 
-        # Check if it's lat,lon coordinates (decimal numbers separated by comma, with optional spaces)
-        # Handle formats like: "47.6,-122.3", "47.6, -122.3", "47.980525, -122.150649", " -47.6 , 122.3 "
-        if re.match(r'^\s*-?\d+\.?\d*\s*,\s*-?\d+\.?\d*\s*$', location):
-            location_type = "coordinates"
-        # Check if it's a US ZIP code (5 digits)
-        elif re.match(r'^\s*\d{5}\s*$', location):
-            location_type = "zipcode"
-            # Keep the original ZIP code for structured queries
-            # Don't modify the location string here - let the geocoding logic handle it
-        else:
-            # It's a city name (possibly with state/country)
-            # Check if it might be "city country" format (space-separated)
-            location_parts = location.split()
-            if len(location_parts) >= 2:
-                potential_city = location_parts[0]
-                potential_country = location_parts[1]
-                country_indicators = ['canada', 'mexico', 'uk', 'united', 'kingdom', 'france', 'germany', 'italy', 'spain', 'australia', 'japan', 'china', 'india', 'brazil']
-
-                # Check if second word is a country indicator
-                if potential_country.lower() in country_indicators:
-                    # Convert space-separated to comma-separated format
-                    if potential_country.lower() in ['united', 'kingdom']:
-                        # Handle "united kingdom" case
-                        if len(location_parts) >= 3 and location_parts[2].lower() == 'kingdom':
-                            location = f"{potential_city}, uk"
-                        else:
-                            location = f"{potential_city}, {potential_country}"
-                    else:
-                        location = f"{potential_city}, {potential_country}"
-            else:
-                # Single word city - check if it's a well-known international city
-                international_cities = {
-                    'beijing': 'beijing, china',
-                    'shanghai': 'shanghai, china',
-                    'tokyo': 'tokyo, japan',
-                    'london': 'london, uk',
-                    'paris': 'paris, france',
-                    'berlin': 'berlin, germany',
-                    'rome': 'rome, italy',
-                    'madrid': 'madrid, spain',
-                    'moscow': 'moscow, russia',
-                    'sydney': 'sydney, australia',
-                    'melbourne': 'melbourne, australia',
-                    'toronto': 'toronto, canada',
-                    'vancouver': 'vancouver, canada',
-                    'mumbai': 'mumbai, india',
-                    'delhi': 'delhi, india',
-                    'bangalore': 'bangalore, india',
-                    'sao paulo': 'sao paulo, brazil',
-                    'rio de janeiro': 'rio de janeiro, brazil',
-                    'mexico city': 'mexico city, mexico',
-                    'cairo': 'cairo, egypt',
-                    'istanbul': 'istanbul, turkey',
-                    'seoul': 'seoul, south korea',
-                    'bangkok': 'bangkok, thailand',
-                    'singapore': 'singapore, singapore',
-                    'hong kong': 'hong kong, china',
-                    'dubai': 'dubai, uae',
-                    'tel aviv': 'tel aviv, israel',
-                    'johannesburg': 'johannesburg, south africa',
-                    'nairobi': 'nairobi, kenya',
-                    'lagos': 'lagos, nigeria',
-                    'buenos aires': 'buenos aires, argentina',
-                    'lima': 'lima, peru',
-                    'santiago': 'santiago, chile',
-                    'bogota': 'bogota, colombia',
-                    'caracas': 'caracas, venezuela',
-                    'havana': 'havana, cuba',
-                    'kingston': 'kingston, jamaica',
-                    'san juan': 'san juan, puerto rico',
-                    'reykjavik': 'reykjavik, iceland',
-                    'oslo': 'oslo, norway',
-                    'stockholm': 'stockholm, sweden',
-                    'copenhagen': 'copenhagen, denmark',
-                    'helsinki': 'helsinki, finland',
-                    'warsaw': 'warsaw, poland',
-                    'prague': 'prague, czech republic',
-                    'budapest': 'budapest, hungary',
-                    'bucharest': 'bucharest, romania',
-                    'sofia': 'sofia, bulgaria',
-                    'zagreb': 'zagreb, croatia',
-                    'belgrade': 'belgrade, serbia',
-                    'athens': 'athens, greece',
-                    'lisbon': 'lisbon, portugal',
-                    'dublin': 'dublin, ireland',
-                    'brussels': 'brussels, belgium',
-                    'amsterdam': 'amsterdam, netherlands',
-                    'zurich': 'zurich, switzerland',
-                    'vienna': 'vienna, austria',
-                    'lucerne': 'lucerne, switzerland',
-                    'geneva': 'geneva, switzerland',
-                    'monaco': 'monaco, monaco',
-                    'andorra': 'andorra, andorra',
-                    'san marino': 'san marino, san marino',
-                    'vatican': 'vatican city, vatican',
-                    'luxembourg': 'luxembourg, luxembourg',
-                    'malta': 'valletta, malta',
-                    'cyprus': 'nicosia, cyprus',
-                    'albania': 'tirana, albania',
-                    'macedonia': 'skopje, macedonia',
-                    'montenegro': 'podgorica, montenegro',
-                    'bosnia': 'sarajevo, bosnia',
-                    'slovenia': 'ljubljana, slovenia',
-                    'slovakia': 'bratislava, slovakia',
-                    'lithuania': 'vilnius, lithuania',
-                    'latvia': 'riga, latvia',
-                    'estonia': 'tallinn, estonia',
-                    'belarus': 'minsk, belarus',
-                    'ukraine': 'kiev, ukraine',
-                    'moldova': 'chisinau, moldova',
-                    'georgia': 'tbilisi, georgia',
-                    'armenia': 'yerevan, armenia',
-                    'azerbaijan': 'baku, azerbaijan',
-                    'kazakhstan': 'almaty, kazakhstan',
-                    'uzbekistan': 'tashkent, uzbekistan',
-                    'kyrgyzstan': 'bishkek, kyrgyzstan',
-                    'tajikistan': 'dushanbe, tajikistan',
-                    'turkmenistan': 'ashgabat, turkmenistan',
-                    'afghanistan': 'kabul, afghanistan',
-                    'pakistan': 'islamabad, pakistan',
-                    'bangladesh': 'dhaka, bangladesh',
-                    'sri lanka': 'colombo, sri lanka',
-                    'nepal': 'kathmandu, nepal',
-                    'bhutan': 'thimphu, bhutan',
-                    'myanmar': 'yangon, myanmar',
-                    'laos': 'vientiane, laos',
-                    'cambodia': 'phnom penh, cambodia',
-                    'vietnam': 'hanoi, vietnam',
-                    'malaysia': 'kuala lumpur, malaysia',
-                    'indonesia': 'jakarta, indonesia',
-                    'philippines': 'manila, philippines',
-                    'taiwan': 'taipei, taiwan',
-                    'north korea': 'pyongyang, north korea',
-                    'mongolia': 'ulaanbaatar, mongolia',
-                    'kazakhstan': 'nur-sultan, kazakhstan'
-                }
-
-                # Check if it's a known international city
-                city_lower = location.lower()
-                if city_lower in international_cities:
-                    location = international_cities[city_lower]
-
-            location_type = "city"
-
         try:
             # Record execution for this user
             self.record_execution(message.sender_id)
 
-            # Get AQI data for the location
-            aqi_data = await self.get_aqi_for_location(location, location_type)
+            # Get AQI data for the location (single resolve with intl rewrite)
+            aqi_data = await self.get_aqi_for_location(location)
 
             # Send the response
             await self.send_response(message, aqi_data)
@@ -328,304 +208,98 @@ class AqiCommand(BaseCommand):
             await self.send_response(message, f"Error getting AQI data: {e}")
             return True
 
-    async def get_aqi_for_location(self, location: str, location_type: str) -> str:
-        """Get AQI data for a location (city or coordinates).
+    def _resolved_state_differs_from_default(self, address_info: Optional[dict]) -> bool:
+        """True when reverse-geocode state/country differs from bot default_state."""
+        if not address_info or not self.default_state:
+            return False
+        country = address_info.get("country", "")
+        state = address_info.get("state", "")
+        default_abbr, default_full = normalize_us_state(self.default_state)
+        defaults = {d for d in (self.default_state, default_abbr, default_full) if d}
+        if country in ("United States", "US", "United States of America"):
+            abbr, full = normalize_us_state(state) if state else (None, None)
+            actuals = {a for a in (abbr, full, state) if a}
+            return bool(actuals) and actuals.isdisjoint(defaults)
+        actual_state = country or address_info.get("province") or ""
+        return bool(actual_state) and actual_state not in defaults
+
+    async def get_aqi_for_location(
+        self, location: str, location_type: Optional[str] = None
+    ) -> str:
+        """Get AQI data for a location (city, ZIP, or coordinates).
+
+        Geocoding and the OpenMeteo fetch are both blocking HTTP calls, so the
+        whole resolve-and-fetch runs on a worker thread; doing them inline would
+        stall message handling and reconnection for up to several 10s timeouts.
 
         Args:
-            location: Location string (city name, ZIP, or "lat,lon").
-            location_type: Type of location ("city", "zipcode", "coordinates").
+            location: Raw location string (city name, ZIP, or "lat,lon").
+            location_type: Unused; kept for call-site/test compatibility.
 
         Returns:
             str: Formatted AQI string or error message.
         """
+        return await asyncio.to_thread(self._get_aqi_for_location_sync, location, location_type)
+
+    def _get_aqi_for_location_sync(
+        self, location: str, location_type: Optional[str] = None
+    ) -> str:
+        """Blocking body of :meth:`get_aqi_for_location` (runs off the event loop)."""
         try:
-            # Define state abbreviation map for US states (needed for all location types)
-            state_abbrev_map = {
-                'Washington': 'WA', 'California': 'CA', 'New York': 'NY', 'Texas': 'TX',
-                'Florida': 'FL', 'Illinois': 'IL', 'Pennsylvania': 'PA', 'Ohio': 'OH',
-                'Georgia': 'GA', 'North Carolina': 'NC', 'Michigan': 'MI', 'New Jersey': 'NJ',
-                'Virginia': 'VA', 'Tennessee': 'TN', 'Indiana': 'IN', 'Arizona': 'AZ',
-                'Massachusetts': 'MA', 'Missouri': 'MO', 'Maryland': 'MD', 'Wisconsin': 'WI',
-                'Colorado': 'CO', 'Minnesota': 'MN', 'South Carolina': 'SC', 'Alabama': 'AL',
-                'Louisiana': 'LA', 'Kentucky': 'KY', 'Oregon': 'OR', 'Oklahoma': 'OK',
-                'Connecticut': 'CT', 'Utah': 'UT', 'Iowa': 'IA', 'Nevada': 'NV',
-                'Arkansas': 'AR', 'Mississippi': 'MS', 'Kansas': 'KS', 'New Mexico': 'NM',
-                'Nebraska': 'NE', 'West Virginia': 'WV', 'Idaho': 'ID', 'Hawaii': 'HI',
-                'New Hampshire': 'NH', 'Maine': 'ME', 'Montana': 'MT', 'Rhode Island': 'RI',
-                'Delaware': 'DE', 'South Dakota': 'SD', 'North Dakota': 'ND', 'Alaska': 'AK',
-                'Vermont': 'VT', 'Wyoming': 'WY'
-            }
-            # Convert location to lat/lon
-            if location_type == "coordinates":
-                # Parse lat,lon coordinates
-                try:
-                    lat_str, lon_str = location.split(',')
-                    lat = float(lat_str.strip())
-                    lon = float(lon_str.strip())
+            opts = ResolveOptions(
+                default_state=self.default_state,
+                default_country=self.default_country,
+                use_international_cities=OPTIONS_AQI.use_international_cities,
+                use_neighborhoods=OPTIONS_AQI.use_neighborhoods,
+                use_structured_zip=OPTIONS_AQI.use_structured_zip,
+                label_style=OPTIONS_AQI.label_style,
+                include_address_info=True,
+                timeout=10,
+            )
+            resolved = resolve_location(self.bot, location, options=opts)
 
-                    # Validate coordinate ranges
-                    if not (-90 <= lat <= 90):
-                        return f"Invalid latitude: {lat}. Must be between -90 and 90."
-                    if not (-180 <= lon <= 180):
-                        return f"Invalid longitude: {lon}. Must be between -180 and 180."
+            if resolved.error == "invalid_latitude":
+                detail = resolved.error_detail or location
+                return f"Invalid latitude: {detail}. Must be between -90 and 90."
+            if resolved.error == "invalid_longitude":
+                detail = resolved.error_detail or location
+                return f"Invalid longitude: {detail}. Must be between -180 and 180."
+            if resolved.error == "invalid_coordinates":
+                return f"Invalid coordinates format: {location}. Use format: lat,lon (e.g., 47.6,-122.3)"
+            if resolved.error == "no_location_zipcode":
+                return f"Could not find ZIP code '{location.strip()}'"
+            if resolved.error == "no_location_city":
+                if "," in (resolved.query or location):
+                    return f"Could not find city '{resolved.query or location}'"
+                region = self.default_state or self.default_country
+                return f"Could not find city '{resolved.query or location}' in {region}"
+            if resolved.lat is None or resolved.lon is None:
+                return f"Could not find location '{location}'"
 
-                    address_info = None
-                except ValueError:
-                    return f"Invalid coordinates format: {location}. Use format: lat,lon (e.g., 47.6,-122.3)"
-            elif location_type == "zipcode":
-                # Handle ZIP code geocoding with AQI-specific structured queries
-                try:
-                    zip_code = location.strip()
+            lat, lon = resolved.lat, resolved.lon
+            address_info = resolved.address_info
+            location_type = resolved.location_type or location_type
 
-                    # Check for known problematic ZIP codes that need specific mapping
-                    zip_code_mappings = {
-                        '98013': 'Vashon, WA, USA',
-                        '98014': 'Vashon Island, WA, USA',
-                        # Add other problematic ZIP codes here as needed
-                    }
-
-                    location_result = None
-
-                    # First check if we have a specific mapping for this ZIP code
-                    if zip_code in zip_code_mappings:
-                        mapped_location = zip_code_mappings[zip_code]
-                        self.logger.debug(f"Using specific mapping for ZIP {zip_code}: {mapped_location}")
-                        try:
-                            result = rate_limited_nominatim_geocode_sync(self.bot, mapped_location, timeout=10)
-                            if result and result.address:
-                                location_result = result
-                                self.logger.debug(f"Found mapped location for ZIP {zip_code}: {result.address}")
-                        except Exception as e:
-                            self.logger.debug(f"Mapping failed for ZIP {zip_code}: {e}")
-
-                    # If no mapping, try structured queries (AQI-specific feature for better ZIP handling)
-                    if not location_result:
-                        structured_queries = [
-                            # Direct postalcode search
-                            {"postalcode": zip_code, "country": "US"},
-                            # Postalcode with state
-                            {"postalcode": zip_code, "state": self.default_state, "country": "US"},
-                            # Postalcode with country code
-                            {"postalcode": zip_code, "countrycode": "US"},
-                        ]
-
-                        for query in structured_queries:
-                            try:
-                                result = rate_limited_nominatim_geocode_sync(self.bot, query, timeout=10)
-                                if result and result.address:
-                                    # Check if it's a US location
-                                    if 'united states' in result.address.lower() or 'usa' in result.address.lower():
-                                        # Additional validation: check if it's in the expected state
-                                        if self.default_state in result.address or 'washington' in result.address.lower():
-                                            location_result = result
-                                            self.logger.debug(f"Found US location in {self.default_state} for ZIP {zip_code}: {result.address}")
-                                            break
-                                        else:
-                                            # Found US location but not in expected state - log warning but continue searching
-                                            self.logger.warning(f"ZIP {zip_code} found in wrong state: {result.address}")
-                                            if not location_result:  # Keep as fallback if no better result found
-                                                location_result = result
-                            except Exception as e:
-                                self.logger.debug(f"Structured query failed for {query}: {e}")
-                                continue
-
-                    # If structured queries didn't work, use shared function as fallback
-                    if not location_result:
-                        lat, lon = geocode_zipcode_sync(self.bot, zip_code, timeout=10)
-                        if lat and lon:
-                            # Use the shared function result directly
-                            pass
-                        else:
-                            lat, lon = None, None
-                    else:
-                        lat = location_result.latitude
-                        lon = location_result.longitude
-
-                    if lat and lon:
-
-                        # Get detailed address info via reverse geocoding (check cache first)
-                        reverse_cache_key = f"reverse_{lat}_{lon}"
-                        cached_address = self.db_manager.get_cached_json(reverse_cache_key, "geolocation")
-                        if cached_address:
-                            address_info = cached_address
-                        else:
-                            try:
-                                reverse_location = rate_limited_nominatim_reverse_sync(self.bot, f"{lat}, {lon}", timeout=10)
-                                if reverse_location:
-                                    address_info = reverse_location.raw.get('address', {})
-                                    # Cache the reverse geocoding result
-                                    self.db_manager.cache_json(reverse_cache_key, address_info, "geolocation", cache_hours=720)
-                                else:
-                                    address_info = {}
-                            except:
-                                address_info = {}
-
-                        # Validate that the found location makes sense for the ZIP code
-                        if address_info:
-                            found_state = address_info.get('state', '')
-                            found_country = address_info.get('country', '')
-
-                            # If we found a location but it's not in the expected state, warn the user
-                            if found_country == 'United States' and found_state != self.default_state:
-                                self.logger.warning(f"ZIP code {zip_code} found in {found_state} instead of {self.default_state}")
-                    else:
-                        lat, lon = None, None
-                        address_info = None
-
-                    if lat is None or lon is None:
-                        return f"Could not find ZIP code '{zip_code}'"
-                except Exception as e:
-                    self.logger.error(f"Error geocoding ZIP code {location}: {e}")
-                    return f"Error geocoding ZIP code: {e}"
-            else:  # city
-
-                result = self.city_to_lat_lon(location)
-                if len(result) == 3:
-                    lat, lon, address_info = result
-                else:
-                    lat, lon = result
-                    address_info = None
-
-                if lat is None or lon is None:
-                    # Check if it's an international city to provide better error message
-                    if ',' in location and any(country in location.lower() for country in ['canada', 'mexico', 'uk', 'france', 'germany', 'italy', 'spain', 'australia', 'japan', 'china', 'india', 'brazil', 'uae', 'russia', 'korea', 'thailand', 'singapore', 'egypt', 'turkey']):
-                        return f"Could not find city '{location}'"
-                    else:
-                        region = self.default_state or self.default_country
-                        return f"Could not find city '{location}' in {region}"
-
-                # Check if the found city is in a different state than default
-                actual_city = location
-                actual_state = self.default_state
-
-                if address_info:
-                    # Try to get the best city name from various address fields
-                    actual_city = (address_info.get('city') or
-                                 address_info.get('town') or
-                                 address_info.get('village') or
-                                 address_info.get('hamlet') or
-                                 address_info.get('municipality') or
-                                 location)
-
-                    # Get state/province/country info - handle US vs international addresses
-                    country = address_info.get('country', '')
-                    state = address_info.get('state', '')
-
-                    # For US cities, use the state; for international cities, use the country
-                    if country == "United States" or country == "US" or country == "United States of America":
-                        # US city - use the state
-                        actual_state = state or self.default_state
-                        # Convert full state name to abbreviation if needed
-                        if len(actual_state) > 2 and actual_state in state_abbrev_map:
-                            actual_state = state_abbrev_map.get(actual_state, actual_state)
-                    else:
-                        # International city - use the country
-                        actual_state = (country or
-                                      address_info.get('province') or
-                                      self.default_state)
-                        # Normalize "United States" variants to "USA" to save characters
-                        if actual_state == "United States" or actual_state == "United States of America":
-                            actual_state = "USA"
-
-                    # Also check if the default state needs to be converted for comparison
-                    default_state_full = self.default_state
-                    if len(self.default_state) == 2:
-                        # Convert abbreviation to full name for comparison
-                        abbrev_to_full_map = {v: k for k, v in state_abbrev_map.items()}
-                        default_state_full = abbrev_to_full_map.get(self.default_state, self.default_state)
-
-            # Get AQI data from OpenMeteo
             aqi_data = self.get_openmeteo_aqi(lat, lon)
-
             if aqi_data == self.ERROR_FETCHING_DATA:
                 return "Error fetching AQI data from OpenMeteo"
 
-            # Add location info for better user confirmation
             location_prefix = ""
-            if location_type == "city" and address_info:
-                # Always try to include city name if there's space
-                # Use abbreviate_location to shorten long location strings (e.g., "United States of America" -> "USA")
-                full_location = f"{actual_city}, {actual_state}" if actual_state else actual_city
-                city_display = abbreviate_location(full_location, max_length=30)
-
-                # Check if we have space for the city name
+            if location_type == "coordinates":
+                location_prefix = f"{lat:.3f},{lon:.3f}: "
+            elif resolved.display_name:
+                city_display = resolved.display_name
                 test_output = f"{city_display}: {aqi_data}"
                 if len(test_output) <= 130:
                     location_prefix = f"{city_display}: "
-                else:
-                    # If no space, only show if it's a different state than default
-                    states_different = (actual_state != self.default_state and
-                                      actual_state != default_state_full)
-                    if states_different:
-                        # Use abbreviated version for shorter display
-                        city_display_short = abbreviate_location(full_location, max_length=20)
-                        location_prefix = f"{city_display_short}: "
+                elif location_type == "zipcode":
+                    location_prefix = f"{location.strip()}: "
+                elif self._resolved_state_differs_from_default(address_info):
+                    # Over budget: only keep a short prefix when outside default region
+                    short = abbreviate_location(city_display, max_length=20)
+                    location_prefix = f"{short}: "
             elif location_type == "zipcode":
-                # Add location info for ZIP codes to confirm geocoding accuracy
-                if address_info:
-                    # Try to get city from address_info first
-                    actual_city = (address_info.get('city') or
-                                 address_info.get('town') or
-                                 address_info.get('village') or
-                                 address_info.get('hamlet') or
-                                 address_info.get('municipality'))
-
-                    # If no city found in address_info, try to extract from the original geocoding result
-                    if not actual_city and location_result and location_result.address:
-                        # Extract city name from the geocoding result address
-                        address_parts = location_result.address.split(',')
-                        if len(address_parts) > 0:
-                            # The first part usually contains the city name
-                            potential_city = address_parts[0].strip()
-                            # Remove any house numbers or road names
-                            if not any(char.isdigit() for char in potential_city):
-                                actual_city = potential_city
-
-                    # Fallback to 'Unknown' if still no city found
-                    if not actual_city:
-                        actual_city = 'Unknown'
-
-                    # Get state info
-                    country = address_info.get('country', '')
-                    state = address_info.get('state', '')
-
-                    if country == "United States" or country == "US" or country == "United States of America":
-                        # US city - use the state
-                        actual_state = state or self.default_state
-                        # Convert full state name to abbreviation if needed
-                        if len(actual_state) > 2 and actual_state in state_abbrev_map:
-                            actual_state = state_abbrev_map.get(actual_state, actual_state)
-                    else:
-                        # International city - use the country
-                        actual_state = (country or
-                                      address_info.get('province') or
-                                      self.default_state)
-                        # Normalize "United States" variants to "USA" to save characters
-                        if actual_state == "United States" or actual_state == "United States of America":
-                            actual_state = "USA"
-
-                    # Use abbreviate_location to shorten long location strings (e.g., "United States of America" -> "USA")
-                    full_location = f"{actual_city}, {actual_state}" if actual_state else actual_city
-                    city_display = abbreviate_location(full_location, max_length=30)
-
-                    # Check if we have space for the city name
-                    test_output = f"{city_display}: {aqi_data}"
-                    if len(test_output) <= 130:
-                        location_prefix = f"{city_display}: "
-                    else:
-                        # If no space, only show if it's a different state than default
-                        states_different = (actual_state != self.default_state and
-                                          actual_state != default_state_full)
-                        if states_different:
-                            # Use abbreviated version for shorter display
-                            city_display_short = abbreviate_location(full_location, max_length=20)
-                            location_prefix = f"{city_display_short}: "
-                else:
-                    # No address info available
-                    location_prefix = f"{zip_code}: "
-            elif location_type == "coordinates":
-                # Add coordinate info for clarity
-                location_prefix = f"{lat:.3f},{lon:.3f}: "
+                location_prefix = f"{location.strip()}: "
 
             return f"{location_prefix}{aqi_data}"
 
@@ -636,167 +310,24 @@ class AqiCommand(BaseCommand):
     def city_to_lat_lon(self, city: str) -> tuple:
         """Convert city name to latitude and longitude using default state.
 
-        Args:
-            city: City name (can include state/country).
-
-        Returns:
-            tuple: (latitude, longitude, address_info) or (None, None, None).
+        Thin wrapper over shared ``geocode_city_best_effort`` (kept for tests/compat).
         """
-        try:
-            # Check if the input contains a comma (city, state/country format)
-            if ',' in city:
-                # Parse city, state/country format
-                city_parts = [part.strip() for part in city.split(',')]
-                if len(city_parts) >= 2:
-                    city_name = city_parts[0]
-                    state_or_country = city_parts[1]
-
-                    # AQI-specific: Check if it's a country (not a US state)
-                    country_indicators = ['canada', 'mexico', 'uk', 'united kingdom', 'france', 'germany', 'italy', 'spain', 'australia', 'japan', 'china', 'india', 'brazil', 'uae', 'russia', 'korea', 'thailand', 'singapore', 'egypt', 'turkey', 'israel', 'south africa', 'kenya', 'nigeria', 'argentina', 'peru', 'chile', 'colombia', 'venezuela', 'cuba', 'jamaica', 'puerto rico', 'iceland', 'norway', 'sweden', 'denmark', 'finland', 'poland', 'czech republic', 'hungary', 'romania', 'bulgaria', 'croatia', 'serbia', 'greece', 'portugal', 'ireland', 'belgium', 'netherlands', 'switzerland', 'austria', 'monaco', 'andorra', 'san marino', 'vatican', 'luxembourg', 'malta', 'cyprus', 'albania', 'macedonia', 'montenegro', 'bosnia', 'slovenia', 'slovakia', 'lithuania', 'latvia', 'estonia', 'belarus', 'ukraine', 'moldova', 'georgia', 'armenia', 'azerbaijan', 'kazakhstan', 'uzbekistan', 'kyrgyzstan', 'tajikistan', 'turkmenistan', 'afghanistan', 'pakistan', 'bangladesh', 'sri lanka', 'nepal', 'bhutan', 'myanmar', 'laos', 'cambodia', 'vietnam', 'malaysia', 'indonesia', 'philippines', 'taiwan', 'north korea', 'mongolia']
-                    is_country = state_or_country.lower() in country_indicators
-
-                    if is_country:
-                        # Handle international cities explicitly (AQI-specific feature)
-                        location = rate_limited_nominatim_geocode_sync(self.bot, f"{city_name}, {state_or_country}", timeout=10)
-                        if location:
-                            # Cache the result
-                            self.db_manager.cache_geocoding(f"{city_name}, {state_or_country}", location.latitude, location.longitude)
-
-                            # Use reverse geocoding to get detailed address info (check cache first)
-                            reverse_cache_key = f"reverse_{location.latitude}_{location.longitude}"
-                            cached_address = self.db_manager.get_cached_json(reverse_cache_key, "geolocation")
-                            if cached_address:
-                                return location.latitude, location.longitude, cached_address
-                            else:
-                                try:
-                                    reverse_location = rate_limited_nominatim_reverse_sync(self.bot, f"{location.latitude}, {location.longitude}", timeout=10)
-                                    if reverse_location:
-                                        address_info = reverse_location.raw.get('address', {})
-                                        # Cache the reverse geocoding result
-                                        self.db_manager.cache_json(reverse_cache_key, address_info, "geolocation", cache_hours=720)
-                                        return location.latitude, location.longitude, address_info
-                                except:
-                                    pass
-                            return location.latitude, location.longitude, location.raw.get('address', {})
-
-            # Use shared geocode_city_sync function with address info
-            default_country = self.bot.config.get('Weather', 'default_country', fallback='US')
-            lat, lon, address_info = geocode_city_sync(
-                self.bot, city, default_state=self.default_state,
-                default_country=default_country,
-                include_address_info=True, timeout=10
-            )
-
-            if lat and lon:
-                return lat, lon, address_info or {}
-
-            # AQI-specific fallback: Try neighborhood-specific queries for major cities
-            neighborhood_queries = self.get_neighborhood_queries(city)
-            if neighborhood_queries:
-                for query in neighborhood_queries:
-                    location = rate_limited_nominatim_geocode_sync(self.bot, query, timeout=10)
-                    if location:
-                        # Cache the result
-                        self.db_manager.cache_geocoding(query, location.latitude, location.longitude)
-
-                        # Use reverse geocoding to get detailed address info (check cache first)
-                        reverse_cache_key = f"reverse_{location.latitude}_{location.longitude}"
-                        cached_address = self.db_manager.get_cached_json(reverse_cache_key, "geolocation")
-                        if cached_address:
-                            return location.latitude, location.longitude, cached_address
-                        else:
-                            try:
-                                reverse_location = rate_limited_nominatim_reverse_sync(self.bot, f"{location.latitude}, {location.longitude}", timeout=10)
-                                if reverse_location:
-                                    address_info = reverse_location.raw.get('address', {})
-                                    # Cache the reverse geocoding result
-                                    self.db_manager.cache_json(reverse_cache_key, address_info, "geolocation", cache_hours=720)
-                                    return location.latitude, location.longitude, address_info
-                            except:
-                                pass
-                            return location.latitude, location.longitude, location.raw.get('address', {})
-
+        lat, lon, address_info = geocode_city_best_effort(
+            self.bot,
+            city,
+            default_state=self.default_state,
+            default_country=self.default_country,
+            use_neighborhoods=True,
+            include_address_info=True,
+            timeout=10,
+        )
+        if lat is None or lon is None:
             return (None, None, None)
-        except Exception as e:
-            self.logger.error(f"Error geocoding city {city}: {e}")
-            return (None, None, None)
+        return lat, lon, address_info or {}
 
     def get_neighborhood_queries(self, city: str) -> list:
-        """Generate neighborhood-specific search queries for major cities.
-
-        Args:
-            city: City name.
-
-        Returns:
-            list: List of neighborhood-specific query strings.
-        """
-        city_lower = city.lower()
-
-        # Seattle neighborhoods
-        if city_lower in ['greenwood', 'ballard', 'capitol hill', 'fremont', 'queen anne',
-                         'wallingford', 'university district', 'pike place', 'pioneer square',
-                         'belltown', 'first hill', 'central district', 'beacon hill', 'columbia city',
-                         'west seattle', 'magnolia', 'phinney ridge', 'crown hill', 'loyal heights']:
-            return [
-                f"{city}, Seattle, WA, USA",
-                f"{city}, Seattle, USA"
-            ]
-
-        # New York neighborhoods
-        elif city_lower in ['greenwich village', 'soho', 'tribeca', 'chinatown', 'little italy',
-                           'east village', 'west village', 'chelsea', 'hells kitchen', 'upper east side',
-                           'upper west side', 'harlem', 'brooklyn heights', 'dumbo', 'williamsburg',
-                           'park slope', 'red hook', 'coney island']:
-            return [
-                f"{city}, New York, NY, USA",
-                f"{city}, New York, USA"
-            ]
-
-        # San Francisco neighborhoods
-        elif city_lower in ['mission district', 'haight-ashbury', 'castro', 'soma', 'financial district',
-                           'north beach', 'chinatown', 'russian hill', 'pacific heights', 'marina district',
-                           'sunset district', 'richmond district', 'bernal heights', 'noe valley']:
-            return [
-                f"{city}, San Francisco, CA, USA",
-                f"{city}, San Francisco, USA"
-            ]
-
-        # Los Angeles neighborhoods
-        elif city_lower in ['hollywood', 'beverly hills', 'santa monica', 'venice', 'manhattan beach',
-                           'hermosa beach', 'redondo beach', 'pasadena', 'glendale', 'burbank',
-                           'west hollywood', 'culver city', 'marina del rey', 'playa del rey']:
-            return [
-                f"{city}, Los Angeles, CA, USA",
-                f"{city}, Los Angeles, USA"
-            ]
-
-        # Chicago neighborhoods
-        elif city_lower in ['loop', 'magnificent mile', 'gold coast', 'lincoln park', 'wrigleyville',
-                           'lakeview', 'wicker park', 'bucktown', 'logan square', 'pilsen', 'hyde park']:
-            return [
-                f"{city}, Chicago, IL, USA",
-                f"{city}, Chicago, USA"
-            ]
-
-        # Boston neighborhoods
-        elif city_lower in ['back bay', 'beacon hill', 'north end', 'south end', 'charlestown',
-                           'east boston', 'dorchester', 'roxbury', 'jamaica plain', 'allston',
-                           'brighton', 'cambridge', 'somerville']:
-            return [
-                f"{city}, Boston, MA, USA",
-                f"{city}, Boston, USA"
-            ]
-
-        # Portland neighborhoods
-        elif city_lower in ['pearl district', 'alphabet district', 'nob hill', 'mississippi district',
-                           'hawthorne', 'belmont', 'sellwood', 'st. johns', 'kenton', 'overlook']:
-            return [
-                f"{city}, Portland, OR, USA",
-                f"{city}, Portland, USA"
-            ]
-
-        # No neighborhood-specific queries for this city
-        return []
+        """Generate neighborhood-specific search queries for major cities."""
+        return location_neighborhood_queries(city)
 
     def get_openmeteo_aqi(self, lat: float, lon: float) -> str:
         """Get AQI data from OpenMeteo API.

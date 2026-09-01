@@ -34,6 +34,8 @@ import textwrap
 from pathlib import Path
 from typing import Optional
 
+from modules.config_schema import DYNAMIC_KEY_SECTIONS, is_known_config_key
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -83,6 +85,11 @@ def load_example_comments(example_path: Path) -> dict[str, dict[str, str]]:
                     if current_section and pending:
                         comments.setdefault(current_section, {})[key] = " ".join(pending)
                     pending = []
+                elif "=" in stripped and stripped.startswith("#"):
+                    key = stripped.lstrip("#").strip().split("=", 1)[0].strip()
+                    if current_section and pending and key:
+                        comments.setdefault(current_section, {})[key] = " ".join(pending)
+                    pending = []
                 else:
                     pending = []
     except (OSError, UnicodeDecodeError):
@@ -107,6 +114,10 @@ def load_example_lines(example_path: Path) -> dict[str, dict[str, str]]:
                     key = stripped.split("=", 1)[0].strip()
                     if current_section:
                         lines.setdefault(current_section, {})[key] = stripped
+                elif "=" in stripped and stripped.startswith("#"):
+                    key = stripped.lstrip("#").strip().split("=", 1)[0].strip()
+                    if current_section and key:
+                        lines.setdefault(current_section, {})[key] = stripped.lstrip("#").strip()
     except (OSError, UnicodeDecodeError):
         pass
     return lines
@@ -138,11 +149,16 @@ def validate_config(
     """Return list of (severity, section, message) issues."""
     issues: list[tuple[str, str, str]] = []
     try:
-        required = {
+        from modules.config_validation import REQUIRED_SECTIONS
+
+        required_keys = {
             "Connection": {"connection_type"},
             "Bot": {"bot_name"},
+            "Channels": set(),
         }
-        for section, req_keys in required.items():
+        for section in REQUIRED_SECTIONS:
+            required_keys.setdefault(section, set())
+        for section, req_keys in required_keys.items():
             if not cfg.has_section(section):
                 issues.append(("ERROR", section, f"Section [{section}] is missing"))
                 continue
@@ -150,14 +166,14 @@ def validate_config(
                 if not cfg.has_option(section, key):
                     issues.append(("ERROR", section, f"Required key '{key}' is missing"))
         for section in cfg.sections():
-            if section not in example_keys:
+            if section in DYNAMIC_KEY_SECTIONS:
                 continue
             try:
                 section_opts = cfg.options(section)
             except configparser.Error:
                 continue
             for key in section_opts:
-                if key not in example_keys.get(section, {}):
+                if not is_known_config_key(section, key, example_keys):
                     issues.append(("WARNING", section, f"Unknown key '{key}' (not in example)"))
         for section in example_keys:
             if not cfg.has_section(section):
@@ -372,9 +388,6 @@ def draw_keys_pane(
             scroll = state.key_idx - height + 1
 
         section = state.current_section()
-        ex_sec = state.example_keys.get(section, {})
-        # Dynamic sections (no fixed keys in example) — never flag keys as unknown
-        dynamic_section = section in state.example_keys and not ex_sec
 
         for i, key in enumerate(keys):
             vis = i - scroll
@@ -385,7 +398,7 @@ def draw_keys_pane(
                 val = state.cfg.get(section, key, fallback="")
             except configparser.Error:
                 val = "(error)"
-            in_example = dynamic_section or key in ex_sec
+            in_example = is_known_config_key(section, key, state.example_keys)
             marker = " " if in_example else "?"
             line = f"{marker} {key} = {val}"
 
@@ -1202,7 +1215,9 @@ def main() -> None:
         print(f"WARNING: Config parse error (partial load): {load_error}", file=sys.stderr)
 
     try:
-        example_keys = load_example_keys(example_path)
+        from modules.config_schema import load_documented_keys_from_example
+
+        example_keys = load_documented_keys_from_example(example_path)
         example_comments = load_example_comments(example_path)
         example_lines = load_example_lines(example_path)
     except Exception as e:

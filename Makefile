@@ -33,7 +33,7 @@ install: $(VENV)/bin/python
 
 dev: $(VENV)/bin/python
 	$(PIP) install -e ".[profanity,geo,test]"
-	$(PIP) install ruff mypy
+	$(PIP) install "ruff==0.15.15" mypy
 
 # ---------------------------------------------------------------------------
 # Testing
@@ -51,11 +51,11 @@ test-no-cov: $(VENV)/bin/python
 # ---------------------------------------------------------------------------
 
 lint: $(VENV)/bin/python
-	$(RUFF) check modules/ tests/
+	$(RUFF) check .
 	$(MYPY) modules/
 
 fix: $(VENV)/bin/python
-	$(RUFF) check --fix modules/ tests/
+	$(RUFF) check --fix .
 
 # ---------------------------------------------------------------------------
 # Packaging

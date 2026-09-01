@@ -82,7 +82,24 @@ class TestStatusCommandExecute:
         assert result is True
         bot.command_manager.send_response.assert_called_once()
         text = bot.command_manager.send_response.call_args[0][1]
-        assert "Bot Status" in text
+        assert text.startswith("Status ")
         assert "connected: True" in text
         assert "radio_zombie: False" in text
-        assert "web_viewer_running: True" in text
+        assert "ch_paused: False" in text
+        assert "web: True" in text
+        assert len(text.encode("utf-8")) <= cmd.get_max_message_length(msg)
+
+    def test_status_fits_dm_budget_worst_case(self):
+        bot = _make_bot(enabled=True)
+        bot.connected = False
+        bot.is_radio_zombie = False
+        bot.is_radio_offline = False
+        bot.channel_responses_enabled = True  # paused=False → "False" is longer
+        bot.web_viewer_integration.running = False
+        cmd = StatusCommand(bot)
+        msg = mock_message(content="status", is_dm=True, sender_id="user1")
+        msg.sender_pubkey = "a" * 64
+
+        _run(cmd.execute(msg))
+        text = bot.command_manager.send_response.call_args[0][1]
+        assert len(text.encode("utf-8")) <= 158

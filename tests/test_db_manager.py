@@ -1,5 +1,6 @@
 """Tests for modules.db_manager."""
 
+import configparser
 import sqlite3
 from contextlib import closing
 from unittest.mock import Mock
@@ -15,6 +16,159 @@ def db(mock_logger, tmp_path):
     bot = Mock()
     bot.logger = mock_logger
     return DBManager(bot, str(tmp_path / "test.db"))
+
+
+class TestDatabaseInitialization:
+    def test_missing_parent_logs_path_diagnostics(self, mock_logger, tmp_path):
+        bot = Mock()
+        bot.logger = mock_logger
+        db_path = tmp_path / "missing" / "test.db"
+
+        with pytest.raises(sqlite3.OperationalError, match="unable to open database file"):
+            DBManager(bot, str(db_path))
+
+        logged = " ".join(
+            str(arg)
+            for call in mock_logger.error.call_args_list
+            for arg in call.args
+        )
+        assert str(db_path) in logged
+        assert "parent=" in logged
+        assert "exists=False" in logged
+
+    def test_journal_mode_is_initialized_once_per_manager(
+        self, mock_logger, monkeypatch, tmp_path
+    ):
+        statements = []
+        real_connect = sqlite3.connect
+
+        class TracingConnection(sqlite3.Connection):
+            def execute(self, sql, parameters=()):
+                statements.append(sql)
+                return super().execute(sql, parameters)
+
+        def tracing_connect(*args, **kwargs):
+            kwargs["factory"] = TracingConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr(sqlite3, "connect", tracing_connect)
+        bot = Mock()
+        bot.logger = mock_logger
+        bot.config = configparser.ConfigParser()
+        bot.config["Bot"] = {"sqlite_journal_mode": "WAL"}
+
+        manager = DBManager(bot, str(tmp_path / "journal-once.db"))
+        manager.get_metadata("missing-one")
+        manager.get_metadata("missing-two")
+
+        journal_statements = [
+            sql for sql in statements if sql.upper().startswith("PRAGMA JOURNAL_MODE=")
+        ]
+        foreign_key_statements = [
+            sql for sql in statements if sql.upper().startswith("PRAGMA FOREIGN_KEYS=")
+        ]
+        assert journal_statements == ["PRAGMA journal_mode=WAL"]
+        assert len(foreign_key_statements) == 3
+
+    def test_journal_mode_retries_after_database_lock(self, db):
+        db._journal_mode_initialized.clear()
+        locked_connection = Mock()
+
+        def locked_execute(sql):
+            if sql.upper().startswith("PRAGMA JOURNAL_MODE="):
+                raise sqlite3.OperationalError("database is locked")
+            return Mock()
+
+        locked_connection.execute.side_effect = locked_execute
+        db._apply_sqlite_pragmas(locked_connection)
+        assert "Bot" not in db._journal_mode_initialized
+
+        available_connection = Mock()
+        db._apply_sqlite_pragmas(available_connection)
+        assert "Bot" in db._journal_mode_initialized
+        assert any(
+            call.args[0].upper().startswith("PRAGMA JOURNAL_MODE=")
+            for call in available_connection.execute.call_args_list
+        )
+
+    def test_config_sections_do_not_starve_each_other(self, db):
+        """[Bot] and [Web_Viewer] are read by different callers against one file.
+
+        A single shared flag would let whichever ran first suppress the other's
+        journal-mode setup entirely.
+        """
+        db._journal_mode_initialized.clear()
+
+        bot_conn = Mock()
+        db._apply_sqlite_pragmas(bot_conn, for_web_viewer=False)
+        viewer_conn = Mock()
+        db._apply_sqlite_pragmas(viewer_conn, for_web_viewer=True)
+
+        def journal_pragmas(conn):
+            return [
+                c.args[0] for c in conn.execute.call_args_list
+                if c.args[0].upper().startswith("PRAGMA JOURNAL_MODE=")
+            ]
+
+        assert journal_pragmas(bot_conn) == ["PRAGMA journal_mode=WAL"]
+        assert journal_pragmas(viewer_conn) == ["PRAGMA journal_mode=WAL"]
+        assert db._journal_mode_initialized == {"Bot", "Web_Viewer"}
+
+        # ...and each section is still only initialized once.
+        again = Mock()
+        db._apply_sqlite_pragmas(again, for_web_viewer=True)
+        assert journal_pragmas(again) == []
+
+    def test_invalid_journal_mode_warns_once_per_section(self, mock_logger, tmp_path):
+        bot = Mock()
+        bot.logger = mock_logger
+        bot.config = configparser.ConfigParser()
+        bot.config["Bot"] = {"sqlite_journal_mode": "NOT_A_MODE"}
+        manager = DBManager(bot, str(tmp_path / "bad-mode.db"))
+        # Construction runs migrations, which already consumed the one warning
+        # and initialized the mode for [Bot].
+        manager._journal_mode_warned.clear()
+        manager._journal_mode_initialized.clear()
+        mock_logger.warning.reset_mock()
+
+        applied = []
+        conn = Mock()
+        conn.execute.side_effect = lambda sql: applied.append(sql)
+        for _ in range(3):
+            manager._apply_sqlite_pragmas(conn)
+
+        assert mock_logger.warning.call_count == 1
+        assert "NOT_A_MODE" in str(mock_logger.warning.call_args)
+        assert [s for s in applied if s.upper().startswith("PRAGMA JOURNAL_MODE=")] == [
+            "PRAGMA journal_mode=WAL"
+        ]
+
+    def test_rollback_journal_mode_is_applied_to_every_connection(
+        self, mock_logger, tmp_path
+    ):
+        """Only WAL persists in the file header; the rollback modes are per-connection.
+
+        Caching a rollback mode after the first connection would leave every
+        later connection silently running SQLite's default DELETE.
+        """
+        bot = Mock()
+        bot.logger = mock_logger
+        bot.config = configparser.ConfigParser()
+        bot.config["Bot"] = {"sqlite_journal_mode": "TRUNCATE"}
+        manager = DBManager(bot, str(tmp_path / "rollback-mode.db"))
+
+        applied = []
+        conn = Mock()
+        conn.execute.side_effect = lambda sql: applied.append(sql)
+        manager._apply_sqlite_pragmas(conn)
+        manager._apply_sqlite_pragmas(conn)
+
+        assert [s for s in applied if s.upper().startswith("PRAGMA JOURNAL_MODE=")] == [
+            "PRAGMA journal_mode=TRUNCATE",
+            "PRAGMA journal_mode=TRUNCATE",
+        ]
+        # A non-persistent mode must not consume the WAL-only fast path.
+        assert "Bot" not in manager._journal_mode_initialized
 
 
 class TestGeocoding:

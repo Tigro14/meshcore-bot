@@ -39,14 +39,25 @@ class TestVersionCommand:
         assert call_args[0][1] == "@[TestUser] Bot version: dev-abc1234"
 
     @pytest.mark.asyncio
-    async def test_execute_falls_back_to_resolver(self, command_mock_bot, monkeypatch):
+    async def test_execute_resolves_version_from_application_root(
+        self, command_mock_bot, monkeypatch, tmp_path
+    ):
         command_mock_bot.config.add_section("Version_Command")
         command_mock_bot.config.set("Version_Command", "enabled", "true")
         command_mock_bot.bot_version = None
-        command_mock_bot.bot_root = "."
+        command_mock_bot.bot_root = tmp_path / "etc" / "meshcore-bot"
+
+        application_root = tmp_path / "opt" / "meshcore-bot"
+        application_root.mkdir(parents=True)
+        (application_root / ".version_info").write_text(
+            '{"installer_version": "v0.9"}', encoding="utf-8"
+        )
+        monkeypatch.delenv("MESHCORE_BOT_VERSION", raising=False)
         monkeypatch.setattr(
-            "modules.commands.version_command.resolve_runtime_version",
-            lambda _root: {"display": "v0.9"},
+            "modules.version_info.get_application_root", lambda: application_root
+        )
+        monkeypatch.setattr(
+            "modules.version_info._safe_git_run", lambda *_args, **_kwargs: None
         )
 
         cmd = VersionCommand(command_mock_bot)
@@ -57,4 +68,3 @@ class TestVersionCommand:
         call_args = command_mock_bot.command_manager.send_response.call_args
         assert call_args is not None
         assert call_args[0][1] == "@[TestUser] Bot version: v0.9"
-

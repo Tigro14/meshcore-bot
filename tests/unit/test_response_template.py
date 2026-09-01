@@ -23,6 +23,53 @@ def test_message_path_bytes_per_hop_from_routing():
 
 
 @pytest.mark.unit
+def test_hopless_packet_is_never_multibyte():
+    """bytes_per_hop describes how a path is encoded; a direct packet has no path for
+    it to describe, so pathbytes_min must not read the format field as a wide path."""
+    msg = MeshMessage(
+        content="test",
+        channel="c",
+        path="Direct",
+        routing_info={"bytes_per_hop": 2, "path_length": 0, "path_nodes": []},
+    )
+    assert message_path_bytes_per_hop(msg) == 1
+
+
+@pytest.mark.unit
+def test_pathbytes_min_hides_label_on_a_direct_message():
+    """A direct message has no path distance, so the whole clause must disappear
+    rather than render "Path Dist: N/A"."""
+    msg = MeshMessage(
+        content="test",
+        channel="c",
+        path="Direct",
+        routing_info={"bytes_per_hop": 2, "path_length": 0, "path_nodes": []},
+    )
+    out = format_piped_template(
+        "ack{path_distance|pathbytes_min:2|prefix_if_nonempty: | Path Dist: }",
+        {"path_distance": "N/A"},
+        message=msg,
+    )
+    assert out == "ack"
+
+
+@pytest.mark.unit
+def test_pathbytes_min_still_passes_a_real_multibyte_path():
+    msg = MeshMessage(
+        content="test",
+        channel="c",
+        path="7a2a,0102 (2 hops)",
+        routing_info={"bytes_per_hop": 2, "path_length": 2, "path_nodes": ["7A2A", "0102"]},
+    )
+    out = format_piped_template(
+        "ack{path_distance|pathbytes_min:2|prefix_if_nonempty: | Path Dist: }",
+        {"path_distance": "12.4km"},
+        message=msg,
+    )
+    assert out == "ack | Path Dist: 12.4km"
+
+
+@pytest.mark.unit
 def test_message_path_bytes_per_hop_infers_from_nodes():
     msg = MeshMessage(
         content="test",
@@ -37,6 +84,16 @@ def test_message_path_bytes_per_hop_infers_from_nodes():
 def test_format_piped_template_plain_field():
     out = format_piped_template("a={x}|end", {"x": "hi"}, message=None)
     assert out == "a=hi|end"
+
+
+@pytest.mark.unit
+def test_format_piped_template_drops_label_for_empty_field():
+    out = format_piped_template(
+        "hash={packet_hash|prefix_if_nonempty:id:}.",
+        {"packet_hash": ""},
+        message=None,
+    )
+    assert out == "hash=."
 
 
 @pytest.mark.unit
@@ -109,3 +166,161 @@ def test_get_response_format_test_command_over_keywords():
 
     cmd = MeshTestCommand(bot)
     assert cmd.get_response_format() == "from-test-cmd"
+
+
+@pytest.mark.unit
+def test_test_command_response_expands_rssi_placeholder():
+    bot = MagicMock()
+    bot.logger = Mock()
+    bot.config = configparser.ConfigParser()
+    bot.config.add_section("Bot")
+    bot.config.set("Bot", "bot_name", "TestBot")
+    bot.config.add_section("Channels")
+    bot.config.set("Channels", "monitor_channels", "general")
+    bot.config.set("Channels", "respond_to_dms", "true")
+    bot.config.add_section("Test_Command")
+    bot.config.set("Test_Command", "enabled", "true")
+    bot.config.add_section("Path_Command")
+    bot.config.set("Path_Command", "recency_weight", "0.2")
+    bot.translator = MagicMock()
+    bot.translator.translate = Mock(side_effect=lambda key, **kwargs: key)
+    bot.prefix_hex_chars = 2
+
+    cmd = MeshTestCommand(bot)
+    msg = MeshMessage(
+        content="test",
+        sender_id="Alice",
+        path="Direct (0 hops)",
+        hops=0,
+        snr=12.25,
+        rssi=-91,
+        routing_info={"path_length": 0},
+    )
+
+    out = cmd.format_response(msg, "RSSI: {rssi} | SNR: {snr} | Dist: {firstlast_distance}")
+
+    assert out == "RSSI: -91 | SNR: 12.25 | Dist: N/A"
+
+
+@pytest.mark.unit
+def test_test_command_response_expands_packet_hash_placeholder():
+    bot = MagicMock()
+    bot.logger = Mock()
+    bot.config = configparser.ConfigParser()
+    bot.config.add_section("Bot")
+    bot.config.set("Bot", "bot_name", "TestBot")
+    bot.config.add_section("Channels")
+    bot.config.set("Channels", "monitor_channels", "general")
+    bot.config.set("Channels", "respond_to_dms", "true")
+    bot.config.add_section("Test_Command")
+    bot.config.set("Test_Command", "enabled", "true")
+    bot.config.add_section("Path_Command")
+    bot.config.set("Path_Command", "recency_weight", "0.2")
+    bot.translator = MagicMock()
+    bot.translator.translate = Mock(side_effect=lambda key, **kwargs: key)
+    bot.prefix_hex_chars = 2
+
+    cmd = MeshTestCommand(bot)
+    msg = MeshMessage(
+        content="test",
+        sender_id="Alice",
+        path="Direct (0 hops)",
+        hops=0,
+        snr=12.25,
+        rssi=-91,
+        routing_info={"path_length": 0, "packet_hash": "ABCDEF0123456789"},
+    )
+
+    out = cmd.format_response(msg, "hash={packet_hash}")
+
+    assert out == "hash=ABCDEF0123456789"
+
+
+@pytest.mark.unit
+def test_test_command_response_omits_missing_packet_hash():
+    bot = MagicMock()
+    bot.logger = Mock()
+    bot.config = configparser.ConfigParser()
+    bot.config.add_section("Bot")
+    bot.config.set("Bot", "bot_name", "TestBot")
+    bot.config.add_section("Channels")
+    bot.config.set("Channels", "monitor_channels", "general")
+    bot.config.set("Channels", "respond_to_dms", "true")
+    bot.config.add_section("Test_Command")
+    bot.config.set("Test_Command", "enabled", "true")
+    bot.config.add_section("Path_Command")
+    bot.config.set("Path_Command", "recency_weight", "0.2")
+    bot.translator = MagicMock()
+    bot.translator.translate = Mock(side_effect=lambda key, **kwargs: key)
+    bot.prefix_hex_chars = 2
+
+    cmd = MeshTestCommand(bot)
+    msg = MeshMessage(
+        content="test",
+        sender_id="Alice",
+        path="Direct (0 hops)",
+        hops=0,
+        routing_info={"path_length": 0},
+    )
+
+    out = cmd.format_response(msg, "hash={packet_hash|prefix_if_nonempty:id:}.")
+
+    assert out == "hash=."
+
+
+def _msg(**kw):
+    base = dict(content="test", channel="c")
+    base.update(kw)
+    return MeshMessage(**base)
+
+
+@pytest.mark.unit
+def test_hops_min_clears_on_a_direct_message():
+    out = format_piped_template(
+        "ack{d|hops_min:1|prefix_if_nonempty: | Dist: }",
+        {"d": "N/A"},
+        message=_msg(path="Direct", hops=0, routing_info={"path_length": 0, "bytes_per_hop": 2}),
+    )
+    assert out == "ack"
+
+
+@pytest.mark.unit
+def test_hops_min_keeps_a_single_byte_multihop_path():
+    """The point of hops_min over pathbytes_min: a one-byte path still travelled,
+    so its distance is real and must not be discarded with the direct messages."""
+    msg = _msg(path="01,02 (2 hops)", hops=2,
+               routing_info={"path_length": 2, "path_nodes": ["01", "02"], "bytes_per_hop": 1})
+    assert format_piped_template("{d|hops_min:1}", {"d": "12.4km"}, message=msg) == "12.4km"
+    assert format_piped_template("{d|pathbytes_min:2}", {"d": "12.4km"}, message=msg) == ""
+
+
+@pytest.mark.unit
+def test_hops_min_threshold_is_inclusive():
+    msg = _msg(path="01,02 (2 hops)", hops=2)
+    assert format_piped_template("{d|hops_min:2}", {"d": "x"}, message=msg) == "x"
+    assert format_piped_template("{d|hops_min:3}", {"d": "x"}, message=msg) == ""
+
+
+@pytest.mark.unit
+def test_hops_min_zero_admits_a_direct_message():
+    msg = _msg(path="Direct", hops=0)
+    assert format_piped_template("{d|hops_min:0}", {"d": "x"}, message=msg) == "x"
+
+
+@pytest.mark.unit
+def test_hops_min_clears_when_the_hop_count_is_unknown():
+    """A gate that cannot confirm the route suppresses rather than guesses."""
+    msg = _msg(path=None, hops=None, routing_info=None)
+    assert format_piped_template("{d|hops_min:1}", {"d": "x"}, message=msg) == ""
+
+
+@pytest.mark.unit
+def test_hops_min_without_a_message_clears():
+    assert format_piped_template("{d|hops_min:1}", {"d": "x"}, message=None) == ""
+
+
+@pytest.mark.unit
+def test_hops_min_with_an_unusable_argument_passes_the_value_through():
+    msg = _msg(path="Direct", hops=0)
+    assert format_piped_template("{d|hops_min:abc}", {"d": "x"}, message=msg) == "x"
+    assert format_piped_template("{d|hops_min:-1}", {"d": "x"}, message=msg) == "x"

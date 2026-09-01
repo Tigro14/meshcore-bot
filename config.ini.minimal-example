@@ -27,22 +27,17 @@
 
 [Connection]
 # Connection type: serial, ble, or tcp
-# serial: Connect via USB serial port
-# ble: Connect via Bluetooth Low Energy
-# tcp: Connect via TCP/IP
+# Only keys for the active type are used; others are ignored (see config.ini.example).
 connection_type = serial
 
-# Serial port (for serial connection)
-# Common ports: /dev/ttyUSB0, /dev/tty.usbserial-*, COM3 (Windows)
+# serial
 serial_port = /dev/ttyUSB0
 
-# BLE device name (for BLE connection)
-# Leave commented out for auto-detection, or specify exact device name
-#ble_device_name = MeshCore
+# ble — uncomment when connection_type = ble (empty ble_device_name = auto-detect)
+#ble_device_name =
 
-# TCP hostname or IP address (for TCP connection)
+# tcp — uncomment when connection_type = tcp
 #hostname = 192.168.1.60
-# TCP port (for TCP connection)
 #tcp_port = 5000
 
 # Connection timeout in seconds
@@ -159,10 +154,10 @@ advert_interval_hours = 0
 startup_advert = false
 
 # Auto-manage contact list when new contacts are discovered
-# device: Device handles auto-addition using standard auto-discovery mode, bot manages contact list capacity (purge old contacts when near limits)
+# device: Device handles auto-addition using standard auto-discovery mode, bot manages contact list capacity (purge old contacts when near limits) (default)
 # bot: Bot automatically adds new companion contacts to device, bot manages contact list capacity (purge old contacts when near limits)
-# false: Manual mode - no automatic actions, use !repeater commands to manage contacts (default)
-auto_manage_contacts = false
+# false: Manual mode - no automatic actions, use !repeater commands to manage contacts
+auto_manage_contacts = device
 
 # Database path for main bot database
 # Default: meshcore_bot.db
@@ -206,6 +201,10 @@ language = en
 # Default: translations/
 translation_path = translations/
 
+# Reply in the sender's language when detectable (default: false).
+# Install the optional detector for longer messages: pip install meshcore-bot[lang]
+auto_detect_language = false
+
 [Admin_ACL]
 # Admin Access Control List (ACL) for restricted commands
 # Only users with public keys listed here can execute admin commands
@@ -235,6 +234,8 @@ admin_commands = repeater,webviewer,reload,channelpause
 # {rssi} - Received signal strength indicator in dBm
 # {timestamp} - Message timestamp in HH:MM:SS format
 # {path} - Message routing path (e.g., "01,5f (2 hops)")
+# {hops} - Total hop count only (e.g., "2" or "0"); same value as in path/connection_info
+# {hops_label} - Same as hops with word "hop"/"hops" and pluralization (e.g., "1 hop", "2 hops", or "?" when unknown)
 # {path_distance} - Total distance between all hops in path with locations (e.g., "123.4km (3 segs, 1 no-loc)")
 # {firstlast_distance} - Distance between first and last repeater in path (e.g., "45.6km" or empty if locations missing)
 # {elapsed} - Elapsed time (e.g. 1234ms) or "Sync Device Clock" when device clock is invalid (use {elapsed} only; do not append ms)
@@ -254,8 +255,7 @@ monitor_channels = general,test,emergency
 respond_to_dms = true
 
 # Maximum hops for a message to get a response
-# Default: 64 - for backwards compatibility
-# Suggested: 10
+# Code default when omitted: 64. This example uses 7 for a tighter local mesh.
 max_response_hops = 7
 
 # Optional: limit channel responses to certain keywords (e.g. help,ping,test).
@@ -282,8 +282,10 @@ allow_private_urls = false
 # CRITICAL: Only critical errors
 log_level = INFO
 
-# Log file path (leave empty for console only)
-# Bot will write logs to this file in addition to console
+# Log file path (leave empty for console/journald only)
+# Bot and web viewer write to this file in addition to console when set.
+# Empty: console only (captured by journald under systemd — preferred for services).
+# systemd service installs use: /var/log/meshcore-bot/meshcore_bot.log
 # Logs rotate at 5 MB with up to 3 backup files (e.g. meshcore_bot.log.1, .2, .3)
 log_file = meshcore_bot.log
 
@@ -308,6 +310,7 @@ meshcore_log_level = INFO
 #  - path (p): Decode hex path data to show repeaters                                              #
 #  - prefix: Look up repeaters by two-character prefix                                             #
 #  - multitest (mt): Listen for multiple path variations                                           #
+#  - help: List available commands ('help <command>' for details)                                 #
 #                                                                                                  #
 ####################################################################################################
 
@@ -342,7 +345,7 @@ enabled = true
 # false: Only respond to "path", "decode", or "route" keywords (default)
 enable_p_shortcut = true
 
-# Optional prefix on path replies: {sender}, {connection_info}, {path}, {timestamp}, {snr}, {rssi}
+# Optional prefix on path replies: {sender}, {connection_info}, {path}, {hops}, {hops_label}, {timestamp}, {snr}, {rssi}
 # reply_prefix = @[{sender}]
 
 # Bytes per hop before DB repeater lookup (0/1 = off; 2 or 3 = gate weak paths to hex-only + tip)
@@ -432,18 +435,22 @@ enabled = true
 # Example: "Found {path_count} unique path(s) for @[{sender}]:\n{paths}"
 response_format = Found {path_count} unique path(s) for @[{sender}]:\n{paths}
 
+[Help_Command]
+# Enable or disable the help command
+# true: Help command is available (responds to 'help'; 'help <command>' for details)
+# false: Help command is disabled
+# Recommended to leave enabled so users can discover the commands above.
+enabled = true
+
 ####################################################################################################
 #                                                                                                  #
 #                              All Other Commands Disabled                                         #
 #                                                                                                  #
 #  The following commands are explicitly disabled in this minimal configuration.                   #
 #  To enable any of these commands, uncomment and set enabled = true in the appropriate section.   #
+#  See config.ini.example for full options for each command.                                       #
 #                                                                                                  #
 ####################################################################################################
-
-[Help_Command]
-# Enable or disable the help command
-enabled = false
 
 [Cmd_Command]
 # Enable or disable the cmd command
@@ -479,6 +486,9 @@ enabled = false
 [Sports_Command]
 enabled = false
 
+[Worldcup_Command]
+enabled = false
+
 [Stats_Command]
 enabled = false
 
@@ -498,8 +508,7 @@ enabled = false
 
 [Web_Viewer]
 # Enable or disable the web data viewer
-# SECURITY NOTE: Web viewer has NO AUTHENTICATION built-in
-# Only enable if you understand the security implications
+# Set web_viewer_password when host is not 127.0.0.1 (see config.ini.example)
 enabled = false
 
 [Wx_Command]
