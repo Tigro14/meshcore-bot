@@ -286,6 +286,89 @@ class TestGetDatabaseStats:
 
 
 # ---------------------------------------------------------------------------
+# /api/contacts clock drift fields
+# ---------------------------------------------------------------------------
+
+class TestContactsClockDriftFields:
+    """_get_tracking_data must attach per-contact clock drift information."""
+
+    def _setup_db(self, db_path, now_epoch, now_sql):
+        with sqlite3.connect(db_path, timeout=60) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    channel TEXT,
+                    content TEXT NOT NULL,
+                    is_dm BOOLEAN NOT NULL,
+                    hops INTEGER,
+                    snr REAL,
+                    rssi INTEGER,
+                    path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            for public_key, name, drift in [
+                ("aa11", "Repeater-A", 1200),
+                ("bb22", "Repeater-B", 60),
+            ]:
+                cursor.execute(
+                    """
+                    INSERT INTO complete_contact_tracking
+                    (public_key, name, role, device_type, hop_count, last_heard)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (public_key, name, "repeater", "repeater", 2, now_sql),
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO message_stats
+                    (timestamp, sender_id, channel, content, is_dm, hops, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (now_epoch - drift, name, "Public", "clock check", 0, 2, now_sql),
+                )
+            conn.commit()
+
+    def test_tracking_data_has_drift_fields(self, viewer_with_db):
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        self._setup_db(viewer_with_db.db_path, now_epoch, now_sql)
+
+        data = viewer_with_db._get_tracking_data(since="all")
+
+        rows = {row["username"]: row for row in data["tracking_data"]}
+        assert "Repeater-A" in rows
+        # 1200 s drift > 300 s threshold → detected
+        assert rows["Repeater-A"]["clock_drift_detected"] is True
+        assert 1190 <= rows["Repeater-A"]["clock_drift_seconds"] <= 1210
+        # 60 s drift < 300 s threshold → not detected
+        assert rows["Repeater-B"]["clock_drift_detected"] is False
+        assert 50 <= rows["Repeater-B"]["clock_drift_seconds"] <= 70
+
+    def test_contacts_without_timestamp_have_null_drift(self, viewer_with_db):
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.execute(
+                """
+                INSERT INTO complete_contact_tracking
+                (public_key, name, role, device_type, hop_count, last_heard)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("cc33", "NoData", "companion", "device", 0, "2026-01-01 00:00:00"),
+            )
+            conn.commit()
+
+        data = viewer_with_db._get_tracking_data(since="all")
+        rows = {row["username"]: row for row in data["tracking_data"]}
+        assert rows["NoData"]["clock_drift_seconds"] is None
+        assert rows["NoData"]["clock_drift_detected"] is False
+
+
+# ---------------------------------------------------------------------------
 # api_export_contacts
 # ---------------------------------------------------------------------------
 

@@ -16,7 +16,7 @@ import time
 from contextlib import closing, contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 # When started as a script (`python modules/web_viewer/app.py`), Python puts the
@@ -5933,6 +5933,13 @@ class BotDataViewer:
             main_rows = cursor.fetchall()
             multibyte_hop_chunks = self._collect_multibyte_hop_chunks(cursor)
 
+            clock_drift_seconds = self._get_clock_drift_map(cursor)
+            clock_drift_threshold = self.config.getint(
+                'Clock_Sync_Admin',
+                'dashboard_max_clock_drift_seconds',
+                fallback=300,
+            )
+
             tracking = []
             for row in main_rows:
                 # Parse raw advertisement data if available
@@ -6009,6 +6016,11 @@ class BotDataViewer:
                     'out_bytes_per_hop': row['out_bytes_per_hop'] if row['out_bytes_per_hop'] is not None else None,
                     'all_paths': all_paths,
                     'path_encoding_badge': path_encoding_badge,
+                    'clock_drift_seconds': clock_drift_seconds.get(row['name']),
+                    'clock_drift_detected': bool(
+                        clock_drift_seconds.get(row['name']) is not None
+                        and clock_drift_seconds[row['name']] > clock_drift_threshold
+                    ),
                 })
 
             # Get server statistics for daily tracking using direct database queries
@@ -6182,6 +6194,54 @@ class BotDataViewer:
         finally:
             if conn:
                 conn.close()
+
+    def _get_clock_drift_map(self, cursor: Any) -> dict[str, Optional[int]]:
+        """Map contact name -> clock drift (seconds) of its latest message.
+
+        ``message_stats.sender_id`` stores the contact *name* (not the public
+        key), so the join is against ``complete_contact_tracking.name`` — the
+        same join the clock sync dashboard uses. Contacts with no parsable
+        sender timestamp are excluded (drift unknown, not "in sync").
+        """
+        try:
+            cursor.execute(
+                """
+                WITH latest_message_per_sender AS (
+                    SELECT sender_id, MAX(id) AS latest_id
+                    FROM message_stats
+                    GROUP BY sender_id
+                )
+                SELECT
+                    c.name,
+                    m.timestamp AS sender_timestamp,
+                    m.created_at AS received_at
+                FROM complete_contact_tracking c
+                INNER JOIN latest_message_per_sender lm
+                    ON lm.sender_id = c.name
+                INNER JOIN message_stats m
+                    ON m.id = lm.latest_id
+                WHERE m.timestamp IS NOT NULL
+                    AND CAST(m.timestamp AS INTEGER) > 0
+                """
+            )
+            result: dict[str, Optional[int]] = {}
+            for row in cursor.fetchall():
+                sender_timestamp = row['sender_timestamp']
+                received_at = row['received_at']
+                if sender_timestamp is None or received_at is None:
+                    continue
+                try:
+                    received_epoch = datetime.strptime(
+                        str(received_at), '%Y-%m-%d %H:%M:%S'
+                    ).replace(tzinfo=timezone.utc).timestamp()
+                    drift = abs(int(received_epoch) - int(sender_timestamp))
+                except (TypeError, ValueError):
+                    continue
+                result[row['name']] = drift
+            return result
+        except Exception as e:
+            self.logger.error(f"Error computing clock drift map: {e}")
+            return {}
 
     def _calculate_distance(self, lat1, lon1, lat2, lon2):
         """Calculate distance between two points using Haversine formula"""

@@ -970,7 +970,7 @@ class ModernContactsManager {
                     <div class="flex-grow-1 min-w-0">
                         <div class="d-flex justify-content-between align-items-start gap-2">
                             <div class="min-w-0">
-                                <div class="fw-bold">${this.escapeHtml(contact.username || 'Unknown')}</div>
+                                <div class="fw-bold">${this.escapeHtml(contact.username || 'Unknown')}${this.formatClockSyncIndicator(contact)}</div>
                                 <small class="text-muted text-break d-block">${this.escapeHtml(contact.user_id ? contact.user_id.substring(0, 16) + '...' : 'Unknown')}</small>
                             </div>
                             <div class="contact-mobile-device text-end flex-shrink-0">${this.formatDeviceType(contact)}</div>
@@ -1045,6 +1045,7 @@ class ModernContactsManager {
                 </td>
                 <td>
                     <strong>${this.escapeHtml(contact.username || 'Unknown')}</strong>
+                    ${this.formatClockSyncIndicator(contact)}
                     <br>
                     <small class="text-muted">${this.escapeHtml(contact.user_id ? contact.user_id.substring(0, 16) + '...' : 'Unknown')}</small>
                 </td>
@@ -1529,6 +1530,29 @@ class ModernContactsManager {
         }
         
         return `<span class="badge ${badgeClass}">${this.escapeHtml(displayText)}</span>`;
+    }
+
+    formatClockSyncIndicator(contact) {
+        if (!contact.clock_drift_detected) return '';
+        const drift = Number(contact.clock_drift_seconds) || 0;
+        const driftLabel = this.formatDrift(drift);
+        return ` <i class="fas fa-clock text-danger clock-sync-warning"
+             data-bs-toggle="tooltip" data-bs-placement="top"
+             title="Device clock out of sync — drift ${driftLabel}"></i>`;
+    }
+
+    formatDrift(seconds) {
+        const s = Math.abs(Math.round(seconds));
+        const days = Math.floor(s / 86400);
+        const hours = Math.floor((s % 86400) / 3600);
+        const minutes = Math.floor((s % 3600) / 60);
+        const secs = s % 60;
+        const parts = [];
+        if (days > 0) parts.push(`${days}d`);
+        if (hours > 0) parts.push(`${hours}h`);
+        if (minutes > 0) parts.push(`${minutes}m`);
+        parts.push(`${secs}s`);
+        return parts.join(' ');
     }
     
     formatSignal(contact) {
