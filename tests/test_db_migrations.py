@@ -344,6 +344,22 @@ class TestSchema:
             )
             assert cur.fetchone() is not None
 
+    def test_clock_sync_admin_log_table_created(self, runner, conn):
+        runner.run()
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='clock_sync_admin_log'"
+        )
+        assert cur.fetchone() is not None
+        for column in [
+            "id",
+            "public_key",
+            "target_name",
+            "success",
+            "error_message",
+            "sent_at",
+        ]:
+            assert _column_exists(conn.cursor(), "clock_sync_admin_log", column) is True
+
     def test_mesh_connections_has_table_specific_last_seen_index(self, runner, conn):
         runner.run()
         row = conn.execute(

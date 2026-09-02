@@ -286,6 +286,89 @@ class TestGetDatabaseStats:
 
 
 # ---------------------------------------------------------------------------
+# /api/contacts clock drift fields
+# ---------------------------------------------------------------------------
+
+class TestContactsClockDriftFields:
+    """_get_tracking_data must attach per-contact clock drift information."""
+
+    def _setup_db(self, db_path, now_epoch, now_sql):
+        with sqlite3.connect(db_path, timeout=60) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    channel TEXT,
+                    content TEXT NOT NULL,
+                    is_dm BOOLEAN NOT NULL,
+                    hops INTEGER,
+                    snr REAL,
+                    rssi INTEGER,
+                    path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            for public_key, name, drift in [
+                ("aa11", "Repeater-A", 1200),
+                ("bb22", "Repeater-B", 60),
+            ]:
+                cursor.execute(
+                    """
+                    INSERT INTO complete_contact_tracking
+                    (public_key, name, role, device_type, hop_count, last_heard)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (public_key, name, "repeater", "repeater", 2, now_sql),
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO message_stats
+                    (timestamp, sender_id, channel, content, is_dm, hops, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (now_epoch - drift, name, "Public", "clock check", 0, 2, now_sql),
+                )
+            conn.commit()
+
+    def test_tracking_data_has_drift_fields(self, viewer_with_db):
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        self._setup_db(viewer_with_db.db_path, now_epoch, now_sql)
+
+        data = viewer_with_db._get_tracking_data(since="all")
+
+        rows = {row["username"]: row for row in data["tracking_data"]}
+        assert "Repeater-A" in rows
+        # 1200 s drift > 300 s threshold → detected
+        assert rows["Repeater-A"]["clock_drift_detected"] is True
+        assert 1190 <= rows["Repeater-A"]["clock_drift_seconds"] <= 1210
+        # 60 s drift < 300 s threshold → not detected
+        assert rows["Repeater-B"]["clock_drift_detected"] is False
+        assert 50 <= rows["Repeater-B"]["clock_drift_seconds"] <= 70
+
+    def test_contacts_without_timestamp_have_null_drift(self, viewer_with_db):
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.execute(
+                """
+                INSERT INTO complete_contact_tracking
+                (public_key, name, role, device_type, hop_count, last_heard)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("cc33", "NoData", "companion", "device", 0, "2026-01-01 00:00:00"),
+            )
+            conn.commit()
+
+        data = viewer_with_db._get_tracking_data(since="all")
+        rows = {row["username"]: row for row in data["tracking_data"]}
+        assert rows["NoData"]["clock_drift_seconds"] is None
+        assert rows["NoData"]["clock_drift_detected"] is False
+
+
+# ---------------------------------------------------------------------------
 # api_export_contacts
 # ---------------------------------------------------------------------------
 
@@ -1353,3 +1436,48 @@ class TestGetClockSyncTargetsStatus:
 
         result = viewer._get_clock_sync_targets_status()
         assert result["targets"][0]["status"] == "In Sync"
+
+    def test_db_fallback_resolves_pubkey_target(self, tmp_path):
+        """A target configured as a pubkey that is absent from meshcore.contacts
+        must still be resolved via the DB contact tracking table."""
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        pubkey = "aaaa00000000000000000000000000000000000000000000000000000000000001"
+        # Target is the raw pubkey; meshcore.contacts does not contain it.
+        viewer, db_path = self._make_viewer_with_target(tmp_path, pubkey)
+        self._setup_db(db_path, now_epoch, now_sql, "DB-Repeater", pubkey, 90)
+
+        result = viewer._get_clock_sync_targets_status()
+
+        targets = result.get("targets", [])
+        assert len(targets) == 1
+        rep = targets[0]
+        assert rep["name"] == "DB-Repeater"
+        assert rep["public_key"] == pubkey
+        assert rep["drift_seconds"] is not None
+        assert 80 <= rep["drift_seconds"] <= 100
+        assert rep["status"] == "In Sync"
+
+    def test_db_only_resolution_without_meshcore(self, tmp_path):
+        """When self.bot is None (standalone web viewer process), targets must
+        still be resolved and drift data populated from the database alone."""
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        pubkey = "bbbb00000000000000000000000000000000000000000000000000000000000002"
+        viewer, db_path = self._make_viewer_with_target(tmp_path, pubkey)
+        self._setup_db(db_path, now_epoch, now_sql, "Standalone-RPT", pubkey, 120)
+
+        # Simulate standalone web viewer: no bot / no meshcore
+        viewer.bot = None
+
+        result = viewer._get_clock_sync_targets_status()
+
+        targets = result.get("targets", [])
+        assert len(targets) == 1
+        rep = targets[0]
+        assert rep["name"] == "Standalone-RPT"
+        assert rep["public_key"] == pubkey
+        assert rep["drift_seconds"] is not None
+        assert 110 <= rep["drift_seconds"] <= 130
+        assert rep["status"] == "In Sync"
+
