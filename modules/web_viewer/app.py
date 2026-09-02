@@ -8244,142 +8244,143 @@ class BotDataViewer:
             targets_status = []
             bot = getattr(self, 'bot', None)
 
+            # Build live contacts lookup when meshcore is available (in-process bot)
+            pubkey_to_contact: dict[str, Any] = {}
+            meshcore = None
             if bot and hasattr(bot, 'meshcore') and bot.meshcore:
                 meshcore = bot.meshcore
                 contacts = getattr(meshcore, 'contacts', {}) or {}
-
-                # Build public key lookup dictionary for O(1) access
-                pubkey_to_contact = {}
                 for contact_data in contacts.values():
                     public_key = (contact_data.get("public_key", "") or "").strip()
                     if public_key:
                         pubkey_to_contact[public_key] = contact_data
 
-                # Get clock drift data from database
-                drift_data = {}
-                last_heard_data = {}
-                db_contacts = {}
-                conn = None
-                try:
-                    conn = self._get_db_connection()
-                    cursor = conn.cursor()
+            # Always query the database for drift data, contacts, and sync log
+            drift_data: dict[str, Any] = {}
+            last_heard_data: dict[str, Any] = {}
+            db_contacts: dict[str, Any] = {}
+            clock_sync_log: dict[str, Any] = {}
+            conn = None
+            try:
+                conn = self._get_db_connection()
+                cursor = conn.cursor()
 
-                    # Get message stats with clock drift information
-                    cutoff_time = time.time() - (check_window_hours * 3600)
-                    cursor.execute(
-                        """
-                        WITH latest_message_per_sender AS (
-                            SELECT sender_id, MAX(id) AS latest_id
-                            FROM message_stats
-                            GROUP BY sender_id
-                        )
-                        SELECT
-                            c.name,
-                            c.public_key,
-                            c.role,
-                            c.hop_count,
-                            CAST(strftime('%s', m.created_at) AS INTEGER) AS received_at,
-                            m.timestamp AS sender_timestamp,
-                            CASE
-                                WHEN m.timestamp IS NULL THEN NULL
-                                WHEN CAST(m.timestamp AS INTEGER) <= 0 THEN NULL
-                                ELSE ABS(
-                                    CAST(strftime('%s', m.created_at) AS INTEGER)
-                                    - CAST(m.timestamp AS INTEGER)
-                                )
-                            END AS drift_seconds
-                        FROM complete_contact_tracking c
-                        JOIN latest_message_per_sender lm ON c.name = lm.sender_id
-                        JOIN message_stats m ON m.id = lm.latest_id
-                        WHERE CAST(strftime('%s', m.created_at) AS INTEGER) >= ?
-                        AND m.timestamp IS NOT NULL
-                        AND CAST(m.timestamp AS INTEGER) > 0
-                        """,
-                        (cutoff_time,)
+                # Get message stats with clock drift information
+                cutoff_time = time.time() - (check_window_hours * 3600)
+                cursor.execute(
+                    """
+                    WITH latest_message_per_sender AS (
+                        SELECT sender_id, MAX(id) AS latest_id
+                        FROM message_stats
+                        GROUP BY sender_id
                     )
+                    SELECT
+                        c.name,
+                        c.public_key,
+                        c.role,
+                        c.hop_count,
+                        CAST(strftime('%s', m.created_at) AS INTEGER) AS received_at,
+                        m.timestamp AS sender_timestamp,
+                        CASE
+                            WHEN m.timestamp IS NULL THEN NULL
+                            WHEN CAST(m.timestamp AS INTEGER) <= 0 THEN NULL
+                            ELSE ABS(
+                                CAST(strftime('%s', m.created_at) AS INTEGER)
+                                - CAST(m.timestamp AS INTEGER)
+                            )
+                        END AS drift_seconds
+                    FROM complete_contact_tracking c
+                    JOIN latest_message_per_sender lm ON c.name = lm.sender_id
+                    JOIN message_stats m ON m.id = lm.latest_id
+                    WHERE CAST(strftime('%s', m.created_at) AS INTEGER) >= ?
+                    AND m.timestamp IS NOT NULL
+                    AND CAST(m.timestamp AS INTEGER) > 0
+                    """,
+                    (cutoff_time,)
+                )
 
-                    for row in cursor.fetchall():
-                        drift_data[row[1]] = {  # public_key as key
-                            'name': row[0],
-                            'role': row[2],
-                            'hop_count': row[3],
-                            'received_at': row[4],
-                            'sender_timestamp': row[5],
-                            'drift_seconds': int(row[6]) if row[6] is not None else None,
-                        }
-
-                    # Get last_heard timestamps for all contacts
-                    cursor.execute(
-                        """
-                        SELECT public_key, CAST(strftime('%s', last_heard) AS INTEGER) AS last_heard_ts
-                        FROM complete_contact_tracking
-                        WHERE last_heard IS NOT NULL
-                        """
-                    )
-                    for row in cursor.fetchall():
-                        last_heard_data[row[0]] = row[1]  # public_key -> last_heard timestamp
-
-                    # Build a DB-backed contact lookup (name/role/hop_count) as a fallback
-                    # when a target is not present in the radio's live contact table.
-                    cursor.execute(
-                        """
-                        SELECT public_key, name, role, hop_count
-                        FROM complete_contact_tracking
-                        WHERE public_key IS NOT NULL AND public_key != ''
-                        """
-                    )
-                    for row in cursor.fetchall():
-                        public_key = (row[0] or "").strip()
-                        if not public_key:
-                            continue
-                        db_contacts[public_key] = {
-                            'name': (row[1] or "").strip(),
-                            'role': row[2],
-                            'hop_count': row[3],
-                        }
-
-                    # Get latest Clock_Sync_Admin log entries for each public key
-                    cursor.execute(
-                        """
-                        SELECT public_key, success, CAST(strftime('%s', sent_at) AS INTEGER), error_message
-                        FROM clock_sync_admin_log
-                        WHERE id IN (
-                            SELECT MAX(id)
-                            FROM clock_sync_admin_log
-                            GROUP BY public_key
-                        )
-                        """
-                    )
-                    clock_sync_log = {}
-                    for row in cursor.fetchall():
-                        clock_sync_log[row[0]] = {  # public_key as key
-                            'success': bool(row[1]),
-                            'sent_at': row[2],
-                            'error_message': row[3],
-                        }
-                finally:
-                    if conn:
-                        conn.close()
-
-                # Process each target
-                for target_identifier in targets:
-                    target_info = {
-                        'identifier': target_identifier,
-                        'name': target_identifier,
-                        'public_key': None,
-                        'role': None,
-                        'hop_count': None,
-                        'drift_seconds': None,
-                        'message_timestamp': None,
-                        'last_seen': None,
-                        'status': 'Not Found',
-                        'last_sync_success': None,
-                        'last_sync_at': None,
-                        'last_sync_error': None
+                for row in cursor.fetchall():
+                    drift_data[row[1]] = {  # public_key as key
+                        'name': row[0],
+                        'role': row[2],
+                        'hop_count': row[3],
+                        'received_at': row[4],
+                        'sender_timestamp': row[5],
+                        'drift_seconds': int(row[6]) if row[6] is not None else None,
                     }
 
-                    # Try to resolve contact by name
-                    contact = None
+                # Get last_heard timestamps for all contacts
+                cursor.execute(
+                    """
+                    SELECT public_key, CAST(strftime('%s', last_heard) AS INTEGER) AS last_heard_ts
+                    FROM complete_contact_tracking
+                    WHERE last_heard IS NOT NULL
+                    """
+                )
+                for row in cursor.fetchall():
+                    last_heard_data[row[0]] = row[1]  # public_key -> last_heard timestamp
+
+                # Build a DB-backed contact lookup (name/role/hop_count) as a fallback
+                # when a target is not present in the radio's live contact table.
+                cursor.execute(
+                    """
+                    SELECT public_key, name, role, hop_count
+                    FROM complete_contact_tracking
+                    WHERE public_key IS NOT NULL AND public_key != ''
+                    """
+                )
+                for row in cursor.fetchall():
+                    public_key = (row[0] or "").strip()
+                    if not public_key:
+                        continue
+                    db_contacts[public_key] = {
+                        'name': (row[1] or "").strip(),
+                        'role': row[2],
+                        'hop_count': row[3],
+                    }
+
+                # Get latest Clock_Sync_Admin log entries for each public key
+                cursor.execute(
+                    """
+                    SELECT public_key, success, CAST(strftime('%s', sent_at) AS INTEGER), error_message
+                    FROM clock_sync_admin_log
+                    WHERE id IN (
+                        SELECT MAX(id)
+                        FROM clock_sync_admin_log
+                        GROUP BY public_key
+                    )
+                    """
+                )
+                for row in cursor.fetchall():
+                    clock_sync_log[row[0]] = {  # public_key as key
+                        'success': bool(row[1]),
+                        'sent_at': row[2],
+                        'error_message': row[3],
+                    }
+            finally:
+                if conn:
+                    conn.close()
+
+            # Process each target
+            for target_identifier in targets:
+                target_info = {
+                    'identifier': target_identifier,
+                    'name': target_identifier,
+                    'public_key': None,
+                    'role': None,
+                    'hop_count': None,
+                    'drift_seconds': None,
+                    'message_timestamp': None,
+                    'last_seen': None,
+                    'status': 'Not Found',
+                    'last_sync_success': None,
+                    'last_sync_at': None,
+                    'last_sync_error': None
+                }
+
+                # Try to resolve contact by name via live meshcore
+                contact = None
+                if meshcore:
                     try:
                         contact = meshcore.get_contact_by_name(target_identifier)
                     except Exception:
@@ -8387,100 +8388,80 @@ class BotDataViewer:
 
                     # If not found by name, try by exact public key or prefix match
                     if not contact:
-                        # First try exact match
                         if target_identifier in pubkey_to_contact:
                             contact = pubkey_to_contact[target_identifier]
                         else:
-                            # Then try prefix match (only if not found by exact match)
                             for public_key, contact_data in pubkey_to_contact.items():
                                 if public_key.startswith(target_identifier):
                                     contact = contact_data
                                     break
 
-                    # Fallback: resolve from the DB contact tracking table when the
-                    # target is absent from the radio's live contact table.
-                    db_contact = None
-                    if not contact:
-                        db_contact = db_contacts.get(target_identifier)
-                        if not db_contact:
-                            for db_key, db_data in db_contacts.items():
-                                if db_key.startswith(target_identifier):
-                                    db_contact = db_data
-                                    break
-                        if db_contact:
-                            db_contact = dict(db_contact)
-                            db_contact['public_key'] = (
-                                target_identifier if target_identifier in db_contacts
-                                else next(
-                                    (k for k in db_contacts if k.startswith(target_identifier)),
-                                    None,
-                                )
+                # Fallback: resolve from the DB contact tracking table
+                db_contact = None
+                if not contact:
+                    db_contact = db_contacts.get(target_identifier)
+                    if not db_contact:
+                        for db_key, db_data in db_contacts.items():
+                            if db_key.startswith(target_identifier):
+                                db_contact = db_data
+                                break
+                    if db_contact:
+                        db_contact = dict(db_contact)
+                        db_contact['public_key'] = (
+                            target_identifier if target_identifier in db_contacts
+                            else next(
+                                (k for k in db_contacts if k.startswith(target_identifier)),
+                                None,
                             )
-
-                    resolved = contact or db_contact
-
-                    if resolved:
-                        public_key = (resolved.get('public_key', '') or '').strip()
-                        contact_name = (
-                            (resolved.get('name', '') or '').strip()
-                            or (resolved.get('adv_name', '') or '').strip()
-                            or target_identifier
                         )
 
-                        target_info['name'] = contact_name
-                        target_info['public_key'] = public_key
-                        target_info['role'] = resolved.get('role', 'unknown')
-                        target_info['hop_count'] = resolved.get('hop_count')
+                resolved = contact or db_contact
 
-                        # Get Clock_Sync_Admin log data if available
-                        if public_key in clock_sync_log:
-                            log = clock_sync_log[public_key]
-                            target_info['last_sync_success'] = log['success']
-                            target_info['last_sync_at'] = log['sent_at']
-                            target_info['last_sync_error'] = log['error_message']
-                        else:
-                            target_info['last_sync_success'] = None
-                            target_info['last_sync_at'] = None
-                            target_info['last_sync_error'] = None
+                if resolved:
+                    public_key = (resolved.get('public_key', '') or '').strip()
+                    contact_name = (
+                        (resolved.get('name', '') or '').strip()
+                        or (resolved.get('adv_name', '') or '').strip()
+                        or target_identifier
+                    )
 
-                        # Get drift data if available
-                        if public_key in drift_data:
-                            drift = drift_data[public_key]
-                            target_info['drift_seconds'] = drift['drift_seconds']
-                            target_info['last_seen'] = drift['received_at']
-                            target_info['message_timestamp'] = drift['sender_timestamp']
+                    target_info['name'] = contact_name
+                    target_info['public_key'] = public_key
+                    target_info['role'] = resolved.get('role', 'unknown')
+                    target_info['hop_count'] = resolved.get('hop_count')
 
-                            if drift['drift_seconds'] is not None:
-                                if drift['drift_seconds'] <= drift_threshold_seconds:
-                                    target_info['status'] = 'In Sync'
-                                else:
-                                    target_info['status'] = 'Out of Sync'
+                    # Get Clock_Sync_Admin log data if available
+                    if public_key in clock_sync_log:
+                        log = clock_sync_log[public_key]
+                        target_info['last_sync_success'] = log['success']
+                        target_info['last_sync_at'] = log['sent_at']
+                        target_info['last_sync_error'] = log['error_message']
+                    else:
+                        target_info['last_sync_success'] = None
+                        target_info['last_sync_at'] = None
+                        target_info['last_sync_error'] = None
+
+                    # Get drift data if available
+                    if public_key in drift_data:
+                        drift = drift_data[public_key]
+                        target_info['drift_seconds'] = drift['drift_seconds']
+                        target_info['last_seen'] = drift['received_at']
+                        target_info['message_timestamp'] = drift['sender_timestamp']
+
+                        if drift['drift_seconds'] is not None:
+                            if drift['drift_seconds'] <= drift_threshold_seconds:
+                                target_info['status'] = 'In Sync'
                             else:
-                                target_info['status'] = 'No Data'
+                                target_info['status'] = 'Out of Sync'
                         else:
-                            # No recent drift data, but still show last_heard if available
-                            if public_key in last_heard_data:
-                                target_info['last_seen'] = last_heard_data[public_key]
-                            target_info['status'] = 'Unknown'
+                            target_info['status'] = 'No Data'
+                    else:
+                        # No recent drift data, but still show last_heard if available
+                        if public_key in last_heard_data:
+                            target_info['last_seen'] = last_heard_data[public_key]
+                        target_info['status'] = 'Unknown'
 
-                    targets_status.append(target_info)
-            else:
-                # Bot not available, just return targets with unknown status
-                for target_identifier in targets:
-                    targets_status.append({
-                        'identifier': target_identifier,
-                        'name': target_identifier,
-                        'public_key': None,
-                        'role': None,
-                        'hop_count': None,
-                        'drift_seconds': None,
-                        'message_timestamp': None,
-                        'last_seen': None,
-                        'status': 'Unknown',
-                        'last_sync_success': None,
-                        'last_sync_at': None,
-                        'last_sync_error': None
-                    })
+                targets_status.append(target_info)
 
             return {
                 'enabled': enabled,

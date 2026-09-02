@@ -1458,3 +1458,26 @@ class TestGetClockSyncTargetsStatus:
         assert 80 <= rep["drift_seconds"] <= 100
         assert rep["status"] == "In Sync"
 
+    def test_db_only_resolution_without_meshcore(self, tmp_path):
+        """When self.bot is None (standalone web viewer process), targets must
+        still be resolved and drift data populated from the database alone."""
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        pubkey = "bbbb00000000000000000000000000000000000000000000000000000000000002"
+        viewer, db_path = self._make_viewer_with_target(tmp_path, pubkey)
+        self._setup_db(db_path, now_epoch, now_sql, "Standalone-RPT", pubkey, 120)
+
+        # Simulate standalone web viewer: no bot / no meshcore
+        viewer.bot = None
+
+        result = viewer._get_clock_sync_targets_status()
+
+        targets = result.get("targets", [])
+        assert len(targets) == 1
+        rep = targets[0]
+        assert rep["name"] == "Standalone-RPT"
+        assert rep["public_key"] == pubkey
+        assert rep["drift_seconds"] is not None
+        assert 110 <= rep["drift_seconds"] <= 130
+        assert rep["status"] == "In Sync"
+
