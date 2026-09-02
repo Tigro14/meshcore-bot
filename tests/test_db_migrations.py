@@ -12,6 +12,7 @@ from modules.db_migrations import (
     _column_exists,
     _m0017_feed_queue_item_uniqueness,
     _m0020_mesh_connections_last_seen_index,
+    _table_exists,
 )
 
 
@@ -500,3 +501,68 @@ class TestObservedPathsZeroHopSignal:
             "SELECT COUNT(*) FROM schema_version WHERE version = 23"
         ).fetchone()[0]
         assert applied == 1
+
+
+class TestBbsAndClockSyncAdminTablesReinstated:
+    """bbs_messages/clock_sync_admin_log were this fork's own migrations 13
+    and 14 before #28's upstream rebase reused those version numbers for
+    observed_paths' covering indexes. Re-added as 24/25 — see the docstrings
+    on _m0024_bbs_messages_table/_m0025_clock_sync_admin_log.
+    """
+
+    def test_fresh_database_gets_both_tables(self, runner, conn):
+        runner.run()
+        cursor = conn.cursor()
+        assert _table_exists(cursor, "bbs_messages") is True
+        assert _table_exists(cursor, "clock_sync_admin_log") is True
+        for column in (
+            "sender_id",
+            "sender_name",
+            "recipient_name",
+            "message",
+            "sent_at",
+            "read_at",
+        ):
+            assert _column_exists(cursor, "bbs_messages", column) is True
+        for column in (
+            "public_key",
+            "target_name",
+            "success",
+            "error_message",
+            "sent_at",
+        ):
+            assert _column_exists(cursor, "clock_sync_admin_log", column) is True
+
+    def test_database_with_legacy_pre_28_version_13_14_still_gets_the_tables(
+        self, conn, logger
+    ):
+        """Regression test for the actual collision: a database that ran
+        this fork's migrations *before* #28 already has 13/14 recorded
+        against the old (bbs_messages/clock_sync_admin_log) content.
+        `_validate_versions` only checks that applied version numbers are
+        known, not that their recorded content matches current code, so
+        this case must be simulated explicitly rather than caught by
+        `test_fresh_database_gets_both_tables` above.
+        """
+        conn.execute(
+            """
+            CREATE TABLE schema_version (
+                version     INTEGER NOT NULL,
+                description TEXT,
+                applied_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+            [(13, "bbs_messages table"), (14, "clock_sync_admin_log table")],
+        )
+        conn.commit()
+        MigrationRunner(conn, logger).run()
+        cursor = conn.cursor()
+        assert _table_exists(cursor, "bbs_messages") is True
+        assert _table_exists(cursor, "clock_sync_admin_log") is True
+        applied = {
+            row[0] for row in conn.execute("SELECT version FROM schema_version")
+        }
+        assert {24, 25} <= applied
