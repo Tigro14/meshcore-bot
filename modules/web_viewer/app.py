@@ -356,6 +356,10 @@ class BotDataViewer:
         self._multibyte_graph_cache_failure: tuple[str, str] | None = None
         self._multibyte_graph_cache_retry_seconds = 5.0
 
+        # Setup logging after config is loaded so file logging can follow the
+        # configured [Logging] log_file (which may live on a writable path).
+        self._setup_logging()
+
         # Use [Bot] db_path when [Web_Viewer] db_path is unset
         bot_db = self.config.get('Bot', 'db_path', fallback='meshcore_bot.db')
         if (self.config.has_section('Web_Viewer') and self.config.has_option('Web_Viewer', 'db_path')
