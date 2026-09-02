@@ -801,6 +801,30 @@ def _m0023_observed_paths_zero_hop_signal(cursor: sqlite3.Cursor) -> None:
     _add_column(cursor, "observed_paths", "rssi", "REAL")
 
 
+def _m0024_clock_sync_admin_log_table(cursor: sqlite3.Cursor) -> None:
+    """Create the clock_sync_admin_log table.
+
+    Records each Clock_Sync_Admin DM send attempt. It is written by the
+    scheduler (_log_clock_sync_admin_attempt) and read by the web viewer
+    (_get_clock_sync_targets_status) to show last sync status per target.
+    """
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS clock_sync_admin_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            public_key TEXT NOT NULL,
+            target_name TEXT,
+            success INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT,
+            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_clock_sync_admin_log_public_key ON clock_sync_admin_log(public_key)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -831,6 +855,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (21, "daily_rollup: per-payload-type multibyte split", _m0021_daily_rollup_packet_type_encoding),
     (22, "neighbor discovery tables", _m0022_neighbor_tables),
     (23, "observed_paths: snr/rssi for zero-hop adverts", _m0023_observed_paths_zero_hop_signal),
+    (24, "clock_sync_admin_log table", _m0024_clock_sync_admin_log_table),
 ]
 
 

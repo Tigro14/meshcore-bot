@@ -8258,6 +8258,7 @@ class BotDataViewer:
                 # Get clock drift data from database
                 drift_data = {}
                 last_heard_data = {}
+                db_contacts = {}
                 conn = None
                 try:
                     conn = self._get_db_connection()
@@ -8318,6 +8319,25 @@ class BotDataViewer:
                     for row in cursor.fetchall():
                         last_heard_data[row[0]] = row[1]  # public_key -> last_heard timestamp
 
+                    # Build a DB-backed contact lookup (name/role/hop_count) as a fallback
+                    # when a target is not present in the radio's live contact table.
+                    cursor.execute(
+                        """
+                        SELECT public_key, name, role, hop_count
+                        FROM complete_contact_tracking
+                        WHERE public_key IS NOT NULL AND public_key != ''
+                        """
+                    )
+                    for row in cursor.fetchall():
+                        public_key = (row[0] or "").strip()
+                        if not public_key:
+                            continue
+                        db_contacts[public_key] = {
+                            'name': (row[1] or "").strip(),
+                            'role': row[2],
+                            'hop_count': row[3],
+                        }
+
                     # Get latest Clock_Sync_Admin log entries for each public key
                     cursor.execute(
                         """
@@ -8377,18 +8397,40 @@ class BotDataViewer:
                                     contact = contact_data
                                     break
 
-                    if contact:
-                        public_key = (contact.get('public_key', '') or '').strip()
+                    # Fallback: resolve from the DB contact tracking table when the
+                    # target is absent from the radio's live contact table.
+                    db_contact = None
+                    if not contact:
+                        db_contact = db_contacts.get(target_identifier)
+                        if not db_contact:
+                            for db_key, db_data in db_contacts.items():
+                                if db_key.startswith(target_identifier):
+                                    db_contact = db_data
+                                    break
+                        if db_contact:
+                            db_contact = dict(db_contact)
+                            db_contact['public_key'] = (
+                                target_identifier if target_identifier in db_contacts
+                                else next(
+                                    (k for k in db_contacts if k.startswith(target_identifier)),
+                                    None,
+                                )
+                            )
+
+                    resolved = contact or db_contact
+
+                    if resolved:
+                        public_key = (resolved.get('public_key', '') or '').strip()
                         contact_name = (
-                            (contact.get('name', '') or '').strip()
-                            or (contact.get('adv_name', '') or '').strip()
+                            (resolved.get('name', '') or '').strip()
+                            or (resolved.get('adv_name', '') or '').strip()
                             or target_identifier
                         )
 
                         target_info['name'] = contact_name
                         target_info['public_key'] = public_key
-                        target_info['role'] = contact.get('role', 'unknown')
-                        target_info['hop_count'] = contact.get('hop_count')
+                        target_info['role'] = resolved.get('role', 'unknown')
+                        target_info['hop_count'] = resolved.get('hop_count')
 
                         # Get Clock_Sync_Admin log data if available
                         if public_key in clock_sync_log:

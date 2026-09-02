@@ -1436,3 +1436,25 @@ class TestGetClockSyncTargetsStatus:
 
         result = viewer._get_clock_sync_targets_status()
         assert result["targets"][0]["status"] == "In Sync"
+
+    def test_db_fallback_resolves_pubkey_target(self, tmp_path):
+        """A target configured as a pubkey that is absent from meshcore.contacts
+        must still be resolved via the DB contact tracking table."""
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        pubkey = "aaaa00000000000000000000000000000000000000000000000000000000000001"
+        # Target is the raw pubkey; meshcore.contacts does not contain it.
+        viewer, db_path = self._make_viewer_with_target(tmp_path, pubkey)
+        self._setup_db(db_path, now_epoch, now_sql, "DB-Repeater", pubkey, 90)
+
+        result = viewer._get_clock_sync_targets_status()
+
+        targets = result.get("targets", [])
+        assert len(targets) == 1
+        rep = targets[0]
+        assert rep["name"] == "DB-Repeater"
+        assert rep["public_key"] == pubkey
+        assert rep["drift_seconds"] is not None
+        assert 80 <= rep["drift_seconds"] <= 100
+        assert rep["status"] == "In Sync"
+
