@@ -801,6 +801,71 @@ def _m0023_observed_paths_zero_hop_signal(cursor: sqlite3.Cursor) -> None:
     _add_column(cursor, "observed_paths", "rssi", "REAL")
 
 
+def _m0024_bbs_messages_table(cursor: sqlite3.Cursor) -> None:
+    """Create bbs_messages table for per-user store-and-forward BBS service.
+
+    Was previously migration 13 on this fork before the upstream rebase in
+    #28 reused that version number for a different, upstream-only migration
+    (observed_paths' advert covering index). Any database that already has
+    version 13 recorded (this fork's own history, pre-#28) silently never
+    got bbs_messages at all — `_validate_versions` only checks that applied
+    version numbers are *known*, not that their content matches, so nothing
+    ever surfaced the mismatch. Re-added here under an unused version number
+    instead of reusing 13, so it actually runs everywhere: fresh installs,
+    and any database that has this fork's pre-#28 version 13 applied.
+    """
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bbs_messages (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_id      TEXT NOT NULL,
+            sender_name    TEXT,
+            recipient_name TEXT NOT NULL,
+            message        TEXT NOT NULL,
+            sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            read_at        TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bbs_recipient "
+        "ON bbs_messages(recipient_name, read_at)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bbs_sent_at ON bbs_messages(sent_at)"
+    )
+
+
+def _m0025_clock_sync_admin_log(cursor: sqlite3.Cursor) -> None:
+    """Create clock_sync_admin_log table for tracking sync job success.
+
+    Was previously migration 14 on this fork — same collision as
+    _m0024_bbs_messages_table above (upstream's #28 rebase reused version
+    14 for observed_paths' multibyte covering index instead). Re-added
+    under an unused version number for the same reason.
+    """
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS clock_sync_admin_log (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            public_key     TEXT NOT NULL,
+            target_name    TEXT NOT NULL,
+            success        BOOLEAN NOT NULL,
+            error_message  TEXT,
+            sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_clock_sync_admin_log_pubkey "
+        "ON clock_sync_admin_log(public_key, sent_at DESC)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_clock_sync_admin_log_sent_at "
+        "ON clock_sync_admin_log(sent_at)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -831,6 +896,8 @@ MIGRATIONS: list[MigrationEntry] = [
     (21, "daily_rollup: per-payload-type multibyte split", _m0021_daily_rollup_packet_type_encoding),
     (22, "neighbor discovery tables", _m0022_neighbor_tables),
     (23, "observed_paths: snr/rssi for zero-hop adverts", _m0023_observed_paths_zero_hop_signal),
+    (24, "bbs_messages table", _m0024_bbs_messages_table),
+    (25, "clock_sync_admin_log table", _m0025_clock_sync_admin_log),
 ]
 
 
