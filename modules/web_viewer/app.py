@@ -131,9 +131,6 @@ class BotDataViewer:
     }
 
     def __init__(self, db_path="meshcore_bot.db", repeater_db_path=None, config_path="config.ini"):
-        # Setup comprehensive logging
-        self._setup_logging()
-
         # Set bot root directory (project root) for path validation
         # This is the directory containing the modules folder
         self.bot_root = Path(os.path.join(os.path.dirname(__file__), '..', '..')).resolve()
@@ -189,6 +186,10 @@ class BotDataViewer:
         # elsewhere (e.g. a separate deployment directory), resulting in a blank realtime monitor
         # because the web viewer and bot opened different database files.
         self._config_base = Path(config_path).parent.resolve() if os.path.exists(config_path) else self.bot_root
+
+        # Setup logging after config is loaded so file logging can follow the
+        # configured [Logging] log_file (which may live on a writable path).
+        self._setup_logging()
 
         # Use [Bot] db_path when [Web_Viewer] db_path is unset
         bot_db = self.config.get('Bot', 'db_path', fallback='meshcore_bot.db')
@@ -253,11 +254,15 @@ class BotDataViewer:
         self.logger.info("BotDataViewer initialized with Flask-SocketIO 5.x best practices")
 
     def _setup_logging(self):
-        """Setup comprehensive logging with rotation"""
-        from logging.handlers import RotatingFileHandler
+        """Setup comprehensive logging with rotation.
 
-        # Create logs directory if it doesn't exist
-        os.makedirs('logs', exist_ok=True)
+        File logging follows the configured [Logging] log_file, exactly like the
+        main bot: the viewer's log is written beside that file.  When log_file is
+        empty/unset, logging is console-only (no file is created).  This avoids
+        writing into the (often read-only) install tree under systemd's
+        ProtectSystem=strict sandbox.
+        """
+        from logging.handlers import RotatingFileHandler
 
         # Get or create logger (don't use basicConfig as it may conflict with existing logging)
         self.logger = logging.getLogger('modern_web_viewer')
@@ -266,17 +271,31 @@ class BotDataViewer:
         # Remove existing handlers to avoid duplicates
         self.logger.handlers.clear()
 
-        # Create rotating file handler (max 5MB per file, keep 3 backups)
-        file_handler = RotatingFileHandler(
-            'logs/web_viewer_modern.log',
-            maxBytes=5 * 1024 * 1024,  # 5 MB
-            backupCount=3,
-            encoding='utf-8'
-        )
-        file_handler.setLevel(logging.DEBUG)
-        file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(file_formatter)
-        self.logger.addHandler(file_handler)
+        # Resolve the configured log_file to determine the writable log directory.
+        log_file = ''
+        if getattr(self, 'config', None) is not None and self.config.has_section('Logging'):
+            log_file = self.config.get('Logging', 'log_file', fallback='').strip()
+        if log_file:
+            resolved_log = resolve_path(log_file, getattr(self, '_config_base', '.'))
+            log_dir = Path(resolved_log).parent
+            log_dir.mkdir(parents=True, exist_ok=True)
+            viewer_log = log_dir / 'web_viewer.log'
+
+            # Create rotating file handler (max 5MB per file, keep 3 backups)
+            file_handler = RotatingFileHandler(
+                str(viewer_log),
+                maxBytes=5 * 1024 * 1024,  # 5 MB
+                backupCount=3,
+                encoding='utf-8'
+            )
+            file_handler.setLevel(logging.DEBUG)
+            file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(file_formatter)
+            self.logger.addHandler(file_handler)
+            self.logger.info("Web viewer file logging initialized: %s", viewer_log)
+        else:
+            self.logger.setLevel(logging.DEBUG)
+            self.logger.info("No [Logging] log_file configured; web viewer logging is console-only")
 
         # Create console handler
         console_handler = logging.StreamHandler()
@@ -287,8 +306,6 @@ class BotDataViewer:
 
         # Prevent propagation to root logger to avoid duplicate messages
         self.logger.propagate = False
-
-        self.logger.info("Web viewer logging initialized with rotation (5MB max, 3 backups)")
 
     def _load_config(self, config_path):
         """Load configuration from file"""
