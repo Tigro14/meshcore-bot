@@ -47,6 +47,7 @@ _RADIO_OPERATION_TYPES = (
     'radio_params_write',
     'radio_advert',
     'send_announcement',
+    'clock_sync_admin_run_now',
 )
 _CONFIG_OPERATION_TYPES = ('config_reload',)
 
@@ -403,37 +404,42 @@ class MessageScheduler:
         """APScheduler sync wrapper for the async Clock_Sync_Admin DM run."""
         self._run_async_on_main_loop(self._run_clock_sync_admin_job_async(), timeout=300.0)
 
-    async def _run_clock_sync_admin_job_async(self) -> None:
-        """Resolve targets and send configured clock-sync admin payload via DM."""
+    async def _run_clock_sync_admin_job_async(self) -> dict[str, Any]:
+        """Resolve targets and send configured clock-sync admin payload via DM.
+
+        Returns a summary dict — {'success': False, 'error': ...} if the run was
+        skipped before sending anything, otherwise {'success': True, 'sent': N,
+        'failed': N, 'unknown': N, 'duplicates_skipped': N}.
+        """
         if not self.bot.config.getboolean("Clock_Sync_Admin", "enabled", fallback=False):
             self.logger.debug("Clock_Sync_Admin run skipped — disabled")
-            return
+            return {'success': False, 'error': 'Clock_Sync_Admin is disabled'}
         if not self.bot.connected or not getattr(self.bot, "meshcore", None):
             self.logger.warning("Clock_Sync_Admin run skipped — bot/radio not connected")
-            return
+            return {'success': False, 'error': 'Bot/radio not connected'}
         if self.bot.is_radio_zombie:
             self.logger.warning("Clock_Sync_Admin run skipped — radio in zombie state")
-            return
+            return {'success': False, 'error': 'Radio in zombie state'}
         if self.bot.is_radio_offline:
             self.logger.warning("Clock_Sync_Admin run skipped — radio offline")
-            return
+            return {'success': False, 'error': 'Radio offline'}
 
         command_manager = getattr(self.bot, "command_manager", None)
         if command_manager is None or not hasattr(command_manager, "send_dm"):
             self.logger.warning("Clock_Sync_Admin run skipped — DM pipeline unavailable")
-            return
+            return {'success': False, 'error': 'DM pipeline unavailable'}
 
         targets = self._parse_clock_sync_admin_targets(
             self.bot.config.get("Clock_Sync_Admin", "targets", fallback="")
         )
         if not targets:
             self.logger.warning("Clock_Sync_Admin run skipped — no targets configured")
-            return
+            return {'success': False, 'error': 'No targets configured'}
 
         payload = self._get_clock_sync_admin_payload()
         if not payload:
             self.logger.warning("Clock_Sync_Admin run skipped — command_payload is empty")
-            return
+            return {'success': False, 'error': 'command_payload is empty'}
 
         self.logger.debug(
             "Clock_Sync_Admin run starting: targets=%d payload=%s",
@@ -552,6 +558,13 @@ class MessageScheduler:
             unknown_count,
             duplicate_count,
         )
+        return {
+            'success': True,
+            'sent': sent_count,
+            'failed': failed_count,
+            'unknown': unknown_count,
+            'duplicates_skipped': duplicate_count,
+        }
 
     def _setup_device_mode_scheduler_jobs(self) -> None:
         """One-shot jobs for auto_manage_contacts=device: firmware autoadd + favourite hygiene."""
@@ -1801,6 +1814,9 @@ class MessageScheduler:
                 elif op_type == 'radio_params_write':
                     payload = json.loads(op['payload_data'] or '{}')
                     success, result_payload = await self._radio_params_write_op(payload)
+                elif op_type == 'clock_sync_admin_run_now':
+                    result_payload = await self._run_clock_sync_admin_job_async()
+                    success = bool(result_payload.get('success'))
                 elif op_type == 'send_announcement':
                     payload = json.loads(op['payload_data'] or '{}')
                     success, result_payload = await self._send_announcement_op(payload)

@@ -130,6 +130,7 @@
     ("POST", "/api/admin/radio-offline-clear","Clear radio-offline flag and resume sends"),
     ("GET",  "/api/config/radio-debug",      "Get radio debug logging state"),
     ("POST", "/api/config/radio-debug",      "Enable or disable radio debug logging"),
+    ("POST", "/api/admin/clock-sync-admin/run-now", "Trigger an immediate Clock_Sync_Admin DM run"),
   ]),
   ("Maintenance", "fa-tools", [
     ("GET",  "/api/maintenance/status",   "Last maintenance run time and outcomes"),

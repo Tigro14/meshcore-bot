@@ -69,9 +69,15 @@
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-broadcast-tower"></i> Clock_Sync_Admin Targets</span>
-                <span id="clock-sync-enabled-badge" class="badge bg-secondary">Loading...</span>
+                <div class="d-flex align-items-center gap-2">
+                    <button id="clock-sync-run-now-btn" class="btn btn-sm btn-outline-primary" type="button">
+                        <i class="fas fa-play me-1"></i>Run Now
+                    </button>
+                    <span id="clock-sync-enabled-badge" class="badge bg-secondary">Loading...</span>
+                </div>
             </div>
             <div class="card-body">
+                <div id="clock-sync-run-now-alert" class="alert d-none" role="alert"></div>
                 <div id="clock-sync-targets-container">
                     <div class="text-center text-muted">
                         <i class="fas fa-spinner fa-spin"></i> Loading targets...
@@ -144,6 +150,60 @@
 
             // Refresh data every 10 seconds
             this.refreshInterval = setInterval(() => this.loadData(), 10000);
+
+            const runNowBtn = document.getElementById('clock-sync-run-now-btn');
+            if (runNowBtn) runNowBtn.addEventListener('click', () => this.runClockSyncNow());
+        }
+
+        showRunNowAlert(message, kind) {
+            const el = document.getElementById('clock-sync-run-now-alert');
+            if (!el) return;
+            el.className = `alert alert-${kind}`;
+            el.textContent = message;
+        }
+
+        async runClockSyncNow() {
+            const btn = document.getElementById('clock-sync-run-now-btn');
+            const originalHtml = '<i class="fas fa-play me-1"></i>Run Now';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Queuing…';
+            }
+            try {
+                const resp = await fetch('/api/admin/clock-sync-admin/run-now', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.success || !data.operation_id) throw new Error(data.error || 'Run failed');
+
+                const status = await MeshCoreChannelOps.pollChannelOperation(data.operation_id, {
+                    button: btn,
+                    originalButtonText: originalHtml,
+                    setButtonHtml: (html) => { if (btn) btn.innerHTML = html; },
+                    onFailed: (message) => this.showRunNowAlert('Run failed: ' + message, 'danger'),
+                });
+
+                if (status === 'completed') {
+                    const resultResp = await fetch(`/api/channel-operations/${data.operation_id}`);
+                    const result = await resultResp.json();
+                    const r = result.result_data || {};
+                    this.showRunNowAlert(
+                        `Clock_Sync_Admin run complete — sent: ${r.sent ?? 0}, failed: ${r.failed ?? 0}, ` +
+                        `unknown: ${r.unknown ?? 0}, duplicates skipped: ${r.duplicates_skipped ?? 0}.`,
+                        (r.failed ?? 0) > 0 ? 'warning' : 'success'
+                    );
+                } else if (status === 'timeout') {
+                    this.showRunNowAlert('Run is taking longer than expected — check Logs for the outcome.', 'warning');
+                }
+            } catch (err) {
+                this.showRunNowAlert('Run failed: ' + err.message, 'danger');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                }
+            }
         }
 
         cleanup() {

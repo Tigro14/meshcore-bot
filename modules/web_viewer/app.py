@@ -2102,6 +2102,29 @@ class BotDataViewer:
                 self.logger.error(f"Error in backup_now: {e}", exc_info=True)
                 return jsonify({'success': False, 'error': str(e)}), 500
 
+        @self.app.route('/api/admin/clock-sync-admin/run-now', methods=['POST'])
+        def api_admin_clock_sync_admin_run_now():
+            """Queue an immediate Clock_Sync_Admin DM run outside the normal schedule.
+
+            The web viewer runs in a separate process from the bot (no live access to
+            its scheduler), so this goes through the same channel_operations queue the
+            radio/firmware/channel actions use. Poll /api/channel-operations/<id>.
+            """
+            try:
+                if not self.config.getboolean('Clock_Sync_Admin', 'enabled', fallback=False):
+                    return jsonify({'success': False, 'error': 'Clock_Sync_Admin is disabled in config.ini'}), 400
+                with self.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO channel_operations (operation_type, status) VALUES ('clock_sync_admin_run_now', 'pending')"
+                    )
+                    conn.commit()
+                    op_id = cursor.lastrowid
+                return jsonify({'success': True, 'operation_id': op_id})
+            except Exception as e:
+                self.logger.error(f"Error queuing clock_sync_admin run-now: {e}", exc_info=True)
+                return jsonify({'success': False, 'error': str(e)}), 500
+
         @self.app.route('/api/maintenance/restore', methods=['POST'])
         def api_maintenance_restore():
             """Restore DB from a backup file.
