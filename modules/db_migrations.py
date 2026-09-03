@@ -801,12 +801,6 @@ def _m0023_observed_paths_zero_hop_signal(cursor: sqlite3.Cursor) -> None:
     _add_column(cursor, "observed_paths", "rssi", "REAL")
 
 
-def _m0024_clock_sync_admin_log_table(cursor: sqlite3.Cursor) -> None:
-    """Create the clock_sync_admin_log table.
-
-    Records each Clock_Sync_Admin DM send attempt. It is written by the
-    scheduler (_log_clock_sync_admin_attempt) and read by the web viewer
-    (_get_clock_sync_targets_status) to show last sync status per target.
 def _m0024_bbs_messages_table(cursor: sqlite3.Cursor) -> None:
     """Create bbs_messages table for per-user store-and-forward BBS service.
 
