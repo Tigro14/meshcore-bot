@@ -9,7 +9,7 @@
     <link rel="manifest" href="{{ url_for('static', filename='ico/site.webmanifest') }}">
     
     <!-- Apply theme immediately to prevent flash -->
-    <script>
+    <script nonce="{{ g.csp_nonce }}">
         (function() {
             const storedTheme = localStorage.getItem('theme');
             const systemPreference = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -488,8 +488,7 @@
                 </div>
                 <div class="d-flex gap-2 align-items-center flex-shrink-0">
                     <span class="small opacity-75">After power cycling:</span>
-                    <button id="zombie-recover-btn" class="btn btn-warning btn-sm fw-semibold"
-                            onclick="zombieRecover()" type="button">
+                    <button id="zombie-recover-btn" class="btn btn-warning btn-sm fw-semibold" type="button">
                         <i class="fas fa-power-off me-1"></i>Restart Bot Processing
                     </button>
                 </div>
@@ -511,8 +510,7 @@
                 </div>
                 <div class="d-flex gap-2 align-items-center flex-shrink-0">
                     <span class="small opacity-75">Once radio is fixed:</span>
-                    <button id="offline-clear-btn" class="btn btn-dark btn-sm fw-semibold"
-                            onclick="radioOfflineClear()" type="button">
+                    <button id="offline-clear-btn" class="btn btn-dark btn-sm fw-semibold" type="button">
                         <i class="fas fa-check me-1"></i>Clear Offline Flag
                     </button>
                 </div>
@@ -520,7 +518,7 @@
         </div>
     </div>
 
-    <script>
+    <script nonce="{{ g.csp_nonce }}">
     // Global 401 interceptor: redirect to login when session expires mid-page.
     // Wraps window.fetch so all AJAX calls in every template are covered.
     (function() {
@@ -587,6 +585,14 @@
             alert('Network error \u2014 could not reach the server.');
         });
     }
+
+    // Banner actions wired via addEventListener (no inline handlers under the nonce CSP)
+    (function() {
+        var zombieBtn = document.getElementById('zombie-recover-btn');
+        if (zombieBtn) zombieBtn.addEventListener('click', zombieRecover);
+        var offlineBtn = document.getElementById('offline-clear-btn');
+        if (offlineBtn) offlineBtn.addEventListener('click', radioOfflineClear);
+    })();
 
     // Live banner polling — updates all banners every 10s without a page reload
     (function() {
@@ -662,7 +668,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/js-sha256/0.11.0/sha256.min.js"></script>
 
     <!-- Base JavaScript -->
-    <script>
+    <script nonce="{{ g.csp_nonce }}">
         // Global connection management
         class ModernConnectionManager {
             constructor() {
@@ -762,16 +768,23 @@
             showNotification(message, type = 'info') {
                 // Create notification element
                 const notification = document.createElement('div');
-                notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+                const safeType = ['info', 'success', 'warning', 'danger'].includes(type)
+                    ? type
+                    : 'info';
+                notification.className = `alert alert-${safeType} alert-dismissible fade show position-fixed`;
                 notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 300px;';
-                
-                notification.innerHTML = `
-                    ${message}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                `;
-                
+
+                const notificationText = document.createElement('span');
+                notificationText.textContent = String(message ?? '');
+                const closeButton = document.createElement('button');
+                closeButton.type = 'button';
+                closeButton.className = 'btn-close';
+                closeButton.setAttribute('data-bs-dismiss', 'alert');
+                closeButton.setAttribute('aria-label', 'Close');
+                notification.append(notificationText, closeButton);
+
                 document.body.appendChild(notification);
-                
+
                 // Auto-remove after 3 seconds
                 setTimeout(() => {
                     if (notification.parentNode) {
