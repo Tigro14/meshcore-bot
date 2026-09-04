@@ -132,7 +132,7 @@
                 </div>
             </div>
 
-            <!-- Node Settings -->
+            <!-- Node Settings (companion) -->
             <div class="card mb-4" id="node-settings-card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="fas fa-microchip me-2"></i>Node Settings</h5>
@@ -143,317 +143,80 @@
                 </div>
                 <div class="card-body">
                     <div id="nodeSettingsAlert" style="display:none"></div>
-
-                    <!-- Response Path Hashing -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
-                        Response Path Hashing
-                    </h6>
-                    <div class="row g-3 align-items-end">
-                        <div class="col-md-3">
-                            <label class="form-label" for="nodePathHashMode">Path Hash Size</label>
-                            <select class="form-select" id="nodePathHashMode">
-                                <option value="">—</option>
-                                <option value="0">1 byte per hop (mode 0)</option>
-                                <option value="1">2 bytes per hop (mode 1)</option>
-                                <option value="2">3 bytes per hop (mode 2)</option>
-                            </select>
+                    <form id="nodeSettingsForm">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label" for="nodeName">Node Name</label>
+                                <input type="text" class="form-control" id="nodeName" name="name"
+                                    placeholder="Friendly node name">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="nodePathHashMode">Path Hash Mode</label>
+                                <select class="form-select" id="nodePathHashMode" name="path_hash_mode">
+                                    <option value="">—</option>
+                                    <option value="off">Off</option>
+                                    <option value="crc8">CRC-8</option>
+                                    <option value="crc16">CRC-16</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="nodeTelemBase">Telemetry Interval (min)</label>
+                                <input type="number" class="form-control" id="nodeTelemBase" name="telem_base"
+                                    min="1" placeholder="e.g. 15">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="nodeRxDelay">RX Delay (ms)</label>
+                                <input type="number" class="form-control" id="nodeRxDelay" name="rx_delay"
+                                    min="0" placeholder="e.g. 100">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="nodeNewContactsMode">New Contacts Mode</label>
+                                <input type="text" class="form-control" id="nodeNewContactsMode"
+                                    value="{{ 'manual' if not auto_manage_contacts else 'auto' }}" readonly>
+                                <small class="form-text text-muted">
+                                    Owned by <code>[Bot] auto_manage_contacts</code> in config.
+                                </small>
+                            </div>
                         </div>
-                        <div class="col-md-auto">
-                            <button type="button" class="btn btn-warning" id="savePathHashBtn">
-                                <span class="spinner-border spinner-border-sm me-1" id="savePathHashSpinner" style="display:none" role="status"></span>
-                                <i class="fas fa-upload me-1"></i>Write Path Settings
+                        <div class="mt-3 d-flex gap-2">
+                            <button type="button" class="btn btn-primary" id="writeNodeSettingsBtn">
+                                <span class="spinner-border spinner-border-sm me-1" id="writeNodeSpinner" style="display:none" role="status"></span>
+                                <i class="fas fa-upload me-1"></i>Write to Device
+                            </button>
+                            <button type="button" class="btn btn-warning" id="sendAdvertFloodBtn">
+                                <i class="fas fa-broadcast-tower me-1"></i>Send Advert Flood
                             </button>
                         </div>
-                    </div>
-                    <small class="form-text text-muted d-block mt-2">
-                        Hash bytes per hop for outgoing (response) paths — mode 0 is the legacy
-                        default; larger hashes avoid relay collisions but need firmware 1.14+
-                        mesh-wide.
-                    </small>
-
-                    <hr class="my-4">
-
-                    <!-- Default Region Scope (device) -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
-                        Default Region Scope
-                    </h6>
-                    <div class="row g-3 align-items-end">
-                        <div class="col-md-4">
-                            <label class="form-label" for="nodeDefaultScope">Region</label>
-                            <input type="text" class="form-control" id="nodeDefaultScope"
-                                   maxlength="30" placeholder="blank = unscoped" autocomplete="off">
-                            <small class="form-text text-muted" id="nodeDefaultScopeKey"></small>
-                        </div>
-                        <div class="col-md-auto">
-                            <button type="button" class="btn btn-warning" id="saveDefaultScopeBtn">
-                                <span class="spinner-border spinner-border-sm me-1" id="saveDefaultScopeSpinner"
-                                      style="display:none" role="status"></span>
-                                <i class="fas fa-upload me-1"></i>Write Default Scope
-                            </button>
-                        </div>
-                    </div>
-                    <small class="form-text text-muted d-block mt-2">
-                        The radio's own default region, stored in firmware and used for any
-                        send the bot does not scope itself. Max 30 ASCII characters including
-                        the <code>#</code>, which is added if you omit it. Blank clears it, and
-                        the radio then floods unscoped.
-                    </small>
-                    <small class="form-text text-muted d-block mt-2">
-                        <i class="fas fa-info-circle me-1"></i>
-                        Once the bot sends a scoped message it leaves the radio in forced-unscoped
-                        mode, so this default stops applying until the bot scopes another send.
-                        If the bot should post under a region, set it in
-                        <a href="#region-scopes-card">Region Scopes</a> below rather than relying
-                        on this.
-                    </small>
-                    <div class="alert alert-warning py-2 px-3 small mt-2" id="nodeDefaultScopeNote"
-                         style="display:none"></div>
-
-                    <hr class="my-4">
-
-                    <!-- Identity & Adverts -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
-                        Identity &amp; Adverts
-                    </h6>
-                    <div class="row g-3">
-                        <div class="col-md-3">
-                            <label class="form-label" for="nodeName">Node Name</label>
-                            <input type="text" class="form-control" id="nodeName" maxlength="32"
-                                placeholder="e.g. MyBot"{% if device_name_managed %} disabled{% endif %}>
-                            {% if device_name_managed %}
-                            <small class="form-text text-muted">
-                                Managed by <code>[Bot] bot_name</code> in config.ini —
-                                reapplied at startup.
-                            </small>
-                            {% else %}
-                            <small class="form-text text-muted">Advertised name (max 32 bytes).</small>
-                            {% endif %}
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label" for="nodeLat">Latitude</label>
-                            <input type="number" class="form-control" id="nodeLat" step="0.000001" min="-90" max="90" placeholder="e.g. 47.6">
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label" for="nodeLon">Longitude</label>
-                            <input type="number" class="form-control" id="nodeLon" step="0.000001" min="-180" max="180" placeholder="e.g. -122.3">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label" for="nodeAdvLocPolicy">Advert Location Policy</label>
-                            <select class="form-select" id="nodeAdvLocPolicy">
-                                <option value="">—</option>
-                                <option value="0">Don't include location</option>
-                                <option value="1">Include location</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="mt-3 d-flex gap-2 flex-wrap">
-                        <button type="button" class="btn btn-warning" id="saveIdentityBtn">
-                            <span class="spinner-border spinner-border-sm me-1" id="saveIdentitySpinner" style="display:none" role="status"></span>
-                            <i class="fas fa-upload me-1"></i>Write Identity
-                        </button>
-                        <button type="button" class="btn btn-outline-primary" id="sendAdvertZeroBtn">
-                            <span class="spinner-border spinner-border-sm me-1" id="advertZeroSpinner" style="display:none" role="status"></span>
-                            <i class="fas fa-bullhorn me-1"></i>Send Advert (Zero-Hop)
-                        </button>
-                        <button type="button" class="btn btn-outline-primary" id="sendAdvertFloodBtn">
-                            <span class="spinner-border spinner-border-sm me-1" id="advertFloodSpinner" style="display:none" role="status"></span>
-                            <i class="fas fa-water me-1"></i>Send Flood Advert
-                        </button>
-                    </div>
-
-                    <hr class="my-4">
-
-                    <!-- Mesh Behavior -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
-                        Mesh Behavior
-                    </h6>
-                    <div class="row g-3">
-                        <div class="col-md-3">
-                            <label class="form-label" for="nodeNewContactsMode">New Contacts</label>
-                            <input type="text" class="form-control" id="nodeNewContactsMode" disabled
-                                value="{% if auto_manage_contacts == 'device' %}Device auto-add (firmware slot policy){% elif auto_manage_contacts == 'bot' %}Bot-managed auto-add{% else %}Manual (!repeater commands){% endif %}">
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label" for="nodeMultiAcks">Extra ACKs</label>
-                            <select class="form-select" id="nodeMultiAcks">
-                                <option value="">—</option>
-                                <option value="0">0 (default)</option>
-                                <option value="1">1</option>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label" for="nodeTelemBase">Base Telemetry</label>
-                            <select class="form-select" id="nodeTelemBase">
-                                <option value="">—</option>
-                                <option value="0">Deny</option>
-                                <option value="1">Per-contact flags</option>
-                                <option value="2">Allow all</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label" for="nodeTelemLoc">Location Telemetry</label>
-                            <select class="form-select" id="nodeTelemLoc">
-                                <option value="">—</option>
-                                <option value="0">Deny</option>
-                                <option value="1">Per-contact flags</option>
-                                <option value="2">Allow all</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label" for="nodeTelemEnv">Env. Telemetry</label>
-                            <select class="form-select" id="nodeTelemEnv">
-                                <option value="">—</option>
-                                <option value="0">Deny</option>
-                                <option value="1">Per-contact flags</option>
-                                <option value="2">Allow all</option>
-                            </select>
-                        </div>
-                    </div>
-                    <small class="form-text text-muted d-block mt-2">
-                        New-contact handling is managed by <code>[Bot] auto_manage_contacts</code>
-                        in config.ini. Extra ACKs improve delivery at the cost of airtime.
-                        Telemetry permissions control who may request each reading type.
-                    </small>
-                    <div class="mt-3">
-                        <button type="button" class="btn btn-warning" id="saveMeshBtn">
-                            <span class="spinner-border spinner-border-sm me-1" id="saveMeshSpinner" style="display:none" role="status"></span>
-                            <i class="fas fa-upload me-1"></i>Write Mesh Behavior
-                        </button>
-                    </div>
-
-                    <hr class="my-4">
-
-                    <!-- Advanced Tuning -->
-                    <details>
-                        <summary class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;cursor:pointer;">
-                            Advanced Tuning
-                        </summary>
-                        <div class="row g-3 mt-1 align-items-end">
-                            <div class="col-md-2">
-                                <label class="form-label" for="nodeRxDelay">RX Delay Base (s)</label>
-                                <input type="number" class="form-control" id="nodeRxDelay" step="0.1" min="0" max="20" placeholder="e.g. 0">
-                            </div>
-                            <div class="col-md-2">
-                                <label class="form-label" for="nodeAirtimeFactor">Airtime Factor</label>
-                                <input type="number" class="form-control" id="nodeAirtimeFactor" step="0.1" min="0" max="9" placeholder="e.g. 1">
-                            </div>
-                            <div class="col-md-auto">
-                                <button type="button" class="btn btn-outline-warning" id="applyTuningBtn">
-                                    <span class="spinner-border spinner-border-sm me-1" id="applyTuningSpinner" style="display:none" role="status"></span>
-                                    <i class="fas fa-wrench me-1"></i>Apply Tuning
-                                </button>
-                            </div>
-                        </div>
-                        <small class="form-text text-muted d-block mt-2">
-                            <i class="fas fa-exclamation-triangle text-warning me-1"></i>
-                            Write-only: current values cannot be read back from the device. Both
-                            fields are required and affect relay timing/duty-cycle behavior.
-                        </small>
-                    </details>
+                    </form>
                 </div>
             </div>
 
-            <!-- Region Scopes -->
-            <div class="card mb-4" id="region-scopes-card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="fas fa-map-marked-alt me-2"></i>Region Scopes</h5>
-                    <small class="text-muted" id="regionScopeTarget"></small>
+            <!-- Announcement Section -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-bullhorn me-2"></i>Annonce</h5>
                 </div>
                 <div class="card-body">
-                    <div id="regionScopeAlert" style="display:none"></div>
-
-                    <p class="text-muted small mb-4">
-                        A region code confines a channel message to repeaters holding that
-                        region's key, instead of flooding the whole mesh. These are bot
-                        settings in <code>config.ini</code>, not device settings, so they
-                        are not read from or written to the radio — the radio's own
-                        <a href="#node-settings-card">Default Region Scope</a> is above, and
-                        only covers sends the bot does not scope itself. See the
-                        <a href="/region-warnings">Region Warnings</a> page for how much
-                        unscoped traffic this mesh actually carries.
-                    </p>
-
-                    <div class="alert alert-warning py-2 px-3 small" id="regionScopeLegacy"
-                         style="display:none"></div>
-
-                    <!-- Incoming allowlist -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
-                        Which scopes the bot replies to
-                    </h6>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="radio" name="regionScopeMode"
-                               id="regionScopeModeAll" value="all">
-                        <label class="form-check-label" for="regionScopeModeAll">
-                            Reply whatever the scope
-                            <span class="text-muted">— every message the bot hears on a monitored channel.</span>
-                        </label>
-                    </div>
-                    <div class="form-check mb-3">
-                        <input class="form-check-input" type="radio" name="regionScopeMode"
-                               id="regionScopeModeList" value="list">
-                        <label class="form-check-label" for="regionScopeModeList">
-                            Only these scopes
-                            <span class="text-muted">— reply mirrors the scope it came in on.</span>
-                        </label>
-                    </div>
-                    <div class="ms-4 ps-2 border-start" id="regionScopeListFields">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <label class="form-label" for="regionScopeList">Region scopes</label>
-                                <input type="text" class="form-control" id="regionScopeList"
-                                       placeholder="e.g. #west, #east" autocomplete="off">
-                                <small class="form-text text-muted">
-                                    Comma-separated. The leading <code>#</code> is added if you omit it.
-                                </small>
-                            </div>
-                            <div class="col-md-6 d-flex align-items-center">
-                                <div class="form-check mt-md-4">
-                                    <input class="form-check-input" type="checkbox" id="regionScopeAllowGlobal">
-                                    <label class="form-check-label" for="regionScopeAllowGlobal">
-                                        Also reply to unscoped (global) messages
-                                        <small class="d-block text-muted">
-                                            Adds <code>*</code>. Without it, a sender with no region set
-                                            gets no reply.
-                                        </small>
-                                    </label>
-                                </div>
-                            </div>
+                    <div id="announcementAlert" style="display:none"></div>
+                    <form id="announcementForm">
+                        <div class="mb-3">
+                            <label class="form-label" for="announcementChannel">Canal</label>
+                            <select class="form-select" id="announcementChannel" name="channel" required>
+                                <option value="">Sélectionner un canal...</option>
+                            </select>
+                            <small class="form-text text-muted">Choisissez le canal sur lequel envoyer l'annonce</small>
                         </div>
-                    </div>
-
-                    <hr class="my-4">
-
-                    <!-- Outgoing default -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
-                        Default outgoing scope
-                    </h6>
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <label class="form-label" for="regionScopeOutgoing">Scope</label>
-                            <input type="text" class="form-control" id="regionScopeOutgoing"
-                                   placeholder="blank = global flood" autocomplete="off">
-                            <small class="form-text text-muted">
-                                Used for sends that have no scope of their own — scheduled
-                                messages, feeds, webhooks — and for a reply whose incoming
-                                scope could not be matched. It never overrides a mirrored
-                                reply scope.
-                            </small>
+                        <div class="mb-3">
+                            <label class="form-label" for="announcementMessage">Message</label>
+                            <textarea class="form-control" id="announcementMessage" name="message" rows="3" 
+                                placeholder="Entrez votre message d'annonce..." required maxlength="200"></textarea>
+                            <small class="form-text text-muted">Maximum 200 caractères</small>
                         </div>
-                        <div class="col-md-8">
-                            <div id="regionScopeChannelOverrides" class="small text-muted"></div>
-                        </div>
-                    </div>
-
-                    <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
-                        <button type="button" class="btn btn-warning" id="saveRegionScopesBtn">
-                            <span class="spinner-border spinner-border-sm me-1" id="saveRegionScopesSpinner"
-                                  style="display:none" role="status"></span>
-                            <i class="fas fa-save me-1"></i>Save Region Scopes
+                        <button type="submit" class="btn btn-primary" id="sendAnnouncementBtn">
+                            <span class="spinner-border spinner-border-sm me-1" id="announcementSpinner" style="display:none" role="status"></span>
+                            <i class="fas fa-paper-plane me-1" id="announcementIcon"></i>Envoyer l'annonce
                         </button>
-                        <small id="regionScopeStatus" class="text-muted"></small>
-                    </div>
+                    </form>
                 </div>
             </div>
 
@@ -565,11 +328,7 @@ class RadioManager {
         await this.loadRadioStatus();
         this.setupEventHandlers();
         this.setupRadioParamsHandlers();
-        this.setupNodeSettingsHandlers();
-        this.setupRegionScopeHandlers();
         this.readRadioParams({ silent: true });
-        this.readFirmwareConfig({ silent: true });
-        this.loadRegionScopes();
 
         // Auto-refresh every 30 seconds
         setInterval(() => this.loadChannels(), 30000);
@@ -609,7 +368,7 @@ class RadioManager {
             const feedCounts = data.channel_feed_counts || {};
             let emptyChannels = 0;
             for (const channel of this.channels) {
-                const channelName = channel.name || channel.channel_name || `Channel ${channel.channel_idx ?? channel.index}`;
+                const channelName = channel.name || channel.channel_name || `Channel ${channel.channel_idx || channel.index}`;
                 const feedCount = feedCounts[channelName] || 0;
                 if (feedCount === 0) {
                     emptyChannels++;
@@ -685,16 +444,16 @@ class RadioManager {
     
     renderChannels() {
         const tbody = document.getElementById('channelsTableBody');
-        tbody.replaceChildren();
         
         if (this.channels.length === 0) {
-            const row = document.createElement('tr');
-            const cell = document.createElement('td');
-            cell.colSpan = 6;
-            cell.className = 'text-center';
-            cell.textContent = 'No channels configured';
-            row.appendChild(cell);
-            tbody.appendChild(row);
+            tbody.replaceChildren();
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 6;
+            td.className = 'text-center';
+            td.textContent = 'No channels configured';
+            tr.appendChild(td);
+            tbody.appendChild(tr);
             return;
         }
         
@@ -703,84 +462,73 @@ class RadioManager {
             const feedCounts = stats.channel_feed_counts || {};
             
             tbody.replaceChildren();
-            this.channels.forEach(channel => {
-                const channelIdx = channel.channel_idx ?? channel.index;
-                const channelName = channel.name || channel.channel_name || `Channel ${channelIdx}`;
+            for (const channel of this.channels) {
+                const channelName = channel.name || channel.channel_name || `Channel ${channel.channel_idx || channel.index}`;
                 const feedCount = feedCounts[channelName] || 0;
-
-                const row = document.createElement('tr');
-                row.appendChild(this.makeTextCell(channelIdx));
-                row.appendChild(this.makeTextCell(channelName));
-
+                
+                const tr = document.createElement('tr');
+                
+                const value = channel.channel_idx || channel.index;
+                const idxCell = document.createElement('td');
+                cell = idxCell;
+                cell.textContent = String(value ?? '');
+                tr.appendChild(idxCell);
+                
+                const nameValue = channelName;
+                const nameCell = document.createElement('td');
+                cell = nameCell;
+                cell.textContent = String(nameValue ?? '');
+                tr.appendChild(nameCell);
+                
                 const typeCell = document.createElement('td');
-                typeCell.appendChild(this.makeBadge(
-                    channel.type === 'hashtag' ? 'Hashtag' : 'Custom',
-                    channel.type === 'hashtag' ? 'bg-primary' : 'bg-secondary'
-                ));
-                row.appendChild(typeCell);
-
+                const typeBadge = document.createElement('span');
+                typeBadge.className = channel.type === 'hashtag' ? 'badge bg-primary' : 'badge bg-secondary';
+                typeBadge.textContent = String(channel.type === 'hashtag' ? 'Hashtag' : 'Custom' ?? '');
+                typeCell.appendChild(typeBadge);
+                tr.appendChild(typeCell);
+                
                 const feedCell = document.createElement('td');
                 if (feedCount > 0) {
                     const link = document.createElement('a');
-                    link.href = `/feeds?channel=${encodeURIComponent(String(channelName))}`;
-                    link.textContent = String(feedCount);
+                    link.href = `/feeds?channel=${encodeURIComponent(channelName)}`;
+                    link.textContent = String(feedCount ?? '');
                     feedCell.appendChild(link);
                 } else {
                     feedCell.textContent = '0';
                 }
-                row.appendChild(feedCell);
-
+                tr.appendChild(feedCell);
+                
                 const statusCell = document.createElement('td');
-                statusCell.appendChild(this.makeBadge('Active', 'bg-success'));
-                row.appendChild(statusCell);
-
-                const actionCell = document.createElement('td');
-                const viewButton = this.makeIconButton('btn-info', 'fa-eye', 'View Details');
-                viewButton.addEventListener('click', () => this.viewChannel(channelIdx));
-                actionCell.appendChild(viewButton);
-
-                const deleteButton = this.makeIconButton('btn-danger', 'fa-trash', 'Delete');
-                deleteButton.dataset.channelIndex = String(channelIdx);
-                deleteButton.disabled = feedCount > 0;
-                deleteButton.addEventListener('click', () => this.deleteChannel(channelIdx));
-                actionCell.appendChild(deleteButton);
-                row.appendChild(actionCell);
-                tbody.appendChild(row);
-            });
+                const statusBadge = document.createElement('span');
+                statusBadge.className = 'badge bg-success';
+                statusBadge.textContent = 'Active';
+                statusCell.appendChild(statusBadge);
+                tr.appendChild(statusCell);
+                
+                const actionsCell = document.createElement('td');
+                const viewButton = document.createElement('button');
+                viewButton.className = 'btn btn-sm btn-info';
+                viewButton.title = 'View Details';
+                viewButton.addEventListener('click', () => this.viewChannel(channel.channel_idx || channel.index));
+                const viewIcon = document.createElement('i');
+                viewIcon.className = 'fas fa-eye';
+                viewButton.appendChild(viewIcon);
+                actionsCell.appendChild(viewButton);
+                
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'btn btn-sm btn-danger';
+                deleteButton.title = 'Delete';
+                if (feedCount > 0) deleteButton.disabled = true;
+                deleteButton.addEventListener('click', () => this.deleteChannel(channel.channel_idx || channel.index));
+                const deleteIcon = document.createElement('i');
+                deleteIcon.className = 'fas fa-trash';
+                deleteButton.appendChild(deleteIcon);
+                actionsCell.appendChild(deleteButton);
+                
+                tr.appendChild(actionsCell);
+                tbody.appendChild(tr);
+            }
         });
-    }
-
-    makeTextCell(value) {
-        const cell = document.createElement('td');
-        cell.textContent = String(value ?? '');
-        return cell;
-    }
-
-    makeBadge(text, colorClass) {
-        const badge = document.createElement('span');
-        badge.className = `badge ${colorClass}`;
-        badge.textContent = String(text ?? '');
-        return badge;
-    }
-
-    makeIconButton(colorClass, iconClass, title) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = `btn btn-sm ${colorClass}`;
-        button.title = title;
-        const icon = document.createElement('i');
-        icon.className = `fas ${iconClass}`;
-        button.appendChild(icon);
-        return button;
-    }
-
-    setLoadingButton(button, label = '') {
-        const spinner = document.createElement('span');
-        spinner.className = 'spinner-border spinner-border-sm';
-        spinner.setAttribute('role', 'status');
-        if (label) spinner.classList.add('me-2');
-        button.replaceChildren(spinner);
-        if (label) button.appendChild(document.createTextNode(label));
     }
     
     setupEventHandlers() {
@@ -837,39 +585,23 @@ class RadioManager {
             btn.className = 'btn btn-secondary';
             txt.textContent = 'Status Unknown';
         } else if (this.radioConnected) {
-            // Not a radio-only disconnect: the bot's main loop runs while it is
-            // connected, so disconnecting ends the process. Label it honestly.
             btn.className = 'btn btn-danger';
-            txt.textContent = 'Stop Bot';
-            btn.title = 'Stops the bot process. It restarts only if managed by '
-                + 'systemd or Docker.';
+            txt.textContent = 'Disconnect';
         } else {
             btn.className = 'btn btn-success';
             txt.textContent = 'Connect';
-            btn.title = 'Reconnect the radio.';
         }
     }
 
     async handleConnectToggle() {
         const action = this.radioConnected ? 'disconnect' : 'connect';
-
-        if (action === 'disconnect' && !confirm(
-            'Stop the bot?\n\n'
-            + 'This shuts the bot down completely, not just the radio link. '
-            + 'It will stop responding on the mesh and this web viewer will '
-            + 'become unavailable.\n\n'
-            + 'It comes back only if something restarts it (systemd, Docker). '
-            + 'If you started it by hand, you will need to start it again the '
-            + 'same way.'
-        )) return;
-
         const spinner = document.getElementById('connectBtnSpinner');
         const btn = document.getElementById('connectToggleBtn');
         const txt = document.getElementById('connectBtnText');
 
         btn.disabled = true;
         spinner.style.display = 'inline-block';
-        txt.textContent = action === 'connect' ? 'Connecting...' : 'Stopping...';
+        txt.textContent = action === 'connect' ? 'Connecting...' : 'Disconnecting...';
 
         try {
             const response = await fetch('/api/radio/connect', {
@@ -907,7 +639,7 @@ class RadioManager {
         for (let attempts = 0; attempts < maxWait; attempts++) {
             await new Promise(resolve => setTimeout(resolve, 2000));
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            txt.textContent = `${action === 'connect' ? 'Connecting' : 'Stopping'}... (${elapsed}s)`;
+            txt.textContent = `${action === 'connect' ? 'Connecting' : 'Disconnecting'}... (${elapsed}s)`;
 
             try {
                 const response = await fetch(`/api/channel-operations/${operationId}`);
@@ -916,13 +648,19 @@ class RadioManager {
                 if (result.status === 'completed') {
                     spinner.style.display = 'none';
                     await this.loadRadioStatus();
-                    this.showSuccess(action === 'connect' ? 'Radio connected successfully' : 'Bot stopping…');
+                    this.showSuccess(`Radio ${action}ed successfully`);
                     return;
-                } else if (result.status === 'failed' || result.status === 'interrupted') {
+                } else if (result.status === 'failed') {
                     spinner.style.display = 'none';
                     btn.disabled = false;
                     this.updateConnectButton();
-                    this.showError(result.error_message || (action === 'connect' ? 'Failed to connect radio' : 'Failed to stop bot'));
+                    this.showError(result.error_message || `Failed to ${action} radio`);
+                    return;
+                } else if (result.status === 'interrupted') {
+                    spinner.style.display = 'none';
+                    btn.disabled = false;
+                    this.updateConnectButton();
+                    this.showError(result.error_message || `Radio ${action} interrupted`);
                     return;
                 }
             } catch (error) {
@@ -953,6 +691,15 @@ class RadioManager {
         }
     }
     
+    _setButtonLoading(btn, text) {
+        btn.disabled = true;
+        btn.replaceChildren();
+        const spinner = document.createElement('span');
+        spinner.className = 'spinner-border spinner-border-sm me-2';
+        spinner.setAttribute('role', 'status');
+        btn.append(spinner, document.createTextNode(text));
+    }
+
     async saveChannel() {
         const form = document.getElementById('createChannelForm');
         const formData = new FormData(form);
@@ -1008,8 +755,7 @@ class RadioManager {
         }
         
         // Disable button and show loading state
-        saveBtn.disabled = true;
-        this.setLoadingButton(saveBtn, 'Creating...');
+        this._setButtonLoading(saveBtn, 'Creating...');
         
         try {
             const pr = await MeshCoreChannelOps.postChannel(data);
@@ -1017,7 +763,7 @@ class RadioManager {
             
             if (pr.ok) {
                 if (result.pending && result.operation_id) {
-                    this.setLoadingButton(saveBtn, 'Processing...');
+                    this._setButtonLoading(saveBtn, 'Processing...');
                     const pollStatus = await MeshCoreChannelOps.pollChannelOperation(result.operation_id, {
                         button: saveBtn,
                         originalButtonText: originalBtnText,
@@ -1069,86 +815,103 @@ class RadioManager {
             const feedsResponse = await fetch(`/api/channels/${channelIdx}/feeds`);
             const feedsData = await feedsResponse.json();
             
-            const channel = this.channels.find(c => (c.channel_idx ?? c.index) === channelIdx);
+            const channel = this.channels.find(c => (c.channel_idx || c.index) === channelIdx);
             if (!channel) {
                 this.showError('Channel not found');
                 return;
             }
             
             const channelKey = channel.key_hex || '';
-            const content = document.getElementById('channelDetailsContent');
+            const detailsEl = document.getElementById('channelDetailsContent');
+            detailsEl.replaceChildren();
+            
             const row = document.createElement('div');
             row.className = 'row';
-            const infoColumn = document.createElement('div');
-            infoColumn.className = 'col-md-6';
-            const infoHeading = document.createElement('h6');
-            infoHeading.textContent = 'Channel Information';
-            infoColumn.appendChild(infoHeading);
-            infoColumn.appendChild(this.makeDetailLine('Name:', channel.name || channel.channel_name || ''));
-            infoColumn.appendChild(this.makeDetailLine('Index:', channel.channel_idx ?? channel.index));
-            infoColumn.appendChild(this.makeDetailLine('Type:', channel.type || 'Unknown'));
-
-            const keyLine = this.makeDetailLine('Key:', '');
+            
+            const col1 = document.createElement('div');
+            col1.className = 'col-md-6';
+            const h6a = document.createElement('h6');
+            h6a.textContent = 'Channel Information';
+            col1.appendChild(h6a);
+            
+            for (const [label, value] of [
+                ['Name', channel.name || channel.channel_name],
+                ['Index', channel.channel_idx || channel.index],
+                ['Type', channel.type || 'Unknown'],
+            ]) {
+                const p = document.createElement('p');
+                const strong = document.createElement('strong');
+                strong.textContent = label + ': ';
+                p.appendChild(strong);
+                const valSpan = document.createElement('span');
+                valSpan.textContent = String(value ?? '');
+                p.appendChild(valSpan);
+                col1.appendChild(p);
+            }
+            
+            // Key row
+            const keyP = document.createElement('p');
+            const keyStrong = document.createElement('strong');
+            keyStrong.textContent = 'Key: ';
+            keyP.appendChild(keyStrong);
             if (channelKey) {
                 const code = document.createElement('code');
-                code.style.fontSize = '0.9em';
-                code.style.wordBreak = 'break-all';
+                code.style.cssText = 'font-size: 0.9em; word-break: break-all;';
                 code.textContent = String(channelKey);
-                keyLine.appendChild(code);
-                const copyButton = this.makeIconButton('btn-outline-secondary ms-2', 'fa-copy', 'Copy key');
-                copyButton.appendChild(document.createTextNode(' Copy'));
-                copyButton.addEventListener('click', () => {
-                    navigator.clipboard.writeText(String(channelKey));
-                    this.showSuccess('Key copied to clipboard');
+                keyP.appendChild(code);
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'btn btn-sm btn-outline-secondary ms-2';
+                copyBtn.dataset.key = channelKey;
+                const copyIcon = document.createElement('i');
+                copyIcon.className = 'fas fa-copy';
+                copyBtn.append(copyIcon, document.createTextNode(' Copy'));
+                copyBtn.addEventListener('click', () => {
+                    navigator.clipboard.writeText(copyBtn.dataset.key);
+                    radioManager.showSuccess('Key copied to clipboard');
                 });
-                keyLine.appendChild(copyButton);
+                keyP.appendChild(copyBtn);
             } else {
-                const emptyKey = document.createElement('em');
-                emptyKey.textContent = 'No key available';
-                keyLine.appendChild(emptyKey);
+                const em = document.createElement('em');
+                em.textContent = 'No key available';
+                keyP.appendChild(em);
             }
-            infoColumn.appendChild(keyLine);
-
-            const feedsColumn = document.createElement('div');
-            feedsColumn.className = 'col-md-6';
-            const feedsHeading = document.createElement('h6');
-            feedsHeading.textContent = 'Feed Subscriptions';
-            feedsColumn.appendChild(feedsHeading);
-            if (Array.isArray(feedsData.feeds) && feedsData.feeds.length > 0) {
-                const list = document.createElement('ul');
-                feedsData.feeds.forEach(feed => {
-                    const item = document.createElement('li');
+            col1.appendChild(keyP);
+            row.appendChild(col1);
+            
+            const col2 = document.createElement('div');
+            col2.className = 'col-md-6';
+            const h6b = document.createElement('h6');
+            h6b.textContent = 'Feed Subscriptions';
+            col2.appendChild(h6b);
+            
+            if (feedsData.feeds && feedsData.feeds.length > 0) {
+                const ul = document.createElement('ul');
+                for (const feed of feedsData.feeds) {
+                    const li = document.createElement('li');
                     const link = document.createElement('a');
-                    link.href = `/feeds?id=${encodeURIComponent(String(feed.id ?? ''))}`;
+                    link.href = `/feeds?id=${feed.id}`;
                     link.textContent = String(feed.feed_name || feed.feed_url || 'Unnamed feed');
-                    item.appendChild(link);
-                    list.appendChild(item);
-                });
-                feedsColumn.appendChild(list);
+                    li.appendChild(link);
+                    ul.appendChild(li);
+                }
+                col2.appendChild(ul);
             } else {
-                const emptyFeeds = document.createElement('p');
-                emptyFeeds.textContent = 'No feed subscriptions';
-                feedsColumn.appendChild(emptyFeeds);
+                const noFeeds = document.createElement('p');
+                noFeeds.textContent = 'No feed subscriptions';
+                col2.appendChild(noFeeds);
             }
-            row.append(infoColumn, feedsColumn);
-            content.replaceChildren(row);
+            row.appendChild(col2);
+            detailsEl.appendChild(row);
+            
             const modal = new bootstrap.Modal(document.getElementById('channelDetailsModal'));
             modal.show();
         } catch (error) {
             this.showError('Error loading channel details: ' + error.message);
         }
     }
-
-    makeDetailLine(label, value) {
-        const line = document.createElement('p');
-        const strong = document.createElement('strong');
-        strong.textContent = `${label} `;
-        line.append(strong, document.createTextNode(String(value ?? '')));
-        return line;
-    }
     
     async deleteChannel(channelIdx) {
-        const channel = this.channels.find(c => (c.channel_idx ?? c.index) === channelIdx);
+        const channel = this.channels.find(c => (c.channel_idx || c.index) === channelIdx);
         if (!channel) {
             this.showError('Channel not found');
             return;
@@ -1172,79 +935,31 @@ class RadioManager {
             // Continue with deletion even if feed check fails
         }
         
-        // Find the delete button and show loading state
-        const deleteBtn = Array.from(document.querySelectorAll('button[data-channel-index]'))
-            .find(button => button.dataset.channelIndex === String(channelIdx)) || null;
-        if (deleteBtn) {
-            deleteBtn.disabled = true;
-            this.setLoadingButton(deleteBtn);
+        try {
+            const response = await fetch(`/api/channels/${channelIdx}`, {
+                method: 'DELETE',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
             
-            try {
-                const response = await fetch(`/api/channels/${channelIdx}`, {
-                    method: 'DELETE',
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                });
-                
-                const result = await response.json();
-                
-                if (response.ok) {
-                    if (result.pending && result.operation_id) {
-                        // Operation is queued, poll for status
-                        await this.pollDeleteOperationStatus(result.operation_id, deleteBtn);
-                    } else {
-                        // Immediate success
-                        this.showSuccess('Channel deleted successfully');
-                        await this.loadChannels();
-                        await this.loadStatistics();
-                        deleteBtn.disabled = false;
-                        this.restoreDeleteButton(deleteBtn);
-                    }
+            const result = await response.json();
+            
+            if (response.ok) {
+                if (result.pending && result.operation_id) {
+                    await this.pollDeleteOperationStatus(result.operation_id);
                 } else {
-                    this.showError(result.error || 'Failed to delete channel');
-                    deleteBtn.disabled = false;
-                    this.restoreDeleteButton(deleteBtn);
+                    this.showSuccess('Channel deleted successfully');
+                    await this.loadChannels();
+                    await this.loadStatistics();
                 }
-            } catch (error) {
-                this.showError('Error deleting channel: ' + error.message);
-                if (deleteBtn) {
-                    deleteBtn.disabled = false;
-                    this.restoreDeleteButton(deleteBtn);
-                }
+            } else {
+                this.showError(result.error || 'Failed to delete channel');
             }
-        } else {
-            // Fallback if button not found
-            try {
-                const response = await fetch(`/api/channels/${channelIdx}`, {
-                    method: 'DELETE',
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                });
-                
-                const result = await response.json();
-                
-                if (response.ok) {
-                    if (result.pending && result.operation_id) {
-                        await this.pollDeleteOperationStatus(result.operation_id);
-                    } else {
-                        this.showSuccess('Channel deleted successfully');
-                        await this.loadChannels();
-                        await this.loadStatistics();
-                    }
-                } else {
-                    this.showError(result.error || 'Failed to delete channel');
-                }
-            } catch (error) {
-                this.showError('Error deleting channel: ' + error.message);
-            }
+        } catch (error) {
+            this.showError('Error deleting channel: ' + error.message);
         }
     }
     
-    restoreDeleteButton(button) {
-        const icon = document.createElement('i');
-        icon.className = 'fas fa-trash';
-        button.replaceChildren(icon);
-    }
-
-    async pollDeleteOperationStatus(operationId, button = null, maxWait = 60) {
+    async pollDeleteOperationStatus(operationId, button = null, originalButtonHtml = null, maxWait = 60) {
         const startTime = Date.now();
         const checkInterval = 1000; // Check every second
         let attempts = 0;
@@ -1262,17 +977,12 @@ class RadioManager {
                     this.showSuccess('Channel deleted successfully');
                     await this.loadChannels();
                     await this.loadStatistics();
-                    if (button) {
-                        button.disabled = false;
-                        this.restoreDeleteButton(button);
-                    }
                     return;
-                } else if (result.status === 'failed' || result.status === 'interrupted') {
+                } else if (result.status === 'failed') {
                     this.showError(result.error_message || 'Channel deletion failed');
-                    if (button) {
-                        button.disabled = false;
-                        this.restoreDeleteButton(button);
-                    }
+                    return;
+                } else if (result.status === 'interrupted') {
+                    this.showError(result.error_message || 'Channel deletion interrupted');
                     return;
                 }
                 // If still pending, continue polling
@@ -1285,10 +995,6 @@ class RadioManager {
         
         // Timeout
         this.showError('Channel deletion is taking longer than expected. Please check the channel list to see if it was deleted.');
-        if (button) {
-            button.disabled = false;
-            this.restoreDeleteButton(button);
-        }
         // Still refresh the channel list in case it was deleted
         await this.loadChannels();
         await this.loadStatistics();
@@ -1304,7 +1010,11 @@ class RadioManager {
         if (!select) return;
 
         // Clear existing options except the first one
-        select.innerHTML = '<option value="">Sélectionner un canal...</option>';
+        select.replaceChildren();
+        const defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = 'Sélectionner un canal...';
+        select.appendChild(defaultOption);
 
         // Add channels
         this.channels.forEach(channel => {
@@ -1394,7 +1104,6 @@ class RadioManager {
             const result = await this.pollRadioParamsOp(data.operation_id);
             if (result && result.status === 'completed' && result.result_data) {
                 this.fillRadioParamsForm(result.result_data);
-                this.fillNodeSettingsForm(result.result_data);
                 if (!silent) this.setParamsAlert('success', 'Radio parameters read successfully.');
             } else {
                 const msg = result?.error_message || 'Read failed';
@@ -1476,7 +1185,8 @@ class RadioManager {
             try {
                 const resp = await fetch(`/api/channel-operations/${opId}`);
                 const data = await resp.json();
-                if (data.status === 'completed' || data.status === 'failed' || data.status === 'interrupted') return data;
+                if (data.status === 'completed' || data.status === 'failed') return data;
+                if (data.status === 'interrupted') return data;
             } catch (_) {}
         }
         return { status: 'failed', error_message: 'Timed out waiting for device response' };
@@ -1508,483 +1218,6 @@ class RadioManager {
         el.style.display = 'block';
     }
 
-    setupNodeSettingsHandlers() {
-        document.getElementById('readNodeSettingsBtn').addEventListener('click', () => {
-            this.readRadioParams();
-            this.readFirmwareConfig();
-        });
-        document.getElementById('savePathHashBtn').addEventListener('click', () => this.savePathHash());
-        document.getElementById('saveDefaultScopeBtn')
-            .addEventListener('click', () => this.saveDefaultScope());
-        document.getElementById('saveIdentityBtn').addEventListener('click', () => this.saveIdentity());
-        document.getElementById('saveMeshBtn').addEventListener('click', () => this.saveMesh());
-        document.getElementById('applyTuningBtn').addEventListener('click', () => this.applyTuning());
-        document.getElementById('sendAdvertZeroBtn').addEventListener('click', () => this.sendAdvert(false));
-        document.getElementById('sendAdvertFloodBtn').addEventListener('click', () => this.sendAdvert(true));
-    }
-
-    setNodeAlert(type, message) {
-        const el = document.getElementById('nodeSettingsAlert');
-        if (!type || !message) { el.style.display = 'none'; return; }
-        el.className = `alert alert-${type}`;
-        el.textContent = message;
-        el.style.display = 'block';
-    }
-
-    // Queue an operation via POST (or GET when payload is null), poll it, and
-    // return the completed/failed operation record.
-    async queueAndPoll(url, payload) {
-        const options = payload === null
-            ? undefined
-            : {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                body: JSON.stringify(payload)
-            };
-        const resp = await fetch(url, options);
-        const data = await resp.json();
-        if (!resp.ok || !data.operation_id) {
-            return { status: 'failed', error_message: data.error || 'Failed to queue operation' };
-        }
-        return await this.pollRadioParamsOp(data.operation_id);
-    }
-
-    // Run an async write action with button/spinner state and shared alert handling.
-    async runNodeAction(btnId, spinnerId, action) {
-        const btn = document.getElementById(btnId);
-        const spinner = document.getElementById(spinnerId);
-        btn.disabled = true;
-        spinner.style.display = 'inline-block';
-        this.setNodeAlert('', '');
-        try {
-            await action();
-        } catch (e) {
-            this.setNodeAlert('danger', 'Error: ' + e.message);
-        } finally {
-            btn.disabled = false;
-            spinner.style.display = 'none';
-        }
-    }
-
-    async readFirmwareConfig({ silent = false } = {}) {
-        try {
-            const result = await this.queueAndPoll('/api/radio/firmware/config/read', {});
-            if (result && result.status === 'completed' && result.result_data) {
-                this.fillFirmwareConfigForm(result.result_data);
-                if (!silent) this.setNodeAlert('success', 'Node settings read successfully.');
-            } else {
-                const msg = result?.error_message || 'Firmware config read failed';
-                if (silent && msg.toLowerCase().includes('not connected')) return;
-                this.setNodeAlert('danger', msg);
-            }
-        } catch (e) {
-            if (!silent) this.setNodeAlert('danger', 'Error: ' + e.message);
-        }
-    }
-
-    fillNodeSettingsForm(params) {
-        if (params.name != null) document.getElementById('nodeName').value = params.name;
-        if (params.adv_lat != null) document.getElementById('nodeLat').value = params.adv_lat;
-        if (params.adv_lon != null) document.getElementById('nodeLon').value = params.adv_lon;
-        if (params.adv_loc_policy != null) document.getElementById('nodeAdvLocPolicy').value = String(params.adv_loc_policy);
-        if (params.multi_acks != null) document.getElementById('nodeMultiAcks').value = String(params.multi_acks);
-        if (params.telemetry_mode_base != null) document.getElementById('nodeTelemBase').value = String(params.telemetry_mode_base);
-        if (params.telemetry_mode_loc != null) document.getElementById('nodeTelemLoc').value = String(params.telemetry_mode_loc);
-        if (params.telemetry_mode_env != null) document.getElementById('nodeTelemEnv').value = String(params.telemetry_mode_env);
-    }
-
-    fillFirmwareConfigForm(data) {
-        if (data.path_hash_mode != null && data.path_hash_mode >= 0) {
-            document.getElementById('nodePathHashMode').value = String(data.path_hash_mode);
-        }
-        this.fillDefaultScope(data);
-    }
-
-    fillDefaultScope(data) {
-        const field = document.getElementById('nodeDefaultScope');
-        const keyNote = document.getElementById('nodeDefaultScopeKey');
-        const note = document.getElementById('nodeDefaultScopeNote');
-        keyNote.textContent = '';
-        note.style.display = 'none';
-
-        // Absent keys mean the radio never answered — older firmware has no
-        // CMD_GET_DEFAULT_FLOOD_SCOPE. Say so rather than showing an empty box
-        // that reads as "no scope set".
-        if (!data.default_scope_supported) {
-            field.value = '';
-            field.disabled = true;
-            document.getElementById('saveDefaultScopeBtn').disabled = true;
-            note.textContent = 'This radio did not report a default scope. The firmware '
-                + 'is likely older than the setting; nothing was changed.';
-            note.style.display = 'block';
-            return;
-        }
-
-        field.disabled = false;
-        document.getElementById('saveDefaultScopeBtn').disabled = false;
-        const name = data.default_scope_name || '';
-        field.value = name;
-        if (!name) return;
-
-        keyNote.textContent = `Key ${(data.default_scope_key || '').slice(0, 8)}…`;
-        // The name is a label the app wrote; the key is what the radio routes
-        // by. They only disagree if something wrote them separately, and then
-        // the name on screen is not the region this radio is actually in.
-        if (data.default_scope_key && data.default_scope_key_matches === false) {
-            note.textContent = `The stored key does not match ${name}. The radio routes by `
-                + 'the key, so the name shown is only a label. Writing the scope again '
-                + 'puts the two back in step.';
-            note.style.display = 'block';
-        }
-    }
-
-    async saveDefaultScope() {
-        const raw = document.getElementById('nodeDefaultScope').value.trim();
-        if (!raw && !confirm(
-            'Clear the radio\'s default region scope?\n\n'
-            + 'Sends the bot does not scope itself will then flood the whole mesh '
-            + 'instead of staying inside a region.'
-        )) return;
-
-        await this.runNodeAction('saveDefaultScopeBtn', 'saveDefaultScopeSpinner', async () => {
-            const result = await this.queueAndPoll(
-                '/api/radio/firmware/config/write', { default_flood_scope: raw });
-            if (result && result.status === 'completed') {
-                this.setNodeAlert('success', raw
-                    ? `Default scope set to ${raw}.`
-                    : 'Default scope cleared — the radio floods unscoped.');
-                // Read it back: the radio is the authority on what it stored.
-                await this.readFirmwareConfig({ silent: true });
-            } else {
-                this.setNodeAlert('danger', result?.error_message || 'Write failed');
-            }
-        });
-    }
-
-    async savePathHash() {
-        const mode = document.getElementById('nodePathHashMode').value;
-        if (mode === '') {
-            this.setNodeAlert('danger', 'No path settings to write.');
-            return;
-        }
-        const payload = { path_hash_mode: parseInt(mode) };
-        if (!confirm('Change the path hash size? Responses may fail to route until other nodes on the mesh run firmware that understands this hash size.')) {
-            return;
-        }
-        await this.runNodeAction('savePathHashBtn', 'savePathHashSpinner', async () => {
-            const result = await this.queueAndPoll('/api/radio/firmware/config/write', payload);
-            if (result && result.status === 'completed') {
-                this.setNodeAlert('success', 'Path settings written successfully.');
-            } else {
-                this.setNodeAlert('danger', result?.error_message || 'Write failed');
-            }
-        });
-    }
-
-    async saveIdentity() {
-        const nameInput = document.getElementById('nodeName');
-        // A disabled name field is config-managed ([Bot] bot_name); never write it.
-        const name = nameInput.disabled ? '' : nameInput.value.trim();
-        const lat = document.getElementById('nodeLat').value.trim();
-        const lon = document.getElementById('nodeLon').value.trim();
-        const policy = document.getElementById('nodeAdvLocPolicy').value;
-
-        if ((lat === '') !== (lon === '')) {
-            this.setNodeAlert('danger', 'Latitude and longitude must be provided together.');
-            return;
-        }
-        const payload = {};
-        if (name) payload.name = name;
-        if (lat !== '') {
-            payload.lat = parseFloat(lat);
-            payload.lon = parseFloat(lon);
-        }
-        if (policy !== '') payload.adv_loc_policy = parseInt(policy);
-        if (!Object.keys(payload).length) {
-            this.setNodeAlert('danger', 'No identity settings to write.');
-            return;
-        }
-        await this.runNodeAction('saveIdentityBtn', 'saveIdentitySpinner', async () => {
-            const result = await this.queueAndPoll('/api/radio/params', payload);
-            if (result && result.status === 'completed') {
-                this.setNodeAlert('success', 'Identity written successfully. Send an advert to announce the changes.');
-            } else {
-                this.setNodeAlert('danger', result?.error_message || 'Write failed');
-            }
-        });
-    }
-
-    async saveMesh() {
-        const multiAcks = document.getElementById('nodeMultiAcks').value;
-        const telemBase = document.getElementById('nodeTelemBase').value;
-        const telemLoc = document.getElementById('nodeTelemLoc').value;
-        const telemEnv = document.getElementById('nodeTelemEnv').value;
-
-        const payload = {};
-        if (multiAcks !== '') payload.multi_acks = parseInt(multiAcks);
-        if (telemBase !== '') payload.telemetry_mode_base = parseInt(telemBase);
-        if (telemLoc !== '') payload.telemetry_mode_loc = parseInt(telemLoc);
-        if (telemEnv !== '') payload.telemetry_mode_env = parseInt(telemEnv);
-        if (!Object.keys(payload).length) {
-            this.setNodeAlert('danger', 'No mesh behavior settings to write.');
-            return;
-        }
-        await this.runNodeAction('saveMeshBtn', 'saveMeshSpinner', async () => {
-            const result = await this.queueAndPoll('/api/radio/params', payload);
-            if (result && result.status === 'completed') {
-                this.setNodeAlert('success', 'Mesh behavior written successfully.');
-            } else {
-                this.setNodeAlert('danger', result?.error_message || 'Write failed');
-            }
-        });
-    }
-
-    async applyTuning() {
-        const rxDelay = document.getElementById('nodeRxDelay').value.trim();
-        const airtimeFactor = document.getElementById('nodeAirtimeFactor').value.trim();
-        if (rxDelay === '' || airtimeFactor === '') {
-            this.setNodeAlert('danger', 'RX delay and airtime factor must both be provided.');
-            return;
-        }
-        if (!confirm('Apply tuning parameters? These affect relay timing and airtime budgeting, and current values cannot be read back from the device.')) {
-            return;
-        }
-        await this.runNodeAction('applyTuningBtn', 'applyTuningSpinner', async () => {
-            const result = await this.queueAndPoll('/api/radio/params', {
-                rx_delay: parseFloat(rxDelay),
-                airtime_factor: parseFloat(airtimeFactor)
-            });
-            if (result && result.status === 'completed') {
-                this.setNodeAlert('success', 'Tuning parameters written successfully.');
-            } else {
-                this.setNodeAlert('danger', result?.error_message || 'Write failed');
-            }
-        });
-    }
-
-    async sendAdvert(flood) {
-        if (flood && !confirm('Send a flood advert? It will be repeated across the whole mesh — use sparingly.')) {
-            return;
-        }
-        const btnId = flood ? 'sendAdvertFloodBtn' : 'sendAdvertZeroBtn';
-        const spinnerId = flood ? 'advertFloodSpinner' : 'advertZeroSpinner';
-        await this.runNodeAction(btnId, spinnerId, async () => {
-            const result = await this.queueAndPoll('/api/radio/advert', { flood });
-            if (result && result.status === 'completed') {
-                this.setNodeAlert('success', flood ? 'Flood advert sent.' : 'Zero-hop advert sent.');
-            } else {
-                this.setNodeAlert('danger', result?.error_message || 'Advert failed');
-            }
-        });
-    }
-
-
-    // ── Region scopes ([Channels] flood_scopes) ─────────────────────────────
-
-    setupRegionScopeHandlers() {
-        const sync = () => this.syncRegionScopeMode();
-        document.getElementById('regionScopeModeAll').addEventListener('change', sync);
-        document.getElementById('regionScopeModeList').addEventListener('change', sync);
-        document.getElementById('saveRegionScopesBtn')
-            .addEventListener('click', () => this.saveRegionScopes());
-    }
-
-    // The allowlist inputs are meaningless in "reply whatever the scope" mode,
-    // so disable rather than hide them: a hidden list the operator forgot they
-    // filled in is the version of this that loses their scopes on the next save.
-    syncRegionScopeMode() {
-        const listMode = document.getElementById('regionScopeModeList').checked;
-        document.getElementById('regionScopeList').disabled = !listMode;
-        document.getElementById('regionScopeAllowGlobal').disabled = !listMode;
-        document.getElementById('regionScopeListFields').style.opacity = listMode ? '1' : '.55';
-    }
-
-    async loadRegionScopes() {
-        try {
-            const resp = await fetch('/api/region-scopes', {
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
-            });
-            const data = await resp.json();
-            if (!resp.ok) {
-                this.setRegionScopeAlert('danger', data.error || 'Could not read region scopes');
-                return;
-            }
-            this.fillRegionScopeForm(data);
-            this.setRegionScopeAlert('', '');
-        } catch (e) {
-            this.setRegionScopeAlert('danger', 'Error: ' + e.message);
-        }
-    }
-
-    fillRegionScopeForm(data) {
-        const scopes = Array.isArray(data.scopes) ? data.scopes : [];
-        document.getElementById('regionScopeList').value = scopes.join(', ');
-        document.getElementById('regionScopeAllowGlobal').checked = !!data.allow_global;
-        document.getElementById('regionScopeOutgoing').value = data.outgoing_override || '';
-        const listMode = !!data.allowlist_active;
-        document.getElementById('regionScopeModeList').checked = listMode;
-        document.getElementById('regionScopeModeAll').checked = !listMode;
-        this.syncRegionScopeMode();
-
-        const target = document.getElementById('regionScopeTarget');
-        target.textContent = data.target ? `[Channels] in ${data.target}` : '';
-
-        const legacy = document.getElementById('regionScopeLegacy');
-        if (data.legacy_section) {
-            // [Channels] is empty, so the bot fell back to the old location.
-            // Saving an allowlist here takes over; saving "reply whatever the
-            // scope" leaves [Channels] empty and hands it straight back.
-            legacy.textContent =
-                `[Channels] has no flood_scopes, so the bot is using the one under `
-                + `[${data.legacy_section}]. Saving a list here writes [Channels], which `
-                + `the bot reads first. Saving "reply whatever the scope" leaves [Channels] `
-                + `empty, and the [${data.legacy_section}] entry takes over again — remove `
-                + 'it from config.ini by hand to turn the allowlist off for good.';
-            legacy.style.display = 'block';
-        } else {
-            legacy.style.display = 'none';
-        }
-
-        this.renderChannelScopeOverrides(data.channel_overrides || []);
-    }
-
-    renderChannelScopeOverrides(overrides) {
-        const host = document.getElementById('regionScopeChannelOverrides');
-        host.replaceChildren();
-        if (!overrides.length) return;
-
-        const heading = document.createElement('div');
-        heading.className = 'fw-semibold mb-1';
-        heading.textContent = 'Per-channel overrides (edit in config.ini)';
-        host.appendChild(heading);
-
-        const list = document.createElement('ul');
-        list.className = 'list-unstyled mb-0';
-        overrides.forEach(entry => {
-            const item = document.createElement('li');
-            const name = document.createElement('code');
-            name.textContent = entry.channel;
-            item.appendChild(name);
-            item.appendChild(document.createTextNode(' → '));
-            const scope = document.createElement('code');
-            scope.textContent = entry.scope || 'global flood';
-            item.appendChild(scope);
-            list.appendChild(item);
-        });
-        host.appendChild(list);
-
-        const note = document.createElement('div');
-        note.className = 'mt-1';
-        note.textContent = 'These win over the default outgoing scope on their channel.';
-        host.appendChild(note);
-    }
-
-    async saveRegionScopes() {
-        const listMode = document.getElementById('regionScopeModeList').checked;
-        const payload = {
-            allowlist_enabled: listMode,
-            scopes: listMode ? document.getElementById('regionScopeList').value : '',
-            allow_global: listMode && document.getElementById('regionScopeAllowGlobal').checked,
-            outgoing_override: document.getElementById('regionScopeOutgoing').value,
-        };
-
-        if (listMode && !payload.allow_global) {
-            const ok = confirm(
-                'Only reply to the listed scopes?\n\n'
-                + 'Anyone whose client has no region set floods unscoped, and the bot '
-                + 'will not answer them at all. Tick "also reply to unscoped messages" '
-                + 'to keep answering those.'
-            );
-            if (!ok) return;
-        }
-
-        const btn = document.getElementById('saveRegionScopesBtn');
-        const spinner = document.getElementById('saveRegionScopesSpinner');
-        btn.disabled = true;
-        spinner.style.display = 'inline-block';
-        this.setRegionScopeAlert('', '');
-        this.setRegionScopeStatus('Saving…', 'text-muted');
-        try {
-            const resp = await fetch('/api/region-scopes', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'
-                },
-                body: JSON.stringify(payload)
-            });
-            const data = await resp.json();
-            if (!resp.ok || !data.success) {
-                this.setRegionScopeStatus('', '');
-                this.setRegionScopeAlert('danger', data.error || 'Save failed');
-                return;
-            }
-            // Show what was actually written, including the canonical form of
-            // anything typed loosely (west -> #west, * folded into the checkbox).
-            this.fillRegionScopeForm(data.settings || {});
-            this.setRegionScopeStatus('Saved. Waiting for the bot to reload…', 'text-muted');
-            const applied = await this.awaitConfigReload(data.reload_operation_id);
-            this.setRegionScopeStatus(applied.text, applied.cls);
-        } catch (e) {
-            this.setRegionScopeStatus('', '');
-            this.setRegionScopeAlert('danger', 'Error: ' + e.message);
-        } finally {
-            btn.disabled = false;
-            spinner.style.display = 'none';
-        }
-    }
-
-    // A queued reload row only means the request was written down. Poll it so
-    // the page reports what the bot did, and says plainly when nothing picked
-    // it up (a stopped bot, or a reload the bot refused).
-    async awaitConfigReload(operationId) {
-        if (!operationId) {
-            return {
-                text: 'Saved to config.ini. It applies the next time the bot reloads.',
-                cls: 'text-warning'
-            };
-        }
-        for (let attempt = 0; attempt < 15; attempt++) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            try {
-                const resp = await fetch(`/api/channel-operations/${operationId}`);
-                const data = await resp.json();
-                if (data.status === 'completed') {
-                    return { text: 'Saved and applied — the bot is using it now.', cls: 'text-success' };
-                }
-                if (data.status === 'failed' || data.status === 'interrupted') {
-                    // reload_config's messages already end in a full stop.
-                    const reason = String(data.error_message || 'reason not reported')
-                        .trim().replace(/\.+$/, '');
-                    return {
-                        text: `Saved to config.ini, but the reload failed: ${reason}. `
-                            + 'Restart the bot to apply it.',
-                        cls: 'text-danger'
-                    };
-                }
-            } catch { /* keep polling; the answer is the same either way */ }
-        }
-        return {
-            text: 'Saved to config.ini. The bot has not picked it up — if it is not '
-                + 'running, this applies at startup.',
-            cls: 'text-warning'
-        };
-    }
-
-    setRegionScopeAlert(type, message) {
-        const el = document.getElementById('regionScopeAlert');
-        if (!type || !message) { el.style.display = 'none'; return; }
-        el.className = `alert alert-${type}`;
-        el.textContent = message;
-        el.style.display = 'block';
-    }
-
-    setRegionScopeStatus(text, cls) {
-        const el = document.getElementById('regionScopeStatus');
-        el.className = cls || 'text-muted';
-        el.textContent = text || '';
-    }
-
     showError(message) {
         const alert = document.createElement('div');
         alert.className = 'alert alert-danger alert-dismissible fade show position-fixed';
@@ -1994,7 +1227,8 @@ class RadioManager {
         const closeButton = document.createElement('button');
         closeButton.type = 'button';
         closeButton.className = 'btn-close';
-        closeButton.dataset.bsDismiss = 'alert';
+        closeButton.setAttribute('data-bs-dismiss', 'alert');
+        closeButton.setAttribute('aria-label', 'Close');
         alert.append(messageNode, closeButton);
         document.body.appendChild(alert);
         setTimeout(() => alert.remove(), 5000);
@@ -2009,7 +1243,8 @@ class RadioManager {
         const closeButton = document.createElement('button');
         closeButton.type = 'button';
         closeButton.className = 'btn-close';
-        closeButton.dataset.bsDismiss = 'alert';
+        closeButton.setAttribute('data-bs-dismiss', 'alert');
+        closeButton.setAttribute('aria-label', 'Close');
         alert.append(messageNode, closeButton);
         document.body.appendChild(alert);
         setTimeout(() => alert.remove(), 3000);
@@ -2065,3 +1300,4 @@ document.addEventListener('DOMContentLoaded', () => {
 }
 </style>
 {% endblock %}
+

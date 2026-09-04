@@ -402,8 +402,11 @@ class BlitzortungService(BaseServicePlugin):
         try:
             from ..utils import rate_limited_nominatim_reverse_sync
 
-            location = rate_limited_nominatim_reverse_sync(
-                self.bot, f"{lat}, {lon}", timeout=5
+            location = await asyncio.to_thread(
+                rate_limited_nominatim_reverse_sync,
+                self.bot,
+                f"{lat}, {lon}",
+                timeout=5,
             )
             if location:
                 if isinstance(location, dict):

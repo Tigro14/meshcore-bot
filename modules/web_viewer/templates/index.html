@@ -1,220 +1,219 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - MeshCore Bot Data Viewer{% endblock %}
+{% block title %}Bot Statistics - MeshCore Bot Data Viewer{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+<style>
+    /* Equal-height columns: stacks fill the same vertical space as the path-encoding card (lg+) */
+    @media (min-width: 992px) {
+        .dashboard-overview-row > .col-lg-4 {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .dashboard-overview-stack {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            min-height: 0;
+            width: 100%;
+        }
+    }
+    /* Multibyte explainer tooltip — allow wrapping for long copy */
+    .tooltip.multibyte-capable-hint .tooltip-inner {
+        max-width: min(22rem, 92vw);
+        text-align: left;
+    }
+    .path-encoding-info-btn:hover,
+    .path-encoding-info-btn:focus {
+        text-decoration: none;
+        color: var(--bs-info, #0dcaf0) !important;
+    }
+</style>
 {% endblock %}
 
 {% block content %}
-
-<!-- Health strip — replaces the old four-column health card -->
-<div class="health-strip">
-    <span class="health-strip__item">
-        <span class="status-indicator status-warning" id="health-status-dot"></span>
-        <strong id="health-status-text">Connecting…</strong>
-    </span>
-    <span class="health-strip__item" id="health-db">DB —</span>
-    <span class="health-strip__item">
-        <span class="health-strip__label">Uptime</span>
-        <span id="health-uptime">—</span>
-    </span>
-    <span class="health-strip__item">
-        <a href="#" id="health-clients-link" class="text-decoration-none"
-           data-bs-toggle="modal" data-bs-target="#connectedClientsModal">
-            <span id="health-clients">0</span> clients
-        </a>
-    </span>
-    <span class="health-strip__item" id="health-radio">radio —</span>
-    <span class="health-strip__spacer"></span>
-    <span class="health-strip__item">
-        <span id="health-snapshot">snapshot —</span>
-        <button type="button" class="btn-refresh" id="snapshot-refresh"
-                title="Recompute the dashboard snapshot now" aria-label="Refresh snapshot">
-            <i class="fas fa-sync-alt" aria-hidden="true"></i>
-        </button>
-    </span>
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">
+            <i class="fas fa-chart-bar"></i> Bot Statistics
+        </h1>
+    </div>
 </div>
 
-<!-- ══ Mesh ══════════════════════════════════════════════════════════════ -->
-<h2 class="dashboard-section-title"><i class="fas fa-project-diagram"></i> Mesh</h2>
-
-<!-- Row 1 — stat tiles (five, so col-xl auto-splits them evenly) -->
-<div class="row g-3 mb-1">
-    <div class="col-6 col-md-4 col-xl">
-        <div class="stat-tile">
-            <div class="stat-tile__label">Nodes heard 24h</div>
-            <div class="stat-tile__row">
-                <span class="stat-tile__value" id="nodes-24h-value">—</span>
-                <span class="delta-chip" id="nodes-24h-delta">–</span>
+<!-- System Health Overview -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-gradient-primary text-white">
+                <div class="d-flex align-items-center">
+                    <i class="fas fa-heartbeat me-2"></i>
+                    <h5 class="mb-0">Bot Health Status</h5>
+                </div>
             </div>
-            <div class="stat-tile__spark"><canvas id="nodes-24h-spark"
-                aria-label="Nodes heard per day, last 30 days"></canvas></div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl">
-        <div class="stat-tile">
-            <div class="stat-tile__label">Adverts 24h</div>
-            <div class="stat-tile__row">
-                <span class="stat-tile__value" id="adverts-24h-value">—</span>
-                <span class="delta-chip" id="adverts-24h-delta">–</span>
+            <div class="card-body p-3">
+                <div class="row text-center health-status-card">
+                    <div class="col-md-3">
+                        <div class="d-flex align-items-center justify-content-center mb-2">
+                            <span class="status-indicator status-connected me-2"></span>
+                            <span id="system-status" class="fw-bold">Online</span>
+                        </div>
+                        <h3 class="text-primary mb-1">
+                            <a href="#" id="health-clients-link" class="text-primary text-decoration-none"
+                               data-bs-toggle="modal" data-bs-target="#connectedClientsModal">0</a>
+                        </h3>
+                        <small class="text-muted text-uppercase">Connected Clients</small>
+                    </div>
+                    
+                    <div class="col-md-3 d-flex flex-column justify-content-center align-items-center">
+                        <div class="mb-2">
+                            <div id="database-status">
+                                <div class="loading">Loading...</div>
+                            </div>
+                        </div>
+                        <small class="text-muted text-uppercase">Database Connection</small>
+                    </div>
+                    
+                    <div class="col-md-3 d-flex flex-column justify-content-center align-items-center">
+                        <h3 id="uptime" class="text-success mb-1">0s</h3>
+                        <small class="text-muted text-uppercase">System Uptime</small>
+                    </div>
+                    
+                    <div class="col-md-3 d-flex flex-column justify-content-center align-items-center">
+                        <h6 id="last-update" class="text-info mb-1">Loading...</h6>
+                        <small class="text-muted text-uppercase">Last Data Refresh</small>
+                    </div>
+                </div>
             </div>
-            <div class="stat-tile__spark"><canvas id="adverts-24h-spark"
-                aria-label="Adverts per day, last 30 days"></canvas></div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl">
-        <div class="stat-tile">
-            <div class="stat-tile__label">New nodes 24h</div>
-            <div class="stat-tile__row">
-                <span class="stat-tile__value" id="new-nodes-value">—</span>
-                <span class="delta-chip" id="new-nodes-delta">–</span>
-            </div>
-            <div class="stat-tile__sub" id="new-nodes-7d">—</div>
-            <div class="stat-tile__spark"><canvas id="new-nodes-spark"
-                aria-label="New nodes per day, last 30 days"></canvas></div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl">
-        <div class="stat-tile">
-            <div class="stat-tile__label">Gone quiet 7d</div>
-            <div class="stat-tile__row">
-                <span class="stat-tile__value text-warning" id="gone-quiet">—</span>
-            </div>
-            <div class="stat-tile__sub">Heard last week, silent this week</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl">
-        <div class="stat-tile">
-            <div class="stat-tile__label">Coverage</div>
-            <div class="stat-tile__row">
-                <span class="stat-tile__value" id="coverage-countries">—</span>
-                <span class="stat-tile__sub">countries</span>
-            </div>
-            <div class="stat-tile__sub">
-                <span id="coverage-states">—</span> states ·
-                <span id="coverage-cities">—</span> cities
-            </div>
-            <div class="stat-tile__sub"><span id="coverage-known">—</span> contacts known</div>
         </div>
     </div>
 </div>
 
-<p class="dashboard-note mb-3">
-    Tile values are rolling 24-hour counts; the
-    <span class="delta-chip">–</span> chip compares the last two complete calendar days.
-    <button type="button" class="dashboard-info-btn" id="delta-info"
-            aria-label="How the change figure is calculated"
-            data-bs-toggle="tooltip" data-bs-placement="top">
-        <i class="fas fa-info-circle" aria-hidden="true"></i>
-    </button>
-</p>
-
-<!-- Row 2 — routing health -->
-<div class="row g-3 mb-3">
-    <div class="col-12 col-lg-5">
-        <div class="card h-100">
-            <div class="card-header"><i class="fas fa-route"></i> Routing mix</div>
-            <div class="card-body">
-                <p class="dashboard-note mb-2">
-                    Incoming packets, <span id="route-mix-window">no data</span>
-                </p>
-                <div class="stacked-bar" id="route-mix-bar"></div>
-                <div class="stacked-bar__legend" id="route-mix-legend"></div>
-                <hr class="my-3">
-                <p class="dashboard-note mb-2">Payload types over the same packets</p>
-                <div id="payload-mix"><div class="dashboard-empty">Loading…</div></div>
+<!-- Network overview: 3 columns — (Active + Devices&amp;cache) | (Network + Geo) | Path encoding -->
+<div class="row mb-4 g-3 align-items-stretch dashboard-overview-row">
+    <div class="col-12 col-lg-4">
+        <div class="dashboard-overview-stack">
+            <div class="card flex-shrink-0">
+                <div class="card-header">
+                    <i class="fas fa-users"></i> Active Contacts
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-4">
+                            <h4 id="contacts-24h" class="text-primary">0</h4>
+                            <small class="text-muted">24h</small>
+                        </div>
+                        <div class="col-4">
+                            <h4 id="contacts-7d" class="text-info">0</h4>
+                            <small class="text-muted">7d</small>
+                        </div>
+                        <div class="col-4">
+                            <h4 id="total-contacts" class="text-success">0</h4>
+                            <small class="text-muted">All</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card flex-grow-1 d-flex flex-column">
+                <div class="card-header">
+                    <i class="fas fa-microchip"></i> Devices &amp; cache
+                </div>
+                <div class="card-body flex-grow-1 d-flex align-items-center justify-content-center">
+                    <div class="row text-center w-100">
+                        <div class="col-4">
+                            <h4 id="unique-device-types" class="text-primary">0</h4>
+                            <small class="text-muted">Device types</small>
+                        </div>
+                        <div class="col-4">
+                            <h4 id="unique-roles" class="text-info">0</h4>
+                            <small class="text-muted">Roles</small>
+                        </div>
+                        <div class="col-4">
+                            <h4 id="active-cache-entries" class="text-success">0</h4>
+                            <small class="text-muted">Active cache</small>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
     <div class="col-12 col-lg-4">
-        <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-ruler-horizontal"></i> Hops away</span>
-                <button type="button" class="dashboard-info-btn" id="hops-info"
-                        aria-label="How hop distance is derived"
-                        data-bs-toggle="tooltip" data-bs-placement="top">
-                    <i class="fas fa-info-circle" aria-hidden="true"></i>
-                </button>
-            </div>
-            <div class="card-body card-body--fill">
-                <p class="dashboard-note mb-2">
-                    Nodes by their closest advert path, and how far arriving
-                    flood packets had travelled
-                </p>
-                <div class="chart-box chart-box--fill">
-                    <canvas id="hopsHistogramChart"
-                        aria-label="Nodes and flood packets by hop distance"></canvas>
+        <div class="dashboard-overview-stack">
+            <div class="card flex-shrink-0">
+                <div class="card-header">
+                    <i class="fas fa-network-wired"></i> Network Health
                 </div>
-                <p class="dashboard-note mt-2 mb-0" id="hops-hidden-note"></p>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-lg-3">
-        <div class="card h-100">
-            <div class="card-header"><i class="fas fa-microchip"></i> Roles</div>
-            <div class="card-body card-body--fill">
-                <div id="role-mix" class="mix-fill"><div class="dashboard-empty">Loading…</div></div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Row 3 — path encoding -->
-<div class="row g-3 mb-3">
-    <div class="col-12 col-lg-7">
-        <div class="card h-100">
-            <div class="card-header"><i class="fas fa-chart-pie"></i> Path encoding</div>
-            <div class="card-body">
-                <div class="row g-3">
-                    <div class="col-12 col-md-6 text-center">
-                        <p class="dashboard-note mb-2">
-                            Contacts (last 7 days)
-                            <button type="button" class="dashboard-info-btn" id="contacts-encoding-info"
-                                    aria-label="How multibyte capable contacts are counted"
-                                    data-bs-toggle="tooltip" data-bs-placement="top">
-                                <i class="fas fa-info-circle" aria-hidden="true"></i>
-                            </button>
-                        </p>
-                        <div class="doughnut-box">
-                            <canvas id="contactsEncodingChart"
-                                aria-label="Multibyte path share among contacts, last 7 days"></canvas>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-4">
+                            <h4 id="avg-hop-count" class="text-warning">0</h4>
+                            <small class="text-muted">Avg Hops</small>
                         </div>
-                        <p class="dashboard-note mt-2 mb-0" id="contacts-encoding-summary"></p>
+                        <div class="col-4">
+                            <h4 id="max-hop-count" class="text-danger">0</h4>
+                            <small class="text-muted">Max Hops</small>
+                        </div>
+                        <div class="col-4">
+                            <h4 id="tracked-contacts" class="text-info">0</h4>
+                            <small class="text-muted">Tracked</small>
+                        </div>
                     </div>
-                    <div class="col-12 col-md-6 text-center">
-                        <p class="dashboard-note mb-2">
-                            Incoming packets (<span id="packets-window-label">no data</span>)
-                        </p>
-                        <div class="doughnut-box">
-                            <canvas id="packetsEncodingChart"
-                                aria-label="Multibyte path share among incoming packets"></canvas>
+                </div>
+            </div>
+            <div class="card flex-grow-1 d-flex flex-column">
+                <div class="card-header">
+                    <i class="fas fa-globe"></i> Geographic Coverage
+                </div>
+                <div class="card-body flex-grow-1 d-flex align-items-center justify-content-center">
+                    <div class="row text-center w-100">
+                        <div class="col-4">
+                            <h4 id="countries" class="text-primary">0</h4>
+                            <small class="text-muted">Countries</small>
                         </div>
-                        <p class="dashboard-note mt-2 mb-0" id="packets-encoding-summary"></p>
+                        <div class="col-4">
+                            <h4 id="states" class="text-info">0</h4>
+                            <small class="text-muted">States</small>
+                        </div>
+                        <div class="col-4">
+                            <h4 id="cities" class="text-success">0</h4>
+                            <small class="text-muted">Cities</small>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    <div class="col-12 col-lg-5">
-        <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-chart-line"></i> Multibyte Share of Packets</span>
-                <button type="button" class="dashboard-info-btn" id="multibyte-trend-info"
-                        aria-label="How the multibyte trend is computed"
-                        data-bs-toggle="tooltip" data-bs-placement="top">
-                    <i class="fas fa-info-circle" aria-hidden="true"></i>
-                </button>
-            </div>
-            <div class="card-body">
-                <p class="dashboard-note mb-2">
-                    Share of each day's packets that took a multibyte path, by payload type
-                </p>
-                <div class="chart-box chart-box--tall">
-                    <canvas id="multibyteTrendChart"
-                        aria-label="Daily multibyte packets by payload type, last 30 days"></canvas>
-                    <div class="dashboard-empty" id="multibyte-trend-empty" style="display:none">
-                        No classified packet days yet — the chart starts accumulating from today.
+    <div class="col-12 col-lg-4">
+        <div class="dashboard-overview-stack">
+            <div class="card h-100 d-flex flex-column flex-grow-1">
+                <div class="card-header">
+                    <i class="fas fa-chart-pie"></i> Path encoding (7d)
+                </div>
+                <div class="card-body py-3 flex-grow-1">
+                    <div class="row g-3 justify-content-center align-items-start">
+                        <div class="col-12 col-md-6 text-center">
+                            <p class="small text-muted mb-2 d-flex align-items-center justify-content-center gap-1 flex-wrap">
+                                <span>Contacts (last 7 days)</span>
+                                <button type="button" class="btn btn-link p-0 border-0 align-baseline text-muted path-encoding-info-btn"
+                                        id="contacts-multibyte-chart-info"
+                                        aria-label="How multibyte capable contacts are counted"
+                                        data-bs-toggle="tooltip" data-bs-placement="top">
+                                    <i class="fas fa-info-circle" aria-hidden="true"></i>
+                                </button>
+                            </p>
+                            <div class="path-encoding-pie-wrap mx-auto" style="max-width: 200px; width: 100%;">
+                                <canvas id="pathEncodingPieChart" aria-label="Multibyte path share among contacts last 7 days"></canvas>
+                            </div>
+                            <p class="small text-muted mt-2 mb-0" id="path-encoding-pie-summary"></p>
+                        </div>
+                        <div class="col-12 col-md-6 text-center">
+                            <p class="small text-muted mb-2">Incoming packets (last 7 days)</p>
+                            <div class="path-encoding-pie-wrap mx-auto" style="max-width: 200px; width: 100%;">
+                                <canvas id="incomingPacketsPieChart" aria-label="Multibyte path share among incoming packets last 7 days"></canvas>
+                            </div>
+                            <p class="small text-muted mt-2 mb-0" id="incoming-packets-pie-summary"></p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -222,162 +221,268 @@
     </div>
 </div>
 
-<!-- Row 4 — busiest repeaters, role &amp; device mix -->
-<div class="row g-3 mb-3">
-    <div class="col-12 col-lg-6">
+<!-- Network Performance -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-hashtag"></i> Channel Statistics
+            </div>
+            <div class="card-body text-center">
+                <div class="row text-center">
+                    <div class="col-3">
+                        <h4 id="unique-channels-total" class="text-success">0</h4>
+                        <small class="text-muted">Total Channels</small>
+                    </div>
+                    <div class="col-3">
+                        <h4 id="bot-reply-rate-24h" class="text-warning">0%</h4>
+                        <small class="text-muted">24h Reply Rate</small>
+                    </div>
+                    <div class="col-3">
+                        <h4 id="bot-reply-rate-7d" class="text-warning">0%</h4>
+                        <small class="text-muted">7d Reply Rate</small>
+                    </div>
+                    <div class="col-3">
+                        <h4 id="bot-reply-rate-30d" class="text-warning">0%</h4>
+                        <small class="text-muted">30d Reply Rate</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Network Activity - Three Columns -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-users"></i> Bot User Statistics
+            </div>
+            <div class="card-body text-center">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <h4 id="unique-senders-24h" class="text-info">0</h4>
+                        <small class="text-muted">24h Active</small>
+                    </div>
+                    <div class="col-6">
+                        <h4 id="unique-users-total" class="text-primary">0</h4>
+                        <small class="text-muted">Total Users</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-comments"></i> Message Activity
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <h4 id="messages-24h" class="text-info">0</h4>
+                        <small class="text-muted">24h Messages</small>
+                    </div>
+                    <div class="col-6">
+                        <h4 id="total-messages" class="text-primary">0</h4>
+                        <small class="text-muted">Total Messages</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-terminal"></i> Command Activity
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <h4 id="commands-24h" class="text-warning">0</h4>
+                        <small class="text-muted">24h Commands</small>
+                    </div>
+                    <div class="col-6">
+                        <h4 id="total-commands" class="text-success">0</h4>
+                        <small class="text-muted">Total Commands</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3" id="bbs-stats-card" style="display:none;">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-inbox"></i> BBS Mailbox
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-4">
+                        <h4 id="bbs-pending-messages" class="text-danger">0</h4>
+                        <small class="text-muted">Pending</small>
+                    </div>
+                    <div class="col-4">
+                        <h4 id="bbs-users-with-messages" class="text-warning">0</h4>
+                        <small class="text-muted">Recipients</small>
+                    </div>
+                    <div class="col-4">
+                        <h4 id="bbs-total-messages" class="text-primary">0</h4>
+                        <small class="text-muted">All Time</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Analytics Section - Four Columns -->
+<div class="row mb-4" id="analytics-section">
+    <div class="col-12 col-md-6 col-lg-3">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-tower-broadcast"></i> Busiest repeaters</span>
-                <select id="top-repeaters-window" class="form-select form-select-sm"
-                        style="width:auto;font-size:0.75rem" aria-label="Repeater time window">
-                    <option value="7d">Last 7 days</option>
+                <div>
+                    <i class="fas fa-trophy"></i> Most Popular Commands
+                </div>
+                <select id="top-commands-time-window" class="form-select form-select-sm" style="width: auto; font-size: 0.75rem;">
+                    <option value="24h">24h</option>
+                    <option value="7d">7d</option>
+                    <option value="30d">30d</option>
+                    <option value="all" selected>All</option>
                 </select>
             </div>
             <div class="card-body">
-                <div id="top-repeaters-list"><div class="dashboard-empty">Loading…</div></div>
+                <div id="top-commands-list">
+                    <div class="loading">Loading command statistics...</div>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-12 col-lg-6">
+    
+    <div class="col-12 col-md-6 col-lg-3">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <span>
-                    <i class="fas fa-signal"></i> One-hop neighbours
-                    <button type="button" class="dashboard-info-btn" id="neighbors-info"
-                            aria-label="What counts as a one-hop neighbour"
-                            data-bs-toggle="tooltip" data-bs-placement="top">
-                        <i class="fas fa-info-circle" aria-hidden="true"></i>
-                    </button>
+                <div>
+                    <i class="fas fa-users"></i> Most Active Users
+                </div>
+                <select id="top-users-time-window" class="form-select form-select-sm" style="width: auto; font-size: 0.75rem;">
+                    <option value="24h">24h</option>
+                    <option value="7d">7d</option>
+                    <option value="30d">30d</option>
+                    <option value="all" selected>All</option>
+                </select>
+            </div>
+            <div class="card-body">
+                <div id="top-users-list">
+                    <div class="loading">Loading user statistics...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-12 col-md-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <i class="fas fa-route"></i> Longest Paths
+                </div>
+                <select id="longest-paths-time-window" class="form-select form-select-sm" style="width: auto; font-size: 0.75rem;">
+                    <option value="24h">24h</option>
+                    <option value="7d">7d</option>
+                    <option value="30d">30d</option>
+                    <option value="all" selected>All</option>
+                </select>
+            </div>
+            <div class="card-body">
+                <div id="longest-paths-list">
+                    <div class="loading">Loading path statistics...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-12 col-md-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <i class="fas fa-hashtag"></i> Top Channels
+                </div>
+                <select id="top-channels-time-window" class="form-select form-select-sm" style="width: auto; font-size: 0.75rem;">
+                    <option value="24h">24h</option>
+                    <option value="7d">7d</option>
+                    <option value="30d">30d</option>
+                    <option value="all" selected>All</option>
+                </select>
+            </div>
+            <div class="card-body">
+                <div id="top-channels-list">
+                    <div class="loading">Loading channel statistics...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Live Activity Feed -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><i class="fas fa-satellite-dish me-2"></i>Live Activity
+                    <span id="live-dot" class="status-indicator status-disconnected ms-2" title="SocketIO connection"></span>
                 </span>
-                <select id="neighbors-window" class="form-select form-select-sm"
-                        style="width:auto;font-size:0.75rem" aria-label="Neighbour time window">
-                    <option value="24h">Last 24 hours</option>
-                </select>
-            </div>
-            <div class="card-body">
-                <div class="d-flex align-items-baseline gap-2 flex-wrap mb-1">
-                    <span class="stat-tile__value" id="neighbors-count">—</span>
-                    <span class="dashboard-note">heard directly by this radio</span>
+                <div class="d-flex gap-2 align-items-center flex-wrap">
+                    <!-- Type filters -->
+                    <div class="d-flex gap-2 align-items-center" id="live-filters">
+                        <small class="text-muted">Filter:</small>
+                        <div class="form-check form-check-inline mb-0">
+                            <input class="form-check-input live-filter-cb" type="checkbox" id="filter-packet" data-type="packet" checked>
+                            <label class="form-check-label" for="filter-packet" style="font-size:0.8rem;color:#fd7e14">Packets</label>
+                        </div>
+                        <div class="form-check form-check-inline mb-0">
+                            <input class="form-check-input live-filter-cb" type="checkbox" id="filter-command" data-type="command" checked>
+                            <label class="form-check-label" for="filter-command" style="font-size:0.8rem;color:#198754">Commands</label>
+                        </div>
+                        <div class="form-check form-check-inline mb-0">
+                            <input class="form-check-input live-filter-cb" type="checkbox" id="filter-message" data-type="message" checked>
+                            <label class="form-check-label" for="filter-message" style="font-size:0.8rem;color:#0dcaf0">Messages</label>
+                        </div>
+                    </div>
+                    <!-- Scroll buttons -->
+                    <button class="btn btn-sm btn-outline-secondary" id="live-scroll-top" title="Scroll to newest">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="live-scroll-bottom" title="Scroll to oldest">
+                        <i class="fas fa-arrow-down"></i>
+                    </button>
+                    <span id="live-count" class="badge bg-secondary">0</span>
+                    <button class="btn btn-sm btn-outline-secondary" id="live-pause-btn">
+                        <i class="fas fa-pause" id="live-pause-icon"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="live-clear-btn">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                    <a href="/realtime" class="btn btn-sm btn-outline-primary">
+                        Full Monitor <i class="fas fa-external-link-alt ms-1"></i>
+                    </a>
                 </div>
-                <p class="dashboard-note mb-3" id="neighbors-shown"></p>
-                <div id="neighbors-list"><div class="dashboard-empty">Loading…</div></div>
             </div>
-        </div>
-    </div>
-</div>
-
-<!-- ══ Bot ═══════════════════════════════════════════════════════════════ -->
-<h2 class="dashboard-section-title"><i class="fas fa-robot"></i> Bot</h2>
-
-<p class="dashboard-note text-warning mb-2" id="bot-source-note" style="display:none"></p>
-
-<!-- Row 5 — bot tiles -->
-<div class="row g-3 mb-3">
-    <div class="col-6 col-lg-3">
-        <div class="stat-tile">
-            <div class="stat-tile__label">Messages 24h</div>
-            <div class="stat-tile__row">
-                <span class="stat-tile__value" id="messages-24h-value">—</span>
-                <span class="delta-chip" id="messages-24h-delta">–</span>
-            </div>
-            <div class="stat-tile__spark"><canvas id="messages-24h-spark"
-                aria-label="Messages per day, last 30 days"></canvas></div>
-        </div>
-    </div>
-    <div class="col-6 col-lg-3">
-        <div class="stat-tile">
-            <div class="stat-tile__label">Commands 24h</div>
-            <div class="stat-tile__row">
-                <span class="stat-tile__value" id="commands-24h-value">—</span>
-                <span class="delta-chip" id="commands-24h-delta">–</span>
-            </div>
-            <div class="stat-tile__spark"><canvas id="commands-24h-spark"
-                aria-label="Commands per day, last 30 days"></canvas></div>
-        </div>
-    </div>
-    <div class="col-6 col-lg-3">
-        <div class="stat-tile">
-            <div class="stat-tile__label">Reply rate 24h</div>
-            <div class="stat-tile__row">
-                <span class="stat-tile__value" id="reply-rate-24h">—</span>
-            </div>
-            <div class="stat-tile__sub">Commands that received a response</div>
-        </div>
-    </div>
-    <div class="col-6 col-lg-3">
-        <div class="stat-tile">
-            <div class="stat-tile__label">Unique users 24h</div>
-            <div class="stat-tile__row">
-                <span class="stat-tile__value" id="unique-users-24h">—</span>
-            </div>
-            <div class="stat-tile__sub" id="unique-channels-24h">—</div>
-        </div>
-    </div>
-</div>
-
-<!-- Row 6 — leaderboards -->
-<div class="row g-3 mb-3">
-    <div class="col-12 col-md-6 col-xl-3">
-        <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-trophy"></i> Top commands</span>
-                <select id="top-commands-window" class="form-select form-select-sm"
-                        style="width:auto;font-size:0.75rem" aria-label="Command time window">
-                    <option value="all">All retained</option>
-                </select>
-            </div>
-            <div class="card-body">
-                <div id="top-commands-list"><div class="dashboard-empty">Loading…</div></div>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-        <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-users"></i> Top users</span>
-                <select id="top-users-window" class="form-select form-select-sm"
-                        style="width:auto;font-size:0.75rem" aria-label="User time window">
-                    <option value="all">All retained</option>
-                </select>
-            </div>
-            <div class="card-body">
-                <div id="top-users-list"><div class="dashboard-empty">Loading…</div></div>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-        <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-hashtag"></i> Top channels</span>
-                <select id="top-channels-window" class="form-select form-select-sm"
-                        style="width:auto;font-size:0.75rem" aria-label="Channel time window">
-                    <option value="all">All retained</option>
-                </select>
-            </div>
-            <div class="card-body">
-                <div id="top-channels-list"><div class="dashboard-empty">Loading…</div></div>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-        <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-route"></i> Longest paths</span>
-                <select id="top-paths-window" class="form-select form-select-sm"
-                        style="width:auto;font-size:0.75rem" aria-label="Path time window">
-                    <option value="all">All retained</option>
-                </select>
-            </div>
-            <div class="card-body">
-                <div id="top-paths-list"><div class="dashboard-empty">Loading…</div></div>
+            <div class="card-body p-0">
+                <div id="live-feed" style="height:260px;overflow-y:auto;background:var(--bg-secondary,#f8f9fa);padding:0.5rem;">
+                    <div class="text-muted text-center py-3" id="live-placeholder">
+                        <i class="fas fa-hourglass-half"></i> Connecting…
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
 <!-- Connected Clients Modal -->
-<div class="modal fade" id="connectedClientsModal" tabindex="-1"
-     aria-labelledby="connectedClientsModalLabel" aria-hidden="true">
+<div class="modal fade" id="connectedClientsModal" tabindex="-1" aria-labelledby="connectedClientsModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
@@ -412,7 +517,1068 @@
 {% endblock %}
 
 {% block extra_js %}
-{# Data, not code: a JSON block needs no CSP nonce and cannot execute. #}
-<script type="application/json" id="dashboard-boot">{{ dashboard_boot|tojson }}</script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script nonce="{{ g.csp_nonce }}">
+class ModernDashboard {
+    constructor() {
+        this.botStartTime = null;
+        this.updateInterval = null;
+        this.uptimeInterval = null;
+        this.pathEncodingPieChart = null;
+        this.incomingPacketsPieChart = null;
+        this.initializeDashboard();
+    }
+
+    // DOM helpers — all untrusted values are rendered via textContent (never an
+    // HTML parser) so attacker-controlled API/mesh values stay inert.
+    makeEl(tagName, className, value) {
+        const el = document.createElement(tagName);
+        if (className) el.className = className;
+        if (value !== undefined && value !== null) {
+            el.textContent = String(value);
+        }
+        return el;
+    }
+
+    emptyMessage(text) {
+        return this.makeEl('div', 'text-muted text-center', text);
+    }
+
+    renderRow(badgeClass, badgeText, nameText, sideEl) {
+        const row = this.makeEl('div', 'd-flex justify-content-between align-items-center mb-2');
+        const left = this.makeEl('div', 'd-flex align-items-center');
+        left.appendChild(this.makeEl('span', `badge ${badgeClass} me-2`, badgeText));
+        const name = this.makeEl('span', 'fw-bold', nameText);
+        name.title = String(nameText ?? '');
+        left.appendChild(name);
+        row.appendChild(left);
+        if (sideEl) row.appendChild(sideEl);
+        return row;
+    }
+
+    
+    initializeDashboard() {
+        // Add a small delay to ensure DOM is ready
+        setTimeout(() => {
+            this.loadDashboardData();
+        }, 100);
+        this.startAutoRefresh();
+        this.updateUptime();
+        this.updateTimestamp();
+        this.setupTimeWindowSelector();
+    }
+    
+    setupTimeWindowSelector() {
+        // Setup selector for Most Active Users
+        const usersSelector = document.getElementById('top-users-time-window');
+        if (usersSelector) {
+            usersSelector.addEventListener('change', (e) => {
+                this.loadTopUsers(e.target.value);
+            });
+        }
+        
+        // Setup selector for Most Popular Commands
+        const commandsSelector = document.getElementById('top-commands-time-window');
+        if (commandsSelector) {
+            commandsSelector.addEventListener('change', (e) => {
+                this.loadTopCommands(e.target.value);
+            });
+        }
+        
+        // Setup selector for Longest Paths
+        const pathsSelector = document.getElementById('longest-paths-time-window');
+        if (pathsSelector) {
+            pathsSelector.addEventListener('change', (e) => {
+                this.loadLongestPaths(e.target.value);
+            });
+        }
+        
+        // Setup selector for Top Channels
+        const channelsSelector = document.getElementById('top-channels-time-window');
+        if (channelsSelector) {
+            channelsSelector.addEventListener('change', (e) => {
+                this.loadTopChannels(e.target.value);
+            });
+        }
+    }
+    
+    async loadDashboardData() {
+        try {
+            console.log('Loading dashboard data...');
+            
+            // Load system health
+            const healthResponse = await fetch('/api/health');
+            const healthData = await healthResponse.json();
+            console.log('Health data:', healthData);
+            
+            document.getElementById('health-clients-link').textContent = healthData.connected_clients || 0;
+            
+            // Store bot uptime for display (null when bot not running / no start time in DB)
+            const rawUptime = healthData.bot_uptime;
+            this.botStartTime = (rawUptime != null && rawUptime > 0) ? rawUptime : null;
+            // Update uptime display and restart live counter with fresh data
+            this.updateUptime();
+            this.startLiveUptime();
+            
+            // Load comprehensive statistics
+            const statsResponse = await fetch('/api/stats');
+            const statsData = await statsResponse.json();
+            console.log('Stats data:', statsData);
+            
+            if (statsData.error) {
+                this.showError('Failed to load statistics: ' + statsData.error);
+                return;
+            }
+            
+            // Update all metrics
+            this.updateMetrics(statsData);
+            
+            // Load analytics with default time windows
+            const usersTimeWindow = document.getElementById('top-users-time-window')?.value || 'all';
+            const commandsTimeWindow = document.getElementById('top-commands-time-window')?.value || 'all';
+            const pathsTimeWindow = document.getElementById('longest-paths-time-window')?.value || 'all';
+            const channelsTimeWindow = document.getElementById('top-channels-time-window')?.value || 'all';
+            
+            this.loadTopUsers(usersTimeWindow);
+            this.loadTopCommands(commandsTimeWindow);
+            this.loadLongestPaths(pathsTimeWindow);
+            this.loadTopChannels(channelsTimeWindow);
+            
+            // Update database status
+            this.updateDatabaseStatus('Connected', 'success');
+            
+        } catch (error) {
+            console.error('Error loading dashboard data:', error);
+            this.showError('Failed to load dashboard data: ' + error.message);
+            this.updateDatabaseStatus('Error', 'danger');
+        }
+    }
+    
+    updateMetrics(data) {
+        console.log('Updating metrics with data:', data);
+        
+        // Test with a simple update first
+        const testElement = document.getElementById('health-clients-link');
+        if (testElement) {
+            testElement.textContent = data.connected_clients || 0;
+            console.log('Updated connected-clients to:', data.connected_clients);
+        } else {
+            console.error('Element connected-clients not found!');
+        }
+        
+        // Update all metrics with error checking
+        this.updateElement('total-contacts', data.total_contacts);
+        this.updateElement('contacts-24h', data.contacts_24h);
+        this.updateElement('contacts-7d', data.contacts_7d);
+        this.updateElement('tracked-contacts', data.tracked_contacts);
+        
+        this.updateElement('avg-hop-count', data.avg_hop_count);
+        this.updateElement('max-hop-count', data.max_hop_count);
+        
+        this.updateElement('countries', data.countries);
+        this.updateElement('states', data.states);
+        this.updateElement('cities', data.cities);
+        
+        this.updateElement('unique-device-types', data.unique_device_types);
+        this.updateElement('unique-roles', data.unique_roles);
+        
+        this.updateElement('active-cache-entries', data.active_cache_entries);
+        
+        this.updateElement('total-messages', data.total_messages);
+        this.updateElement('messages-24h', data.messages_24h);
+        this.updateElement('total-commands', data.total_commands);
+        this.updateElement('commands-24h', data.commands_24h);
+        
+        // Additional statistics
+        this.updateElement('unique-users-total', data.unique_users_total);
+        this.updateElement('unique-senders-24h', data.unique_senders_24h);
+        this.updateElement('unique-channels-total', data.unique_channels_total);
+        this.updateElement('bot-reply-rate-24h', data.bot_reply_rate_24h !== undefined ? `${data.bot_reply_rate_24h}%` : '0%');
+        this.updateElement('bot-reply-rate-7d', data.bot_reply_rate_7d !== undefined ? `${data.bot_reply_rate_7d}%` : '0%');
+        this.updateElement('bot-reply-rate-30d', data.bot_reply_rate_30d !== undefined ? `${data.bot_reply_rate_30d}%` : '0%');
+
+        // BBS mailbox statistics (show card only when BBS data is available)
+        const bbsCard = document.getElementById('bbs-stats-card');
+        if (data.bbs_total_messages !== undefined && bbsCard) {
+            bbsCard.style.display = '';
+            this.updateElement('bbs-pending-messages', data.bbs_pending_messages);
+            this.updateElement('bbs-users-with-messages', data.bbs_users_with_messages);
+            this.updateElement('bbs-total-messages', data.bbs_total_messages);
+        }
+
+        this.updatePathEncodingPieChart(data);
+        this.updateIncomingPacketsPieChart(data);
+        
+        // Analytics are loaded separately with time window selectors
+    }
+
+    updatePathEncodingPieChart(data) {
+        const canvas = document.getElementById('pathEncodingPieChart');
+        const summaryEl = document.getElementById('path-encoding-pie-summary');
+        if (!canvas || typeof Chart === 'undefined') {
+            return;
+        }
+        const total = Number(data.contacts_7d) || 0;
+        let mb = data.contacts_7d_multibyte_path;
+        mb = Number(mb);
+        if (!Number.isFinite(mb)) {
+            mb = 0;
+        }
+        mb = Math.max(0, Math.min(mb, total));
+        const other = Math.max(0, total - mb);
+
+        const cs = getComputedStyle(document.documentElement);
+        const legendColor = (cs.getPropertyValue('--text-muted') || '#6c757d').trim();
+        const mbColor = '#0891b2';
+        const otherColor = '#a8a29e';
+        const emptyColor = (cs.getPropertyValue('--bg-tertiary') || '#dee2e6').trim();
+
+        const setNoAnimationOptions = (options) => {
+            options.animation = false;
+            options.animations = false;
+            options.transitions = {
+                active: { animation: { duration: 0 } },
+                resize: { animation: { duration: 0 } },
+                show: { animation: { duration: 0 } },
+                hide: { animation: { duration: 0 } },
+            };
+        };
+
+        if (total === 0) {
+            if (summaryEl) {
+                summaryEl.textContent = 'No contacts in the last 7 days.';
+            }
+            if (!this.pathEncodingPieChart) {
+                this.pathEncodingPieChart = new Chart(canvas.getContext('2d'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['—'],
+                        datasets: [{
+                            data: [1],
+                            backgroundColor: [emptyColor],
+                            borderWidth: 0,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                        cutout: '55%',
+                    },
+                });
+                setNoAnimationOptions(this.pathEncodingPieChart.options);
+            } else {
+                this.pathEncodingPieChart.data.labels = ['—'];
+                this.pathEncodingPieChart.data.datasets[0].data = [1];
+                this.pathEncodingPieChart.data.datasets[0].backgroundColor = [emptyColor];
+                this.pathEncodingPieChart.options.plugins.legend.display = false;
+                this.pathEncodingPieChart.options.plugins.tooltip.enabled = false;
+                this.pathEncodingPieChart.update('none');
+            }
+            return;
+        }
+
+        const pct = Math.round((mb / total) * 1000) / 10;
+        if (summaryEl) {
+            summaryEl.textContent = `${pct}% multibyte (${mb} of ${total})`;
+        }
+
+        if (!this.pathEncodingPieChart) {
+            this.pathEncodingPieChart = new Chart(canvas.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Multibyte paths', 'Other'],
+                    datasets: [{
+                        data: [mb, other],
+                        backgroundColor: [mbColor, otherColor],
+                        borderWidth: 0,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: legendColor,
+                                boxWidth: 12,
+                                font: { size: 11 },
+                            },
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const n = ctx.raw;
+                                    const p = total ? Math.round((n / total) * 1000) / 10 : 0;
+                                    return ` ${n} (${p}%)`;
+                                },
+                            },
+                        },
+                    },
+                    cutout: '55%',
+                },
+            });
+            setNoAnimationOptions(this.pathEncodingPieChart.options);
+        } else {
+            this.pathEncodingPieChart.data.labels = ['Multibyte paths', 'Other'];
+            this.pathEncodingPieChart.data.datasets[0].data = [mb, other];
+            this.pathEncodingPieChart.data.datasets[0].backgroundColor = [mbColor, otherColor];
+            this.pathEncodingPieChart.options.plugins.legend.display = true;
+            this.pathEncodingPieChart.options.plugins.legend.position = 'bottom';
+            this.pathEncodingPieChart.options.plugins.legend.labels = {
+                color: legendColor,
+                boxWidth: 12,
+                font: { size: 11 },
+            };
+            this.pathEncodingPieChart.options.plugins.tooltip.enabled = true;
+            this.pathEncodingPieChart.options.plugins.tooltip.callbacks = {
+                label: (ctx) => {
+                    const n = ctx.raw;
+                    const p = total ? Math.round((n / total) * 1000) / 10 : 0;
+                    return ` ${n} (${p}%)`;
+                },
+            };
+            this.pathEncodingPieChart.update('none');
+        }
+    }
+
+    updateIncomingPacketsPieChart(data) {
+        const canvas = document.getElementById('incomingPacketsPieChart');
+        const summaryEl = document.getElementById('incoming-packets-pie-summary');
+        if (!canvas || typeof Chart === 'undefined') {
+            return;
+        }
+        const total = Number(data.incoming_packets_7d) || 0;
+        let mb = data.incoming_packets_7d_multibyte_path;
+        mb = Number(mb);
+        if (!Number.isFinite(mb)) {
+            mb = 0;
+        }
+        mb = Math.max(0, Math.min(mb, total));
+        const other = Math.max(0, total - mb);
+
+        const cs = getComputedStyle(document.documentElement);
+        const legendColor = (cs.getPropertyValue('--text-muted') || '#6c757d').trim();
+        const mbColor = '#0891b2';
+        const otherColor = '#a8a29e';
+        const emptyColor = (cs.getPropertyValue('--bg-tertiary') || '#dee2e6').trim();
+
+        const setNoAnimationOptions = (options) => {
+            options.animation = false;
+            options.animations = false;
+            options.transitions = {
+                active: { animation: { duration: 0 } },
+                resize: { animation: { duration: 0 } },
+                show: { animation: { duration: 0 } },
+                hide: { animation: { duration: 0 } },
+            };
+        };
+
+        if (total === 0) {
+            if (summaryEl) {
+                summaryEl.textContent = 'No incoming packets in the last 7 days.';
+            }
+            if (!this.incomingPacketsPieChart) {
+                this.incomingPacketsPieChart = new Chart(canvas.getContext('2d'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['—'],
+                        datasets: [{
+                            data: [1],
+                            backgroundColor: [emptyColor],
+                            borderWidth: 0,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                        cutout: '55%',
+                    },
+                });
+                setNoAnimationOptions(this.incomingPacketsPieChart.options);
+            } else {
+                this.incomingPacketsPieChart.data.labels = ['—'];
+                this.incomingPacketsPieChart.data.datasets[0].data = [1];
+                this.incomingPacketsPieChart.data.datasets[0].backgroundColor = [emptyColor];
+                this.incomingPacketsPieChart.options.plugins.legend.display = false;
+                this.incomingPacketsPieChart.options.plugins.tooltip.enabled = false;
+                this.incomingPacketsPieChart.update('none');
+            }
+            return;
+        }
+
+        const pct = Math.round((mb / total) * 1000) / 10;
+        if (summaryEl) {
+            summaryEl.textContent = `${pct}% multibyte (${mb} of ${total})`;
+        }
+
+        if (!this.incomingPacketsPieChart) {
+            this.incomingPacketsPieChart = new Chart(canvas.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Multibyte paths', 'Other'],
+                    datasets: [{
+                        data: [mb, other],
+                        backgroundColor: [mbColor, otherColor],
+                        borderWidth: 0,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: legendColor,
+                                boxWidth: 12,
+                                font: { size: 11 },
+                            },
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const n = ctx.raw;
+                                    const p = total ? Math.round((n / total) * 1000) / 10 : 0;
+                                    return ` ${n} (${p}%)`;
+                                },
+                            },
+                        },
+                    },
+                    cutout: '55%',
+                },
+            });
+            setNoAnimationOptions(this.incomingPacketsPieChart.options);
+        } else {
+            this.incomingPacketsPieChart.data.labels = ['Multibyte paths', 'Other'];
+            this.incomingPacketsPieChart.data.datasets[0].data = [mb, other];
+            this.incomingPacketsPieChart.data.datasets[0].backgroundColor = [mbColor, otherColor];
+            this.incomingPacketsPieChart.options.plugins.legend.display = true;
+            this.incomingPacketsPieChart.options.plugins.legend.position = 'bottom';
+            this.incomingPacketsPieChart.options.plugins.legend.labels = {
+                color: legendColor,
+                boxWidth: 12,
+                font: { size: 11 },
+            };
+            this.incomingPacketsPieChart.options.plugins.tooltip.enabled = true;
+            this.incomingPacketsPieChart.options.plugins.tooltip.callbacks = {
+                label: (ctx) => {
+                    const n = ctx.raw;
+                    const p = total ? Math.round((n / total) * 1000) / 10 : 0;
+                    return ` ${n} (${p}%)`;
+                },
+            };
+            this.incomingPacketsPieChart.update('none');
+        }
+    }
+
+    updateElement(elementId, value) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.textContent = value || 0;
+        } else {
+            console.error(`Element ${elementId} not found!`);
+        }
+    }
+    
+    async loadTopCommands(timeWindow = 'all') {
+        try {
+            const response = await fetch(`/api/stats?top_commands_window=${timeWindow}`);
+            const data = await response.json();
+            
+            if (data.error) {
+                console.error('Error loading top commands:', data.error);
+                return;
+            }
+            
+            if (data.top_commands && data.top_commands.length > 0) {
+                this.updateTopCommands(data.top_commands);
+            } else {
+                const container = document.getElementById('top-commands-list');
+                container.replaceChildren(this.emptyMessage('No commands found'));
+            }
+        } catch (error) {
+            console.error('Error loading top commands:', error);
+        }
+    }
+    
+    updateTopCommands(commands) {
+        const container = document.getElementById('top-commands-list');
+        const rows = [];
+        commands.forEach((cmd, index) => {
+            const usesBadge = this.makeEl('span', 'badge bg-secondary', `${cmd.count} uses`);
+            rows.push(this.renderRow('bg-primary', String(index + 1), cmd.command, usesBadge));
+        });
+        container.replaceChildren(...rows);
+    }
+    
+    async loadTopUsers(timeWindow = 'all') {
+        try {
+            const response = await fetch(`/api/stats?top_users_window=${timeWindow}`);
+            const data = await response.json();
+            
+            if (data.error) {
+                console.error('Error loading top users:', data.error);
+                return;
+            }
+            
+            if (data.top_users && data.top_users.length > 0) {
+                this.updateTopUsers(data.top_users);
+            } else {
+                const container = document.getElementById('top-users-list');
+                container.replaceChildren(this.emptyMessage('No users found'));
+            }
+        } catch (error) {
+            console.error('Error loading top users:', error);
+        }
+    }
+    
+    updateTopUsers(users) {
+        const container = document.getElementById('top-users-list');
+        const rows = [];
+        users.forEach((user, index) => {
+            const name = this.makeEl('span', 'fw-bold text-truncate', user.user);
+            name.style.maxWidth = '200px';
+            name.title = String(user.user ?? '');
+            const msgBadge = this.makeEl('span', 'badge bg-info', `${user.count} messages`);
+            const row = this.makeEl('div', 'd-flex justify-content-between align-items-center mb-2');
+            const left = this.makeEl('div', 'd-flex align-items-center');
+            left.appendChild(this.makeEl('span', 'badge bg-success me-2', String(index + 1)));
+            left.appendChild(name);
+            row.appendChild(left);
+            row.appendChild(msgBadge);
+            rows.push(row);
+        });
+        container.replaceChildren(...rows);
+    }
+    
+    async loadLongestPaths(timeWindow = 'all') {
+        try {
+            const response = await fetch(`/api/stats?top_paths_window=${timeWindow}`);
+            const data = await response.json();
+            
+            if (data.error) {
+                console.error('Error loading longest paths:', data.error);
+                return;
+            }
+            
+            if (data.top_paths && data.top_paths.length > 0) {
+                this.updateLongestPaths(data.top_paths);
+            } else {
+                const container = document.getElementById('longest-paths-list');
+                container.replaceChildren(this.emptyMessage('No paths found'));
+            }
+        } catch (error) {
+            console.error('Error loading longest paths:', error);
+        }
+    }
+    
+    updateLongestPaths(paths) {
+        const container = document.getElementById('longest-paths-list');
+        const nodes = [];
+        paths.forEach((path, index) => {
+            const block = this.makeEl('div', 'mb-3 p-2 border rounded');
+            const head = this.makeEl('div', 'd-flex align-items-center mb-2');
+            head.appendChild(this.makeEl('span', 'badge bg-warning me-2', String(index + 1)));
+            const user = this.makeEl('span', 'fw-bold text-truncate', path.user);
+            user.style.maxWidth = '150px';
+            user.title = String(path.user ?? '');
+            head.appendChild(user);
+            head.appendChild(this.makeEl('span', 'badge bg-danger ms-2', `${path.path_length} hops`));
+            block.appendChild(head);
+            const code = this.makeEl('code', 'text-break', path.path_string);
+            code.style.cssText = 'word-break: break-all; font-size: 0.75rem;';
+            const pathLine = this.makeEl('div', 'small text-muted mb-1');
+            pathLine.appendChild(code);
+            block.appendChild(pathLine);
+            block.appendChild(this.makeEl('div', 'small text-muted', new Date(path.timestamp * 1000).toLocaleString()));
+            nodes.push(block);
+        });
+        container.replaceChildren(...nodes);
+    }
+    
+    async loadTopChannels(timeWindow = 'all') {
+        try {
+            const response = await fetch(`/api/stats?top_channels_window=${timeWindow}`);
+            const data = await response.json();
+            
+            if (data.error) {
+                console.error('Error loading top channels:', data.error);
+                return;
+            }
+            
+            if (data.top_channels && data.top_channels.length > 0) {
+                this.updateTopChannels(data.top_channels);
+            } else {
+                const container = document.getElementById('top-channels-list');
+                container.replaceChildren(this.emptyMessage('No channels found'));
+            }
+        } catch (error) {
+            console.error('Error loading top channels:', error);
+        }
+    }
+    
+    updateTopChannels(channels) {
+        const container = document.getElementById('top-channels-list');
+        const rows = [];
+        channels.forEach((channel, index) => {
+            const name = this.makeEl('span', 'fw-bold text-truncate', channel.channel);
+            name.style.maxWidth = '200px';
+            name.title = String(channel.channel ?? '');
+            const side = this.makeEl('div', 'text-end');
+            side.appendChild(this.makeEl('span', 'badge bg-secondary me-1', `${channel.messages} msgs`));
+            side.appendChild(this.makeEl('span', 'badge bg-info', `${channel.users} users`));
+            const row = this.makeEl('div', 'd-flex justify-content-between align-items-center mb-2');
+            const left = this.makeEl('div', 'd-flex align-items-center');
+            left.appendChild(this.makeEl('span', 'badge bg-primary me-2', String(index + 1)));
+            left.appendChild(name);
+            row.appendChild(left);
+            row.appendChild(side);
+            rows.push(row);
+        });
+        container.replaceChildren(...rows);
+    }
+    
+    updateDatabaseStatus(status, type) {
+        const statusElement = document.getElementById('database-status');
+        const box = this.makeEl('div', 'd-flex align-items-center justify-content-center mb-2');
+        const indicator = this.makeEl('span', `status-indicator status-${type} me-2`, '');
+        box.appendChild(indicator);
+        box.appendChild(this.makeEl('span', '', status));
+        statusElement.replaceChildren(box);
+    }
+    
+    updateUptime() {
+        const uptimeElement = document.getElementById('uptime');
+        if (!uptimeElement) return;
+        if (this.botStartTime != null && this.botStartTime > 0) {
+            this.formatUptime(this.botStartTime);
+        } else {
+            // Bot not running or no start time in DB (e.g. viewer run standalone)
+            uptimeElement.textContent = 'Bot Down?';
+        }
+    }
+    
+    formatUptime(uptimeSeconds) {
+        const uptimeElement = document.getElementById('uptime');
+        const totalMinutes = Math.floor(uptimeSeconds / 60);
+        const totalHours = Math.floor(uptimeSeconds / 3600);
+        const totalDays = Math.floor(uptimeSeconds / 86400);
+        const months = Math.floor(totalDays / 30);
+        const days = totalDays % 30;
+        const hours = Math.floor((uptimeSeconds % 86400) / 3600);
+        const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+        const seconds = Math.floor(uptimeSeconds % 60);
+
+        const parts = [];
+        if (months > 0) parts.push(`${months}mo`);
+        if (days > 0) parts.push(`${days}d`);
+        if (hours > 0) parts.push(`${hours}h`);
+        if (minutes > 0) parts.push(`${minutes}m`);
+        if (parts.length === 0 || totalHours < 1) {
+            if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+        }
+        uptimeElement.textContent = parts.length > 0 ? parts.join(' ') : '0s';
+    }
+    
+    startLiveUptime() {
+        // Clear any existing uptime interval
+        if (this.uptimeInterval) {
+            clearInterval(this.uptimeInterval);
+            this.uptimeInterval = null;
+        }
+        
+        // Only run live counter when we have a valid bot uptime (bot is running)
+        if (this.botStartTime != null && this.botStartTime > 0) {
+            this.uptimeInterval = setInterval(() => {
+                if (this.botStartTime != null) {
+                    this.botStartTime += 1;
+                    this.formatUptime(this.botStartTime);
+                }
+            }, 1000);
+        }
+    }
+    
+    updateTimestamp() {
+        const now = new Date();
+        const timestamp = now.toLocaleTimeString();
+        document.getElementById('last-update').textContent = timestamp;
+    }
+    
+    startAutoRefresh() {
+        this.updateInterval = setInterval(() => {
+            this.loadDashboardData();
+            this.updateTimestamp();
+        }, 30000); // Refresh every 30 seconds
+    }
+    
+    destroy() {
+        // Clean up intervals when dashboard is destroyed
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+        }
+        if (this.uptimeInterval) {
+            clearInterval(this.uptimeInterval);
+        }
+        if (this.pathEncodingPieChart) {
+            this.pathEncodingPieChart.destroy();
+            this.pathEncodingPieChart = null;
+        }
+        if (this.incomingPacketsPieChart) {
+            this.incomingPacketsPieChart.destroy();
+            this.incomingPacketsPieChart = null;
+        }
+    }
+    
+    async loadConnectedClients() {
+        const loading = document.getElementById('connected-clients-loading');
+        const empty   = document.getElementById('connected-clients-empty');
+        const table   = document.getElementById('connected-clients-table');
+        const tbody   = document.getElementById('connected-clients-tbody');
+        if (!loading) return;
+        loading.style.display = '';
+        empty.style.display   = 'none';
+        table.style.display   = 'none';
+        tbody.replaceChildren();
+        try {
+            const resp = await fetch('/api/connected_clients');
+            const clients = await resp.json();
+            loading.style.display = 'none';
+            if (!Array.isArray(clients) || clients.length === 0) {
+                empty.style.display = '';
+                return;
+            }
+            table.style.display = '';
+            for (const c of clients) {
+                const connAt = c.connected_at
+                    ? new Date(c.connected_at * 1000).toLocaleTimeString()
+                    : '—';
+                const lastAct = c.last_activity
+                    ? new Date(c.last_activity * 1000).toLocaleTimeString()
+                    : '—';
+                const tr = document.createElement('tr');
+                const idCell = document.createElement('td');
+                idCell.appendChild(this.makeEl('code', '', c.client_id));
+                const tsCell = document.createElement('td');
+                tsCell.textContent = String(connAt ?? '');
+                const laCell = document.createElement('td');
+                laCell.textContent = String(lastAct ?? '');
+                tr.append(idCell, tsCell, laCell);
+                tbody.appendChild(tr);
+            }
+        } catch (e) {
+            loading.style.display = 'none';
+            empty.style.display   = '';
+            empty.textContent     = 'Failed to load client list.';
+        }
+    }
+
+    showError(message) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'alert alert-danger alert-dismissible fade show';
+        const messageNode = document.createElement('span');
+        messageNode.textContent = String(message ?? '');
+        const closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.className = 'btn-close';
+        closeButton.setAttribute('data-bs-dismiss', 'alert');
+        closeButton.setAttribute('aria-label', 'Close');
+        errorDiv.append(messageNode, closeButton);
+
+        // Insert at the top of the content
+        const content = document.querySelector('.container-fluid');
+        if (content) {
+            content.insertBefore(errorDiv, content.firstChild);
+
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                if (errorDiv.parentNode) {
+                    errorDiv.parentNode.removeChild(errorDiv);
+                }
+            }, 10000);
+        }
+    }
+}
+
+function initMultibyteCapableTooltips() {
+    if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
+    const dashboardTip =
+        'Contacts heard in the last 7 days are counted as multibyte capable if any apply: ' +
+        'stored path encoding (out bytes per hop) is 2 or 3; ' +
+        'we saw an advert from them in that window on observed paths with multibyte hops (2–3 bytes per hop); ' +
+        'or, for repeaters and room servers, their public key prefix matches a hop prefix from a multibyte advert path in that window.';
+    const el = document.getElementById('contacts-multibyte-chart-info');
+    if (el) {
+        const existing = bootstrap.Tooltip.getInstance(el);
+        if (existing) existing.dispose();
+        new bootstrap.Tooltip(el, {
+            title: dashboardTip,
+            html: false,
+            customClass: 'multibyte-capable-hint',
+        });
+    }
+}
+
+// Initialize dashboard when page loads
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM loaded, initializing dashboard...');
+    window.dashboard = new ModernDashboard();
+    initMultibyteCapableTooltips();
+
+    // Connected-clients modal (wired via listener — no inline handlers under nonce CSP)
+    const connectedClientsLink = document.getElementById('health-clients-link');
+    if (connectedClientsLink) {
+        connectedClientsLink.addEventListener('click', () => {
+            if (window.dashboard) {
+                window.dashboard.loadConnectedClients();
+            }
+        });
+    }
+});
+
+// Clean up when page is unloaded
+window.addEventListener('beforeunload', () => {
+    if (window.dashboard) {
+        window.dashboard.destroy();
+    }
+});
+</script>
+
+<script nonce="{{ g.csp_nonce }}">
+// ── Live Activity Feed (SocketIO) ─────────────────────────────────────────────
+(function () {
+    const feed      = document.getElementById('live-feed');
+    const dot       = document.getElementById('live-dot');
+    const countBadge = document.getElementById('live-count');
+    const placeholder = document.getElementById('live-placeholder');
+    let paused   = false;
+    let total    = 0;
+    const MAX_ENTRIES = 100;
+
+    const TYPE_COLORS = {
+        packet:  '#fd7e14',
+        command: '#198754',
+        message: '#0dcaf0',
+    };
+
+    function escHtml(s) {
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // Track active type filters
+    const activeFilters = { packet: true, command: true, message: true };
+
+    function applyFilters() {
+        Array.from(feed.children).forEach(el => {
+            const t = el.dataset.type;
+            if (!t) return; // placeholder or unknown
+            el.style.display = activeFilters[t] ? '' : 'none';
+        });
+    }
+
+    // Wire filter checkboxes
+    document.querySelectorAll('.live-filter-cb').forEach(cb => {
+        cb.addEventListener('change', () => {
+            activeFilters[cb.dataset.type] = cb.checked;
+            applyFilters();
+        });
+    });
+
+    function addEntry(label, text, type) {
+        if (paused) return;
+        if (placeholder && placeholder.parentNode) placeholder.remove();
+        const ts = new Date().toLocaleTimeString();
+        const color = TYPE_COLORS[type] || '#6c757d';
+        const el = document.createElement('div');
+        el.dataset.type = type;
+        el.style.cssText = `border-left:3px solid ${color};padding:3px 8px;margin-bottom:3px;font-size:0.82rem;border-radius:2px;`;
+        const tsSpan = document.createElement('span');
+        tsSpan.className = 'text-muted me-2';
+        tsSpan.textContent = String(ts ?? '');
+        const strongEl = document.createElement('strong');
+        strongEl.textContent = String(label ?? '');
+        const textSpan = document.createElement('span');
+        textSpan.className = 'text-muted';
+        textSpan.textContent = String(text ?? '');
+        el.append(tsSpan, strongEl, document.createTextNode(' '), textSpan);
+        if (!activeFilters[type]) el.style.display = 'none';
+        feed.insertBefore(el, feed.firstChild);
+        total++;
+        countBadge.textContent = total;
+        // Trim
+        const items = feed.children;
+        while (items.length > MAX_ENTRIES) feed.removeChild(feed.lastChild);
+    }
+
+    window.toggleLivePause = function () {
+        paused = !paused;
+        const icon = document.getElementById('live-pause-icon');
+        icon.className = paused ? 'fas fa-play' : 'fas fa-pause';
+    };
+    window.clearLiveFeed = function () {
+        feed.replaceChildren();
+        total = 0;
+        countBadge.textContent = '0';
+    };
+    window.scrollLiveFeed = function (dir) {
+        feed.scrollTop = dir === 'top' ? 0 : feed.scrollHeight;
+    };
+
+    // Live feed controls wired via listeners (no inline handlers under nonce CSP)
+    const scrollTopBtn = document.getElementById('live-scroll-top');
+    if (scrollTopBtn) scrollTopBtn.addEventListener('click', () => window.scrollLiveFeed('top'));
+    const scrollBottomBtn = document.getElementById('live-scroll-bottom');
+    if (scrollBottomBtn) scrollBottomBtn.addEventListener('click', () => window.scrollLiveFeed('bottom'));
+    const pauseBtn = document.getElementById('live-pause-btn');
+    if (pauseBtn) pauseBtn.addEventListener('click', window.toggleLivePause);
+    const clearBtn = document.getElementById('live-clear-btn');
+    if (clearBtn) clearBtn.addEventListener('click', window.clearLiveFeed);
+
+    const socket = window.connectionManager.socket;
+
+    socket.on('connect', () => {
+        dot.className = 'status-indicator status-connected ms-2';
+        socket.emit('subscribe_packets');
+        socket.emit('subscribe_commands');
+        socket.emit('subscribe_messages');
+    });
+    socket.on('disconnect', () => {
+        dot.className = 'status-indicator status-disconnected ms-2';
+    });
+
+    socket.on('packet_data', d => {
+        const ptype = d.payload_type_name || d.type_name || 'Packet';
+        const src   = d.from_name || d.pubkey_prefix || '';
+        addEntry(ptype, src, 'packet');
+    });
+    socket.on('command_data', d => {
+        addEntry('Cmd: ' + (d.command || '?'), (d.user || '') + ' → ' + (d.channel || ''), 'command');
+    });
+    socket.on('message_data', d => {
+        const ch = d.channel ? `[${d.channel}] ` : (d.is_dm ? '[DM] ' : '');
+        addEntry(d.sender || '?', ch + (d.content || ''), 'message');
+    });
+})();
+</script>
+
+<style>
+/* Status indicators moved to enhanced section below */
+
+.loading {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px var(--shadow-color);
+}
+
+.metric-value {
+    font-weight: 700;
+    font-size: 1.5rem;
+}
+
+.metric-label {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Analytics section uses Bootstrap responsive classes */
+
+/* Health status card styling */
+.health-status-card .col-md-3 {
+    border-right: 1px solid var(--border-color);
+    padding: 0.75rem 0.5rem;
+    position: relative;
+}
+
+.health-status-card .col-md-3:last-child {
+    border-right: none;
+}
+
+.health-status-card .col-md-3:first-child {
+    padding-left: 0;
+}
+
+.health-status-card .col-md-3:last-child {
+    padding-right: 0;
+}
+
+/* Enhanced card styling */
+.card.shadow-sm {
+    border: none;
+    border-radius: 12px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card.shadow-sm:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px var(--shadow-color) !important;
+}
+
+.bg-gradient-primary {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+    border: none;
+}
+
+.card-header.bg-gradient-primary {
+    border-radius: 12px 12px 0 0;
+    padding: 0.75rem 1.25rem;
+}
+
+/* Status indicator enhancements */
+.status-indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.2);
+    animation: pulse 2s infinite;
+}
+
+.status-connected { 
+    background-color: #28a745; 
+}
+
+.status-disconnected { 
+    background-color: #dc3545; 
+}
+
+.status-warning { 
+    background-color: #ffc107; 
+}
+
+.status-success { 
+    background-color: #28a745; 
+}
+
+.status-danger { 
+    background-color: #dc3545; 
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(40, 167, 69, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+}
+
+[data-theme="dark"] .status-indicator {
+    box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.4);
+    animation: pulse-dark 2s infinite;
+}
+
+@keyframes pulse-dark {
+    0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.6); }
+    70% { box-shadow: 0 0 0 6px rgba(40, 167, 69, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+}
+</style>
 {% endblock %}
