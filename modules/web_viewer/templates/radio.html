@@ -132,6 +132,65 @@
                 </div>
             </div>
 
+            <!-- Node Settings (companion) -->
+            <div class="card mb-4" id="node-settings-card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-microchip me-2"></i>Node Settings</h5>
+                    <button class="btn btn-sm btn-outline-secondary" id="readNodeSettingsBtn">
+                        <span class="spinner-border spinner-border-sm me-1" id="readNodeSpinner" style="display:none" role="status"></span>
+                        <i class="fas fa-sync me-1" id="readNodeIcon"></i>Read from Device
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="nodeSettingsAlert" style="display:none"></div>
+                    <form id="nodeSettingsForm">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label" for="nodeName">Node Name</label>
+                                <input type="text" class="form-control" id="nodeName" name="name"
+                                    placeholder="Friendly node name">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="nodePathHashMode">Path Hash Mode</label>
+                                <select class="form-select" id="nodePathHashMode" name="path_hash_mode">
+                                    <option value="">—</option>
+                                    <option value="off">Off</option>
+                                    <option value="crc8">CRC-8</option>
+                                    <option value="crc16">CRC-16</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="nodeTelemBase">Telemetry Interval (min)</label>
+                                <input type="number" class="form-control" id="nodeTelemBase" name="telem_base"
+                                    min="1" placeholder="e.g. 15">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="nodeRxDelay">RX Delay (ms)</label>
+                                <input type="number" class="form-control" id="nodeRxDelay" name="rx_delay"
+                                    min="0" placeholder="e.g. 100">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="nodeNewContactsMode">New Contacts Mode</label>
+                                <input type="text" class="form-control" id="nodeNewContactsMode"
+                                    value="{{ 'manual' if not auto_manage_contacts else 'auto' }}" readonly>
+                                <small class="form-text text-muted">
+                                    Owned by <code>[Bot] auto_manage_contacts</code> in config.
+                                </small>
+                            </div>
+                        </div>
+                        <div class="mt-3 d-flex gap-2">
+                            <button type="button" class="btn btn-primary" id="writeNodeSettingsBtn">
+                                <span class="spinner-border spinner-border-sm me-1" id="writeNodeSpinner" style="display:none" role="status"></span>
+                                <i class="fas fa-upload me-1"></i>Write to Device
+                            </button>
+                            <button type="button" class="btn btn-warning" id="sendAdvertFloodBtn">
+                                <i class="fas fa-broadcast-tower me-1"></i>Send Advert Flood
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
             <!-- Announcement Section -->
             <div class="card mb-4">
                 <div class="card-header">
@@ -254,7 +313,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ g.csp_nonce }}">
 class RadioManager {
     constructor() {
         this.channels = [];
@@ -387,7 +446,14 @@ class RadioManager {
         const tbody = document.getElementById('channelsTableBody');
         
         if (this.channels.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center">No channels configured</td></tr>';
+            tbody.replaceChildren();
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 6;
+            td.className = 'text-center';
+            td.textContent = 'No channels configured';
+            tr.appendChild(td);
+            tbody.appendChild(tr);
             return;
         }
         
@@ -395,31 +461,73 @@ class RadioManager {
         fetch('/api/channels/stats').then(r => r.json()).then(stats => {
             const feedCounts = stats.channel_feed_counts || {};
             
-            tbody.innerHTML = this.channels.map(channel => {
+            tbody.replaceChildren();
+            for (const channel of this.channels) {
                 const channelName = channel.name || channel.channel_name || `Channel ${channel.channel_idx || channel.index}`;
                 const feedCount = feedCounts[channelName] || 0;
-                const typeBadge = channel.type === 'hashtag' 
-                    ? '<span class="badge bg-primary">Hashtag</span>'
-                    : '<span class="badge bg-secondary">Custom</span>';
                 
-                return `
-                    <tr>
-                        <td>${channel.channel_idx || channel.index}</td>
-                        <td>${channelName}</td>
-                        <td>${typeBadge}</td>
-                        <td>${feedCount > 0 ? `<a href="/feeds?channel=${encodeURIComponent(channelName)}">${feedCount}</a>` : '0'}</td>
-                        <td><span class="badge bg-success">Active</span></td>
-                        <td>
-                            <button class="btn btn-sm btn-info" onclick="radioManager.viewChannel(${channel.channel_idx || channel.index})" title="View Details">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                            <button class="btn btn-sm btn-danger" onclick="radioManager.deleteChannel(${channel.channel_idx || channel.index})" title="Delete" ${feedCount > 0 ? 'disabled' : ''}>
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `;
-            }).join('');
+                const tr = document.createElement('tr');
+                
+                const value = channel.channel_idx || channel.index;
+                const idxCell = document.createElement('td');
+                cell = idxCell;
+                cell.textContent = String(value ?? '');
+                tr.appendChild(idxCell);
+                
+                const nameValue = channelName;
+                const nameCell = document.createElement('td');
+                cell = nameCell;
+                cell.textContent = String(nameValue ?? '');
+                tr.appendChild(nameCell);
+                
+                const typeCell = document.createElement('td');
+                const typeBadge = document.createElement('span');
+                typeBadge.className = channel.type === 'hashtag' ? 'badge bg-primary' : 'badge bg-secondary';
+                typeBadge.textContent = String(channel.type === 'hashtag' ? 'Hashtag' : 'Custom' ?? '');
+                typeCell.appendChild(typeBadge);
+                tr.appendChild(typeCell);
+                
+                const feedCell = document.createElement('td');
+                if (feedCount > 0) {
+                    const link = document.createElement('a');
+                    link.href = `/feeds?channel=${encodeURIComponent(channelName)}`;
+                    link.textContent = String(feedCount ?? '');
+                    feedCell.appendChild(link);
+                } else {
+                    feedCell.textContent = '0';
+                }
+                tr.appendChild(feedCell);
+                
+                const statusCell = document.createElement('td');
+                const statusBadge = document.createElement('span');
+                statusBadge.className = 'badge bg-success';
+                statusBadge.textContent = 'Active';
+                statusCell.appendChild(statusBadge);
+                tr.appendChild(statusCell);
+                
+                const actionsCell = document.createElement('td');
+                const viewButton = document.createElement('button');
+                viewButton.className = 'btn btn-sm btn-info';
+                viewButton.title = 'View Details';
+                viewButton.addEventListener('click', () => this.viewChannel(channel.channel_idx || channel.index));
+                const viewIcon = document.createElement('i');
+                viewIcon.className = 'fas fa-eye';
+                viewButton.appendChild(viewIcon);
+                actionsCell.appendChild(viewButton);
+                
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'btn btn-sm btn-danger';
+                deleteButton.title = 'Delete';
+                if (feedCount > 0) deleteButton.disabled = true;
+                deleteButton.addEventListener('click', () => this.deleteChannel(channel.channel_idx || channel.index));
+                const deleteIcon = document.createElement('i');
+                deleteIcon.className = 'fas fa-trash';
+                deleteButton.appendChild(deleteIcon);
+                actionsCell.appendChild(deleteButton);
+                
+                tr.appendChild(actionsCell);
+                tbody.appendChild(tr);
+            }
         });
     }
     
@@ -548,6 +656,12 @@ class RadioManager {
                     this.updateConnectButton();
                     this.showError(result.error_message || `Failed to ${action} radio`);
                     return;
+                } else if (result.status === 'interrupted') {
+                    spinner.style.display = 'none';
+                    btn.disabled = false;
+                    this.updateConnectButton();
+                    this.showError(result.error_message || `Radio ${action} interrupted`);
+                    return;
                 }
             } catch (error) {
                 console.error('Error polling operation:', error);
@@ -577,11 +691,20 @@ class RadioManager {
         }
     }
     
+    _setButtonLoading(btn, text) {
+        btn.disabled = true;
+        btn.replaceChildren();
+        const spinner = document.createElement('span');
+        spinner.className = 'spinner-border spinner-border-sm me-2';
+        spinner.setAttribute('role', 'status');
+        btn.append(spinner, document.createTextNode(text));
+    }
+
     async saveChannel() {
         const form = document.getElementById('createChannelForm');
         const formData = new FormData(form);
         const saveBtn = document.getElementById('saveChannelBtn');
-        const originalBtnText = saveBtn.innerHTML;
+        const originalBtnText = saveBtn.textContent;
         
         const channelName = formData.get('channel_name')?.trim();
         const channelKey = formData.get('channel_key')?.trim();
@@ -632,8 +755,7 @@ class RadioManager {
         }
         
         // Disable button and show loading state
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating...';
+        this._setButtonLoading(saveBtn, 'Creating...');
         
         try {
             const pr = await MeshCoreChannelOps.postChannel(data);
@@ -641,7 +763,7 @@ class RadioManager {
             
             if (pr.ok) {
                 if (result.pending && result.operation_id) {
-                    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Processing...';
+                    this._setButtonLoading(saveBtn, 'Processing...');
                     const pollStatus = await MeshCoreChannelOps.pollChannelOperation(result.operation_id, {
                         button: saveBtn,
                         originalButtonText: originalBtnText,
@@ -664,7 +786,7 @@ class RadioManager {
                         await this.loadStatistics();
                     }
                     saveBtn.disabled = false;
-                    saveBtn.innerHTML = originalBtnText;
+                    saveBtn.textContent = originalBtnText;
                 } else {
                     this.showSuccess('Channel created successfully');
                     bootstrap.Modal.getInstance(document.getElementById('createChannelModal')).hide();
@@ -673,17 +795,17 @@ class RadioManager {
                     await this.loadChannels();
                     await this.loadStatistics();
                     saveBtn.disabled = false;
-                    saveBtn.innerHTML = originalBtnText;
+                    saveBtn.textContent = originalBtnText;
                 }
             } else {
                 this.showError(result.error || 'Failed to create channel');
                 saveBtn.disabled = false;
-                saveBtn.innerHTML = originalBtnText;
+                saveBtn.textContent = originalBtnText;
             }
         } catch (error) {
             this.showError('Error creating channel: ' + error.message);
             saveBtn.disabled = false;
-            saveBtn.innerHTML = originalBtnText;
+            saveBtn.textContent = originalBtnText;
         }
     }
     
@@ -700,29 +822,87 @@ class RadioManager {
             }
             
             const channelKey = channel.key_hex || '';
-            const keyDisplay = channelKey 
-                ? `<code style="font-size: 0.9em; word-break: break-all;">${channelKey}</code> <button class="btn btn-sm btn-outline-secondary ms-2" onclick="navigator.clipboard.writeText('${channelKey}'); radioManager.showSuccess('Key copied to clipboard');"><i class="fas fa-copy"></i> Copy</button>`
-                : '<em>No key available</em>';
+            const detailsEl = document.getElementById('channelDetailsContent');
+            detailsEl.replaceChildren();
             
-            const content = `
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>Channel Information</h6>
-                        <p><strong>Name:</strong> ${channel.name || channel.channel_name}</p>
-                        <p><strong>Index:</strong> ${channel.channel_idx || channel.index}</p>
-                        <p><strong>Type:</strong> ${channel.type || 'Unknown'}</p>
-                        <p><strong>Key:</strong> ${keyDisplay}</p>
-                    </div>
-                    <div class="col-md-6">
-                        <h6>Feed Subscriptions</h6>
-                        ${feedsData.feeds && feedsData.feeds.length > 0
-                            ? `<ul>${feedsData.feeds.map(f => `<li><a href="/feeds?id=${f.id}">${f.feed_name || f.feed_url}</a></li>`).join('')}</ul>`
-                            : '<p>No feed subscriptions</p>'}
-                    </div>
-                </div>
-            `;
+            const row = document.createElement('div');
+            row.className = 'row';
             
-            document.getElementById('channelDetailsContent').innerHTML = content;
+            const col1 = document.createElement('div');
+            col1.className = 'col-md-6';
+            const h6a = document.createElement('h6');
+            h6a.textContent = 'Channel Information';
+            col1.appendChild(h6a);
+            
+            for (const [label, value] of [
+                ['Name', channel.name || channel.channel_name],
+                ['Index', channel.channel_idx || channel.index],
+                ['Type', channel.type || 'Unknown'],
+            ]) {
+                const p = document.createElement('p');
+                const strong = document.createElement('strong');
+                strong.textContent = label + ': ';
+                p.appendChild(strong);
+                const valSpan = document.createElement('span');
+                valSpan.textContent = String(value ?? '');
+                p.appendChild(valSpan);
+                col1.appendChild(p);
+            }
+            
+            // Key row
+            const keyP = document.createElement('p');
+            const keyStrong = document.createElement('strong');
+            keyStrong.textContent = 'Key: ';
+            keyP.appendChild(keyStrong);
+            if (channelKey) {
+                const code = document.createElement('code');
+                code.style.cssText = 'font-size: 0.9em; word-break: break-all;';
+                code.textContent = String(channelKey);
+                keyP.appendChild(code);
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'btn btn-sm btn-outline-secondary ms-2';
+                copyBtn.dataset.key = channelKey;
+                const copyIcon = document.createElement('i');
+                copyIcon.className = 'fas fa-copy';
+                copyBtn.append(copyIcon, document.createTextNode(' Copy'));
+                copyBtn.addEventListener('click', () => {
+                    navigator.clipboard.writeText(copyBtn.dataset.key);
+                    radioManager.showSuccess('Key copied to clipboard');
+                });
+                keyP.appendChild(copyBtn);
+            } else {
+                const em = document.createElement('em');
+                em.textContent = 'No key available';
+                keyP.appendChild(em);
+            }
+            col1.appendChild(keyP);
+            row.appendChild(col1);
+            
+            const col2 = document.createElement('div');
+            col2.className = 'col-md-6';
+            const h6b = document.createElement('h6');
+            h6b.textContent = 'Feed Subscriptions';
+            col2.appendChild(h6b);
+            
+            if (feedsData.feeds && feedsData.feeds.length > 0) {
+                const ul = document.createElement('ul');
+                for (const feed of feedsData.feeds) {
+                    const li = document.createElement('li');
+                    const link = document.createElement('a');
+                    link.href = `/feeds?id=${feed.id}`;
+                    link.textContent = String(feed.feed_name || feed.feed_url || 'Unnamed feed');
+                    li.appendChild(link);
+                    ul.appendChild(li);
+                }
+                col2.appendChild(ul);
+            } else {
+                const noFeeds = document.createElement('p');
+                noFeeds.textContent = 'No feed subscriptions';
+                col2.appendChild(noFeeds);
+            }
+            row.appendChild(col2);
+            detailsEl.appendChild(row);
+            
             const modal = new bootstrap.Modal(document.getElementById('channelDetailsModal'));
             modal.show();
         } catch (error) {
@@ -755,71 +935,27 @@ class RadioManager {
             // Continue with deletion even if feed check fails
         }
         
-        // Find the delete button and show loading state
-        const deleteButtons = document.querySelectorAll(`button[onclick*="deleteChannel(${channelIdx})"]`);
-        let deleteBtn = null;
-        if (deleteButtons.length > 0) {
-            deleteBtn = deleteButtons[0];
-            const originalHtml = deleteBtn.innerHTML;
-            deleteBtn.disabled = true;
-            deleteBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+        try {
+            const response = await fetch(`/api/channels/${channelIdx}`, {
+                method: 'DELETE',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
             
-            try {
-                const response = await fetch(`/api/channels/${channelIdx}`, {
-                    method: 'DELETE',
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                });
-                
-                const result = await response.json();
-                
-                if (response.ok) {
-                    if (result.pending && result.operation_id) {
-                        // Operation is queued, poll for status
-                        await this.pollDeleteOperationStatus(result.operation_id, deleteBtn, originalHtml);
-                    } else {
-                        // Immediate success
-                        this.showSuccess('Channel deleted successfully');
-                        await this.loadChannels();
-                        await this.loadStatistics();
-                        deleteBtn.disabled = false;
-                        deleteBtn.innerHTML = originalHtml;
-                    }
+            const result = await response.json();
+            
+            if (response.ok) {
+                if (result.pending && result.operation_id) {
+                    await this.pollDeleteOperationStatus(result.operation_id);
                 } else {
-                    this.showError(result.error || 'Failed to delete channel');
-                    deleteBtn.disabled = false;
-                    deleteBtn.innerHTML = originalHtml;
+                    this.showSuccess('Channel deleted successfully');
+                    await this.loadChannels();
+                    await this.loadStatistics();
                 }
-            } catch (error) {
-                this.showError('Error deleting channel: ' + error.message);
-                if (deleteBtn) {
-                    deleteBtn.disabled = false;
-                    deleteBtn.innerHTML = originalHtml;
-                }
+            } else {
+                this.showError(result.error || 'Failed to delete channel');
             }
-        } else {
-            // Fallback if button not found
-            try {
-                const response = await fetch(`/api/channels/${channelIdx}`, {
-                    method: 'DELETE',
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                });
-                
-                const result = await response.json();
-                
-                if (response.ok) {
-                    if (result.pending && result.operation_id) {
-                        await this.pollDeleteOperationStatus(result.operation_id);
-                    } else {
-                        this.showSuccess('Channel deleted successfully');
-                        await this.loadChannels();
-                        await this.loadStatistics();
-                    }
-                } else {
-                    this.showError(result.error || 'Failed to delete channel');
-                }
-            } catch (error) {
-                this.showError('Error deleting channel: ' + error.message);
-            }
+        } catch (error) {
+            this.showError('Error deleting channel: ' + error.message);
         }
     }
     
@@ -841,17 +977,12 @@ class RadioManager {
                     this.showSuccess('Channel deleted successfully');
                     await this.loadChannels();
                     await this.loadStatistics();
-                    if (button) {
-                        button.disabled = false;
-                        button.innerHTML = originalButtonHtml;
-                    }
                     return;
                 } else if (result.status === 'failed') {
                     this.showError(result.error_message || 'Channel deletion failed');
-                    if (button) {
-                        button.disabled = false;
-                        button.innerHTML = originalButtonHtml;
-                    }
+                    return;
+                } else if (result.status === 'interrupted') {
+                    this.showError(result.error_message || 'Channel deletion interrupted');
                     return;
                 }
                 // If still pending, continue polling
@@ -864,10 +995,6 @@ class RadioManager {
         
         // Timeout
         this.showError('Channel deletion is taking longer than expected. Please check the channel list to see if it was deleted.');
-        if (button) {
-            button.disabled = false;
-            button.innerHTML = originalButtonHtml;
-        }
         // Still refresh the channel list in case it was deleted
         await this.loadChannels();
         await this.loadStatistics();
@@ -883,7 +1010,11 @@ class RadioManager {
         if (!select) return;
 
         // Clear existing options except the first one
-        select.innerHTML = '<option value="">Sélectionner un canal...</option>';
+        select.replaceChildren();
+        const defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = 'Sélectionner un canal...';
+        select.appendChild(defaultOption);
 
         // Add channels
         this.channels.forEach(channel => {
@@ -1055,6 +1186,7 @@ class RadioManager {
                 const resp = await fetch(`/api/channel-operations/${opId}`);
                 const data = await resp.json();
                 if (data.status === 'completed' || data.status === 'failed') return data;
+                if (data.status === 'interrupted') return data;
             } catch (_) {}
         }
         return { status: 'failed', error_message: 'Timed out waiting for device response' };
@@ -1090,7 +1222,14 @@ class RadioManager {
         const alert = document.createElement('div');
         alert.className = 'alert alert-danger alert-dismissible fade show position-fixed';
         alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 300px;';
-        alert.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+        const messageNode = document.createElement('span');
+        messageNode.textContent = String(message ?? '');
+        const closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.className = 'btn-close';
+        closeButton.setAttribute('data-bs-dismiss', 'alert');
+        closeButton.setAttribute('aria-label', 'Close');
+        alert.append(messageNode, closeButton);
         document.body.appendChild(alert);
         setTimeout(() => alert.remove(), 5000);
     }
@@ -1099,7 +1238,14 @@ class RadioManager {
         const alert = document.createElement('div');
         alert.className = 'alert alert-success alert-dismissible fade show position-fixed';
         alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 300px;';
-        alert.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+        const messageNode = document.createElement('span');
+        messageNode.textContent = String(message ?? '');
+        const closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.className = 'btn-close';
+        closeButton.setAttribute('data-bs-dismiss', 'alert');
+        closeButton.setAttribute('aria-label', 'Close');
+        alert.append(messageNode, closeButton);
         document.body.appendChild(alert);
         setTimeout(() => alert.remove(), 3000);
     }

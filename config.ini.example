@@ -252,12 +252,45 @@ send_timeout_seconds = 30
 # conflating distinct links (see Path Command / path-command-config.md).
 # Does not control radio advert path-hash mode (firmware path.hash.mode).
 prefix_bytes = 3
+
+# Set the radio device clock to local time instead of UTC when syncing.
+# Enable this when your mesh network devices use local time rather than UTC.
+# Default: false
+radio_clock_use_local_time = false
 [Admin]
 # Local admin API (binds to 127.0.0.1)
 enabled = false
 port = 5001
 # Required when enabled
 token =
+[Clock_Sync_Admin]
+# Optional scheduled admin clock-sync DM job for repeaters.
+# Sends a "clock sync admin" command (or custom payload) via DM to listed
+# repeater targets on a cron schedule, keeping their clocks aligned.
+enabled = false
+
+# Daily cron schedule in [Bot] timezone
+schedule = 0 3 * * *
+
+# Comma-separated repeater identifiers (name, pubkey, or prefix)
+targets =
+
+# DM payload sent to each resolved target
+command_payload = clock sync admin
+
+# Dashboard clock drift monitor for repeaters near the bot
+# Maximum hop distance to include repeaters in drift dashboard
+dashboard_hop_radius = 5
+
+# Hours of recent data to consider when computing clock drift
+dashboard_check_window_hours = 24
+
+# Maximum acceptable clock drift in seconds before flagging a repeater
+dashboard_max_clock_drift_seconds = 300
+
+# Seconds to wait for a DM reply from each target before marking as unreplied.
+# Default: 60. Increase on slow/lossy links.
+clock_sync_admin_reply_window_seconds = 60
 [Channels]
 # Channels to monitor (comma-separated)
 # Bot will only respond to messages on these channels
@@ -1530,6 +1563,56 @@ enabled = true
 [Aqi_Command]
 enabled = true
 # channels =
+[Llm_Command]
+# AI chat command (primary keyword: llm; aliases: ia, ai, chat)
+# Connects to a local llama.cpp OpenAI-compatible endpoint for short mesh replies.
+enabled = false
+
+# Local llama.cpp OpenAI-compatible endpoint
+endpoint = http://127.0.0.1:8080/v1/chat/completions
+
+# Optional model name (blank = server default model)
+model =
+
+# System prompt (keep short for mesh bandwidth)
+system_prompt = You are a helpful assistant on a low-bandwidth mesh network. Reply briefly in one short sentence.
+
+# Maximum tokens in response (8-512, default 80)
+max_tokens = 80
+
+# Sampling temperature (0.0-2.0, default 0.4)
+temperature = 0.4
+
+# Top-p nucleus sampling (0.0-1.0, default 0.9)
+top_p = 0.9
+
+# HTTP request timeout in seconds (1-120, default 20)
+timeout_seconds = 20
+
+# Strip <think>...</think> tags from model output (default true)
+strip_thinking_tags = true
+
+# --- Context settings ---
+# Inject local data (weather, repeaters, network status) into prompts
+include_local_context = true
+context_include_weather = true
+context_include_repeaters = true
+context_include_network_status = true
+context_include_contacts = false
+context_include_moon = false
+context_include_sun = false
+context_include_commands = false
+context_include_system_metrics = false
+
+# Cache TTL for injected context (seconds)
+context_cache_seconds = 60
+
+# Conversation history window (seconds) and max turns to retain
+# context_window_seconds = 600
+# context_max_turns = 5
+
+# Weather location for LLM context (used when context_include_weather = true)
+# context_weather_location = Paris, France
 [Advert_Command]
 enabled = true
 # channels =
@@ -2128,6 +2211,10 @@ rain_nowcast_cache_seconds = 300
 # Default: 600000 (10 minutes)
 # Note: Storm detection area must be configured for this to work
 blitz_collection_interval = 600000
+
+# Minimum lightning strike count within the collection interval to trigger an alert.
+# Default: 10. Set lower for early warning, higher to reduce noise.
+blitz_alert_threshold = 10
 
 # Storm detection area (optional)
 # Only report storms detected within this area

@@ -178,6 +178,7 @@ SECTIONS: dict[str, SectionMeta] = {
         "radio_offline_alert_email": KeyMeta(),
         "radio_zombie_alert_enabled": KeyMeta(type="bool", default="false"),
         "radio_zombie_alert_email": KeyMeta(),
+        "radio_clock_use_local_time": KeyMeta(type="bool", default="false"),
     }),
     "Channels": SectionMeta(keys={
         "monitor_channels": KeyMeta(required=True),
@@ -243,6 +244,7 @@ SECTIONS: dict[str, SectionMeta] = {
         "rain_nowcast_show_amount": KeyMeta(type="bool", default="true"),
         "rain_nowcast_amount_unit": KeyMeta(type="enum", values=("in", "mm"), default="in"),
         "rain_nowcast_min_probability": KeyMeta(type="int", default="50"),
+        "blitz_alert_threshold": KeyMeta(type="int", default="10"),
     }),
     "Path_Command": SectionMeta(keys={
         "geographic_scoring_enabled": KeyMeta(type="bool", default="true"),

@@ -60,9 +60,8 @@
                             <span id="system-status" class="fw-bold">Online</span>
                         </div>
                         <h3 class="text-primary mb-1">
-                            <a href="#" id="connected-clients" class="text-primary text-decoration-none"
-                               data-bs-toggle="modal" data-bs-target="#connectedClientsModal"
-                               onclick="window.dashboard && window.dashboard.loadConnectedClients()">0</a>
+                            <a href="#" id="health-clients-link" class="text-primary text-decoration-none"
+                               data-bs-toggle="modal" data-bs-target="#connectedClientsModal">0</a>
                         </h3>
                         <small class="text-muted text-uppercase">Connected Clients</small>
                     </div>
@@ -453,17 +452,17 @@
                         </div>
                     </div>
                     <!-- Scroll buttons -->
-                    <button class="btn btn-sm btn-outline-secondary" id="live-scroll-top" onclick="scrollLiveFeed('top')" title="Scroll to newest">
+                    <button class="btn btn-sm btn-outline-secondary" id="live-scroll-top" title="Scroll to newest">
                         <i class="fas fa-arrow-up"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-secondary" id="live-scroll-bottom" onclick="scrollLiveFeed('bottom')" title="Scroll to oldest">
+                    <button class="btn btn-sm btn-outline-secondary" id="live-scroll-bottom" title="Scroll to oldest">
                         <i class="fas fa-arrow-down"></i>
                     </button>
                     <span id="live-count" class="badge bg-secondary">0</span>
-                    <button class="btn btn-sm btn-outline-secondary" id="live-pause-btn" onclick="toggleLivePause()">
+                    <button class="btn btn-sm btn-outline-secondary" id="live-pause-btn">
                         <i class="fas fa-pause" id="live-pause-icon"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="clearLiveFeed()">
+                    <button class="btn btn-sm btn-outline-secondary" id="live-clear-btn">
                         <i class="fas fa-trash-alt"></i>
                     </button>
                     <a href="/realtime" class="btn btn-sm btn-outline-primary">
@@ -518,7 +517,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ g.csp_nonce }}">
 class ModernDashboard {
     constructor() {
         this.botStartTime = null;
@@ -528,6 +527,34 @@ class ModernDashboard {
         this.incomingPacketsPieChart = null;
         this.initializeDashboard();
     }
+
+    // DOM helpers — all untrusted values are rendered via textContent (never an
+    // HTML parser) so attacker-controlled API/mesh values stay inert.
+    makeEl(tagName, className, value) {
+        const el = document.createElement(tagName);
+        if (className) el.className = className;
+        if (value !== undefined && value !== null) {
+            el.textContent = String(value);
+        }
+        return el;
+    }
+
+    emptyMessage(text) {
+        return this.makeEl('div', 'text-muted text-center', text);
+    }
+
+    renderRow(badgeClass, badgeText, nameText, sideEl) {
+        const row = this.makeEl('div', 'd-flex justify-content-between align-items-center mb-2');
+        const left = this.makeEl('div', 'd-flex align-items-center');
+        left.appendChild(this.makeEl('span', `badge ${badgeClass} me-2`, badgeText));
+        const name = this.makeEl('span', 'fw-bold', nameText);
+        name.title = String(nameText ?? '');
+        left.appendChild(name);
+        row.appendChild(left);
+        if (sideEl) row.appendChild(sideEl);
+        return row;
+    }
+
     
     initializeDashboard() {
         // Add a small delay to ensure DOM is ready
@@ -583,7 +610,7 @@ class ModernDashboard {
             const healthData = await healthResponse.json();
             console.log('Health data:', healthData);
             
-            document.getElementById('connected-clients').textContent = healthData.connected_clients || 0;
+            document.getElementById('health-clients-link').textContent = healthData.connected_clients || 0;
             
             // Store bot uptime for display (null when bot not running / no start time in DB)
             const rawUptime = healthData.bot_uptime;
@@ -630,7 +657,7 @@ class ModernDashboard {
         console.log('Updating metrics with data:', data);
         
         // Test with a simple update first
-        const testElement = document.getElementById('connected-clients');
+        const testElement = document.getElementById('health-clients-link');
         if (testElement) {
             testElement.textContent = data.connected_clients || 0;
             console.log('Updated connected-clients to:', data.connected_clients);
@@ -969,7 +996,7 @@ class ModernDashboard {
                 this.updateTopCommands(data.top_commands);
             } else {
                 const container = document.getElementById('top-commands-list');
-                container.innerHTML = '<div class="text-muted text-center">No commands found</div>';
+                container.replaceChildren(this.emptyMessage('No commands found'));
             }
         } catch (error) {
             console.error('Error loading top commands:', error);
@@ -978,15 +1005,12 @@ class ModernDashboard {
     
     updateTopCommands(commands) {
         const container = document.getElementById('top-commands-list');
-        container.innerHTML = commands.map((cmd, index) => `
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="d-flex align-items-center">
-                    <span class="badge bg-primary me-2">${index + 1}</span>
-                    <span class="fw-bold">${cmd.command}</span>
-                </div>
-                <span class="badge bg-secondary">${cmd.count} uses</span>
-            </div>
-        `).join('');
+        const rows = [];
+        commands.forEach((cmd, index) => {
+            const usesBadge = this.makeEl('span', 'badge bg-secondary', `${cmd.count} uses`);
+            rows.push(this.renderRow('bg-primary', String(index + 1), cmd.command, usesBadge));
+        });
+        container.replaceChildren(...rows);
     }
     
     async loadTopUsers(timeWindow = 'all') {
@@ -1003,7 +1027,7 @@ class ModernDashboard {
                 this.updateTopUsers(data.top_users);
             } else {
                 const container = document.getElementById('top-users-list');
-                container.innerHTML = '<div class="text-muted text-center">No users found</div>';
+                container.replaceChildren(this.emptyMessage('No users found'));
             }
         } catch (error) {
             console.error('Error loading top users:', error);
@@ -1012,15 +1036,21 @@ class ModernDashboard {
     
     updateTopUsers(users) {
         const container = document.getElementById('top-users-list');
-        container.innerHTML = users.map((user, index) => `
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="d-flex align-items-center">
-                    <span class="badge bg-success me-2">${index + 1}</span>
-                    <span class="fw-bold text-truncate" style="max-width: 200px;" title="${user.user}">${user.user}</span>
-                </div>
-                <span class="badge bg-info">${user.count} messages</span>
-            </div>
-        `).join('');
+        const rows = [];
+        users.forEach((user, index) => {
+            const name = this.makeEl('span', 'fw-bold text-truncate', user.user);
+            name.style.maxWidth = '200px';
+            name.title = String(user.user ?? '');
+            const msgBadge = this.makeEl('span', 'badge bg-info', `${user.count} messages`);
+            const row = this.makeEl('div', 'd-flex justify-content-between align-items-center mb-2');
+            const left = this.makeEl('div', 'd-flex align-items-center');
+            left.appendChild(this.makeEl('span', 'badge bg-success me-2', String(index + 1)));
+            left.appendChild(name);
+            row.appendChild(left);
+            row.appendChild(msgBadge);
+            rows.push(row);
+        });
+        container.replaceChildren(...rows);
     }
     
     async loadLongestPaths(timeWindow = 'all') {
@@ -1037,7 +1067,7 @@ class ModernDashboard {
                 this.updateLongestPaths(data.top_paths);
             } else {
                 const container = document.getElementById('longest-paths-list');
-                container.innerHTML = '<div class="text-muted text-center">No paths found</div>';
+                container.replaceChildren(this.emptyMessage('No paths found'));
             }
         } catch (error) {
             console.error('Error loading longest paths:', error);
@@ -1046,21 +1076,26 @@ class ModernDashboard {
     
     updateLongestPaths(paths) {
         const container = document.getElementById('longest-paths-list');
-        container.innerHTML = paths.map((path, index) => `
-            <div class="mb-3 p-2 border rounded">
-                <div class="d-flex align-items-center mb-2">
-                    <span class="badge bg-warning me-2">${index + 1}</span>
-                    <span class="fw-bold text-truncate" style="max-width: 150px;" title="${path.user}">${path.user}</span>
-                    <span class="badge bg-danger ms-2">${path.path_length} hops</span>
-                </div>
-                <div class="small text-muted mb-1">
-                    <code class="text-break" style="word-break: break-all; font-size: 0.75rem;">${path.path_string}</code>
-                </div>
-                <div class="small text-muted">
-                    ${new Date(path.timestamp * 1000).toLocaleString()}
-                </div>
-            </div>
-        `).join('');
+        const nodes = [];
+        paths.forEach((path, index) => {
+            const block = this.makeEl('div', 'mb-3 p-2 border rounded');
+            const head = this.makeEl('div', 'd-flex align-items-center mb-2');
+            head.appendChild(this.makeEl('span', 'badge bg-warning me-2', String(index + 1)));
+            const user = this.makeEl('span', 'fw-bold text-truncate', path.user);
+            user.style.maxWidth = '150px';
+            user.title = String(path.user ?? '');
+            head.appendChild(user);
+            head.appendChild(this.makeEl('span', 'badge bg-danger ms-2', `${path.path_length} hops`));
+            block.appendChild(head);
+            const code = this.makeEl('code', 'text-break', path.path_string);
+            code.style.cssText = 'word-break: break-all; font-size: 0.75rem;';
+            const pathLine = this.makeEl('div', 'small text-muted mb-1');
+            pathLine.appendChild(code);
+            block.appendChild(pathLine);
+            block.appendChild(this.makeEl('div', 'small text-muted', new Date(path.timestamp * 1000).toLocaleString()));
+            nodes.push(block);
+        });
+        container.replaceChildren(...nodes);
     }
     
     async loadTopChannels(timeWindow = 'all') {
@@ -1077,7 +1112,7 @@ class ModernDashboard {
                 this.updateTopChannels(data.top_channels);
             } else {
                 const container = document.getElementById('top-channels-list');
-                container.innerHTML = '<div class="text-muted text-center">No channels found</div>';
+                container.replaceChildren(this.emptyMessage('No channels found'));
             }
         } catch (error) {
             console.error('Error loading top channels:', error);
@@ -1086,28 +1121,32 @@ class ModernDashboard {
     
     updateTopChannels(channels) {
         const container = document.getElementById('top-channels-list');
-        container.innerHTML = channels.map((channel, index) => `
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="d-flex align-items-center">
-                    <span class="badge bg-primary me-2">${index + 1}</span>
-                    <span class="fw-bold text-truncate" style="max-width: 200px;" title="${channel.channel}">${channel.channel}</span>
-                </div>
-                <div class="text-end">
-                    <span class="badge bg-secondary me-1">${channel.messages} msgs</span>
-                    <span class="badge bg-info">${channel.users} users</span>
-                </div>
-            </div>
-        `).join('');
+        const rows = [];
+        channels.forEach((channel, index) => {
+            const name = this.makeEl('span', 'fw-bold text-truncate', channel.channel);
+            name.style.maxWidth = '200px';
+            name.title = String(channel.channel ?? '');
+            const side = this.makeEl('div', 'text-end');
+            side.appendChild(this.makeEl('span', 'badge bg-secondary me-1', `${channel.messages} msgs`));
+            side.appendChild(this.makeEl('span', 'badge bg-info', `${channel.users} users`));
+            const row = this.makeEl('div', 'd-flex justify-content-between align-items-center mb-2');
+            const left = this.makeEl('div', 'd-flex align-items-center');
+            left.appendChild(this.makeEl('span', 'badge bg-primary me-2', String(index + 1)));
+            left.appendChild(name);
+            row.appendChild(left);
+            row.appendChild(side);
+            rows.push(row);
+        });
+        container.replaceChildren(...rows);
     }
     
     updateDatabaseStatus(status, type) {
         const statusElement = document.getElementById('database-status');
-        statusElement.innerHTML = `
-            <div class="d-flex align-items-center justify-content-center mb-2">
-                <span class="status-indicator status-${type} me-2"></span>
-                <span>${status}</span>
-            </div>
-        `;
+        const box = this.makeEl('div', 'd-flex align-items-center justify-content-center mb-2');
+        const indicator = this.makeEl('span', `status-indicator status-${type} me-2`, '');
+        box.appendChild(indicator);
+        box.appendChild(this.makeEl('span', '', status));
+        statusElement.replaceChildren(box);
     }
     
     updateUptime() {
@@ -1201,7 +1240,7 @@ class ModernDashboard {
         loading.style.display = '';
         empty.style.display   = 'none';
         table.style.display   = 'none';
-        tbody.innerHTML       = '';
+        tbody.replaceChildren();
         try {
             const resp = await fetch('/api/connected_clients');
             const clients = await resp.json();
@@ -1219,7 +1258,13 @@ class ModernDashboard {
                     ? new Date(c.last_activity * 1000).toLocaleTimeString()
                     : '—';
                 const tr = document.createElement('tr');
-                tr.innerHTML = `<td><code>${c.client_id}</code></td><td>${connAt}</td><td>${lastAct}</td>`;
+                const idCell = document.createElement('td');
+                idCell.appendChild(this.makeEl('code', '', c.client_id));
+                const tsCell = document.createElement('td');
+                tsCell.textContent = String(connAt ?? '');
+                const laCell = document.createElement('td');
+                laCell.textContent = String(lastAct ?? '');
+                tr.append(idCell, tsCell, laCell);
                 tbody.appendChild(tr);
             }
         } catch (e) {
@@ -1232,16 +1277,20 @@ class ModernDashboard {
     showError(message) {
         const errorDiv = document.createElement('div');
         errorDiv.className = 'alert alert-danger alert-dismissible fade show';
-        errorDiv.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        `;
-        
+        const messageNode = document.createElement('span');
+        messageNode.textContent = String(message ?? '');
+        const closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.className = 'btn-close';
+        closeButton.setAttribute('data-bs-dismiss', 'alert');
+        closeButton.setAttribute('aria-label', 'Close');
+        errorDiv.append(messageNode, closeButton);
+
         // Insert at the top of the content
         const content = document.querySelector('.container-fluid');
         if (content) {
             content.insertBefore(errorDiv, content.firstChild);
-            
+
             // Auto-remove after 10 seconds
             setTimeout(() => {
                 if (errorDiv.parentNode) {
@@ -1276,6 +1325,16 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, initializing dashboard...');
     window.dashboard = new ModernDashboard();
     initMultibyteCapableTooltips();
+
+    // Connected-clients modal (wired via listener — no inline handlers under nonce CSP)
+    const connectedClientsLink = document.getElementById('health-clients-link');
+    if (connectedClientsLink) {
+        connectedClientsLink.addEventListener('click', () => {
+            if (window.dashboard) {
+                window.dashboard.loadConnectedClients();
+            }
+        });
+    }
 });
 
 // Clean up when page is unloaded
@@ -1286,7 +1345,7 @@ window.addEventListener('beforeunload', () => {
 });
 </script>
 
-<script>
+<script nonce="{{ g.csp_nonce }}">
 // ── Live Activity Feed (SocketIO) ─────────────────────────────────────────────
 (function () {
     const feed      = document.getElementById('live-feed');
@@ -1334,7 +1393,15 @@ window.addEventListener('beforeunload', () => {
         const el = document.createElement('div');
         el.dataset.type = type;
         el.style.cssText = `border-left:3px solid ${color};padding:3px 8px;margin-bottom:3px;font-size:0.82rem;border-radius:2px;`;
-        el.innerHTML = `<span class="text-muted me-2">${ts}</span><strong>${escHtml(label)}</strong> <span class="text-muted">${escHtml(text)}</span>`;
+        const tsSpan = document.createElement('span');
+        tsSpan.className = 'text-muted me-2';
+        tsSpan.textContent = String(ts ?? '');
+        const strongEl = document.createElement('strong');
+        strongEl.textContent = String(label ?? '');
+        const textSpan = document.createElement('span');
+        textSpan.className = 'text-muted';
+        textSpan.textContent = String(text ?? '');
+        el.append(tsSpan, strongEl, document.createTextNode(' '), textSpan);
         if (!activeFilters[type]) el.style.display = 'none';
         feed.insertBefore(el, feed.firstChild);
         total++;
@@ -1350,13 +1417,23 @@ window.addEventListener('beforeunload', () => {
         icon.className = paused ? 'fas fa-play' : 'fas fa-pause';
     };
     window.clearLiveFeed = function () {
-        feed.innerHTML = '';
+        feed.replaceChildren();
         total = 0;
         countBadge.textContent = '0';
     };
     window.scrollLiveFeed = function (dir) {
         feed.scrollTop = dir === 'top' ? 0 : feed.scrollHeight;
     };
+
+    // Live feed controls wired via listeners (no inline handlers under nonce CSP)
+    const scrollTopBtn = document.getElementById('live-scroll-top');
+    if (scrollTopBtn) scrollTopBtn.addEventListener('click', () => window.scrollLiveFeed('top'));
+    const scrollBottomBtn = document.getElementById('live-scroll-bottom');
+    if (scrollBottomBtn) scrollBottomBtn.addEventListener('click', () => window.scrollLiveFeed('bottom'));
+    const pauseBtn = document.getElementById('live-pause-btn');
+    if (pauseBtn) pauseBtn.addEventListener('click', window.toggleLivePause);
+    const clearBtn = document.getElementById('live-clear-btn');
+    if (clearBtn) clearBtn.addEventListener('click', window.clearLiveFeed);
 
     const socket = window.connectionManager.socket;
 

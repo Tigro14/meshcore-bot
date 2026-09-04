@@ -17,11 +17,14 @@ from modules.web_viewer.app import BotDataViewer
 
 LOGGER = logging.getLogger("test-neighbor-edges")
 
+from datetime import datetime, timezone
+
 SELF_KEY = "ff" * 32
 KEY_A = "aa" * 32
 KEY_B = "bb" * 32
 
-RECENT = "2026-08-01T00:00:00+00:00"
+# RECENT is relative to now so the 30-day window never drifts stale.
+RECENT = datetime.now(timezone.utc).isoformat()
 ANCIENT = "2020-01-01T00:00:00+00:00"
 
 
