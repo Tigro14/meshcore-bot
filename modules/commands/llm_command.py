@@ -366,6 +366,12 @@ class LlmCommand(BaseCommand):
                 cleaned,
                 flags=re.IGNORECASE | re.DOTALL,
             )
+            cleaned = re.sub(
+                r"<(?:think|thinking)>.*$",
+                "",
+                cleaned,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
         cleaned = " ".join(cleaned.split()).strip()
 
         if not cleaned:
