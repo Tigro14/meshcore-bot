@@ -709,7 +709,7 @@ class LlmCommand(BaseCommand):
             return await self.send_response(message, "LLM unavailable: local llama.cpp is unreachable.")
 
         if response.status_code != 200:
-            self.logger.warning(f"LLM command error status: {response.status_code}")
+            self.logger.warning(f"LLM command error status: {response.status_code}, body: {response.text[:500]}")
             return await self.send_response(message, "LLM error: llama.cpp returned an invalid response.")
 
         try:
