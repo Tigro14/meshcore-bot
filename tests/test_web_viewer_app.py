@@ -1354,3 +1354,98 @@ class TestGetClockSyncTargetsStatus:
 
         result = viewer._get_clock_sync_targets_status()
         assert result["targets"][0]["status"] == "In Sync"
+
+
+class TestContactsClockDriftStatus:
+    """Smart per-contact drift status in the /api/contacts tracking payload.
+
+    Threshold bands (relative to dashboard_max_clock_drift_seconds, default 300):
+      known drift <= 0.5 * threshold            -> 'in_sync'
+      0.5 * threshold < drift <= threshold      -> 'warning'
+      drift > threshold                         -> 'out_of_sync'
+      no parsable latest message                -> 'unknown' (drift None)
+    """
+
+    def _seed(self, viewer):
+        """Populate complete_contact_tracking + message_stats (same schema as prod)."""
+        db_path = viewer.db_path
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+        contacts = [
+            # (public_key, name, drift_seconds)
+            ("aa" + "0" * 62, "InSync", 60),
+            ("bb" + "0" * 62, "Warn", 200),
+            ("cc" + "0" * 62, "Out", 600),
+            ("dd" + "0" * 62, "NoData", None),
+        ]
+        with sqlite3.connect(db_path, timeout=60) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    channel TEXT,
+                    content TEXT NOT NULL,
+                    is_dm BOOLEAN NOT NULL,
+                    hops INTEGER,
+                    snr REAL,
+                    rssi INTEGER,
+                    path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            for public_key, name, drift in contacts:
+                cursor.execute(
+                    """
+                    INSERT INTO complete_contact_tracking
+                    (public_key, name, role, device_type, hop_count,
+                     first_heard, last_heard, advert_count, is_currently_tracked)
+                    VALUES (?, ?, 'client', 'mobile', 1, ?, ?, 1, 1)
+                    """,
+                    (public_key, name, now_sql, now_sql),
+                )
+                if drift is not None:
+                    cursor.execute(
+                        """
+                        INSERT INTO message_stats
+                        (timestamp, sender_id, channel, content, is_dm, hops, created_at)
+                        VALUES (?, ?, 'Public', 'hello', 0, 1, ?)
+                        """,
+                        (now_epoch - drift, name, now_sql),
+                    )
+            conn.commit()
+
+    def _find(self, tracking, name):
+        for row in tracking:
+            if row["username"] == name:
+                return row
+        return None
+
+    def test_tracking_data_reports_all_four_drift_statuses(self, viewer_with_db):
+        self._seed(viewer_with_db)
+
+        result = viewer_with_db._get_tracking_data(since='all')
+        tracking = result["tracking_data"]
+
+        assert result["server_stats"]["clock_drift_threshold_seconds"] == 300
+
+        no_data = self._find(tracking, "NoData")
+        assert no_data["clock_drift_status"] == "unknown"
+        assert no_data["clock_drift_seconds"] is None
+        assert no_data["clock_drift_detected"] is False
+
+        in_sync = self._find(tracking, "InSync")
+        assert in_sync["clock_drift_status"] == "in_sync"
+        assert 55 <= in_sync["clock_drift_seconds"] <= 65
+
+        warn = self._find(tracking, "Warn")
+        assert warn["clock_drift_status"] == "warning"
+        assert 195 <= warn["clock_drift_seconds"] <= 205
+
+        out = self._find(tracking, "Out")
+        assert out["clock_drift_status"] == "out_of_sync"
+        assert 595 <= out["clock_drift_seconds"] <= 605
