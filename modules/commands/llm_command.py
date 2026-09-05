@@ -604,6 +604,12 @@ class LlmCommand(BaseCommand):
                 cleaned,
                 flags=re.IGNORECASE | re.DOTALL,
             )
+            cleaned = re.sub(
+                r"<(?:think|thinking)>.*$",
+                "",
+                cleaned,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
         cleaned = " ".join(cleaned.split()).strip()
 
         if not cleaned:
@@ -689,6 +695,7 @@ class LlmCommand(BaseCommand):
 
         # Build the payload with current time and context injected in system prompt
         payload = self._build_payload(prompt=prompt, history=history)
+        self.logger.debug(f"LLM prompt: {repr(prompt[:500])}")
 
         try:
             response = await asyncio.to_thread(
@@ -714,6 +721,7 @@ class LlmCommand(BaseCommand):
             choice = choices[0]
             assistant_message = choice.get("message", {})
             content = assistant_message.get("content", "")
+            self.logger.debug(f"LLM raw response ({len(content)} chars): {repr(content[:2000])}")
 
         except (ValueError, TypeError, IndexError, AttributeError, KeyError) as e:
             self.logger.warning(f"LLM command parse error: {e}")
