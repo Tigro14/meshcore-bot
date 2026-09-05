@@ -382,9 +382,6 @@ class LlmCommand(BaseCommand):
             try:
                 commands = self._get_enabled_commands_list()
                 if commands:
-                    # Get command prefix for display
-                    command_prefix = self.bot.config.get('Bot', 'command_prefix', fallback='').strip()
-
                     # Build commands list string
                     commands_list = []
                     for cmd in commands:
@@ -402,7 +399,7 @@ class LlmCommand(BaseCommand):
         if self.context_include_system_metrics:
             try:
                 system_info = []
-                
+
                 # CPU temperature and usage
                 cpu_temp = get_cpu_temperature()
                 cpu_usage = get_cpu_usage()
@@ -415,18 +412,18 @@ class LlmCommand(BaseCommand):
                     cpu_info += f" {cpu_usage:.1f}%"
                 if cpu_temp is not None or cpu_usage is not None:
                     system_info.append(cpu_info)
-                
+
                 # RAM usage
                 ram_info = get_ram_usage()
                 if ram_info is not None:
                     used_pct, available_gb = ram_info
                     system_info.append(f"RAM: {used_pct:.0f}% used")
-                
+
                 # llama.cpp model info
                 model_info = self._get_llama_model_info()
                 if model_info:
                     system_info.append(f"Model: {model_info}")
-                
+
                 if system_info:
                     context_parts.append("System: " + ", ".join(system_info))
             except Exception as e:
@@ -452,7 +449,7 @@ class LlmCommand(BaseCommand):
             parsed = urlparse(self.endpoint)
             base_url = f"{parsed.scheme}://{parsed.netloc}"
             models_url = urljoin(base_url, '/v1/models')
-            
+
             response = requests.get(models_url, timeout=2.0)
             if response.status_code == 200:
                 data = response.json()
@@ -462,7 +459,7 @@ class LlmCommand(BaseCommand):
                     model_name = model.get('id', '')
                     if model_name:
                         return model_name
-            
+
             # Fallback to configured model name
             if self.model:
                 return self.model
@@ -500,7 +497,7 @@ class LlmCommand(BaseCommand):
                 "timezone": "auto"
             }
 
-            response = requests.get(url, params=params, timeout=5)
+            response = requests.get(url, params=params, timeout=5)  # type: ignore[arg-type]
             if response.status_code == 200:
                 data = response.json()
                 current = data.get("current", {})
