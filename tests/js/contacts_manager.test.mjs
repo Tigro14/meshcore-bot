@@ -400,3 +400,69 @@ test('successful delete reloads the current server page', async () => {
     assert.equal(manager.selectedContactIds.has('deadbeef'), false);
     assert.equal(reloads, 1);
 });
+
+test('formatClockDriftBadge renders a badge for every drift state', () => {
+    const { Manager } = loadManagerClass();
+    const manager = bareManager(Manager);
+
+    const unknown = manager.formatClockDriftBadge({
+        clock_drift_status: 'unknown',
+    });
+    assert.match(unknown, /bg-secondary/);
+    assert.match(unknown, /N\/D/);
+
+    const inSync = manager.formatClockDriftBadge({
+        clock_drift_status: 'in_sync',
+        clock_drift_seconds: 30,
+    });
+    assert.match(inSync, /bg-success/);
+    assert.match(inSync, />30s</);
+
+    const warning = manager.formatClockDriftBadge({
+        clock_drift_status: 'warning',
+        clock_drift_seconds: 200,
+    });
+    assert.match(warning, /bg-warning/);
+    assert.match(warning, /3m20s/);
+
+    const outOfSync = manager.formatClockDriftBadge({
+        clock_drift_status: 'out_of_sync',
+        clock_drift_seconds: 600,
+    });
+    assert.match(outOfSync, /bg-danger/);
+    assert.match(outOfSync, /10m/);
+});
+
+test('formatDriftCompact keeps two units at most', () => {
+    const { Manager } = loadManagerClass();
+    const manager = bareManager(Manager);
+
+    assert.equal(manager.formatDriftCompact(45), '45s');
+    assert.equal(manager.formatDriftCompact(305), '5m5s');
+    assert.equal(manager.formatDriftCompact(7265), '2h1m');
+    assert.equal(manager.formatDriftCompact(266400), '3d2h');
+});
+
+test('setupDriftTooltips initializes tooltips for drift badges', () => {
+    const { context, Manager } = loadManagerClass();
+    const manager = bareManager(Manager);
+
+    const badge = {};
+    context.document.querySelectorAll = selector =>
+        selector === '.clock-drift-badge[data-bs-toggle="tooltip"]' ? [badge] : [];
+    let created = [];
+    context.bootstrap.Tooltip = class Tooltip {
+        constructor(el) {
+            created.push(el);
+        }
+        static getInstance() {
+            return null;
+        }
+    };
+
+    manager.setupDriftTooltips();
+    assert.deepEqual(created, [badge]);
+
+    manager.setupDriftTooltips();
+    assert.equal(created.length, 2);
+});
