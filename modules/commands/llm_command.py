@@ -382,6 +382,7 @@ class LlmCommand(BaseCommand):
             try:
                 commands = self._get_enabled_commands_list()
                 if commands:
+                    _command_prefix = self.bot.config.get('Bot', 'command_prefix', fallback='').strip()
                     # Build commands list string
                     commands_list = []
                     for cmd in commands:
