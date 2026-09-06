@@ -5,6 +5,7 @@ Handles scheduled messages and timing
 """
 
 import asyncio
+import configparser
 import datetime
 import hashlib
 import json
@@ -302,6 +303,132 @@ class MessageScheduler:
         )
         return (payload or "").strip()
 
+    def _get_clock_sync_min_drift(self) -> int:
+        """Minimum drift (seconds) that justifies sending a sync DM.
+
+        Targets whose latest clocked packet shows a drift <= this value are
+        considered in sync and skipped. 0 restores the legacy always-send
+        behavior.
+        """
+        try:
+            value = self.bot.config.getint("Clock_Sync_Admin", "min_sync_drift", fallback=60)
+        except (ValueError, configparser.Error):
+            value = 60
+        return max(0, value)
+
+    @staticmethod
+    def _clock_sync_parse_db_timestamp(value: Any) -> Optional[float]:
+        """Parse a naive UTC timestamp from the DB into epoch seconds."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
+            try:
+                return datetime.datetime.strptime(text, fmt).replace(
+                    tzinfo=datetime.timezone.utc
+                ).timestamp()
+            except ValueError:
+                continue
+        return None
+
+    def _get_clock_sync_target_drift(
+        self, contact_name: str, public_key: str = ""
+    ) -> Optional[int]:
+        """Latest clock drift (seconds) for a target, from its clocked packets.
+
+        Considers the latest message (``message_stats``) and the latest
+        advertisement (``complete_contact_tracking.raw_advert_data.advert_time``
+        sender clock vs ``last_heard`` reception) and returns the drift of the
+        freshest sample — the same source the web viewer drift badge uses.
+
+        Returns None when no parsable sender timestamp is available (drift
+        unknown); callers should still send in that case.
+        """
+        db_manager = getattr(self.bot, "db_manager", None)
+        if not db_manager:
+            return None
+        name = (contact_name or "").strip()
+        if not name:
+            return None
+
+        samples: list[tuple[float, int]] = []  # (received_at, drift)
+        try:
+            with db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    WITH latest_message_per_sender AS (
+                        SELECT sender_id, MAX(id) AS latest_id
+                        FROM message_stats
+                        GROUP BY sender_id
+                    )
+                    SELECT
+                        m.timestamp AS sender_timestamp,
+                        m.created_at AS received_at
+                    FROM latest_message_per_sender lm
+                    INNER JOIN message_stats m ON m.id = lm.latest_id
+                    WHERE lm.sender_id = ?
+                        AND m.timestamp IS NOT NULL
+                        AND CAST(m.timestamp AS INTEGER) > 0
+                    """,
+                    (name,),
+                )
+                row = cursor.fetchone()
+                if row is not None:
+                    received_at = self._clock_sync_parse_db_timestamp(row[1])
+                    if received_at is not None:
+                        try:
+                            sender_epoch = int(row[0])
+                        except (TypeError, ValueError):
+                            sender_epoch = 0
+                        if sender_epoch > 0:
+                            samples.append((received_at, abs(int(received_at) - sender_epoch)))
+
+                lookup_key = (public_key or "").strip() or name
+                cursor.execute(
+                    """
+                    SELECT last_heard, raw_advert_data
+                    FROM complete_contact_tracking
+                    WHERE last_heard IS NOT NULL
+                        AND raw_advert_data IS NOT NULL
+                        AND (public_key = ? OR name = ?)
+                    ORDER BY last_heard DESC
+                    LIMIT 1
+                    """,
+                    (lookup_key, name),
+                )
+                row = cursor.fetchone()
+                if row is not None:
+                    received_at = self._clock_sync_parse_db_timestamp(row[0])
+                    if received_at is not None:
+                        raw = row[1]
+                        if isinstance(raw, str):
+                            try:
+                                raw = json.loads(raw)
+                            except (TypeError, ValueError):
+                                raw = None
+                        if isinstance(raw, dict):
+                            try:
+                                sender_epoch = int(raw.get("advert_time"))
+                            except (TypeError, ValueError):
+                                sender_epoch = 0
+                            if sender_epoch > 0:
+                                samples.append(
+                                    (received_at, abs(int(received_at) - sender_epoch))
+                                )
+        except Exception as e:
+            self.logger.debug(
+                "Clock_Sync_Admin drift lookup failed for %s: %s",
+                sanitize_name(name),
+                e,
+            )
+            return None
+
+        if not samples:
+            return None
+        samples.sort(key=lambda item: item[0], reverse=True)
+        return samples[0][1]
+
     async def _wait_for_clock_sync_reply(
         self, public_key: str, run_started_at: int
     ) -> tuple[bool, str]:
@@ -451,6 +578,8 @@ class MessageScheduler:
         failed_count = 0
         unknown_count = 0
         duplicate_count = 0
+        skipped_in_sync_count = 0
+        min_sync_drift = self._get_clock_sync_min_drift()
         seen_contacts: set[str] = set()
         run_started_at = int(time.time())
 
@@ -485,6 +614,19 @@ class MessageScheduler:
                 )
                 continue
             seen_contacts.update(dedup_keys)
+
+            # Only sync targets whose latest clocked packet shows a notable
+            # drift; an unknown drift still gets a sync (cannot confirm otherwise).
+            drift = self._get_clock_sync_target_drift(contact_name, public_key)
+            if drift is not None and drift <= min_sync_drift:
+                skipped_in_sync_count += 1
+                self.logger.info(
+                    "Clock_Sync_Admin skipping %s — in sync (drift %ds <= min_sync_drift %ds)",
+                    sanitize_name(contact_name),
+                    drift,
+                    min_sync_drift,
+                )
+                continue
 
             # send_dm supports both public keys and contact names; prefer pubkey when available.
             recipient = public_key if public_key else contact_name
@@ -552,11 +694,14 @@ class MessageScheduler:
                 )
 
         self.logger.info(
-            "Clock_Sync_Admin summary: sent=%d failed=%d unknown=%d duplicates_skipped=%d",
+            "Clock_Sync_Admin summary: sent=%d failed=%d unknown=%d duplicates_skipped=%d "
+            "in_sync_skipped=%d (min_sync_drift=%ds)",
             sent_count,
             failed_count,
             unknown_count,
             duplicate_count,
+            skipped_in_sync_count,
+            min_sync_drift,
         )
         return {
             'success': True,
@@ -564,6 +709,7 @@ class MessageScheduler:
             'failed': failed_count,
             'unknown': unknown_count,
             'duplicates_skipped': duplicate_count,
+            'in_sync_skipped': skipped_in_sync_count,
         }
 
     def _setup_device_mode_scheduler_jobs(self) -> None:
