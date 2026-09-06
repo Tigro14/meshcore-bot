@@ -866,6 +866,20 @@ def _m0025_clock_sync_admin_log(cursor: sqlite3.Cursor) -> None:
     )
 
 
+def _m0026_clock_sync_targets(cursor: sqlite3.Cursor) -> None:
+    """Create clock_sync_targets table for DB-managed sync targets."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS clock_sync_targets (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            target         TEXT NOT NULL UNIQUE,
+            enabled        BOOLEAN NOT NULL DEFAULT 1,
+            created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -898,6 +912,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (23, "observed_paths: snr/rssi for zero-hop adverts", _m0023_observed_paths_zero_hop_signal),
     (24, "bbs_messages table", _m0024_bbs_messages_table),
     (25, "clock_sync_admin_log table", _m0025_clock_sync_admin_log),
+    (26, "clock_sync_targets table", _m0026_clock_sync_targets),
 ]
 
 

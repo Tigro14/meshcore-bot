@@ -220,9 +220,7 @@ class MessageScheduler:
             self.logger.warning("Clock_Sync_Admin invalid schedule %r; job not registered", schedule_raw)
             return
 
-        targets = self._parse_clock_sync_admin_targets(
-            self.bot.config.get("Clock_Sync_Admin", "targets", fallback="")
-        )
+        targets = self._get_clock_sync_targets()
         if not targets:
             self.logger.warning("Clock_Sync_Admin has no targets configured; job not registered")
             return
@@ -254,6 +252,25 @@ class MessageScheduler:
             seen.add(dedup_key)
             targets.append(candidate)
         return targets
+
+    def _get_clock_sync_targets(self) -> list[str]:
+        """Return enabled clock-sync targets, preferring DB over config.ini."""
+        db_manager = getattr(self.bot, "db_manager", None)
+        if db_manager:
+            try:
+                with db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT target FROM clock_sync_targets WHERE enabled = 1 ORDER BY id"
+                    )
+                    db_targets = [row[0] for row in cursor.fetchall() if row and row[0]]
+                if db_targets:
+                    return db_targets
+            except Exception as exc:
+                self.logger.debug("Clock_Sync_Admin DB target read failed, falling back to config: %s", exc)
+        return self._parse_clock_sync_admin_targets(
+            self.bot.config.get("Clock_Sync_Admin", "targets", fallback="")
+        )
 
     def _resolve_clock_sync_target_contact(self, identifier: str) -> dict[str, Any] | None:
         """Resolve configured identifier to a mesh contact by name or public key/prefix."""
@@ -429,9 +446,7 @@ class MessageScheduler:
             self.logger.warning("Clock_Sync_Admin run skipped — DM pipeline unavailable")
             return {'success': False, 'error': 'DM pipeline unavailable'}
 
-        targets = self._parse_clock_sync_admin_targets(
-            self.bot.config.get("Clock_Sync_Admin", "targets", fallback="")
-        )
+        targets = self._get_clock_sync_targets()
         if not targets:
             self.logger.warning("Clock_Sync_Admin run skipped — no targets configured")
             return {'success': False, 'error': 'No targets configured'}
