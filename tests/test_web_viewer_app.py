@@ -1354,3 +1354,282 @@ class TestGetClockSyncTargetsStatus:
 
         result = viewer._get_clock_sync_targets_status()
         assert result["targets"][0]["status"] == "In Sync"
+
+
+class TestContactsClockDriftStatus:
+    """Smart per-contact drift status in the /api/contacts tracking payload.
+
+    Threshold bands (relative to dashboard_max_clock_drift_seconds, default 300):
+      known drift <= 0.5 * threshold            -> 'in_sync'
+      0.5 * threshold < drift <= threshold      -> 'warning'
+      drift > threshold                         -> 'out_of_sync'
+      no parsable latest message                -> 'unknown' (drift None)
+    """
+
+    def _seed(self, viewer):
+        """Populate complete_contact_tracking + message_stats (same schema as prod)."""
+        db_path = viewer.db_path
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+        contacts = [
+            # (public_key, name, drift_seconds)
+            ("aa" + "0" * 62, "InSync", 60),
+            ("bb" + "0" * 62, "Warn", 200),
+            ("cc" + "0" * 62, "Out", 600),
+            ("dd" + "0" * 62, "NoData", None),
+        ]
+        with sqlite3.connect(db_path, timeout=60) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    channel TEXT,
+                    content TEXT NOT NULL,
+                    is_dm BOOLEAN NOT NULL,
+                    hops INTEGER,
+                    snr REAL,
+                    rssi INTEGER,
+                    path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            for public_key, name, drift in contacts:
+                cursor.execute(
+                    """
+                    INSERT INTO complete_contact_tracking
+                    (public_key, name, role, device_type, hop_count,
+                     first_heard, last_heard, advert_count, is_currently_tracked)
+                    VALUES (?, ?, 'client', 'mobile', 1, ?, ?, 1, 1)
+                    """,
+                    (public_key, name, now_sql, now_sql),
+                )
+                if drift is not None:
+                    cursor.execute(
+                        """
+                        INSERT INTO message_stats
+                        (timestamp, sender_id, channel, content, is_dm, hops, created_at)
+                        VALUES (?, ?, 'Public', 'hello', 0, 1, ?)
+                        """,
+                        (now_epoch - drift, name, now_sql),
+                    )
+            conn.commit()
+
+    def _find(self, tracking, name):
+        for row in tracking:
+            if row["username"] == name:
+                return row
+        return None
+
+    def test_tracking_data_reports_all_four_drift_statuses(self, viewer_with_db):
+        self._seed(viewer_with_db)
+
+        result = viewer_with_db._get_tracking_data(since='all')
+        tracking = result["tracking_data"]
+
+        assert result["server_stats"]["clock_drift_threshold_seconds"] == 300
+
+        no_data = self._find(tracking, "NoData")
+        assert no_data["clock_drift_status"] == "unknown"
+        assert no_data["clock_drift_seconds"] is None
+        assert no_data["clock_drift_detected"] is False
+
+        in_sync = self._find(tracking, "InSync")
+        assert in_sync["clock_drift_status"] == "in_sync"
+        assert 55 <= in_sync["clock_drift_seconds"] <= 65
+
+        warn = self._find(tracking, "Warn")
+        assert warn["clock_drift_status"] == "warning"
+        assert 195 <= warn["clock_drift_seconds"] <= 205
+
+        out = self._find(tracking, "Out")
+        assert out["clock_drift_status"] == "out_of_sync"
+        assert 595 <= out["clock_drift_seconds"] <= 605
+
+
+# ---------------------------------------------------------------------------
+# Drift freshness: latest clocked packet wins (message vs advert)
+# ---------------------------------------------------------------------------
+
+
+class TestClockDriftFreshness:
+    """The drift must come from the freshest clocked packet per contact.
+
+    A stale message (e.g. from weeks ago, when the device clock was off) must
+    not mask a fresh advertisement whose ``advert_time`` shows the device is
+    now in sync — the exact case of a serial companion clock-synced at bot
+    startup that only advertises afterwards.
+    """
+
+    WEEK = 7 * 24 * 3600
+
+    def _seed(self, viewer, rows):
+        """rows: list of dicts with keys name, public_key, message (drift, age),
+        advert (drift, age). age = seconds ago the packet was received."""
+        db_path = viewer.db_path
+        now_epoch = int(time.time())
+
+        def ts(epoch):
+            return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+        with sqlite3.connect(db_path, timeout=60) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    channel TEXT,
+                    content TEXT NOT NULL,
+                    is_dm BOOLEAN NOT NULL,
+                    hops INTEGER,
+                    snr REAL,
+                    rssi INTEGER,
+                    path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            for row in rows:
+                cursor.execute(
+                    """
+                    INSERT INTO complete_contact_tracking
+                    (public_key, name, role, device_type, hop_count,
+                     first_heard, last_heard, advert_count, is_currently_tracked,
+                     raw_advert_data)
+                    VALUES (?, ?, 'client', 'mobile', 1, ?, ?, 1, 1, ?)
+                    """,
+                    (
+                        row["public_key"],
+                        row["name"],
+                        ts(now_epoch - self.WEEK),
+                        row["last_heard_sql"],
+                        row["raw_advert_data"],
+                    ),
+                )
+                if row["message"] is not None:
+                    drift, age = row["message"]
+                    received_epoch = now_epoch - age
+                    cursor.execute(
+                        """
+                        INSERT INTO message_stats
+                        (timestamp, sender_id, channel, content, is_dm, hops, created_at)
+                        VALUES (?, ?, 'Public', 'hello', 0, 1, ?)
+                        """,
+                        (received_epoch - drift, row["name"], ts(received_epoch)),
+                    )
+            conn.commit()
+
+    @staticmethod
+    def _advert(advert_time):
+        return json.dumps({
+            "advert_time": advert_time,
+            "name": "test",
+            "lat": 0.0,
+            "lon": 0.0,
+            "mode": "manual",
+        })
+
+    def _find(self, tracking, name):
+        for row in tracking:
+            if row["username"] == name:
+                return row
+        return None
+
+    def test_fresh_advert_overrides_stale_out_of_sync_message(self, viewer_with_db):
+        """TigroBot case: stale 4h-drift message + fresh in-sync advert."""
+        now_epoch = int(time.time())
+        self._seed(viewer_with_db, [{
+            "name": "TigroBot",
+            "public_key": "aa" + "1" * 62,
+            # message received a week ago, device clock was 4h08m behind then
+            "message": (14919, self.WEEK),
+            # advert received now, device clock now only 50s off (synced)
+            "advert": (50, 0),
+            "last_heard_sql": datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "raw_advert_data": self._advert(now_epoch - 50),
+        }])
+
+        result = viewer_with_db._get_tracking_data(since='all')
+        row = self._find(result["tracking_data"], "TigroBot")
+
+        assert row["clock_drift_status"] == "in_sync"
+        assert 45 <= row["clock_drift_seconds"] <= 55
+        assert row["clock_drift_source"] == "advert"
+        assert row["clock_drift_detected"] is False
+
+    def test_fresh_message_overrides_stale_advert(self, viewer_with_db):
+        """A fresh out-of-sync message must beat a stale in-sync advert."""
+        now_epoch = int(time.time())
+        stale_received = now_epoch - self.WEEK
+        self._seed(viewer_with_db, [{
+            "name": "StaleAdvert",
+            "public_key": "bb" + "2" * 62,
+            "message": (600, 0),
+            "advert": (30, self.WEEK),
+            "last_heard_sql": datetime.fromtimestamp(stale_received, timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "raw_advert_data": self._advert(stale_received - 30),
+        }])
+
+        result = viewer_with_db._get_tracking_data(since='all')
+        row = self._find(result["tracking_data"], "StaleAdvert")
+
+        assert row["clock_drift_status"] == "out_of_sync"
+        assert 595 <= row["clock_drift_seconds"] <= 605
+        assert row["clock_drift_source"] == "message"
+        assert row["clock_drift_detected"] is True
+
+    def test_advert_only_contact_reports_drift(self, viewer_with_db):
+        """A contact with no message but a clocked advert is no longer 'unknown'."""
+        now_epoch = int(time.time())
+        self._seed(viewer_with_db, [{
+            "name": "AdvertOnly",
+            "public_key": "cc" + "3" * 62,
+            "message": None,
+            "advert": (200, 0),
+            "last_heard_sql": datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "raw_advert_data": self._advert(now_epoch - 200),
+        }])
+
+        result = viewer_with_db._get_tracking_data(since='all')
+        row = self._find(result["tracking_data"], "AdvertOnly")
+
+        assert row["clock_drift_status"] == "warning"
+        assert 195 <= row["clock_drift_seconds"] <= 205
+        assert row["clock_drift_source"] == "advert"
+
+    def test_dashboard_prefers_fresh_advert_over_stale_message(self, viewer_with_db):
+        """Dashboard: fresh in-sync advert removes a stale out-of-sync message node."""
+        now_epoch = int(time.time())
+        self._seed(viewer_with_db, [
+            {
+                "name": "SyncedNow",
+                "public_key": "dd" + "4" * 62,
+                "message": (14919, self.WEEK),
+                "advert": (50, 0),
+                "last_heard_sql": datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "raw_advert_data": self._advert(now_epoch - 50),
+            },
+            {
+                "name": "BrokenClock",
+                "public_key": "ee" + "5" * 62,
+                "message": None,
+                "advert": (600, 0),
+                "last_heard_sql": datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "raw_advert_data": self._advert(now_epoch - 600),
+            },
+        ])
+
+        stats = viewer_with_db._get_database_stats()
+        clock_stats = stats.get("clock_sync_dashboard", {})
+
+        assert clock_stats.get("checked_nodes") == 2
+        assert clock_stats.get("out_of_sync_count") == 1
+        flagged = clock_stats.get("out_of_sync_nodes")
+        assert [node["name"] for node in flagged] == ["BrokenClock"]
+        assert flagged[0]["drift_seconds"] == 600
