@@ -6642,6 +6642,16 @@ class BotDataViewer:
 
             tracking = []
             for row in main_rows:
+                drift_value = clock_drift_seconds.get(row['name'])
+                if drift_value is not None:
+                    if drift_value > clock_drift_threshold:
+                        drift_status = 'out_of_sync'
+                    elif drift_value > clock_drift_threshold / 2:
+                        drift_status = 'warning'
+                    else:
+                        drift_status = 'in_sync'
+                else:
+                    drift_status = 'unknown'
                 # Parse raw advertisement data if available
                 raw_advert_data_parsed = None
                 if row['raw_advert_data']:
@@ -6717,10 +6727,11 @@ class BotDataViewer:
                     'all_paths': all_paths,
                     'path_encoding_badge': path_encoding_badge,
                     'path_bytes_per_hop': self._contact_path_bytes_per_hop(row, all_paths),
-                    'clock_drift_seconds': clock_drift_seconds.get(row['name']),
+                    'clock_drift_seconds': drift_value,
+                    'clock_drift_status': drift_status,
                     'clock_drift_detected': bool(
-                        clock_drift_seconds.get(row['name']) is not None
-                        and clock_drift_seconds[row['name']] > clock_drift_threshold
+                        drift_value is not None
+                        and drift_value > clock_drift_threshold
                     ),
                 })
 
@@ -6884,6 +6895,8 @@ class BotDataViewer:
 
             except Exception as e:
                 self.logger.debug(f"Could not get server stats: {e}")
+
+            server_stats['clock_drift_threshold_seconds'] = clock_drift_threshold
 
             return {
                 'tracking_data': tracking,
