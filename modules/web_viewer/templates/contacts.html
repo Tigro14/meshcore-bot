@@ -1543,7 +1543,7 @@ class ModernContactsManager {
         if (status === 'unknown' || !hasDrift) {
             return ' <span class="badge clock-drift-badge bg-secondary"'
                 + ' data-bs-toggle="tooltip" data-bs-placement="top"'
-                + ' title="No drift data — no recent message with a timestamp">N/D</span>';
+                 + ' title="No drift data — no recent packet with a timestamp">N/D</span>';
         }
 
         const compact = this.formatDriftCompact(drift);
