@@ -278,6 +278,12 @@ targets =
 # DM payload sent to each resolved target
 command_payload = clock sync admin
 
+# Minimum clock drift in seconds that justifies sending a sync DM to a target.
+# Targets whose latest clocked packet (message or advertisement) shows a drift
+# <= this value are considered in sync and skipped. Unknown drift still gets a
+# sync. Set to 0 to always send (legacy behavior). Default: 60.
+min_sync_drift = 60
+
 # Dashboard clock drift monitor for repeaters near the bot
 # Maximum hop distance to include repeaters in drift dashboard
 dashboard_hop_radius = 5

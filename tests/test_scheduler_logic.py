@@ -1,6 +1,7 @@
 """Tests for MessageScheduler pure logic (no threading, no asyncio)."""
 
 import datetime
+import json
 import time
 from configparser import ConfigParser
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -506,6 +507,170 @@ class TestClockSyncAdminScheduler:
         record.assert_called_once_with(
             "deadbeef00112233", "TargetA", False, "Send returned False"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestClockSyncAdminMinDrift (min_sync_drift gate)
+# ---------------------------------------------------------------------------
+
+
+class TestClockSyncAdminMinDrift:
+    """Sync DMs must only be sent to targets with a notable clock drift."""
+
+    @staticmethod
+    def _seed_drift_db(db_path, name, drift_seconds, source):
+        """Seed a real sqlite DB with one clocked sample for the target."""
+        import sqlite3
+
+        now_epoch = int(time.time())
+        now_sql = datetime.datetime.fromtimestamp(
+            now_epoch, datetime.timezone.utc
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(db_path, timeout=60) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    channel TEXT,
+                    content TEXT NOT NULL,
+                    is_dm BOOLEAN NOT NULL,
+                    hops INTEGER,
+                    snr REAL,
+                    rssi INTEGER,
+                    path TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS complete_contact_tracking (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    public_key TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    device_type TEXT,
+                    first_heard TIMESTAMP,
+                    last_heard TIMESTAMP,
+                    advert_count INTEGER DEFAULT 1,
+                    raw_advert_data TEXT
+                )
+                """
+            )
+            if source == "message":
+                cursor.execute(
+                    """
+                    INSERT INTO message_stats
+                    (timestamp, sender_id, channel, content, is_dm, hops, created_at)
+                    VALUES (?, ?, 'Public', 'hello', 0, 1, ?)
+                    """,
+                    (now_epoch - drift_seconds, name, now_sql),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO complete_contact_tracking
+                    (public_key, name, role, last_heard, raw_advert_data)
+                    VALUES (?, ?, 'repeater', ?, ?)
+                    """,
+                    (
+                        "bb" + "0" * 62,
+                        name,
+                        now_sql,
+                        json.dumps({"advert_time": now_epoch - drift_seconds, "name": name}),
+                    ),
+                )
+            conn.commit()
+
+    @staticmethod
+    def _attach_db(scheduler, db_path):
+        import contextlib
+        import sqlite3
+
+        conn = sqlite3.connect(db_path, timeout=60)
+        scheduler.bot.db_manager = Mock()
+        scheduler.bot.db_manager.connection.return_value = contextlib.nullcontext(conn)
+        return conn
+
+    def _run_context(self, scheduler, contact_name, min_sync_drift):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "enabled", "true")
+        # target is a public key prefix, resolved via the contacts table
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", "aa0000000000")
+        scheduler.bot.config.set("Clock_Sync_Admin", "command_payload", "clock sync admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "min_sync_drift", str(min_sync_drift))
+        scheduler.bot.connected = True
+        scheduler.bot.is_radio_zombie = False
+        scheduler.bot.is_radio_offline = False
+        scheduler.bot.meshcore = Mock()
+        scheduler.bot.meshcore.get_contact_by_name = Mock(side_effect=lambda value: None)
+        scheduler.bot.meshcore.contacts = {
+            "t": {"name": contact_name, "public_key": "aa" + "0" * 62},
+        }
+        scheduler.bot.command_manager = Mock()
+        scheduler.bot.command_manager.send_dm = AsyncMock(return_value=True)
+
+    def test_in_sync_target_is_skipped(self, scheduler, tmp_path):
+        db_path = str(tmp_path / "bot.db")
+        self._seed_drift_db(db_path, "InSyncRep", 30, "advert")
+        self._attach_db(scheduler, db_path)
+        self._run_context(scheduler, "InSyncRep", 60)
+
+        result = asyncio.run(scheduler._run_clock_sync_admin_job_async())
+
+        assert scheduler.bot.command_manager.send_dm.await_count == 0
+        assert result["in_sync_skipped"] == 1
+        assert result["sent"] == 0
+
+    def test_drift_above_min_is_sent(self, scheduler, tmp_path):
+        db_path = str(tmp_path / "bot.db")
+        self._seed_drift_db(db_path, "DriftedRep", 120, "message")
+        self._attach_db(scheduler, db_path)
+        self._run_context(scheduler, "DriftedRep", 60)
+
+        result = asyncio.run(scheduler._run_clock_sync_admin_job_async())
+
+        assert scheduler.bot.command_manager.send_dm.await_count == 1
+        assert result["sent"] == 1
+        assert result["in_sync_skipped"] == 0
+
+    def test_unknown_drift_is_still_sent(self, scheduler, tmp_path):
+        db_path = str(tmp_path / "bot.db")
+        # seeded under a different name -> no clocked sample for the target
+        self._seed_drift_db(db_path, "SilentRep", 30, "advert")
+        self._attach_db(scheduler, db_path)
+        self._run_context(scheduler, "SilentRep2", 60)
+
+        result = asyncio.run(scheduler._run_clock_sync_admin_job_async())
+
+        assert scheduler.bot.command_manager.send_dm.await_count == 1
+        assert result["sent"] == 1
+
+    def test_min_sync_drift_zero_always_sends(self, scheduler, tmp_path):
+        db_path = str(tmp_path / "bot.db")
+        self._seed_drift_db(db_path, "ZeroGate", 30, "advert")
+        self._attach_db(scheduler, db_path)
+        self._run_context(scheduler, "ZeroGate", 0)
+
+        result = asyncio.run(scheduler._run_clock_sync_admin_job_async())
+
+        # drift 30 > 0 -> sent even though the clock is nearly aligned
+        assert scheduler.bot.command_manager.send_dm.await_count == 1
+        assert result["sent"] == 1
+
+    def test_min_sync_drift_default_is_60(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        assert scheduler._get_clock_sync_min_drift() == 60
+
+    def test_min_sync_drift_invalid_value_falls_back(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "min_sync_drift", "not-a-number")
+        assert scheduler._get_clock_sync_min_drift() == 60
+        scheduler.bot.config.set("Clock_Sync_Admin", "min_sync_drift", "-5")
+        assert scheduler._get_clock_sync_min_drift() == 0
 
 
 # ---------------------------------------------------------------------------
