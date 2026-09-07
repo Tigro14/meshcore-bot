@@ -970,22 +970,25 @@ class BotDataViewer:
                 'mesh',
                 'api_explorer',
             }
-            if request.endpoint in nonce_hardened_endpoints:
-                script_source = f"script-src 'self' 'nonce-{g.csp_nonce}' "
-            else:
-                script_source = "script-src 'self' 'unsafe-inline' "
-            response.headers['Content-Security-Policy'] = (
-                "default-src 'self'; "
-                + script_source
-                + "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; "
-                "style-src 'self' 'unsafe-inline' "
-                "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; "
-                "img-src 'self' data: https://*.tile.openstreetmap.org "
-                "https://unpkg.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-                "connect-src 'self' ws: wss: "
-                "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; "
-                "font-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com"
-            )
+            # CSP is managed by the reverse proxy (Apache) — skip when behind proxy
+            if not request.headers.get('X-Forwarded-For') and not request.headers.get('X-Real-Ip'):
+                if request.endpoint in nonce_hardened_endpoints:
+                    script_source = f"script-src 'self' 'nonce-{g.csp_nonce}' "
+                else:
+                    script_source = "script-src 'self' 'unsafe-inline' "
+                response.headers['Content-Security-Policy'] = (
+                    "default-src 'self'; "
+                    + script_source
+                    + "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; "
+                    "style-src 'self' 'unsafe-inline' "
+                    "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; "
+                    "img-src 'self' data: https://*.tile.openstreetmap.org "
+                    "https://unpkg.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                    "connect-src 'self' ws: wss: https://tiles.openfreemap.org "
+                    "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; "
+                    "font-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                    "worker-src 'self' blob:"
+                )
 
             # Sanitize error details from 5xx JSON responses to prevent info disclosure.
             # The full exception is already logged server-side; clients only need a
