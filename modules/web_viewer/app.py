@@ -285,6 +285,15 @@ class BotDataViewer:
             # Derrière un proxy, l'Origin differ de l'adresse interne → autoriser explicitement
             self._socketio_kwargs['cors_allowed_origins'] = '*'
 
+        # WebSocket transport: only enable if config explicitly allows it
+        ws_enabled = self.config.getboolean('Web_Viewer', 'websocket_enabled', fallback=False)
+        if not ws_enabled:
+            self._socketio_kwargs['transports'] = ['polling']
+            self.logger.info("Socket.IO transports: polling only (websocket_enabled=false)")
+        else:
+            self._socketio_kwargs['transports'] = ['websocket', 'polling']
+            self.logger.info("Socket.IO transports: websocket + polling")
+
         # Initialize SocketIO with Flask app now that config is loaded
         self.socketio.init_app(self.app, **self._socketio_kwargs)
 
