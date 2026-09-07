@@ -216,7 +216,7 @@ class BotDataViewer:
             logger=False,                  # Disable verbose logging
             engineio_logger=False,        # Disable EngineIO logging
             async_mode='threading',       # Use threading for better stability
-            allow_upgrades=False,   # ← AJOUT : désactive l'upgrade WebSocket
+
         )
         self.socketio = SocketIO()
 
@@ -224,7 +224,7 @@ class BotDataViewer:
 
         # Connection management using Flask-SocketIO built-ins
         self.connected_clients = {}  # Track client metadata
-        self._clients_lock = threading.Lock()  # Thread safety for connected_clients
+        self._clients_lock = threading.RLock()  # Reentrant: disconnect() re-enters from handle_connect
         self.max_clients = 10
 
         # Database connection pooling with thread safety
