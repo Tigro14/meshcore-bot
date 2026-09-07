@@ -55,11 +55,6 @@ ssh dietpi@192.168.1.16
 sudo -s
 cd /home/dietpi/meshcore-bot && git pull
 ./install-service.sh -u
-sudo systemctl restart meshcore-bot
-
-# Logs bot
-sudo journalctl -u meshcore-bot --since '5 min ago' --no-pager
-
 # Test Socket.IO direct (sur le bot)
 curl -s 'http://127.0.0.1:8083/socket.io/?EIO=4&transport=polling'
 
