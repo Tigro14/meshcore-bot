@@ -189,3 +189,6 @@ local/service_plugins/*
 # Local debugging scratch (captured configs and logs — may contain real settings)
 _debug/
 aqi_http_cache.sqlite
+
+# Agent session context (contains internal IPs, SSH targets)
+AGENTS.md
