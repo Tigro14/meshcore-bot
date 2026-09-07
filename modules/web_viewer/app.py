@@ -564,6 +564,10 @@ class BotDataViewer:
                     radio_offline = False
                     radio_offline_since = None
                     bot_initializing = False
+                try:
+                    websocket_enabled = self.config.getboolean('Web_Viewer', 'websocket_enabled', fallback=False)
+                except (configparser.NoSectionError, configparser.NoOptionError, ValueError, TypeError):
+                    websocket_enabled = False
                 return {
                     'greeter_enabled': greeter_enabled,
                     'feed_manager_enabled': feed_manager_enabled,
@@ -574,6 +578,7 @@ class BotDataViewer:
                     'radio_offline': radio_offline,
                     'radio_offline_since': radio_offline_since,
                     'bot_initializing': bot_initializing,
+                    'websocket_enabled': websocket_enabled,
                 }
             except Exception as e:
                 self.logger.exception("Template context processor failed: %s", e)
@@ -587,6 +592,7 @@ class BotDataViewer:
                     'radio_zombie_since': None,
                     'radio_offline': False,
                     'radio_offline_since': None,
+                    'websocket_enabled': False,
                 }
 
     def _init_databases(self):
