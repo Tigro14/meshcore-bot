@@ -216,7 +216,7 @@ class BotDataViewer:
             logger=False,                  # Disable verbose logging
             engineio_logger=False,        # Disable EngineIO logging
             async_mode='threading',       # Use threading for better stability
-            allow_upgrades=False,   # ← AJOUT : désactive l'upgrade WebSocket
+
         )
         self.socketio = SocketIO()
 
@@ -224,7 +224,7 @@ class BotDataViewer:
 
         # Connection management using Flask-SocketIO built-ins
         self.connected_clients = {}  # Track client metadata
-        self._clients_lock = threading.Lock()  # Thread safety for connected_clients
+        self._clients_lock = threading.RLock()  # Reentrant: disconnect() re-enters from handle_connect
         self.max_clients = 10
 
         # Database connection pooling with thread safety
@@ -284,6 +284,15 @@ class BotDataViewer:
         else:
             # Derrière un proxy, l'Origin differ de l'adresse interne → autoriser explicitement
             self._socketio_kwargs['cors_allowed_origins'] = '*'
+
+        # WebSocket transport: only enable if config explicitly allows it
+        ws_enabled = self.config.getboolean('Web_Viewer', 'websocket_enabled', fallback=False)
+        if not ws_enabled:
+            self._socketio_kwargs['transports'] = ['polling']
+            self.logger.info("Socket.IO transports: polling only (websocket_enabled=false)")
+        else:
+            self._socketio_kwargs['transports'] = ['websocket', 'polling']
+            self.logger.info("Socket.IO transports: websocket + polling")
 
         # Initialize SocketIO with Flask app now that config is loaded
         self.socketio.init_app(self.app, **self._socketio_kwargs)
@@ -555,6 +564,10 @@ class BotDataViewer:
                     radio_offline = False
                     radio_offline_since = None
                     bot_initializing = False
+                try:
+                    websocket_enabled = self.config.getboolean('Web_Viewer', 'websocket_enabled', fallback=False)
+                except (configparser.NoSectionError, configparser.NoOptionError, ValueError, TypeError):
+                    websocket_enabled = False
                 return {
                     'greeter_enabled': greeter_enabled,
                     'feed_manager_enabled': feed_manager_enabled,
@@ -565,6 +578,7 @@ class BotDataViewer:
                     'radio_offline': radio_offline,
                     'radio_offline_since': radio_offline_since,
                     'bot_initializing': bot_initializing,
+                    'websocket_enabled': websocket_enabled,
                 }
             except Exception as e:
                 self.logger.exception("Template context processor failed: %s", e)
@@ -578,6 +592,7 @@ class BotDataViewer:
                     'radio_zombie_since': None,
                     'radio_offline': False,
                     'radio_offline_since': None,
+                    'websocket_enabled': False,
                 }
 
     def _init_databases(self):
@@ -1056,6 +1071,11 @@ class BotDataViewer:
         def time_page():
             """Time synchronization page"""
             return render_template('time.html')
+
+        @self.app.route('/time/admin')
+        def time_admin_page():
+            """Clock sync targets admin page"""
+            return render_template('time_admin.html')
 
         @self.app.route('/config')
         def config_page():
@@ -2125,7 +2145,87 @@ class BotDataViewer:
                 self.logger.error(f"Error getting clock sync targets: {e}")
                 return jsonify({'error': 'Failed to retrieve clock sync targets'}), 500
 
+        @self.app.route('/api/clock-sync-targets-admin', methods=['GET'])
+        def api_clock_sync_targets_admin_list():
+            """List clock sync targets from DB"""
+            try:
+                with self._with_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT id, target, enabled, created_at FROM clock_sync_targets ORDER BY id"
+                    )
+                    rows = cursor.fetchall()
+                    targets = [
+                        {'id': r[0], 'target': r[1], 'enabled': bool(r[2]), 'created_at': r[3]}
+                        for r in rows if r
+                    ]
+                return jsonify({'targets': targets})
+            except Exception as e:
+                self.logger.error(f"Error listing clock sync targets: {e}")
+                return jsonify({'error': str(e)}), 500
 
+        @self.app.route('/api/clock-sync-targets-admin', methods=['POST'])
+        def api_clock_sync_targets_admin_add():
+            """Add a clock sync target"""
+            data = request.get_json(silent=True) or {}
+            target = (data.get('target') or '').strip().strip('"\'')
+            if not target:
+                return jsonify({'error': 'target is required'}), 400
+            try:
+                with self._with_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO clock_sync_targets (target) VALUES (?)",
+                        (target,),
+                    )
+                    conn.commit()
+                    new_id = cursor.lastrowid
+                return jsonify({'id': new_id, 'target': target, 'enabled': True}), 201
+            except sqlite3.IntegrityError:
+                return jsonify({'error': f'Target "{target}" already exists'}), 409
+            except Exception as e:
+                self.logger.error(f"Error adding clock sync target: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/clock-sync-targets-admin/<int:target_id>', methods=['PUT'])
+        def api_clock_sync_targets_admin_update(target_id):
+            """Update a clock sync target (enable/disable)"""
+            data = request.get_json(silent=True) or {}
+            enabled = data.get('enabled')
+            if enabled is None:
+                return jsonify({'error': 'enabled is required'}), 400
+            try:
+                with self._with_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE clock_sync_targets SET enabled = ? WHERE id = ?",
+                        (1 if enabled else 0, target_id),
+                    )
+                    conn.commit()
+                    if cursor.rowcount == 0:
+                        return jsonify({'error': 'Target not found'}), 404
+                return jsonify({'id': target_id, 'enabled': bool(enabled)})
+            except Exception as e:
+                self.logger.error(f"Error updating clock sync target: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/clock-sync-targets-admin/<int:target_id>', methods=['DELETE'])
+        def api_clock_sync_targets_admin_delete(target_id):
+            """Delete a clock sync target"""
+            try:
+                with self._with_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "DELETE FROM clock_sync_targets WHERE id = ?",
+                        (target_id,),
+                    )
+                    conn.commit()
+                    if cursor.rowcount == 0:
+                        return jsonify({'error': 'Target not found'}), 404
+                return jsonify({'deleted': target_id})
+            except Exception as e:
+                self.logger.error(f"Error deleting clock sync target: {e}")
+                return jsonify({'error': str(e)}), 500
 
         @self.app.route('/api/dashboard/summary')
         def api_dashboard_summary():

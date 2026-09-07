@@ -1745,6 +1745,11 @@ allow_private_urls = false
 # Enable web viewer (true/false). false recommended unless you have configured web_viewer_password.
 enabled = false
 
+# Enable WebSocket transport for Socket.IO (true/false).
+# Set to true only if your reverse proxy correctly forwards Upgrade/Connection headers.
+# When false, Socket.IO uses long-polling only (safer behind most proxies).
+websocket_enabled = false
+
 # If set to a non-empty value, a login page is shown and all routes + SocketIO require auth.
 # If empty, unset, "", or a null placeholder (none / null / nil), authentication is disabled.
 # Recommendation: always set a password when host != 127.0.0.1
