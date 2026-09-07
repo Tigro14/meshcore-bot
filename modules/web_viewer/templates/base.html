@@ -685,10 +685,10 @@
                 // Use io() without forceNew so that realtime.html's io() shares
                 // this same manager/socket.  forceNew created a second independent
                 // connection that interfered with the realtime-page socket.
+                const wsEnabled = {{ websocket_enabled | lower }};
                 this.socket = io({
-                    //transports: ['websocket', 'polling'],
-                    transports: ['polling'],
-                    upgrade: false,          // ← empêche toute tentative d'upgrade côté client
+                    transports: wsEnabled ? ['websocket', 'polling'] : ['polling'],
+                    upgrade: wsEnabled,
                     timeout: 10000,
                     reconnectionDelay: 2000,
                 });

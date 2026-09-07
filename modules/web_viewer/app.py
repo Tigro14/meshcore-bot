@@ -216,7 +216,7 @@ class BotDataViewer:
             logger=False,                  # Disable verbose logging
             engineio_logger=False,        # Disable EngineIO logging
             async_mode='threading',       # Use threading for better stability
-            allow_upgrades=False,   # ← AJOUT : désactive l'upgrade WebSocket
+
         )
         self.socketio = SocketIO()
 
@@ -224,7 +224,7 @@ class BotDataViewer:
 
         # Connection management using Flask-SocketIO built-ins
         self.connected_clients = {}  # Track client metadata
-        self._clients_lock = threading.Lock()  # Thread safety for connected_clients
+        self._clients_lock = threading.RLock()  # Reentrant: disconnect() re-enters from handle_connect
         self.max_clients = 10
 
         # Database connection pooling with thread safety
@@ -284,6 +284,15 @@ class BotDataViewer:
         else:
             # Derrière un proxy, l'Origin differ de l'adresse interne → autoriser explicitement
             self._socketio_kwargs['cors_allowed_origins'] = '*'
+
+        # WebSocket transport: only enable if config explicitly allows it
+        ws_enabled = self.config.getboolean('Web_Viewer', 'websocket_enabled', fallback=False)
+        if not ws_enabled:
+            self._socketio_kwargs['transports'] = ['polling']
+            self.logger.info("Socket.IO transports: polling only (websocket_enabled=false)")
+        else:
+            self._socketio_kwargs['transports'] = ['websocket', 'polling']
+            self.logger.info("Socket.IO transports: websocket + polling")
 
         # Initialize SocketIO with Flask app now that config is loaded
         self.socketio.init_app(self.app, **self._socketio_kwargs)
@@ -555,6 +564,10 @@ class BotDataViewer:
                     radio_offline = False
                     radio_offline_since = None
                     bot_initializing = False
+                try:
+                    websocket_enabled = self.config.getboolean('Web_Viewer', 'websocket_enabled', fallback=False)
+                except (configparser.NoSectionError, configparser.NoOptionError, ValueError, TypeError):
+                    websocket_enabled = False
                 return {
                     'greeter_enabled': greeter_enabled,
                     'feed_manager_enabled': feed_manager_enabled,
@@ -565,6 +578,7 @@ class BotDataViewer:
                     'radio_offline': radio_offline,
                     'radio_offline_since': radio_offline_since,
                     'bot_initializing': bot_initializing,
+                    'websocket_enabled': websocket_enabled,
                 }
             except Exception as e:
                 self.logger.exception("Template context processor failed: %s", e)
@@ -578,6 +592,7 @@ class BotDataViewer:
                     'radio_zombie_since': None,
                     'radio_offline': False,
                     'radio_offline_since': None,
+                    'websocket_enabled': False,
                 }
 
     def _init_databases(self):
