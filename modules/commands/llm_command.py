@@ -162,6 +162,9 @@ class LlmCommand(BaseCommand):
         self.context_include_system_metrics = self.get_config_value(
             "Llm_Command", "context_include_system_metrics", fallback=True, value_type="bool"
         )
+        self.llm_db_query_enabled = self.get_config_value(
+            "Llm_Command", "db_query_enabled", fallback=True, value_type="bool"
+        )
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
         )
@@ -368,9 +371,7 @@ class LlmCommand(BaseCommand):
                     stats_parts = []
 
                     # Contacts by role
-                    cursor.execute(
-                        "SELECT role, COUNT(*) FROM complete_contact_tracking GROUP BY role"
-                    )
+                    cursor.execute("SELECT role, COUNT(*) FROM complete_contact_tracking GROUP BY role")
                     roles = cursor.fetchall()
                     if roles:
                         role_str = ", ".join(f"{r[0]}:{r[1]}" for r in roles)
@@ -434,7 +435,7 @@ class LlmCommand(BaseCommand):
                         " UNION ALL"
                         " SELECT to_prefix as prefix FROM mesh_connections"
                         " ) GROUP BY prefix ORDER BY degree DESC LIMIT ?",
-                        (self.context_mesh_topology_limit,)
+                        (self.context_mesh_topology_limit,),
                     )
                     top_prefixes = [r[0] for r in cursor.fetchall()]
                     if top_prefixes:
@@ -443,19 +444,17 @@ class LlmCommand(BaseCommand):
                             # Resolve name
                             cursor.execute(
                                 "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1",
-                                (pfx + "%",)
+                                (pfx + "%",),
                             )
                             row = cursor.fetchone()
                             name = row[0] if row else pfx
                             # Get neighbors (both directions)
                             cursor.execute(
-                                "SELECT DISTINCT to_prefix FROM mesh_connections WHERE from_prefix = ?",
-                                (pfx,)
+                                "SELECT DISTINCT to_prefix FROM mesh_connections WHERE from_prefix = ?", (pfx,)
                             )
                             outgoing = [r[0] for r in cursor.fetchall()]
                             cursor.execute(
-                                "SELECT DISTINCT from_prefix FROM mesh_connections WHERE to_prefix = ?",
-                                (pfx,)
+                                "SELECT DISTINCT from_prefix FROM mesh_connections WHERE to_prefix = ?", (pfx,)
                             )
                             incoming = [r[0] for r in cursor.fetchall()]
                             # Resolve neighbor names
@@ -464,14 +463,13 @@ class LlmCommand(BaseCommand):
                             for np in all_neighbors:
                                 cursor.execute(
                                     "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1",
-                                    (np + "%",)
+                                    (np + "%",),
                                 )
                                 nrow = cursor.fetchone()
                                 nb_names.append(nrow[0] if nrow else np)
                             topo_lines.append(f"  {name}: {', '.join(nb_names)}")
                         context_parts.append(
-                            f"Mesh topology (top {len(top_prefixes)} by connections):\n"
-                            + "\n".join(topo_lines)
+                            f"Mesh topology (top {len(top_prefixes)} by connections):\n" + "\n".join(topo_lines)
                         )
             except Exception as e:
                 self.logger.warning(f"Failed to get mesh topology: {e}")
@@ -669,11 +667,13 @@ class LlmCommand(BaseCommand):
                     name = label
                     break
             chars = len(part)
-            breakdown.append({
-                "section": name,
-                "chars": chars,
-                "est_tokens": chars // 4,
-            })
+            breakdown.append(
+                {
+                    "section": name,
+                    "chars": chars,
+                    "est_tokens": chars // 4,
+                }
+            )
         return breakdown
 
     def _get_llama_model_info(self) -> str:
@@ -792,6 +792,22 @@ class LlmCommand(BaseCommand):
             if node_neighbors:
                 result += f"\n[Node neighbors: {node_neighbors}]"
 
+            # Add DB query capability
+            if self.llm_db_query_enabled:
+                result += (
+                    "\n\n[Database Query Capability]\n"
+                    "You can query the mesh database. To do so, respond with ONLY: [[SQL: SELECT ...]]\n"
+                    "Available tables:\n"
+                    "- complete_contact_tracking: name, public_key, role, city, country, last_heard, hop_count, snr, latitude, longitude\n"
+                    "- message_stats: timestamp(unix), sender_id, channel, content, is_dm, hops, snr, rssi\n"
+                    "- observed_paths: public_key, path_hex, path_length, observation_count, last_seen, snr, rssi\n"
+                    "- mesh_connections: from_prefix, to_prefix, observation_count, last_seen\n"
+                    "- neighbor_links: self_public_key, neighbor_public_key, last_snr, last_status, last_seen\n"
+                    "- daily_stats: date, public_key, advert_count\n"
+                    "Rules: SELECT only, LIMIT 20 max, last_heard is ISO datetime string, timestamp is unix int.\n"
+                    "If you can answer without querying, just answer normally."
+                )
+
             return result
         except Exception as e:
             self.logger.warning(f"Error injecting current time/context: {e}")
@@ -819,22 +835,15 @@ class LlmCommand(BaseCommand):
                     return ""
                 parts = []
                 for name, prefix in matched[:3]:
-                    cursor.execute(
-                        "SELECT DISTINCT to_prefix FROM mesh_connections WHERE from_prefix = ?",
-                        (prefix,)
-                    )
+                    cursor.execute("SELECT DISTINCT to_prefix FROM mesh_connections WHERE from_prefix = ?", (prefix,))
                     outgoing = [r[0] for r in cursor.fetchall()]
-                    cursor.execute(
-                        "SELECT DISTINCT from_prefix FROM mesh_connections WHERE to_prefix = ?",
-                        (prefix,)
-                    )
+                    cursor.execute("SELECT DISTINCT from_prefix FROM mesh_connections WHERE to_prefix = ?", (prefix,))
                     incoming = [r[0] for r in cursor.fetchall()]
                     all_nbs = list(set(outgoing + incoming) - {prefix})[:10]
                     nb_names = []
                     for np in all_nbs:
                         cursor.execute(
-                            "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1",
-                            (np + "%",)
+                            "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1", (np + "%",)
                         )
                         row = cursor.fetchone()
                         nb_names.append(row[0] if row else np)
@@ -889,6 +898,35 @@ class LlmCommand(BaseCommand):
             payload["model"] = self.model
 
         return payload
+
+    def _extract_sql(self, content: str) -> str | None:
+        """Extract SQL query from LLM response if present."""
+        match = re.search(r"\[\[SQL:\s*(SELECT\s+.+?)\]\]", content, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip().rstrip(";")
+        return None
+
+    def _execute_sql(self, sql: str) -> str:
+        """Execute a read-only SQL query and return formatted results."""
+        if not re.search(r"\bLIMIT\s+\d+", sql, re.IGNORECASE):
+            sql += " LIMIT 20"
+        sql = re.sub(r"\bLIMIT\s+\d+", "LIMIT 20", sql, flags=re.IGNORECASE)
+        try:
+            with self.bot.db_manager.connection() as conn:
+                conn.execute("PRAGMA query_only = ON")
+                cursor = conn.cursor()
+                cursor.execute(sql)
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
+                rows = cursor.fetchall()
+                if not rows:
+                    return "(no results)"
+                lines = [" | ".join(columns)]
+                for row in rows[:20]:
+                    lines.append(" | ".join(str(v) if v is not None else "-" for v in row))
+                return "\n".join(lines)
+        except Exception as e:
+            self.logger.warning(f"LLM SQL execution error: {e} | SQL: {sql[:200]}")
+            return f"(query error: {e})"
 
     def _clean_ai_response(self, content: str, max_length: int) -> str:
         cleaned = content or ""
@@ -1021,6 +1059,33 @@ class LlmCommand(BaseCommand):
         except (ValueError, TypeError, IndexError, AttributeError, KeyError) as e:
             self.logger.warning(f"LLM command parse error: {e}")
             return await self.send_response(message, "LLM error: could not parse response.")
+
+        # Check if LLM wants to query the database
+        if self.llm_db_query_enabled:
+            sql = self._extract_sql(content)
+            if sql:
+                self.logger.info(f"LLM requested DB query: {sql}")
+                sql_results = await asyncio.to_thread(self._execute_sql, sql)
+                self.logger.debug(f"SQL results: {sql_results[:500]}")
+                # Second LLM call: format the results into an answer
+                followup_prompt = (
+                    f"The query returned these results:\n{sql_results}\n\n"
+                    f"Answer the original question: {prompt}\n"
+                    "Be concise, use the actual data."
+                )
+                followup_payload = self._build_payload(prompt=followup_prompt)
+                try:
+                    resp2 = await asyncio.to_thread(
+                        requests.post, self.endpoint, json=followup_payload, timeout=self.timeout_seconds
+                    )
+                    if resp2.status_code == 200:
+                        data2 = resp2.json()
+                        content = data2["choices"][0]["message"]["content"].strip()
+                        self.logger.debug(f"LLM followup response: {content[:200]}")
+                    else:
+                        content = sql_results
+                except requests.RequestException:
+                    content = sql_results
 
         # Clean the response first
         if self.pagination_enabled:
