@@ -834,12 +834,15 @@ class LlmCommand(BaseCommand):
             with self.bot.db_manager.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT latitude, longitude FROM complete_contact_tracking WHERE public_key = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 LIMIT 1",
-                    (sender_id,),
+                    "SELECT latitude, longitude FROM complete_contact_tracking WHERE (public_key = ? OR name = ?) AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 LIMIT 1",
+                    (sender_id, sender_id),
                 )
                 row = cursor.fetchone()
                 if row:
                     self._sender_position = (float(row[0]), float(row[1]))
+                    self.logger.debug(f"Sender position found: {self._sender_position}")
+                else:
+                    self.logger.debug(f"No position found for sender: {sender_id}")
         except Exception as e:
             self.logger.debug(f"Failed to get sender position: {e}")
 
