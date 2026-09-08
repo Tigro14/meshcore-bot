@@ -946,7 +946,7 @@ class LlmCommand(BaseCommand):
         return None
 
     def _execute_sql(self, sql: str) -> str:
-        """Execute a read-only SQL query and return formatted results."""
+        """Execute a read-only SQL query and return compact results."""
         if not re.search(r"\bLIMIT\s+\d+", sql, re.IGNORECASE):
             sql += " LIMIT 20"
         sql = re.sub(r"\bLIMIT\s+\d+", "LIMIT 20", sql, flags=re.IGNORECASE)
@@ -959,9 +959,10 @@ class LlmCommand(BaseCommand):
                 rows = cursor.fetchall()
                 if not rows:
                     return "(no results)"
-                lines = [" | ".join(columns)]
+                lines = []
                 for row in rows[:20]:
-                    lines.append(" | ".join(str(v) if v is not None else "-" for v in row))
+                    parts = [f"{c}={v}" for c, v in zip(columns, row, strict=True) if v is not None]
+                    lines.append(", ".join(parts))
                 return "\n".join(lines)
         except Exception as e:
             self.logger.warning(f"LLM SQL execution error: {e} | SQL: {sql[:200]}")
@@ -1111,11 +1112,15 @@ class LlmCommand(BaseCommand):
                 self.logger.info(f"LLM requested DB query: {sql}")
                 sql_results = await asyncio.to_thread(self._execute_sql, sql)
                 self.logger.debug(f"SQL results: {sql_results[:500]}")
-                # Second LLM call: format the results into an answer
+                # Second LLM call: format the results into a mesh-friendly answer
                 followup_prompt = (
                     f"The query returned these results:\n{sql_results}\n\n"
-                    f"Answer the original question: {prompt}\n"
-                    "Be concise, use the actual data."
+                    f"Answer the original question: {prompt}\n\n"
+                    "FORMAT RULES (mesh network, max 150 chars per message):\n"
+                    "- One item per line, short (name + key info only)\n"
+                    "- No tables, no pipes, no columns\n"
+                    "- Max 5 items, format: 'name: value' or 'name (X km)'\n"
+                    "- Total response under 500 chars"
                 )
                 followup_payload = self._build_payload(prompt=followup_prompt)
                 try:
