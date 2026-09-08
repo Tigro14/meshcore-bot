@@ -164,6 +164,7 @@ class LlmCommand(BaseCommand):
         )
         self._cached_context_str = ""
         self._cached_context_time = 0.0
+        self._cached_context_breakdown: list[dict[str, Any]] = []
         self._cached_commands_list = None
 
         # CPU temperature cooling threshold (in degrees Celsius)

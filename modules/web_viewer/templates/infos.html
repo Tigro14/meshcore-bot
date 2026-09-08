@@ -246,12 +246,27 @@
         {% if llm_context %}
         <!-- LLM Context -->
         <div class="card info-card mb-4">
-            <div class="card-header">
-                <i class="fas fa-brain me-2"></i>LLM Context
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <span><i class="fas fa-brain me-2"></i>LLM Context</span>
+                {% if llm_context_total_tokens %}<span class="badge bg-secondary">~{{ llm_context_total_tokens }} tokens</span>{% endif %}
             </div>
             <div class="card-body p-3">
-                <p class="text-muted mb-2 small">This is the full context currently sent to the LLM as the system prompt:</p>
-                <pre class="bg-dark text-light p-3 rounded" style="white-space: pre-wrap; font-size: 0.85rem;">{{ llm_context }}</pre>
+                {% if llm_context_breakdown %}
+                <table class="table table-sm table-dark mb-3" style="font-size: 0.85rem;">
+                    <thead>
+                        <tr><th>Section</th><th class="text-end">Chars</th><th class="text-end">~Tokens</th></tr>
+                    </thead>
+                    <tbody>
+                    {% for s in llm_context_breakdown %}
+                    <tr><td>{{ s.section }}</td><td class="text-end">{{ s.chars }}</td><td class="text-end">{{ s.est_tokens }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+                <details>
+                    <summary class="text-muted small mb-2">Full context</summary>
+                    <pre class="bg-dark text-light p-3 rounded" style="white-space: pre-wrap; font-size: 0.85rem;">{{ llm_context }}</pre>
+                </details>
             </div>
         </div>
         {% endif %}
