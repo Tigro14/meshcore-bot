@@ -156,6 +156,7 @@ class TestLlmCommand:
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Bot", "command_prefix", "")
         cmd = LlmCommand(command_mock_bot)
+        cmd.context_window_seconds = 600
         cmd._store_context("Alice", "what is LoRa?", "LoRa is a long-range radio tech.")
         history = cmd._get_context_history("Alice")
         assert len(history) == 2
@@ -197,6 +198,7 @@ class TestLlmCommand:
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Llm_Command", "context_max_turns", "2")
         cmd = LlmCommand(command_mock_bot)
+        cmd.context_window_seconds = 600
         now = time.time()
         entries = []
         for i in range(6):
@@ -214,6 +216,7 @@ class TestLlmCommand:
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Bot", "command_prefix", "")
         cmd = LlmCommand(command_mock_bot)
+        cmd.context_window_seconds = 600
         # Seed some history for this user
         cmd._store_context("TestUser", "what is LoRa?", "LoRa is a long-range radio.")
         msg = mock_message(content="llm tell me more", sender_id="TestUser", is_dm=True)
@@ -237,6 +240,7 @@ class TestLlmCommand:
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Bot", "command_prefix", "")
         cmd = LlmCommand(command_mock_bot)
+        cmd.context_window_seconds = 600
         msg = mock_message(content="llm what is APRS?", sender_id="TestUser", is_dm=True)
 
         mock_response = Mock()
