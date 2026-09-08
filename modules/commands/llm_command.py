@@ -85,7 +85,7 @@ class LlmCommand(BaseCommand):
         )
         self.context_window_seconds = max(
             0,
-            self.get_config_value("Llm_Command", "context_window_seconds", fallback=600, value_type="int"),
+            self.get_config_value("Llm_Command", "context_window_seconds", fallback=0, value_type="int"),
         )
         self.context_max_turns = max(
             1,
