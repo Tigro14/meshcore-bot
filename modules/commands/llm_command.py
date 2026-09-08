@@ -124,7 +124,7 @@ class LlmCommand(BaseCommand):
             "Llm_Command", "context_include_weather", fallback=True, value_type="bool"
         )
         self.context_include_repeaters = self.get_config_value(
-            "Llm_Command", "context_include_repeaters", fallback=False, value_type="bool"
+            "Llm_Command", "context_include_repeaters", fallback=True, value_type="bool"
         )
         self.context_repeaters_limit = self.get_config_value(
             "Llm_Command", "context_repeaters_limit", fallback=50, value_type="int"
@@ -360,39 +360,67 @@ class LlmCommand(BaseCommand):
             except Exception as e:
                 self.logger.warning(f"Failed to get contacts stats: {e}")
 
-        # Add repeater information
+        # Add network stats (contacts, activity, trend)
         if self.context_include_repeaters:
             try:
                 with self.bot.db_manager.connection() as conn:
                     cursor = conn.cursor()
+                    stats_parts = []
+
+                    # Contacts by role
                     cursor.execute(
-                        "SELECT c.name, SUBSTR(c.public_key, 1, 4) as prefix, c.city, c.country, "
-                        "c.hop_count, c.snr, "
-                        "MAX(op.last_seen) as last_seen "
-                        "FROM complete_contact_tracking c "
-                        "LEFT JOIN observed_paths op ON op.public_key = c.public_key "
-                        "WHERE c.role IN ('repeater', 'roomserver') "
-                        "GROUP BY c.public_key "
-                        "ORDER BY last_seen DESC LIMIT ?",
-                        (self.context_repeaters_limit,)
+                        "SELECT role, COUNT(*) FROM complete_contact_tracking GROUP BY role"
                     )
-                    repeaters = cursor.fetchall()
-                    if repeaters:
-                        rep_lines = []
-                        for r in repeaters:
-                            name, prefix, city, country, hops, snr, last_seen = r
-                            loc = f"{city}, {country}" if city else (country or "unknown")
-                            try:
-                                ls_ts = datetime.fromisoformat(last_seen).timestamp() if isinstance(last_seen, str) else float(last_seen)
-                                age_h = int((time.time() - ls_ts) / 3600)
-                            except (ValueError, TypeError, OSError):
-                                age_h = -1
-                            age_str = f"{age_h}h ago" if age_h >= 0 else "never"
-                            snr_str = f", SNR {snr:.1f}" if snr is not None else ""
-                            rep_lines.append(f"  - {name} ({prefix}) @ {loc}, {hops} hop(s), {age_str}{snr_str}")
-                        context_parts.append(f"Repeaters ({len(repeaters)}):\n" + "\n".join(rep_lines))
+                    roles = cursor.fetchall()
+                    if roles:
+                        role_str = ", ".join(f"{r[0]}:{r[1]}" for r in roles)
+                        total = sum(r[1] for r in roles)
+                        stats_parts.append(f"Contacts: {total} ({role_str})")
+
+                    # Mesh size
+                    cursor.execute("SELECT COUNT(*) FROM mesh_connections")
+                    edges = cursor.fetchone()[0]
+                    cursor.execute("SELECT COUNT(DISTINCT from_prefix) FROM mesh_connections")
+                    nodes = cursor.fetchone()[0]
+                    if edges > 0:
+                        stats_parts.append(f"Mesh: {edges} links, {nodes} nodes")
+
+                    # 24h activity
+                    now = int(time.time())
+                    cursor.execute(
+                        "SELECT COUNT(*), COUNT(DISTINCT sender_id) FROM message_stats WHERE timestamp >= ?",
+                        (now - 86400,),
+                    )
+                    msgs_24h, senders_24h = cursor.fetchone()
+                    if msgs_24h > 0:
+                        stats_parts.append(f"24h: {msgs_24h} msgs, {senders_24h} senders")
+                        # Top channel
+                        cursor.execute(
+                            "SELECT channel, COUNT(*) as cnt FROM message_stats "
+                            "WHERE timestamp >= ? AND is_dm = 0 AND channel IS NOT NULL "
+                            "GROUP BY channel ORDER BY cnt DESC LIMIT 1",
+                            (now - 86400,),
+                        )
+                        top_ch = cursor.fetchone()
+                        if top_ch:
+                            stats_parts.append(f"Top channel: {top_ch[0]} ({top_ch[1]} msgs)")
+
+                    # 7-day trend (messages per day)
+                    cursor.execute(
+                        "SELECT date(timestamp, 'unixepoch') as day, COUNT(*) "
+                        "FROM message_stats WHERE timestamp >= ? "
+                        "GROUP BY day ORDER BY day DESC LIMIT 7",
+                        (now - 7 * 86400,),
+                    )
+                    trend = cursor.fetchall()
+                    if trend:
+                        trend_str = " ".join(f"{d[5:]}:{c}" for d, c in reversed(trend))
+                        stats_parts.append(f"7d trend: {trend_str}")
+
+                    if stats_parts:
+                        context_parts.append("Network stats: " + " | ".join(stats_parts))
             except Exception as e:
-                self.logger.warning(f"Failed to get repeater info: {e}")
+                self.logger.warning(f"Failed to get network stats: {e}")
 
         # Add mesh topology (who connects to whom)
         if self.context_include_mesh_topology:
@@ -623,7 +651,7 @@ class LlmCommand(BaseCommand):
         """Compute per-section character count and estimated token count."""
         section_names = [
             ("Contacts:", "Contacts"),
-            ("Repeaters", "Repeaters"),
+            ("Network stats", "Network stats"),
             ("Mesh topology", "Mesh topology"),
             ("Network:", "Network"),
             ("Recent channel messages", "Channel messages"),
