@@ -172,10 +172,14 @@ class LlmCommand(BaseCommand):
         self.context_weather_location = self.get_config_value(
             "Llm_Command", "context_weather_location", fallback="Paris, France", value_type="str"
         )
+        # Bot GPS position for distance calculations
+        self.bot_latitude = self.get_config_value("Llm_Command", "bot_latitude", fallback=None, value_type="float")
+        self.bot_longitude = self.get_config_value("Llm_Command", "bot_longitude", fallback=None, value_type="float")
         self._cached_context_str = ""
         self._cached_context_time = 0.0
         self._cached_context_breakdown: list[dict[str, Any]] = []
         self._cached_commands_list = None
+        self._sender_position: tuple[float, float] | None = None
 
         # CPU temperature cooling threshold (in degrees Celsius)
         self.cpu_temp_threshold = max(
@@ -794,6 +798,12 @@ class LlmCommand(BaseCommand):
 
             # Add DB query capability
             if self.llm_db_query_enabled:
+                pos_info = ""
+                if self._sender_position:
+                    lat, lon = self._sender_position
+                    pos_info = f"\nUser position: {lat:.5f}, {lon:.5f} (use for distance calculations)"
+                elif self.bot_latitude and self.bot_longitude:
+                    pos_info = f"\nBot position: {self.bot_latitude:.5f}, {self.bot_longitude:.5f} (use for distance calculations)"
                 result += (
                     "\n\n[Database Query Capability]\n"
                     "You can query the mesh database. To do so, respond with ONLY: [[SQL: SELECT ...]]\n"
@@ -805,6 +815,8 @@ class LlmCommand(BaseCommand):
                     "- neighbor_links: self_public_key, neighbor_public_key, last_snr, last_status, last_seen\n"
                     "- daily_stats: date, public_key, advert_count\n"
                     "Rules: SELECT only, LIMIT 20 max, last_heard is ISO datetime string, timestamp is unix int.\n"
+                    f"For distance use Haversine: 6371*2*ASIN(SQRT(POWER(SIN(RADIANS(lat2-{(self._sender_position[0] if self._sender_position else self.bot_latitude or 48.85):.5f})/2),2)+COS(RADIANS({(self._sender_position[0] if self._sender_position else self.bot_latitude or 48.85):.5f})*COS(RADIANS(lat2))*POWER(SIN(RADIANS(lon2-{(self._sender_position[1] if self._sender_position else self.bot_longitude or 2.35):.5f})/2),2)))\n"
+                    f"{pos_info}\n"
                     "If you can answer without querying, just answer normally."
                 )
 
@@ -812,6 +824,24 @@ class LlmCommand(BaseCommand):
         except Exception as e:
             self.logger.warning(f"Error injecting current time/context: {e}")
             return prompt
+
+    def _get_sender_position(self, message: MeshMessage) -> None:
+        """Look up the sender's GPS position from the DB and store it."""
+        try:
+            sender_id = message.sender_id or ""
+            if not sender_id:
+                return
+            with self.bot.db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT latitude, longitude FROM complete_contact_tracking WHERE public_key = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 LIMIT 1",
+                    (sender_id,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    self._sender_position = (float(row[0]), float(row[1]))
+        except Exception as e:
+            self.logger.debug(f"Failed to get sender position: {e}")
 
     def _get_prompt_node_neighbors(self, prompt: str) -> str:
         """If the prompt mentions a known mesh node, return its neighbors."""
@@ -1025,6 +1055,11 @@ class LlmCommand(BaseCommand):
 
         user_key = self._user_key(message)
         history = self._get_context_history(user_key) if user_key else []
+
+        # Look up sender's GPS position for distance-based queries
+        self._sender_position = None
+        if self.llm_db_query_enabled:
+            self._get_sender_position(message)
 
         # Build the payload with current time and context injected in system prompt
         payload = self._build_payload(prompt=prompt, history=history)
