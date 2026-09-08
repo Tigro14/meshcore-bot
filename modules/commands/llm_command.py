@@ -759,10 +759,62 @@ class LlmCommand(BaseCommand):
             if local_context:
                 result += f"\n[Local Context:\n{local_context}]"
 
+            # Add specific node neighbors if a known node is mentioned in the prompt
+            node_neighbors = self._get_prompt_node_neighbors(prompt)
+            if node_neighbors:
+                result += f"\n[Node neighbors: {node_neighbors}]"
+
             return result
         except Exception as e:
             self.logger.warning(f"Error injecting current time/context: {e}")
             return prompt
+
+    def _get_prompt_node_neighbors(self, prompt: str) -> str:
+        """If the prompt mentions a known mesh node, return its neighbors."""
+        if not self.context_include_mesh_topology:
+            return ""
+        try:
+            prompt_lower = prompt.lower()
+            with self.bot.db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name, SUBSTR(public_key, 1, 4) as prefix "
+                    "FROM complete_contact_tracking "
+                    "WHERE role IN ('repeater', 'roomserver') AND name IS NOT NULL"
+                )
+                nodes = cursor.fetchall()
+                matched = []
+                for name, prefix in nodes:
+                    if name.lower() in prompt_lower or (len(prefix) >= 3 and prefix.lower() in prompt_lower):
+                        matched.append((name, prefix))
+                if not matched:
+                    return ""
+                parts = []
+                for name, prefix in matched[:3]:
+                    cursor.execute(
+                        "SELECT DISTINCT to_prefix FROM mesh_connections WHERE from_prefix = ?",
+                        (prefix,)
+                    )
+                    outgoing = [r[0] for r in cursor.fetchall()]
+                    cursor.execute(
+                        "SELECT DISTINCT from_prefix FROM mesh_connections WHERE to_prefix = ?",
+                        (prefix,)
+                    )
+                    incoming = [r[0] for r in cursor.fetchall()]
+                    all_nbs = list(set(outgoing + incoming) - {prefix})[:10]
+                    nb_names = []
+                    for np in all_nbs:
+                        cursor.execute(
+                            "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1",
+                            (np + "%",)
+                        )
+                        row = cursor.fetchone()
+                        nb_names.append(row[0] if row else np)
+                    parts.append(f"{name}: {', '.join(nb_names) if nb_names else 'no known links'}")
+                return " | ".join(parts)
+        except Exception as e:
+            self.logger.warning(f"Failed to get prompt node neighbors: {e}")
+            return ""
 
     def _build_payload(
         self,
