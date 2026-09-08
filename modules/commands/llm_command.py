@@ -127,7 +127,7 @@ class LlmCommand(BaseCommand):
             "Llm_Command", "context_include_repeaters", fallback=True, value_type="bool"
         )
         self.context_repeaters_limit = self.get_config_value(
-            "Llm_Command", "context_repeaters_limit", fallback=30, value_type="int"
+            "Llm_Command", "context_repeaters_limit", fallback=100, value_type="int"
         )
         self.context_include_network_status = self.get_config_value(
             "Llm_Command", "context_include_network_status", fallback=True, value_type="bool"
