@@ -360,22 +360,25 @@ class LlmCommand(BaseCommand):
                 with self.bot.db_manager.connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "SELECT name, SUBSTR(public_key, 1, 4) as prefix, city, country, "
-                        "last_heard, hop_count, snr, is_currently_tracked "
-                        "FROM complete_contact_tracking "
-                        "WHERE role IN ('repeater', 'roomserver') "
-                        "ORDER BY last_heard DESC LIMIT ?",
+                        "SELECT c.name, SUBSTR(c.public_key, 1, 4) as prefix, c.city, c.country, "
+                        "c.hop_count, c.snr, "
+                        "MAX(op.last_seen) as last_seen "
+                        "FROM complete_contact_tracking c "
+                        "LEFT JOIN observed_paths op ON op.public_key = c.public_key "
+                        "WHERE c.role IN ('repeater', 'roomserver') "
+                        "GROUP BY c.public_key "
+                        "ORDER BY last_seen DESC LIMIT ?",
                         (self.context_repeaters_limit,)
                     )
                     repeaters = cursor.fetchall()
                     if repeaters:
                         rep_lines = []
                         for r in repeaters:
-                            name, prefix, city, country, last_heard, hops, snr, tracked = r
+                            name, prefix, city, country, hops, snr, last_seen = r
                             loc = f"{city}, {country}" if city else (country or "unknown")
                             try:
-                                lh_ts = datetime.fromisoformat(last_heard).timestamp() if isinstance(last_heard, str) else float(last_heard)
-                                age_h = int((time.time() - lh_ts) / 3600)
+                                ls_ts = datetime.fromisoformat(last_seen).timestamp() if isinstance(last_seen, str) else float(last_seen)
+                                age_h = int((time.time() - ls_ts) / 3600)
                             except (ValueError, TypeError, OSError):
                                 age_h = -1
                             age_str = f"{age_h}h ago" if age_h >= 0 else "never"
