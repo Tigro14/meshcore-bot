@@ -135,6 +135,12 @@ class LlmCommand(BaseCommand):
         self.context_include_channel_messages = self.get_config_value(
             "Llm_Command", "context_include_channel_messages", fallback=True, value_type="bool"
         )
+        self.context_include_mesh_topology = self.get_config_value(
+            "Llm_Command", "context_include_mesh_topology", fallback=True, value_type="bool"
+        )
+        self.context_mesh_topology_limit = self.get_config_value(
+            "Llm_Command", "context_mesh_topology_limit", fallback=20, value_type="int"
+        )
         self.context_channel_messages_limit = self.get_config_value(
             "Llm_Command", "context_channel_messages_limit", fallback=10, value_type="int"
         )
@@ -388,6 +394,60 @@ class LlmCommand(BaseCommand):
             except Exception as e:
                 self.logger.warning(f"Failed to get repeater info: {e}")
 
+        # Add mesh topology (who connects to whom)
+        if self.context_include_mesh_topology:
+            try:
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    # Get top N most connected repeaters (by degree)
+                    cursor.execute(
+                        "SELECT prefix, COUNT(*) as degree FROM ("
+                        " SELECT from_prefix as prefix FROM mesh_connections"
+                        " UNION ALL"
+                        " SELECT to_prefix as prefix FROM mesh_connections"
+                        " ) GROUP BY prefix ORDER BY degree DESC LIMIT ?",
+                        (self.context_mesh_topology_limit,)
+                    )
+                    top_prefixes = [r[0] for r in cursor.fetchall()]
+                    if top_prefixes:
+                        topo_lines = []
+                        for pfx in top_prefixes:
+                            # Resolve name
+                            cursor.execute(
+                                "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1",
+                                (pfx + "%",)
+                            )
+                            row = cursor.fetchone()
+                            name = row[0] if row else pfx
+                            # Get neighbors (both directions)
+                            cursor.execute(
+                                "SELECT DISTINCT to_prefix FROM mesh_connections WHERE from_prefix = ?",
+                                (pfx,)
+                            )
+                            outgoing = [r[0] for r in cursor.fetchall()]
+                            cursor.execute(
+                                "SELECT DISTINCT from_prefix FROM mesh_connections WHERE to_prefix = ?",
+                                (pfx,)
+                            )
+                            incoming = [r[0] for r in cursor.fetchall()]
+                            # Resolve neighbor names
+                            all_neighbors = list(set(outgoing + incoming) - {pfx})[:8]
+                            nb_names = []
+                            for np in all_neighbors:
+                                cursor.execute(
+                                    "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1",
+                                    (np + "%",)
+                                )
+                                nrow = cursor.fetchone()
+                                nb_names.append(nrow[0] if nrow else np)
+                            topo_lines.append(f"  {name}: {', '.join(nb_names)}")
+                        context_parts.append(
+                            f"Mesh topology (top {len(top_prefixes)} by connections):\n"
+                            + "\n".join(topo_lines)
+                        )
+            except Exception as e:
+                self.logger.warning(f"Failed to get mesh topology: {e}")
+
         # Add network status
         if self.context_include_network_status:
             try:
@@ -564,6 +624,7 @@ class LlmCommand(BaseCommand):
         section_names = [
             ("Contacts:", "Contacts"),
             ("Repeaters", "Repeaters"),
+            ("Mesh topology", "Mesh topology"),
             ("Network:", "Network"),
             ("Recent channel messages", "Channel messages"),
             ("Moon:", "Moon"),
