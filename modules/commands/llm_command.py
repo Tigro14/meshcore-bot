@@ -137,6 +137,12 @@ class LlmCommand(BaseCommand):
         self.context_include_channel_messages = self.get_config_value(
             "Llm_Command", "context_include_channel_messages", fallback=True, value_type="bool"
         )
+        self.context_include_mesh_topology = self.get_config_value(
+            "Llm_Command", "context_include_mesh_topology", fallback=True, value_type="bool"
+        )
+        self.context_mesh_topology_limit = self.get_config_value(
+            "Llm_Command", "context_mesh_topology_limit", fallback=20, value_type="int"
+        )
         self.context_channel_messages_limit = self.get_config_value(
             "Llm_Command", "context_channel_messages_limit", fallback=10, value_type="int"
         )
