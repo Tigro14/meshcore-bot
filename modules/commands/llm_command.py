@@ -52,7 +52,7 @@ class LlmCommand(BaseCommand):
         self.timeout_seconds = max(
             1.0,
             min(
-                120.0,
+                300.0,
                 self.get_config_value("Llm_Command", "timeout_seconds", fallback=20.0, value_type="float"),
             ),
         )
@@ -127,7 +127,7 @@ class LlmCommand(BaseCommand):
             "Llm_Command", "context_include_repeaters", fallback=True, value_type="bool"
         )
         self.context_repeaters_limit = self.get_config_value(
-            "Llm_Command", "context_repeaters_limit", fallback=100, value_type="int"
+            "Llm_Command", "context_repeaters_limit", fallback=50, value_type="int"
         )
         self.context_include_network_status = self.get_config_value(
             "Llm_Command", "context_include_network_status", fallback=True, value_type="bool"
@@ -139,7 +139,7 @@ class LlmCommand(BaseCommand):
             "Llm_Command", "context_include_mesh_topology", fallback=True, value_type="bool"
         )
         self.context_mesh_topology_limit = self.get_config_value(
-            "Llm_Command", "context_mesh_topology_limit", fallback=20, value_type="int"
+            "Llm_Command", "context_mesh_topology_limit", fallback=15, value_type="int"
         )
         self.context_channel_messages_limit = self.get_config_value(
             "Llm_Command", "context_channel_messages_limit", fallback=10, value_type="int"
