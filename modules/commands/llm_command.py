@@ -162,6 +162,7 @@ class LlmCommand(BaseCommand):
         )
         self._cached_context_str = ""
         self._cached_context_time = 0.0
+        self._cached_context_breakdown: list[dict[str, Any]] = []
         self._cached_commands_list = None
 
         # CPU temperature cooling threshold (in degrees Celsius)
@@ -542,9 +543,38 @@ class LlmCommand(BaseCommand):
         if context_parts:
             self._cached_context_str = "\n".join(context_parts)
             self._cached_context_time = now
+            self._cached_context_breakdown = self._compute_context_breakdown(context_parts)
             return self._cached_context_str
 
         return ""
+
+    def _compute_context_breakdown(self, context_parts: list[str]) -> list[dict[str, Any]]:
+        """Compute per-section character count and estimated token count."""
+        section_names = [
+            ("Contacts:", "Contacts"),
+            ("Repeaters", "Repeaters"),
+            ("Network:", "Network"),
+            ("Recent channel messages", "Channel messages"),
+            ("Moon:", "Moon"),
+            ("Sun:", "Sun"),
+            ("Weather", "Weather"),
+            ("Available Commands", "Commands"),
+            ("System:", "System"),
+        ]
+        breakdown = []
+        for part in context_parts:
+            name = "Other"
+            for prefix, label in section_names:
+                if part.startswith(prefix):
+                    name = label
+                    break
+            chars = len(part)
+            breakdown.append({
+                "section": name,
+                "chars": chars,
+                "est_tokens": chars // 4,
+            })
+        return breakdown
 
     def _get_llama_model_info(self) -> str:
         """Get information about the running llama.cpp model.

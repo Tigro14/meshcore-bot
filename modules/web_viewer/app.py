@@ -1134,10 +1134,17 @@ class BotDataViewer:
                     self.db_manager = db_manager
 
             llm_context = ""
+            llm_context_breakdown = []
+            llm_context_total_tokens = 0
             try:
                 minimal_bot = _MinimalBot(self.config, self.logger, getattr(self, 'db_manager', None))
                 llm_cmd = LlmCommand(minimal_bot)
                 llm_context = llm_cmd._inject_current_time_into_prompt(llm_cmd.system_prompt)
+                llm_context_breakdown = llm_cmd._cached_context_breakdown
+                if llm_context_breakdown:
+                    llm_context_total_tokens = sum(s['est_tokens'] for s in llm_context_breakdown)
+                    sys_prompt_tokens = len(llm_cmd.system_prompt) // 4
+                    llm_context_total_tokens += sys_prompt_tokens
             except Exception as e:
                 self.logger.warning("Failed to load LLM context for /infos page: %s", e)
 
@@ -1150,6 +1157,8 @@ class BotDataViewer:
                 respond_to_dms=respond_to_dms,
                 cmd_reference_url=cmd_reference_url,
                 llm_context=llm_context,
+                llm_context_breakdown=llm_context_breakdown,
+                llm_context_total_tokens=llm_context_total_tokens,
             )
 
         @self.app.route('/api/config/notifications')
