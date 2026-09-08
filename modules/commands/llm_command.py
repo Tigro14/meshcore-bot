@@ -369,7 +369,11 @@ class LlmCommand(BaseCommand):
                         for r in repeaters:
                             name, prefix, city, country, last_heard, hops, snr, tracked = r
                             loc = f"{city}, {country}" if city else (country or "unknown")
-                            age_h = int((time.time() - last_heard) / 3600) if last_heard else -1
+                            try:
+                                lh_ts = datetime.fromisoformat(last_heard).timestamp() if isinstance(last_heard, str) else float(last_heard)
+                                age_h = int((time.time() - lh_ts) / 3600)
+                            except (ValueError, TypeError, OSError):
+                                age_h = -1
                             age_str = f"{age_h}h ago" if age_h >= 0 else "never"
                             snr_str = f", SNR {snr:.1f}" if snr is not None else ""
                             rep_lines.append(f"  - {name} ({prefix}) @ {loc}, {hops} hop(s), {age_str}{snr_str}")
