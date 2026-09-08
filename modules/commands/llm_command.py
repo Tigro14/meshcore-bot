@@ -129,6 +129,15 @@ class LlmCommand(BaseCommand):
         self.context_include_network_status = self.get_config_value(
             "Llm_Command", "context_include_network_status", fallback=True, value_type="bool"
         )
+        self.context_include_channel_messages = self.get_config_value(
+            "Llm_Command", "context_include_channel_messages", fallback=True, value_type="bool"
+        )
+        self.context_channel_messages_limit = self.get_config_value(
+            "Llm_Command", "context_channel_messages_limit", fallback=10, value_type="int"
+        )
+        self.context_channel_messages_window = self.get_config_value(
+            "Llm_Command", "context_channel_messages_window", fallback=1800, value_type="int"
+        )
         self.context_include_contacts = self.get_config_value(
             "Llm_Command", "context_include_contacts", fallback=True, value_type="bool"
         )
@@ -410,6 +419,34 @@ class LlmCommand(BaseCommand):
                 context_parts.append("Network: " + " | ".join(net_parts))
             except Exception as e:
                 self.logger.warning(f"Failed to get network status: {e}")
+
+        # Add recent channel messages
+        if self.context_include_channel_messages:
+            try:
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cutoff = int(time.time()) - self.context_channel_messages_window
+                    cursor.execute(
+                        "SELECT sender_id, channel, content, hops "
+                        "FROM message_stats "
+                        "WHERE is_dm = 0 AND channel IS NOT NULL AND timestamp >= ? "
+                        "ORDER BY timestamp DESC LIMIT ?",
+                        (cutoff, self.context_channel_messages_limit),
+                    )
+                    msgs = cursor.fetchall()
+                    if msgs:
+                        msg_lines = []
+                        for m in reversed(msgs):
+                            sender, channel, content, hops = m
+                            text = content[:80] + ("..." if len(content) > 80 else "")
+                            hop_str = f" [{hops}h]" if hops else ""
+                            msg_lines.append(f"  {channel} {sender}: {text}{hop_str}")
+                        window_min = self.context_channel_messages_window // 60
+                        context_parts.append(
+                            f"Recent channel messages ({len(msgs)}, last {window_min}min):\n" + "\n".join(msg_lines)
+                        )
+            except Exception as e:
+                self.logger.warning(f"Failed to get channel messages: {e}")
 
         # Add moon information
         if self.context_include_moon:
