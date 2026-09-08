@@ -124,7 +124,7 @@ class LlmCommand(BaseCommand):
             "Llm_Command", "context_include_weather", fallback=True, value_type="bool"
         )
         self.context_include_repeaters = self.get_config_value(
-            "Llm_Command", "context_include_repeaters", fallback=True, value_type="bool"
+            "Llm_Command", "context_include_repeaters", fallback=False, value_type="bool"
         )
         self.context_repeaters_limit = self.get_config_value(
             "Llm_Command", "context_repeaters_limit", fallback=50, value_type="int"
