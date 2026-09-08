@@ -122,9 +122,7 @@ class Translator:
             if key in result and isinstance(result[key], dict) and isinstance(value, dict):
                 result[key] = self._deep_merge_translations(result[key], value)
             else:
-                # Otherwise, overwrite the value or add the new key
                 result[key] = value
-
         return result
 
     def _load_file(self, lang: str) -> dict[str, Any]:
