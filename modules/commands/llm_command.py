@@ -31,9 +31,7 @@ class LlmCommand(BaseCommand):
     short_description = "Ask the local llama.cpp model a short question"
     usage = "llm <question>"
     examples = ["llm What is APRS?", "llm summarize LoRa in one sentence"]
-    parameters = [
-        {"name": "question", "description": "Prompt to send to local llama.cpp"}
-    ]
+    parameters = [{"name": "question", "description": "Prompt to send to local llama.cpp"}]
 
     def __init__(self, bot):
         super().__init__(bot)
@@ -219,7 +217,7 @@ class LlmCommand(BaseCommand):
 
         if self._command_prefix:
             if content.startswith(self._command_prefix):
-                content = content[len(self._command_prefix):].strip()
+                content = content[len(self._command_prefix) :].strip()
         elif content.startswith("!"):
             # Backward-compatibility: base_command.matches_keyword also strips a leading
             # "!" when no command_prefix is configured, so we do the same here.
@@ -233,7 +231,7 @@ class LlmCommand(BaseCommand):
             if lowered == kw:
                 return ""
             if lowered.startswith(kw) and len(lowered) > len(kw) and lowered[len(kw)] == " ":
-                return content[len(keyword):].strip()
+                return content[len(keyword) :].strip()
 
         return ""
 
@@ -254,17 +252,17 @@ class LlmCommand(BaseCommand):
             commands = plugin_loader.load_all_plugins()
 
             # Get admin commands to exclude them
-            admin_commands_str = self.bot.config.get('Admin_ACL', 'admin_commands', fallback='')
-            admin_commands = {c.strip() for c in admin_commands_str.split(',') if c.strip()}
+            admin_commands_str = self.bot.config.get("Admin_ACL", "admin_commands", fallback="")
+            admin_commands = {c.strip() for c in admin_commands_str.split(",") if c.strip()}
 
             # Filter to only enabled, non-admin commands
             enabled_commands = []
             for cmd_name, cmd_instance in commands.items():
                 # Skip admin commands
-                primary_name = getattr(cmd_instance, 'name', cmd_name)
+                primary_name = getattr(cmd_instance, "name", cmd_name)
                 if cmd_name in admin_commands or primary_name in admin_commands:
                     continue
-                if hasattr(cmd_instance, 'requires_admin_access') and cmd_instance.requires_admin_access():
+                if hasattr(cmd_instance, "requires_admin_access") and cmd_instance.requires_admin_access():
                     continue
 
                 # Check if command is enabled
@@ -272,18 +270,21 @@ class LlmCommand(BaseCommand):
                     continue
 
                 # Get command info
-                keywords = getattr(cmd_instance, 'keywords', [])
+                keywords = getattr(cmd_instance, "keywords", [])
                 if not keywords:
                     continue
 
-                enabled_commands.append({
-                    'name': primary_name,
-                    'keywords': keywords,
-                    'description': getattr(cmd_instance, 'short_description', None) or getattr(cmd_instance, 'description', ''),
-                })
+                enabled_commands.append(
+                    {
+                        "name": primary_name,
+                        "keywords": keywords,
+                        "description": getattr(cmd_instance, "short_description", None)
+                        or getattr(cmd_instance, "description", ""),
+                    }
+                )
 
             # Sort by name
-            enabled_commands.sort(key=lambda c: str(c['name']))
+            enabled_commands.sort(key=lambda c: str(c["name"]))
             self._cached_commands_list = enabled_commands
             return enabled_commands
         except Exception as e:
@@ -293,12 +294,12 @@ class LlmCommand(BaseCommand):
     @staticmethod
     def _is_command_enabled(cmd_instance: Any) -> bool:
         """Return True if the command is currently enabled in configuration."""
-        name = getattr(cmd_instance, 'name', '')
+        name = getattr(cmd_instance, "name", "")
         if name:
             named_attr = f"{name}_enabled"
             if hasattr(cmd_instance, named_attr):
                 return bool(getattr(cmd_instance, named_attr))
-        if hasattr(cmd_instance, 'enabled'):
+        if hasattr(cmd_instance, "enabled"):
             return bool(cmd_instance.enabled)
         return True
 
@@ -332,7 +333,7 @@ class LlmCommand(BaseCommand):
                     cursor.execute(
                         "SELECT COUNT(DISTINCT public_key) FROM complete_contact_tracking "
                         "WHERE is_currently_tracked = 1 AND last_heard >= ?",
-                        (int(time.time()) - 86400,)
+                        (int(time.time()) - 86400,),
                     )
                     recent_contacts = cursor.fetchone()[0]
                     if total_contacts > 0:
@@ -340,13 +341,83 @@ class LlmCommand(BaseCommand):
             except Exception as e:
                 self.logger.warning(f"Failed to get contacts stats: {e}")
 
+        # Add repeater information
+        if self.context_include_repeaters:
+            try:
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT name, SUBSTR(public_key, 1, 4) as prefix, city, country, "
+                        "last_heard, hop_count, snr, is_currently_tracked "
+                        "FROM complete_contact_tracking "
+                        "WHERE role IN ('repeater', 'roomserver') "
+                        "ORDER BY last_heard DESC LIMIT 8"
+                    )
+                    repeaters = cursor.fetchall()
+                    if repeaters:
+                        rep_lines = []
+                        for r in repeaters:
+                            name, prefix, city, country, last_heard, hops, snr, tracked = r
+                            loc = f"{city}, {country}" if city else (country or "unknown")
+                            age_h = int((time.time() - last_heard) / 3600) if last_heard else -1
+                            age_str = f"{age_h}h ago" if age_h >= 0 else "never"
+                            snr_str = f", SNR {snr:.1f}" if snr is not None else ""
+                            rep_lines.append(f"  - {name} ({prefix}) @ {loc}, {hops} hop(s), {age_str}{snr_str}")
+                        context_parts.append(f"Repeaters ({len(repeaters)}):\n" + "\n".join(rep_lines))
+            except Exception as e:
+                self.logger.warning(f"Failed to get repeater info: {e}")
+
+        # Add network status
+        if self.context_include_network_status:
+            try:
+                net_parts = []
+                # Radio state from bot_metadata
+                radio_state = self.bot.db_manager.get_metadata("bot.radio_zombie") == "true"
+                radio_offline = self.bot.db_manager.get_metadata("bot.radio_offline") == "true"
+                if radio_offline:
+                    net_parts.append("Radio: OFFLINE")
+                elif radio_state:
+                    net_parts.append("Radio: ZOMBIE (connected but not responding)")
+                else:
+                    net_parts.append("Radio: OK")
+
+                # Neighbor links with SNR
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT nl.neighbor_public_key, nl.last_snr, nl.best_snr, nl.last_status, "
+                        "cct.name "
+                        "FROM neighbor_links nl "
+                        "LEFT JOIN complete_contact_tracking cct ON cct.public_key = nl.neighbor_public_key "
+                        "ORDER BY nl.last_snr DESC"
+                    )
+                    neighbors = cursor.fetchall()
+                    if neighbors:
+                        nb_lines = []
+                        for n in neighbors:
+                            nb_key, last_snr, best_snr, status, name = n
+                            nb_name = name or nb_key[:4]
+                            snr_str = f"SNR {last_snr:.1f}" if last_snr is not None else "no SNR"
+                            nb_lines.append(f"  - {nb_name}: {snr_str}, {status or 'unknown'}")
+                        net_parts.append(f"Direct links ({len(neighbors)}):\n" + "\n".join(nb_lines))
+
+                    # Mesh edges count
+                    cursor.execute("SELECT COUNT(*) FROM mesh_connections")
+                    edge_count = cursor.fetchone()[0]
+                    if edge_count > 0:
+                        net_parts.append(f"Mesh edges: {edge_count}")
+
+                context_parts.append("Network: " + " | ".join(net_parts))
+            except Exception as e:
+                self.logger.warning(f"Failed to get network status: {e}")
+
         # Add moon information
         if self.context_include_moon:
             try:
                 moon_info = get_moon()
                 if moon_info and "Error" not in moon_info:
                     # Extract just the phase and illumination
-                    lines = moon_info.split('\n')
+                    lines = moon_info.split("\n")
                     for line in lines:
                         if line.startswith("Phase:"):
                             phase_info = line.replace("Phase:", "").strip()
@@ -361,7 +432,7 @@ class LlmCommand(BaseCommand):
                 sun_info = get_sun()
                 if sun_info and "Error" not in sun_info:
                     # Extract sunrise/sunset
-                    lines = sun_info.split('\n')
+                    lines = sun_info.split("\n")
                     if lines:
                         context_parts.append(f"Sun: {lines[0]}")
             except Exception as e:
@@ -382,13 +453,13 @@ class LlmCommand(BaseCommand):
             try:
                 commands = self._get_enabled_commands_list()
                 if commands:
-                    _command_prefix = self.bot.config.get('Bot', 'command_prefix', fallback='').strip()
+                    _command_prefix = self.bot.config.get("Bot", "command_prefix", fallback="").strip()
                     # Build commands list string
                     commands_list = []
                     for cmd in commands:
                         # Show first 3 keywords as examples
-                        keywords = cmd['keywords'][:3]
-                        keyword_examples = ' '.join(keywords)
+                        keywords = cmd["keywords"][:3]
+                        keyword_examples = " ".join(keywords)
                         commands_list.append(f"  - {cmd['name']}: {cmd['description']} (e.g., {keyword_examples})")
 
                     commands_str = "Available Commands:\n" + "\n".join(commands_list)
@@ -449,15 +520,15 @@ class LlmCommand(BaseCommand):
             # Parse the endpoint URL and construct the models endpoint
             parsed = urlparse(self.endpoint)
             base_url = f"{parsed.scheme}://{parsed.netloc}"
-            models_url = urljoin(base_url, '/v1/models')
+            models_url = urljoin(base_url, "/v1/models")
 
             response = requests.get(models_url, timeout=2.0)
             if response.status_code == 200:
                 data = response.json()
-                if 'data' in data and len(data['data']) > 0:
+                if "data" in data and len(data["data"]) > 0:
                     # Try to get model from API first, then fall back to config
-                    model = data['data'][0]
-                    model_name = model.get('id', '')
+                    model = data["data"][0]
+                    model_name = model.get("id", "")
                     if model_name:
                         return model_name
 
@@ -495,7 +566,7 @@ class LlmCommand(BaseCommand):
                 "current": "temperature_2m,weather_code,wind_speed_10m",
                 "temperature_unit": "celsius",
                 "wind_speed_unit": "kmh",
-                "timezone": "auto"
+                "timezone": "auto",
             }
 
             response = requests.get(url, params=params, timeout=5)  # type: ignore[arg-type]
@@ -554,7 +625,12 @@ class LlmCommand(BaseCommand):
             self.logger.warning(f"Error injecting current time/context: {e}")
             return prompt
 
-    def _build_payload(self, prompt: str = "", history: list[dict[str, str]] | None = None, messages: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    def _build_payload(
+        self,
+        prompt: str = "",
+        history: list[dict[str, str]] | None = None,
+        messages: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """Build the API payload for the LLM request.
 
         This method supports two modes:
@@ -571,7 +647,9 @@ class LlmCommand(BaseCommand):
         """
         # Validate that conflicting parameters aren't provided
         if messages is not None and (prompt or history):
-            self.logger.warning("_build_payload: messages parameter provided with prompt/history; ignoring prompt/history")
+            self.logger.warning(
+                "_build_payload: messages parameter provided with prompt/history; ignoring prompt/history"
+            )
 
         if messages is None:
             # Build messages from prompt and history
@@ -651,7 +729,7 @@ class LlmCommand(BaseCommand):
                     current_page = ""
                 else:
                     # Single word exceeds limit, truncate it
-                    pages.append(word[:self.chars_per_page - 3] + "...")
+                    pages.append(word[: self.chars_per_page - 3] + "...")
                     word_idx += 1
 
                 # Check if we've reached the maximum page count
@@ -662,7 +740,7 @@ class LlmCommand(BaseCommand):
                         last_page = pages[-1]
                         marker = " [...]"
                         if len(last_page) + len(marker) > self.chars_per_page:
-                            pages[-1] = last_page[:self.chars_per_page - len(marker)].rstrip() + marker
+                            pages[-1] = last_page[: self.chars_per_page - len(marker)].rstrip() + marker
                         else:
                             pages[-1] = last_page + marker
                     return pages
