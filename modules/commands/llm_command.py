@@ -131,6 +131,15 @@ class LlmCommand(BaseCommand):
         self.context_include_network_status = self.get_config_value(
             "Llm_Command", "context_include_network_status", fallback=True, value_type="bool"
         )
+        self.context_include_channel_messages = self.get_config_value(
+            "Llm_Command", "context_include_channel_messages", fallback=True, value_type="bool"
+        )
+        self.context_channel_messages_limit = self.get_config_value(
+            "Llm_Command", "context_channel_messages_limit", fallback=10, value_type="int"
+        )
+        self.context_channel_messages_window = self.get_config_value(
+            "Llm_Command", "context_channel_messages_window", fallback=1800, value_type="int"
+        )
         self.context_include_contacts = self.get_config_value(
             "Llm_Command", "context_include_contacts", fallback=True, value_type="bool"
         )
