@@ -126,6 +126,9 @@ class LlmCommand(BaseCommand):
         self.context_include_repeaters = self.get_config_value(
             "Llm_Command", "context_include_repeaters", fallback=True, value_type="bool"
         )
+        self.context_repeaters_limit = self.get_config_value(
+            "Llm_Command", "context_repeaters_limit", fallback=30, value_type="int"
+        )
         self.context_include_network_status = self.get_config_value(
             "Llm_Command", "context_include_network_status", fallback=True, value_type="bool"
         )
@@ -361,7 +364,8 @@ class LlmCommand(BaseCommand):
                         "last_heard, hop_count, snr, is_currently_tracked "
                         "FROM complete_contact_tracking "
                         "WHERE role IN ('repeater', 'roomserver') "
-                        "ORDER BY last_heard DESC LIMIT 8"
+                        "ORDER BY last_heard DESC LIMIT ?",
+                        (self.context_repeaters_limit,)
                     )
                     repeaters = cursor.fetchall()
                     if repeaters:
