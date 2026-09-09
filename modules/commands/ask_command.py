@@ -30,6 +30,7 @@ Notes:
 - Read-only: SELECT only
 - Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0
 - No firmware version or hardware/model info is stored in this database. If asked about version or hardware, reply: 'not tracked in DB'
+- Do NOT query the bbs_messages table (per-user store-and-forward, not mesh analytics)
 """
 
 
@@ -243,6 +244,8 @@ class AskCommand(BaseCommand):
         ]
         return await self._send_truncated(message, "\n".join(lines))
 
+    _EXCLUDED_TABLES = {"bbs_messages", "clock_sync_admin_log"}
+
     async def _handle_tables(self, message: MeshMessage) -> bool:
         try:
             with self.bot.db_manager.connection() as conn:
@@ -250,7 +253,7 @@ class AskCommand(BaseCommand):
                 cursor.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
                 )
-                tables = [row[0] for row in cursor.fetchall()]
+                tables = [row[0] for row in cursor.fetchall() if row[0] not in self._EXCLUDED_TABLES]
                 lines = []
                 for table in tables:
                     cursor.execute(f'PRAGMA table_info("{table}")')
@@ -265,9 +268,14 @@ class AskCommand(BaseCommand):
 
     async def _send_truncated(self, message: MeshMessage, text: str) -> bool:
         max_length = self.get_max_message_length(message)
-        if len(text) > max_length:
-            text = text[:max_length]
-        return await self.send_response(message, text)
+        if len(text) <= max_length:
+            return await self.send_response(message, text)
+        pages = [text[i:i + max_length] for i in range(0, len(text), max_length)]
+        for i, page in enumerate(pages):
+            suffix = f" ({i+1}/{len(pages)})" if len(pages) > 1 else ""
+            await self.send_response(message, page + suffix)
+            await asyncio.sleep(0.3)
+        return True
 
     async def execute(self, message: MeshMessage) -> bool:
         question = self._extract_question(message)
