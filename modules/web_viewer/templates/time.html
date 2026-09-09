@@ -2,21 +2,6 @@
 
 {% block title %}Time Synchronization - MeshCore Bot Data Viewer{% endblock %}
 
-{% block extra_css %}
-<style>
-    .sync-status-badge {
-        min-width: 80px;
-        display: inline-block;
-    }
-    .target-card {
-        transition: all 0.2s ease;
-    }
-    .target-card:hover {
-        box-shadow: 0 4px 8px var(--shadow-color);
-    }
-</style>
-{% endblock %}
-
 {% block content %}
 <div class="row">
     <div class="col-12">
@@ -24,46 +9,7 @@
             <h1 class="mb-0">
                 <i class="fas fa-clock"></i> Time Synchronization
             </h1>
-            <a href="/time/admin" class="btn btn-outline-secondary btn-sm">
-                <i class="fas fa-cog me-1"></i>Manage Targets
-            </a>
-        </div>
-    </div>
-</div>
-
-<!-- Node Clock Drift Section -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card h-100">
-            <div class="card-header">
-                <i class="fas fa-clock"></i> Node Clock Drift (daily window)
-            </div>
-            <div class="card-body">
-                <div class="row text-center mb-3">
-                    <div class="col-md-3">
-                        <h4 id="clock-drift-count" class="text-danger">0</h4>
-                        <small class="text-muted">Out of sync</small>
-                    </div>
-                    <div class="col-md-3">
-                        <h4 id="clock-drift-checked" class="text-primary">0</h4>
-                        <small class="text-muted">Checked nodes</small>
-                    </div>
-                    <div class="col-md-3">
-                        <h4 id="clock-drift-radius" class="text-info">5</h4>
-                        <small class="text-muted">Max hops</small>
-                    </div>
-                    <div class="col-md-3">
-                        <h4 id="clock-drift-threshold" class="text-warning">300s</h4>
-                        <small class="text-muted">Drift threshold</small>
-                    </div>
-                </div>
-                <div>
-                    <small class="text-muted d-block mb-2">Nodes with drift above threshold:</small>
-                    <ul id="clock-drift-list" class="mb-0 ps-3">
-                        <li class="text-muted">No out-of-sync nodes detected.</li>
-                    </ul>
-                </div>
-            </div>
+            <span id="clock-sync-enabled-badge" class="badge bg-secondary">Loading...</span>
         </div>
     </div>
 </div>
@@ -74,15 +20,22 @@
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-broadcast-tower"></i> Clock_Sync_Admin Targets</span>
-                <div class="d-flex align-items-center gap-2">
-                    <button id="clock-sync-run-now-btn" class="btn btn-sm btn-outline-primary" type="button">
-                        <i class="fas fa-play me-1"></i>Run Now
-                    </button>
-                    <span id="clock-sync-enabled-badge" class="badge bg-secondary">Loading...</span>
-                </div>
+                <button id="clock-sync-run-now-btn" class="btn btn-sm btn-outline-primary" type="button">
+                    <i class="fas fa-play me-1"></i>Run Now
+                </button>
             </div>
             <div class="card-body">
                 <div id="clock-sync-run-now-alert" class="alert d-none" role="alert"></div>
+
+                <!-- Add target -->
+                <div class="input-group mb-3" style="max-width: 500px;">
+                    <input type="text" class="form-control" id="new-target-input" placeholder="Name or public key...">
+                    <button class="btn btn-outline-primary" id="add-target-btn" type="button">
+                        <i class="fas fa-plus me-1"></i>Add
+                    </button>
+                </div>
+
+                <!-- Targets list -->
                 <div id="clock-sync-targets-container">
                     <div class="text-center text-muted">
                         <i class="fas fa-spinner fa-spin"></i> Loading targets...
@@ -123,41 +76,53 @@
         </div>
     </div>
 </div>
+
+<!-- Delete confirmation modal -->
+<div class="modal fade" id="deleteTargetModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-trash me-2"></i>Confirm Delete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Remove target <strong id="delete-target-name"></strong>?</p>
+                <p class="text-muted small mb-0">This cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-btn">
+                    <i class="fas fa-trash me-1"></i>Delete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
     class TimeViewer {
         constructor() {
-            this.socket = null;
             this.refreshInterval = null;
+            this.deleteTargetId = null;
             this.init();
         }
 
         init() {
-            // Initialize WebSocket connection
-            this.socket = io();
-
-            this.socket.on('connect', () => {
-                console.log('WebSocket connected');
-            });
-
-            this.socket.on('disconnect', () => {
-                console.log('WebSocket disconnected');
-            });
-
-            this.socket.on('stats_update', (data) => {
-                this.updateClockDrift(data.clock_sync_dashboard);
-            });
-
-            // Initial load
             this.loadData();
-
-            // Refresh data every 10 seconds
-            this.refreshInterval = setInterval(() => this.loadData(), 10000);
+            this.refreshInterval = setInterval(() => this.loadData(), 15000);
 
             const runNowBtn = document.getElementById('clock-sync-run-now-btn');
             if (runNowBtn) runNowBtn.addEventListener('click', () => this.runClockSyncNow());
+
+            const addBtn = document.getElementById('add-target-btn');
+            if (addBtn) addBtn.addEventListener('click', () => this.addTarget());
+            const input = document.getElementById('new-target-input');
+            if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.addTarget(); });
+
+            const confirmBtn = document.getElementById('confirm-delete-btn');
+            if (confirmBtn) confirmBtn.addEventListener('click', () => this.confirmDelete());
         }
 
         showRunNowAlert(message, kind) {
@@ -199,7 +164,7 @@
                         (r.failed ?? 0) > 0 ? 'warning' : 'success'
                     );
                 } else if (status === 'timeout') {
-                    this.showRunNowAlert('Run is taking longer than expected — check Logs for the outcome.', 'warning');
+                    this.showRunNowAlert('Run is taking longer than expected — check Logs.', 'warning');
                 }
             } catch (err) {
                 this.showRunNowAlert('Run failed: ' + err.message, 'danger');
@@ -211,24 +176,67 @@
             }
         }
 
-        cleanup() {
-            if (this.refreshInterval) {
-                clearInterval(this.refreshInterval);
-                this.refreshInterval = null;
+        async addTarget() {
+            const input = document.getElementById('new-target-input');
+            const value = (input.value || '').trim();
+            if (!value) return;
+            try {
+                const resp = await fetch('/api/clock-sync-targets-admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ target: value }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.error || 'Failed to add');
+                input.value = '';
+                this.loadData();
+            } catch (err) {
+                alert('Add failed: ' + err.message);
+            }
+        }
+
+        promptDelete(id, name) {
+            this.deleteTargetId = id;
+            document.getElementById('delete-target-name').textContent = name;
+            const modal = document.getElementById('deleteTargetModal');
+            const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
+            bsModal.show();
+        }
+
+        async confirmDelete() {
+            if (!this.deleteTargetId) return;
+            const btn = document.getElementById('confirm-delete-btn');
+            btn.disabled = true;
+            try {
+                const resp = await fetch(`/api/clock-sync-targets-admin/${this.deleteTargetId}`, {
+                    method: 'DELETE',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                if (!resp.ok) {
+                    const data = await resp.json();
+                    throw new Error(data.error || 'Delete failed');
+                }
+                bootstrap.Modal.getInstance(document.getElementById('deleteTargetModal')).hide();
+                this.loadData();
+            } catch (err) {
+                alert('Delete failed: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                this.deleteTargetId = null;
             }
         }
 
         async loadData() {
             try {
-                // Load clock drift data
+                // Load clock drift stats
                 const statsResponse = await fetch('/api/stats');
                 if (statsResponse.ok) {
                     const stats = await statsResponse.json();
                     this.updateClockDrift(stats.clock_sync_dashboard);
                 }
 
-                // Load Clock_Sync_Admin targets
-                const targetsResponse = await fetch('/api/clock-sync-targets');
+                // Load targets from DB
+                const targetsResponse = await fetch('/api/clock-sync-targets-admin');
                 if (targetsResponse.ok) {
                     const targetsData = await targetsResponse.json();
                     this.updateTargets(targetsData);
@@ -239,43 +247,7 @@
         }
 
         updateClockDrift(clockData) {
-            const fallback = {
-                out_of_sync_count: 0,
-                checked_nodes: 0,
-                max_hops: 5,
-                drift_threshold_seconds: 300,
-                out_of_sync_nodes: [],
-            };
-            const data = clockData || fallback;
-
-            this.updateElement('clock-drift-count', data.out_of_sync_count || 0);
-            this.updateElement('clock-drift-checked', data.checked_nodes || 0);
-            this.updateElement('clock-drift-radius', data.max_hops ?? 5);
-            this.updateElement('clock-drift-threshold', `${data.drift_threshold_seconds ?? 300}s`);
-
-            const list = document.getElementById('clock-drift-list');
-            if (!list) return;
-            
-            list.innerHTML = '';
-            const outOfSync = Array.isArray(data.out_of_sync_nodes) ? data.out_of_sync_nodes : [];
-            
-            if (outOfSync.length === 0) {
-                const item = document.createElement('li');
-                item.className = 'text-muted';
-                item.textContent = 'No out-of-sync nodes detected.';
-                list.appendChild(item);
-            } else {
-                outOfSync.forEach(node => {
-                    const item = document.createElement('li');
-                    const driftMinutes = Math.round(node.drift_seconds / 60);
-                    item.innerHTML = `<strong>${this.escapeHtml(node.name)}</strong> ` +
-                        `(${node.role || 'unknown'}, ${node.hop_count} hops) — ` +
-                        `drift: <span class="text-danger">${driftMinutes}m (${node.drift_seconds}s)</span>`;
-                    list.appendChild(item);
-                });
-            }
-
-            // Update configuration display
+            const data = clockData || {};
             this.updateElement('config-hop-radius', data.max_hops ?? 5);
             this.updateElement('config-check-window', data.check_window_hours ?? 24);
             this.updateElement('config-max-drift', data.drift_threshold_seconds ?? 300);
@@ -285,164 +257,55 @@
             const container = document.getElementById('clock-sync-targets-container');
             if (!container) return;
 
-            // Update enabled badge
-            const enabledBadge = document.getElementById('clock-sync-enabled-badge');
-            if (enabledBadge) {
-                if (data.enabled) {
-                    enabledBadge.textContent = 'Enabled';
-                    enabledBadge.className = 'badge bg-success';
-                } else {
-                    enabledBadge.textContent = 'Disabled';
-                    enabledBadge.className = 'badge bg-secondary';
-                }
-            }
+            const targets = Array.isArray(data) ? data : (data.targets || []);
 
-            // Update configuration display
-            this.updateElement('config-enabled', data.enabled ? 'Yes' : 'No');
-            this.updateElement('config-schedule', data.schedule || 'Not configured');
-            this.updateElement('config-payload', data.command_payload || 'clock sync admin');
-
-            // Update targets list
-            if (!data.targets || data.targets.length === 0) {
-                container.innerHTML = `
-                    <div class="alert alert-info mb-0">
-                        <i class="fas fa-info-circle"></i> No targets configured. 
-                        Add targets to the <code>[Clock_Sync_Admin]</code> section in your configuration.
-                    </div>
-                `;
+            if (targets.length === 0) {
+                container.innerHTML = `<div class="alert alert-info mb-0"><i class="fas fa-info-circle"></i> No targets configured. Add one above.</div>`;
                 return;
             }
 
-            let html = '<div class="row g-3">';
-            data.targets.forEach(target => {
-                const statusClass = this.getStatusClass(target.status);
-                const statusIcon = this.getStatusIcon(target.status);
-                const driftInfo = this.getDriftInfo(target);
-                const syncStatusInfo = this.getSyncStatusInfo(target);
-                
-                html += `
-                    <div class="col-md-6 col-lg-4">
-                        <div class="card target-card h-100">
-                            <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <h6 class="mb-0">${this.escapeHtml(target.name)}</h6>
-                                    <span class="badge ${statusClass} sync-status-badge">
-                                        <i class="fas ${statusIcon}"></i> ${this.escapeHtml(target.status)}
-                                    </span>
-                                </div>
-                                <div class="text-muted small">
-                                    ${target.public_key ? `
-                                        <div class="mb-1">
-                                            <strong>Public Key:</strong><br>
-                                            <code class="small">${this.escapeHtml(target.public_key.substring(0, 16))}...</code><br>
-                                            <span class="text-secondary">${this.escapeHtml(target.name)}</span>
-                                        </div>
-                                    ` : `<div><strong>Identifier:</strong> ${this.escapeHtml(target.identifier)}</div>`}
-                                    ${syncStatusInfo}
-                                    ${target.role ? `<div><strong>Role:</strong> ${this.escapeHtml(target.role)}</div>` : ''}
-                                    ${target.hop_count !== null ? `<div><strong>Hops:</strong> ${target.hop_count}</div>` : ''}
-                                    ${driftInfo}
-                                    ${target.last_seen ? `<div><strong>Last Seen:</strong> ${this.formatTimestamp(target.last_seen)}</div>` : ''}
-                                </div>
-                            </div>
+            let html = '<table class="table table-sm align-middle mb-0"><tbody>';
+            targets.forEach(t => {
+                const id = t.id;
+                const name = this.escapeHtml(t.target || t.name || 'unknown');
+                const enabled = t.enabled ? 1 : 0;
+                const toggleClass = enabled ? 'btn-outline-success' : 'btn-outline-secondary';
+                const toggleIcon = enabled ? 'fa-check' : 'fa-pause';
+                html += `<tr>
+                    <td><code>${name}</code></td>
+                    <td class="text-end">
+                        <div class="d-flex gap-1 justify-content-end">
+                            <button class="btn btn-sm ${toggleClass}" onclick="document.querySelector('#TimeViewer').toggleTarget(${id}, ${enabled})">
+                                <i class="fas ${toggleIcon}"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="document.querySelector('#TimeViewer').promptDelete(${id}, '${name.replace(/'/g, "\\'")}')">
+                                <i class="fas fa-trash"></i>
+                            </button>
                         </div>
-                    </div>
-                `;
+                    </td>
+                </tr>`;
             });
-            html += '</div>';
+            html += '</tbody></table>';
             container.innerHTML = html;
         }
 
-        getSyncStatusInfo(target) {
-            if (target.last_sync_at === null || target.last_sync_at === undefined) {
-                return '';
+        async toggleTarget(id, currentEnabled) {
+            const newEnabled = currentEnabled ? 0 : 1;
+            try {
+                await fetch(`/api/clock-sync-targets-admin/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ enabled: newEnabled }),
+                });
+                this.loadData();
+            } catch (err) {
+                alert('Toggle failed: ' + err.message);
             }
-            
-            const timestamp = this.formatTimestamp(target.last_sync_at);
-            if (target.last_sync_success) {
-                return `
-                    <div class="mb-1">
-                        <strong>Daily Sync:</strong> 
-                        <span class="text-success">
-                            <i class="fas fa-check-circle"></i> Success
-                        </span>
-                        <br>
-                        <small>${timestamp}</small>
-                    </div>
-                `;
-            } else {
-                const errorMsg = target.last_sync_error ? ` (${this.escapeHtml(target.last_sync_error)})` : '';
-                return `
-                    <div class="mb-1">
-                        <strong>Daily Sync:</strong> 
-                        <span class="text-danger">
-                            <i class="fas fa-times-circle"></i> Failed
-                        </span>${errorMsg}
-                        <br>
-                        <small>${timestamp}</small>
-                    </div>
-                `;
-            }
-        }
-
-        getStatusClass(status) {
-            const statusMap = {
-                'In Sync': 'bg-success',
-                'Out of Sync': 'bg-danger',
-                'Unknown': 'bg-secondary',
-                'Not Found': 'bg-warning',
-                'No Data': 'bg-secondary'
-            };
-            return statusMap[status] || 'bg-secondary';
-        }
-
-        getStatusIcon(status) {
-            const iconMap = {
-                'In Sync': 'fa-check-circle',
-                'Out of Sync': 'fa-exclamation-triangle',
-                'Unknown': 'fa-question-circle',
-                'Not Found': 'fa-search',
-                'No Data': 'fa-minus-circle'
-            };
-            return iconMap[status] || 'fa-question-circle';
-        }
-
-        getDriftInfo(target) {
-            let html = '';
-            
-            // Show message timestamp if available (even without drift data)
-            if (target.message_timestamp !== null && target.message_timestamp !== undefined && target.message_timestamp > 0) {
-                const msgDate = new Date(target.message_timestamp * 1000);
-                html += `<div><strong>Message Timestamp:</strong> ${msgDate.toLocaleString()}</div>`;
-            }
-            
-            // Show drift information only if available
-            if (target.drift_seconds !== null && target.drift_seconds !== undefined) {
-                const driftMinutes = Math.round(target.drift_seconds / 60);
-                const driftClass = target.status === 'Out of Sync' ? 'text-danger' : 'text-success';
-                html += `<div><strong>Drift:</strong> <span class="${driftClass}">${driftMinutes}m (${target.drift_seconds}s)</span></div>`;
-            }
-            
-            return html;
-        }
-
-        formatTimestamp(timestamp) {
-            if (!timestamp) return 'Never';
-            const date = new Date(timestamp * 1000);
-            const now = new Date();
-            const diff = Math.floor((now - date) / 1000);
-            
-            if (diff < 60) return `${diff}s ago`;
-            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-            return `${Math.floor(diff / 86400)}d ago`;
         }
 
         updateElement(id, value) {
             const element = document.getElementById(id);
-            if (element) {
-                element.textContent = value;
-            }
+            if (element) element.textContent = value;
         }
 
         escapeHtml(text) {
@@ -450,11 +313,25 @@
             div.textContent = text || '';
             return div.innerHTML;
         }
+
+        cleanup() {
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+                this.refreshInterval = null;
+            }
+        }
     }
 
-    // Initialize when DOM is ready
     document.addEventListener('DOMContentLoaded', () => {
-        new TimeViewer();
+        const viewer = new TimeViewer();
+        const el = document.createElement('div');
+        el.id = 'TimeViewer';
+        el.style.display = 'none';
+        el._viewer = viewer;
+        document.body.appendChild(el);
+        // Expose methods for inline onclick handlers
+        el.toggleTarget = viewer.toggleTarget.bind(viewer);
+        el.promptDelete = viewer.promptDelete.bind(viewer);
     });
 </script>
 {% endblock %}
