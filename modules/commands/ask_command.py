@@ -29,6 +29,7 @@ Notes:
 - Use LIMIT 20 max
 - Read-only: SELECT only
 - Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0
+- No firmware version or hardware/model info is stored in this database. If asked about version or hardware, reply: 'not tracked in DB'
 """
 
 
@@ -226,11 +227,59 @@ class AskCommand(BaseCommand):
             self.logger.warning(f"Ask command followup error: {e}")
         return None
 
+    async def _handle_help(self, message: MeshMessage) -> bool:
+        pfx = (self.bot.config.get("Bot", "command_prefix", fallback="") or "").strip()
+        lines = [
+            f"{pfx}ask <question> - query the mesh DB with NL",
+            f"{pfx}ask help - this help",
+            f"{pfx}ask tables - list available tables & columns",
+            "",
+            "Examples:",
+            '  "combien de répéteurs actifs sur 7 jours"',
+            '  "top 10 expéditeurs sur 30 jours"',
+            '  "quel est le chemin le plus long observé"',
+            '  "les n\u00f5uds avec le meilleur SNR"',
+            '  "combien de messages par jour cette semaine"',
+        ]
+        return await self._send_truncated(message, "\n".join(lines))
+
+    async def _handle_tables(self, message: MeshMessage) -> bool:
+        try:
+            with self.bot.db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+                tables = [row[0] for row in cursor.fetchall()]
+                lines = []
+                for table in tables:
+                    cursor.execute(f'PRAGMA table_info("{table}")')
+                    cols = [row[1] for row in cursor.fetchall()]
+                    lines.append(f"{table}: {', '.join(cols)}")
+                if not lines:
+                    return await self._send_truncated(message, "(no tables found)")
+        except Exception as e:
+            self.logger.warning(f"Ask tables error: {e}")
+            return await self._send_truncated(message, f"(error: {e})")
+        return await self._send_truncated(message, "\n".join(lines))
+
+    async def _send_truncated(self, message: MeshMessage, text: str) -> bool:
+        max_length = self.get_max_message_length(message)
+        if len(text) > max_length:
+            text = text[:max_length]
+        return await self.send_response(message, text)
+
     async def execute(self, message: MeshMessage) -> bool:
         question = self._extract_question(message)
         if not question:
             pfx = (self.bot.config.get("Bot", "command_prefix", fallback="") or "").strip()
             return await self.send_response(message, f"Usage: {pfx}ask <question about the mesh>")
+
+        q_lower = question.lower().strip()
+        if q_lower in ("help", "?", "h"):
+            return self._handle_help(message)
+        if q_lower in ("tables", "schema", "db"):
+            return self._handle_tables(message)
 
         self.logger.info(f"Ask command: {question}")
 
