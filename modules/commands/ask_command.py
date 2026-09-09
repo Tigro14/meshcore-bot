@@ -268,9 +268,14 @@ class AskCommand(BaseCommand):
 
     async def _send_truncated(self, message: MeshMessage, text: str) -> bool:
         max_length = self.get_max_message_length(message)
-        if len(text) > max_length:
-            text = text[:max_length]
-        return await self.send_response(message, text)
+        if len(text) <= max_length:
+            return await self.send_response(message, text)
+        pages = [text[i:i + max_length] for i in range(0, len(text), max_length)]
+        for i, page in enumerate(pages):
+            suffix = f" ({i+1}/{len(pages)})" if len(pages) > 1 else ""
+            await self.send_response(message, page + suffix)
+            await asyncio.sleep(0.3)
+        return True
 
     async def execute(self, message: MeshMessage) -> bool:
         question = self._extract_question(message)
