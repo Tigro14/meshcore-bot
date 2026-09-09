@@ -14,6 +14,47 @@
     </div>
 </div>
 
+<!-- Configuration Info Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-info-circle"></i> Configuration
+            </div>
+            <div class="card-body">
+                <div class="alert alert-secondary small mb-3" style="opacity:0.9;">
+                    <i class="fas fa-info-circle me-1"></i>
+                    <strong>FR:</strong> Cette fonction envoie la commande <code id="desc-command">clock sync admin</code> par DM aux nœuds ci-dessous pour synchroniser leur horloge.<br>
+                    La commande n'est envoyée <strong>que si le drift constaté dépasse le seuil max</strong> indiqué plus bas (sinon le sync est sauté).<br>
+                    Pour que cela fonctionne, le nœud cible doit avoir ajouté le public key du bot dans sa liste d'<strong>admins</strong> :<br>
+                    <code class="user-select-all" id="desc-bot-pubkey">...</code><br><br>
+                    <strong>EN:</strong> This feature sends <code id="desc-command-en">clock sync admin</code> via DM to each listed node to sync its clock.<br>
+                    The command is only sent <strong>if the observed drift exceeds the max threshold</strong> shown below (otherwise the sync is skipped).<br>
+                    For this to work, the target node must have added the bot's public key to its <strong>admins</strong> list:<br>
+                    <code class="user-select-all" id="desc-bot-pubkey-en">...</code>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Clock_Sync_Admin Settings:</h6>
+                        <ul class="mb-0">
+                            <li><strong>Enabled:</strong> <span id="config-enabled">-</span></li>
+                            <li><strong>Schedule (cron):</strong> <code id="config-schedule">-</code></li>
+                            <li><strong>Command Payload:</strong> <code id="config-payload">-</code></li>
+                            <li><strong>Min Sync Drift:</strong> <span id="config-min-drift">-</span> s</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Dashboard Settings:</h6>
+                        <ul class="mb-0">
+                            <li><strong>Max Clock Drift:</strong> <span id="config-max-drift">-</span> seconds</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Clock_Sync_Admin Targets Section -->
 <div class="row mb-4">
     <div class="col-12">
@@ -46,47 +87,6 @@
     </div>
 </div>
 
-<!-- Configuration Info Section -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card h-100">
-            <div class="card-header">
-                <i class="fas fa-info-circle"></i> Configuration
-            </div>
-            <div class="card-body">
-                <div class="alert alert-light border small mb-3">
-                    <i class="fas fa-info-circle me-1"></i>
-                    <strong>FR:</strong> Cette fonction envoie la commande <code id="desc-command">clock sync admin</code> par DM aux nœuds ci-dessus pour synchroniser leur horloge.<br>
-                    La commande n'est envoyée <strong>que si le drift constaté dépasse le seuil max</strong> indiqué en bas de page (sinon le sync est sauté).<br>
-                    Pour que cela fonctionne, le nœud cible doit avoir ajouté le public key du bot dans sa liste d'<strong>admins</strong> :<br>
-                    <code class="user-select-all" id="desc-bot-pubkey">...</code><br><br>
-                    <strong>EN:</strong> This feature sends <code id="desc-command-en">clock sync admin</code> via DM to each listed node to sync its clock.<br>
-                    The command is only sent <strong>if the observed drift exceeds the max threshold</strong> shown below (otherwise the sync is skipped).<br>
-                    For this to work, the target node must have added the bot's public key to its <strong>admins</strong> list:<br>
-                    <code class="user-select-all" id="desc-bot-pubkey-en">...</code>
-                </div>
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>Clock_Sync_Admin Settings:</h6>
-                        <ul class="mb-0">
-                            <li><strong>Enabled:</strong> <span id="config-enabled">-</span></li>
-                            <li><strong>Schedule (cron):</strong> <code id="config-schedule">-</code></li>
-                            <li><strong>Command Payload:</strong> <code id="config-payload">-</code></li>
-                            <li><strong>Min Sync Drift:</strong> <span id="config-min-drift">-</span> s</li>
-                        </ul>
-                    </div>
-                    <div class="col-md-6">
-                        <h6>Dashboard Settings:</h6>
-                        <ul class="mb-0">
-                            <li><strong>Max Clock Drift:</strong> <span id="config-max-drift">-</span> seconds</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Delete confirmation modal -->
 <div class="modal fade" id="deleteTargetModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -104,6 +104,26 @@
                 <button type="button" class="btn btn-danger" id="confirm-delete-btn">
                     <i class="fas fa-trash me-1"></i>Delete
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- History modal -->
+<div class="modal fade" id="historyModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-history me-2"></i><span id="history-target-name"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="history-content" class="text-center">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
@@ -236,6 +256,38 @@
             }
         }
 
+        async showHistory(id, name) {
+            document.getElementById('history-target-name').textContent = name;
+            const content = document.getElementById('history-content');
+            content.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+            const modal = document.getElementById('historyModal');
+            const bsModal = bootstrap.Modal.getOrCreateInstance(modal);
+            bsModal.show();
+            try {
+                const resp = await fetch(`/api/clock-sync-targets-admin/${id}/history`);
+                if (!resp.ok) throw new Error('Failed to load history');
+                const data = await resp.json();
+                const history = data.history || [];
+                if (history.length === 0) {
+                    content.innerHTML = '<div class="text-muted text-center">No sync history yet.</div>';
+                    return;
+                }
+                let html = '<table class="table table-sm mb-0"><thead><tr><th>Time</th><th>Status</th><th>Detail</th></tr></thead><tbody>';
+                history.forEach(h => {
+                    const time = this.formatTimestamp(h.at);
+                    const status = h.success
+                        ? '<span class="badge bg-success">OK</span>'
+                        : '<span class="badge bg-danger">Fail</span>';
+                    const detail = h.error ? this.escapeHtml(h.error) : '-';
+                    html += `<tr><td class="text-muted small">${time}</td><td>${status}</td><td class="small">${detail}</td></tr>`;
+                });
+                html += '</tbody></table>';
+                content.innerHTML = html;
+            } catch (err) {
+                content.innerHTML = `<div class="text-danger text-center">${this.escapeHtml(err.message)}</div>`;
+            }
+        }
+
         async loadData() {
             try {
                 // Load clock drift stats
@@ -296,7 +348,7 @@
             }
 
             let html = '<table class="table table-sm align-middle mb-0">';
-            html += '<thead><tr><th>Target</th><th>Status</th><th>Last Sync</th><th class="text-end">Actions</th></tr></thead><tbody>';
+            html += '<thead><tr><th>Target</th><th>Drift</th><th>Status</th><th>Last Sync</th><th class="text-end">Actions</th></tr></thead><tbody>';
             targets.forEach(t => {
                 const id = t.id;
                 const displayTarget = this.escapeHtml(t.target || 'unknown');
@@ -305,6 +357,14 @@
                 const toggleClass = enabled ? 'btn-outline-success' : 'btn-outline-secondary';
                 const toggleIcon = enabled ? 'fa-check' : 'fa-pause';
                 const toggleTitle = enabled ? 'Click to disable' : 'Click to enable';
+
+                // Drift
+                let driftHtml = '<span class="text-muted">-</span>';
+                if (t.clock_drift !== undefined && t.clock_drift !== null) {
+                    const drift = t.clock_drift;
+                    const driftClass = Math.abs(drift) > 300 ? 'text-danger' : (Math.abs(drift) > 60 ? 'text-warning' : 'text-success');
+                    driftHtml = `<span class="${driftClass}">${drift}s</span>`;
+                }
 
                 // Sync status
                 let syncBadge = '<span class="badge bg-secondary">No data</span>';
@@ -323,12 +383,16 @@
                 }
 
                 const deleteTitle = `Delete target ${displayTarget}`;
+                const displayName = contactName || displayTarget;
 
                 html += `<tr>
                     <td>
-                        <strong>${contactName || displayTarget}</strong>
+                        <a href="#" class="text-decoration-none" onclick="document.querySelector('#TimeViewer').showHistory(${id}, '${displayName.replace(/'/g, "\\'")}')" title="View sync history">
+                            <strong>${displayName}</strong>
+                        </a>
                         ${contactName ? `<br><code class="small">${displayTarget.substring(0, 16)}...</code>` : ''}
                     </td>
+                    <td>${driftHtml}</td>
                     <td>${syncBadge}</td>
                     <td class="text-muted small">${lastSync}</td>
                     <td class="text-end">
@@ -336,7 +400,7 @@
                             <button class="btn btn-sm ${toggleClass}" title="${toggleTitle}" onclick="document.querySelector('#TimeViewer').toggleTarget(${id}, ${enabled})">
                                 <i class="fas ${toggleIcon}"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger" title="${deleteTitle}" onclick="document.querySelector('#TimeViewer').promptDelete(${id}, '${(contactName || displayTarget).replace(/'/g, "\\'")}')">
+                            <button class="btn btn-sm btn-outline-danger" title="${deleteTitle}" onclick="document.querySelector('#TimeViewer').promptDelete(${id}, '${displayName.replace(/'/g, "\\'")}')">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -398,9 +462,9 @@
         el.style.display = 'none';
         el._viewer = viewer;
         document.body.appendChild(el);
-        // Expose methods for inline onclick handlers
         el.toggleTarget = viewer.toggleTarget.bind(viewer);
         el.promptDelete = viewer.promptDelete.bind(viewer);
+        el.showHistory = viewer.showHistory.bind(viewer);
     });
 </script>
 {% endblock %}
