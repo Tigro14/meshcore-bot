@@ -30,6 +30,7 @@ Notes:
 - Read-only: SELECT only
 - Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0
 - No firmware version or hardware/model info is stored in this database. If asked about version or hardware, reply: 'not tracked in DB'
+- Do NOT query the bbs_messages table (per-user store-and-forward, not mesh analytics)
 """
 
 
@@ -243,6 +244,8 @@ class AskCommand(BaseCommand):
         ]
         return await self._send_truncated(message, "\n".join(lines))
 
+    _EXCLUDED_TABLES = {"bbs_messages", "clock_sync_admin_log"}
+
     async def _handle_tables(self, message: MeshMessage) -> bool:
         try:
             with self.bot.db_manager.connection() as conn:
@@ -250,7 +253,7 @@ class AskCommand(BaseCommand):
                 cursor.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
                 )
-                tables = [row[0] for row in cursor.fetchall()]
+                tables = [row[0] for row in cursor.fetchall() if row[0] not in self._EXCLUDED_TABLES]
                 lines = []
                 for table in tables:
                     cursor.execute(f'PRAGMA table_info("{table}")')
