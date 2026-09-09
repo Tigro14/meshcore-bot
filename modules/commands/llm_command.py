@@ -31,9 +31,7 @@ class LlmCommand(BaseCommand):
     short_description = "Ask the local llama.cpp model a short question"
     usage = "llm <question>"
     examples = ["llm What is APRS?", "llm summarize LoRa in one sentence"]
-    parameters = [
-        {"name": "question", "description": "Prompt to send to local llama.cpp"}
-    ]
+    parameters = [{"name": "question", "description": "Prompt to send to local llama.cpp"}]
 
     def __init__(self, bot):
         super().__init__(bot)
@@ -54,7 +52,7 @@ class LlmCommand(BaseCommand):
         self.timeout_seconds = max(
             1.0,
             min(
-                120.0,
+                300.0,
                 self.get_config_value("Llm_Command", "timeout_seconds", fallback=20.0, value_type="float"),
             ),
         )
@@ -87,7 +85,7 @@ class LlmCommand(BaseCommand):
         )
         self.context_window_seconds = max(
             0,
-            self.get_config_value("Llm_Command", "context_window_seconds", fallback=600, value_type="int"),
+            self.get_config_value("Llm_Command", "context_window_seconds", fallback=0, value_type="int"),
         )
         self.context_max_turns = max(
             1,
@@ -128,8 +126,26 @@ class LlmCommand(BaseCommand):
         self.context_include_repeaters = self.get_config_value(
             "Llm_Command", "context_include_repeaters", fallback=True, value_type="bool"
         )
+        self.context_repeaters_limit = self.get_config_value(
+            "Llm_Command", "context_repeaters_limit", fallback=50, value_type="int"
+        )
         self.context_include_network_status = self.get_config_value(
             "Llm_Command", "context_include_network_status", fallback=True, value_type="bool"
+        )
+        self.context_include_channel_messages = self.get_config_value(
+            "Llm_Command", "context_include_channel_messages", fallback=True, value_type="bool"
+        )
+        self.context_include_mesh_topology = self.get_config_value(
+            "Llm_Command", "context_include_mesh_topology", fallback=False, value_type="bool"
+        )
+        self.context_mesh_topology_limit = self.get_config_value(
+            "Llm_Command", "context_mesh_topology_limit", fallback=15, value_type="int"
+        )
+        self.context_channel_messages_limit = self.get_config_value(
+            "Llm_Command", "context_channel_messages_limit", fallback=10, value_type="int"
+        )
+        self.context_channel_messages_window = self.get_config_value(
+            "Llm_Command", "context_channel_messages_window", fallback=1800, value_type="int"
         )
         self.context_include_contacts = self.get_config_value(
             "Llm_Command", "context_include_contacts", fallback=True, value_type="bool"
@@ -146,6 +162,9 @@ class LlmCommand(BaseCommand):
         self.context_include_system_metrics = self.get_config_value(
             "Llm_Command", "context_include_system_metrics", fallback=True, value_type="bool"
         )
+        self.llm_db_query_enabled = self.get_config_value(
+            "Llm_Command", "db_query_enabled", fallback=False, value_type="bool"
+        )
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
         )
@@ -153,9 +172,14 @@ class LlmCommand(BaseCommand):
         self.context_weather_location = self.get_config_value(
             "Llm_Command", "context_weather_location", fallback="Paris, France", value_type="str"
         )
+        # Bot GPS position for distance calculations
+        self.bot_latitude = self.get_config_value("Llm_Command", "bot_latitude", fallback=None, value_type="float")
+        self.bot_longitude = self.get_config_value("Llm_Command", "bot_longitude", fallback=None, value_type="float")
         self._cached_context_str = ""
         self._cached_context_time = 0.0
+        self._cached_context_breakdown: list[dict[str, Any]] = []
         self._cached_commands_list = None
+        self._sender_position: tuple[float, float] | None = None
 
         # CPU temperature cooling threshold (in degrees Celsius)
         self.cpu_temp_threshold = max(
@@ -219,7 +243,7 @@ class LlmCommand(BaseCommand):
 
         if self._command_prefix:
             if content.startswith(self._command_prefix):
-                content = content[len(self._command_prefix):].strip()
+                content = content[len(self._command_prefix) :].strip()
         elif content.startswith("!"):
             # Backward-compatibility: base_command.matches_keyword also strips a leading
             # "!" when no command_prefix is configured, so we do the same here.
@@ -233,7 +257,7 @@ class LlmCommand(BaseCommand):
             if lowered == kw:
                 return ""
             if lowered.startswith(kw) and len(lowered) > len(kw) and lowered[len(kw)] == " ":
-                return content[len(keyword):].strip()
+                return content[len(keyword) :].strip()
 
         return ""
 
@@ -254,17 +278,17 @@ class LlmCommand(BaseCommand):
             commands = plugin_loader.load_all_plugins()
 
             # Get admin commands to exclude them
-            admin_commands_str = self.bot.config.get('Admin_ACL', 'admin_commands', fallback='')
-            admin_commands = {c.strip() for c in admin_commands_str.split(',') if c.strip()}
+            admin_commands_str = self.bot.config.get("Admin_ACL", "admin_commands", fallback="")
+            admin_commands = {c.strip() for c in admin_commands_str.split(",") if c.strip()}
 
             # Filter to only enabled, non-admin commands
             enabled_commands = []
             for cmd_name, cmd_instance in commands.items():
                 # Skip admin commands
-                primary_name = getattr(cmd_instance, 'name', cmd_name)
+                primary_name = getattr(cmd_instance, "name", cmd_name)
                 if cmd_name in admin_commands or primary_name in admin_commands:
                     continue
-                if hasattr(cmd_instance, 'requires_admin_access') and cmd_instance.requires_admin_access():
+                if hasattr(cmd_instance, "requires_admin_access") and cmd_instance.requires_admin_access():
                     continue
 
                 # Check if command is enabled
@@ -272,18 +296,21 @@ class LlmCommand(BaseCommand):
                     continue
 
                 # Get command info
-                keywords = getattr(cmd_instance, 'keywords', [])
+                keywords = getattr(cmd_instance, "keywords", [])
                 if not keywords:
                     continue
 
-                enabled_commands.append({
-                    'name': primary_name,
-                    'keywords': keywords,
-                    'description': getattr(cmd_instance, 'short_description', None) or getattr(cmd_instance, 'description', ''),
-                })
+                enabled_commands.append(
+                    {
+                        "name": primary_name,
+                        "keywords": keywords,
+                        "description": getattr(cmd_instance, "short_description", None)
+                        or getattr(cmd_instance, "description", ""),
+                    }
+                )
 
             # Sort by name
-            enabled_commands.sort(key=lambda c: str(c['name']))
+            enabled_commands.sort(key=lambda c: str(c["name"]))
             self._cached_commands_list = enabled_commands
             return enabled_commands
         except Exception as e:
@@ -293,12 +320,12 @@ class LlmCommand(BaseCommand):
     @staticmethod
     def _is_command_enabled(cmd_instance: Any) -> bool:
         """Return True if the command is currently enabled in configuration."""
-        name = getattr(cmd_instance, 'name', '')
+        name = getattr(cmd_instance, "name", "")
         if name:
             named_attr = f"{name}_enabled"
             if hasattr(cmd_instance, named_attr):
                 return bool(getattr(cmd_instance, named_attr))
-        if hasattr(cmd_instance, 'enabled'):
+        if hasattr(cmd_instance, "enabled"):
             return bool(cmd_instance.enabled)
         return True
 
@@ -332,7 +359,7 @@ class LlmCommand(BaseCommand):
                     cursor.execute(
                         "SELECT COUNT(DISTINCT public_key) FROM complete_contact_tracking "
                         "WHERE is_currently_tracked = 1 AND last_heard >= ?",
-                        (int(time.time()) - 86400,)
+                        (int(time.time()) - 86400,),
                     )
                     recent_contacts = cursor.fetchone()[0]
                     if total_contacts > 0:
@@ -340,13 +367,196 @@ class LlmCommand(BaseCommand):
             except Exception as e:
                 self.logger.warning(f"Failed to get contacts stats: {e}")
 
+        # Add network stats (contacts, activity, trend)
+        if self.context_include_repeaters:
+            try:
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    stats_parts = []
+
+                    # Contacts by role
+                    cursor.execute("SELECT role, COUNT(*) FROM complete_contact_tracking GROUP BY role")
+                    roles = cursor.fetchall()
+                    if roles:
+                        role_str = ", ".join(f"{r[0]}:{r[1]}" for r in roles)
+                        total = sum(r[1] for r in roles)
+                        stats_parts.append(f"Contacts: {total} ({role_str})")
+
+                    # Mesh size
+                    cursor.execute("SELECT COUNT(*) FROM mesh_connections")
+                    edges = cursor.fetchone()[0]
+                    cursor.execute("SELECT COUNT(DISTINCT from_prefix) FROM mesh_connections")
+                    nodes = cursor.fetchone()[0]
+                    if edges > 0:
+                        stats_parts.append(f"Mesh: {edges} links, {nodes} nodes")
+
+                    # 24h activity
+                    now = int(time.time())
+                    cursor.execute(
+                        "SELECT COUNT(*), COUNT(DISTINCT sender_id) FROM message_stats WHERE timestamp >= ?",
+                        (now - 86400,),
+                    )
+                    msgs_24h, senders_24h = cursor.fetchone()
+                    if msgs_24h > 0:
+                        stats_parts.append(f"24h: {msgs_24h} msgs, {senders_24h} senders")
+                        # Top channel
+                        cursor.execute(
+                            "SELECT channel, COUNT(*) as cnt FROM message_stats "
+                            "WHERE timestamp >= ? AND is_dm = 0 AND channel IS NOT NULL "
+                            "GROUP BY channel ORDER BY cnt DESC LIMIT 1",
+                            (now - 86400,),
+                        )
+                        top_ch = cursor.fetchone()
+                        if top_ch:
+                            stats_parts.append(f"Top channel: {top_ch[0]} ({top_ch[1]} msgs)")
+
+                    # 7-day trend (messages per day)
+                    cursor.execute(
+                        "SELECT date(timestamp, 'unixepoch') as day, COUNT(*) "
+                        "FROM message_stats WHERE timestamp >= ? "
+                        "GROUP BY day ORDER BY day DESC LIMIT 7",
+                        (now - 7 * 86400,),
+                    )
+                    trend = cursor.fetchall()
+                    if trend:
+                        trend_str = " ".join(f"{d[5:]}:{c}" for d, c in reversed(trend))
+                        stats_parts.append(f"7d trend: {trend_str}")
+
+                    if stats_parts:
+                        context_parts.append("Network stats: " + " | ".join(stats_parts))
+            except Exception as e:
+                self.logger.warning(f"Failed to get network stats: {e}")
+
+        # Add mesh topology (who connects to whom)
+        if self.context_include_mesh_topology:
+            try:
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    # Get top N most connected repeaters (by degree)
+                    cursor.execute(
+                        "SELECT prefix, COUNT(*) as degree FROM ("
+                        " SELECT from_prefix as prefix FROM mesh_connections"
+                        " UNION ALL"
+                        " SELECT to_prefix as prefix FROM mesh_connections"
+                        " ) GROUP BY prefix ORDER BY degree DESC LIMIT ?",
+                        (self.context_mesh_topology_limit,),
+                    )
+                    top_prefixes = [r[0] for r in cursor.fetchall()]
+                    if top_prefixes:
+                        topo_lines = []
+                        for pfx in top_prefixes:
+                            # Resolve name
+                            cursor.execute(
+                                "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1",
+                                (pfx + "%",),
+                            )
+                            row = cursor.fetchone()
+                            name = row[0] if row else pfx
+                            # Get neighbors (both directions)
+                            cursor.execute(
+                                "SELECT DISTINCT to_prefix FROM mesh_connections WHERE from_prefix = ?", (pfx,)
+                            )
+                            outgoing = [r[0] for r in cursor.fetchall()]
+                            cursor.execute(
+                                "SELECT DISTINCT from_prefix FROM mesh_connections WHERE to_prefix = ?", (pfx,)
+                            )
+                            incoming = [r[0] for r in cursor.fetchall()]
+                            # Resolve neighbor names
+                            all_neighbors = list(set(outgoing + incoming) - {pfx})[:8]
+                            nb_names = []
+                            for np in all_neighbors:
+                                cursor.execute(
+                                    "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1",
+                                    (np + "%",),
+                                )
+                                nrow = cursor.fetchone()
+                                nb_names.append(nrow[0] if nrow else np)
+                            topo_lines.append(f"  {name}: {', '.join(nb_names)}")
+                        context_parts.append(
+                            f"Mesh topology (top {len(top_prefixes)} by connections):\n" + "\n".join(topo_lines)
+                        )
+            except Exception as e:
+                self.logger.warning(f"Failed to get mesh topology: {e}")
+
+        # Add network status
+        if self.context_include_network_status:
+            try:
+                net_parts = []
+                # Radio state from bot_metadata
+                radio_state = self.bot.db_manager.get_metadata("bot.radio_zombie") == "true"
+                radio_offline = self.bot.db_manager.get_metadata("bot.radio_offline") == "true"
+                if radio_offline:
+                    net_parts.append("Radio: OFFLINE")
+                elif radio_state:
+                    net_parts.append("Radio: ZOMBIE (connected but not responding)")
+                else:
+                    net_parts.append("Radio: OK")
+
+                # Neighbor links with SNR
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT nl.neighbor_public_key, nl.last_snr, nl.best_snr, nl.last_status, "
+                        "cct.name "
+                        "FROM neighbor_links nl "
+                        "LEFT JOIN complete_contact_tracking cct ON cct.public_key = nl.neighbor_public_key "
+                        "ORDER BY nl.last_snr DESC"
+                    )
+                    neighbors = cursor.fetchall()
+                    if neighbors:
+                        nb_lines = []
+                        for n in neighbors:
+                            nb_key, last_snr, best_snr, status, name = n
+                            nb_name = name or nb_key[:4]
+                            snr_str = f"SNR {last_snr:.1f}" if last_snr is not None else "no SNR"
+                            nb_lines.append(f"  - {nb_name}: {snr_str}, {status or 'unknown'}")
+                        net_parts.append(f"Direct links ({len(neighbors)}):\n" + "\n".join(nb_lines))
+
+                    # Mesh edges count
+                    cursor.execute("SELECT COUNT(*) FROM mesh_connections")
+                    edge_count = cursor.fetchone()[0]
+                    if edge_count > 0:
+                        net_parts.append(f"Mesh edges: {edge_count}")
+
+                context_parts.append("Network: " + " | ".join(net_parts))
+            except Exception as e:
+                self.logger.warning(f"Failed to get network status: {e}")
+
+        # Add recent channel messages
+        if self.context_include_channel_messages:
+            try:
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cutoff = int(time.time()) - self.context_channel_messages_window
+                    cursor.execute(
+                        "SELECT sender_id, channel, content, hops "
+                        "FROM message_stats "
+                        "WHERE is_dm = 0 AND channel IS NOT NULL AND timestamp >= ? "
+                        "ORDER BY timestamp DESC LIMIT ?",
+                        (cutoff, self.context_channel_messages_limit),
+                    )
+                    msgs = cursor.fetchall()
+                    if msgs:
+                        msg_lines = []
+                        for m in reversed(msgs):
+                            sender, channel, content, hops = m
+                            text = content[:80] + ("..." if len(content) > 80 else "")
+                            hop_str = f" [{hops}h]" if hops else ""
+                            msg_lines.append(f"  {channel} {sender}: {text}{hop_str}")
+                        window_min = self.context_channel_messages_window // 60
+                        context_parts.append(
+                            f"Recent channel messages ({len(msgs)}, last {window_min}min):\n" + "\n".join(msg_lines)
+                        )
+            except Exception as e:
+                self.logger.warning(f"Failed to get channel messages: {e}")
+
         # Add moon information
         if self.context_include_moon:
             try:
                 moon_info = get_moon()
                 if moon_info and "Error" not in moon_info:
                     # Extract just the phase and illumination
-                    lines = moon_info.split('\n')
+                    lines = moon_info.split("\n")
                     for line in lines:
                         if line.startswith("Phase:"):
                             phase_info = line.replace("Phase:", "").strip()
@@ -361,7 +571,7 @@ class LlmCommand(BaseCommand):
                 sun_info = get_sun()
                 if sun_info and "Error" not in sun_info:
                     # Extract sunrise/sunset
-                    lines = sun_info.split('\n')
+                    lines = sun_info.split("\n")
                     if lines:
                         context_parts.append(f"Sun: {lines[0]}")
             except Exception as e:
@@ -382,13 +592,13 @@ class LlmCommand(BaseCommand):
             try:
                 commands = self._get_enabled_commands_list()
                 if commands:
-                    _command_prefix = self.bot.config.get('Bot', 'command_prefix', fallback='').strip()
+                    _command_prefix = self.bot.config.get("Bot", "command_prefix", fallback="").strip()
                     # Build commands list string
                     commands_list = []
                     for cmd in commands:
                         # Show first 3 keywords as examples
-                        keywords = cmd['keywords'][:3]
-                        keyword_examples = ' '.join(keywords)
+                        keywords = cmd["keywords"][:3]
+                        keyword_examples = " ".join(keywords)
                         commands_list.append(f"  - {cmd['name']}: {cmd['description']} (e.g., {keyword_examples})")
 
                     commands_str = "Available Commands:\n" + "\n".join(commands_list)
@@ -434,9 +644,41 @@ class LlmCommand(BaseCommand):
         if context_parts:
             self._cached_context_str = "\n".join(context_parts)
             self._cached_context_time = now
+            self._cached_context_breakdown = self._compute_context_breakdown(context_parts)
             return self._cached_context_str
 
         return ""
+
+    def _compute_context_breakdown(self, context_parts: list[str]) -> list[dict[str, Any]]:
+        """Compute per-section character count and estimated token count."""
+        section_names = [
+            ("Contacts:", "Contacts"),
+            ("Network stats", "Network stats"),
+            ("Mesh topology", "Mesh topology"),
+            ("Network:", "Network"),
+            ("Recent channel messages", "Channel messages"),
+            ("Moon:", "Moon"),
+            ("Sun:", "Sun"),
+            ("Weather", "Weather"),
+            ("Available Commands", "Commands"),
+            ("System:", "System"),
+        ]
+        breakdown = []
+        for part in context_parts:
+            name = "Other"
+            for prefix, label in section_names:
+                if part.startswith(prefix):
+                    name = label
+                    break
+            chars = len(part)
+            breakdown.append(
+                {
+                    "section": name,
+                    "chars": chars,
+                    "est_tokens": chars // 4,
+                }
+            )
+        return breakdown
 
     def _get_llama_model_info(self) -> str:
         """Get information about the running llama.cpp model.
@@ -449,15 +691,15 @@ class LlmCommand(BaseCommand):
             # Parse the endpoint URL and construct the models endpoint
             parsed = urlparse(self.endpoint)
             base_url = f"{parsed.scheme}://{parsed.netloc}"
-            models_url = urljoin(base_url, '/v1/models')
+            models_url = urljoin(base_url, "/v1/models")
 
             response = requests.get(models_url, timeout=2.0)
             if response.status_code == 200:
                 data = response.json()
-                if 'data' in data and len(data['data']) > 0:
+                if "data" in data and len(data["data"]) > 0:
                     # Try to get model from API first, then fall back to config
-                    model = data['data'][0]
-                    model_name = model.get('id', '')
+                    model = data["data"][0]
+                    model_name = model.get("id", "")
                     if model_name:
                         return model_name
 
@@ -495,7 +737,7 @@ class LlmCommand(BaseCommand):
                 "current": "temperature_2m,weather_code,wind_speed_10m",
                 "temperature_unit": "celsius",
                 "wind_speed_unit": "kmh",
-                "timezone": "auto"
+                "timezone": "auto",
             }
 
             response = requests.get(url, params=params, timeout=5)  # type: ignore[arg-type]
@@ -549,12 +791,114 @@ class LlmCommand(BaseCommand):
             if local_context:
                 result += f"\n[Local Context:\n{local_context}]"
 
+            # Add specific node neighbors if a known node is mentioned in the prompt
+            node_neighbors = self._get_prompt_node_neighbors(prompt)
+            if node_neighbors:
+                result += f"\n[Node neighbors: {node_neighbors}]"
+
+            # Add DB query capability
+            if self.llm_db_query_enabled:
+                pos_info = ""
+                if self._sender_position:
+                    lat, lon = self._sender_position
+                    pos_info = f"\nUser position: {lat:.5f}, {lon:.5f} (use for distance calculations)"
+                elif self.bot_latitude and self.bot_longitude:
+                    pos_info = f"\nBot position: {self.bot_latitude:.5f}, {self.bot_longitude:.5f} (use for distance calculations)"
+                result += (
+                    "\n\n[Database Query Capability]\n"
+                    "You can query the mesh database. To do so, respond with ONLY: [[SQL: SELECT ...]]\n"
+                    "Available tables:\n"
+                    "- complete_contact_tracking: name, public_key, role, city, country, last_heard, hop_count, snr, latitude, longitude\n"
+                    "- message_stats: timestamp(unix), sender_id, channel, content, is_dm, hops, snr, rssi\n"
+                    "- observed_paths: public_key, path_hex, path_length, observation_count, last_seen, snr, rssi\n"
+                    "- mesh_connections: from_prefix, to_prefix, observation_count, last_seen\n"
+                    "- neighbor_links: self_public_key, neighbor_public_key, last_snr, last_status, last_seen\n"
+                    "- daily_stats: date, public_key, advert_count\n"
+                    "Rules: SELECT only, LIMIT 20 max, last_heard is ISO datetime string, timestamp is unix int.\n"
+                    "IMPORTANT: Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0\n"
+                    f"Haversine formula: 6371*2*ASIN(SQRT(POWER(SIN(RADIANS(lat2-{(self._sender_position[0] if self._sender_position else self.bot_latitude or 48.85):.5f})/2),2)+COS(RADIANS({(self._sender_position[0] if self._sender_position else self.bot_latitude or 48.85):.5f})*COS(RADIANS(lat2))*POWER(SIN(RADIANS(lon2-{(self._sender_position[1] if self._sender_position else self.bot_longitude or 2.35):.5f})/2),2)))\n"
+                    f"{pos_info}\n"
+                    "If you can answer without querying, just answer normally."
+                )
+
             return result
         except Exception as e:
             self.logger.warning(f"Error injecting current time/context: {e}")
             return prompt
 
-    def _build_payload(self, prompt: str = "", history: list[dict[str, str]] | None = None, messages: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    def _get_sender_position(self, message: MeshMessage) -> None:
+        """Look up the sender's GPS position from the DB and store it."""
+        try:
+            sender_id = message.sender_id or ""
+            if not sender_id:
+                return
+            with self.bot.db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT latitude, longitude FROM complete_contact_tracking WHERE name = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 LIMIT 1",
+                    (sender_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    cursor.execute(
+                        "SELECT latitude, longitude FROM complete_contact_tracking WHERE public_key = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 LIMIT 1",
+                        (sender_id,),
+                    )
+                    row = cursor.fetchone()
+                if row:
+                    self._sender_position = (float(row[0]), float(row[1]))
+                    self.logger.debug(f"Sender position found: {self._sender_position}")
+                else:
+                    self.logger.debug(f"No position found for sender: {sender_id}")
+        except Exception as e:
+            self.logger.debug(f"Failed to get sender position: {e}")
+
+    def _get_prompt_node_neighbors(self, prompt: str) -> str:
+        """If the prompt mentions a known mesh node, return its neighbors."""
+        if not self.context_include_mesh_topology:
+            return ""
+        try:
+            prompt_lower = prompt.lower()
+            with self.bot.db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name, SUBSTR(public_key, 1, 4) as prefix "
+                    "FROM complete_contact_tracking "
+                    "WHERE role IN ('repeater', 'roomserver') AND name IS NOT NULL"
+                )
+                nodes = cursor.fetchall()
+                matched = []
+                for name, prefix in nodes:
+                    if name.lower() in prompt_lower or (len(prefix) >= 3 and prefix.lower() in prompt_lower):
+                        matched.append((name, prefix))
+                if not matched:
+                    return ""
+                parts = []
+                for name, prefix in matched[:3]:
+                    cursor.execute("SELECT DISTINCT to_prefix FROM mesh_connections WHERE from_prefix = ?", (prefix,))
+                    outgoing = [r[0] for r in cursor.fetchall()]
+                    cursor.execute("SELECT DISTINCT from_prefix FROM mesh_connections WHERE to_prefix = ?", (prefix,))
+                    incoming = [r[0] for r in cursor.fetchall()]
+                    all_nbs = list(set(outgoing + incoming) - {prefix})[:10]
+                    nb_names = []
+                    for np in all_nbs:
+                        cursor.execute(
+                            "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1", (np + "%",)
+                        )
+                        row = cursor.fetchone()
+                        nb_names.append(row[0] if row else np)
+                    parts.append(f"{name}: {', '.join(nb_names) if nb_names else 'no known links'}")
+                return " | ".join(parts)
+        except Exception as e:
+            self.logger.warning(f"Failed to get prompt node neighbors: {e}")
+            return ""
+
+    def _build_payload(
+        self,
+        prompt: str = "",
+        history: list[dict[str, str]] | None = None,
+        messages: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """Build the API payload for the LLM request.
 
         This method supports two modes:
@@ -571,7 +915,9 @@ class LlmCommand(BaseCommand):
         """
         # Validate that conflicting parameters aren't provided
         if messages is not None and (prompt or history):
-            self.logger.warning("_build_payload: messages parameter provided with prompt/history; ignoring prompt/history")
+            self.logger.warning(
+                "_build_payload: messages parameter provided with prompt/history; ignoring prompt/history"
+            )
 
         if messages is None:
             # Build messages from prompt and history
@@ -592,6 +938,35 @@ class LlmCommand(BaseCommand):
             payload["model"] = self.model
 
         return payload
+
+    def _extract_sql(self, content: str) -> str | None:
+        """Extract SQL query from LLM response if present."""
+        match = re.search(r"\[\[SQL:\s*(SELECT\s+.+?)\]\]", content, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip().rstrip(";")
+        return None
+
+    def _execute_sql(self, sql: str) -> str:
+        """Execute a read-only SQL query and return compact results."""
+        if not re.search(r"\bLIMIT\s+\d+", sql, re.IGNORECASE):
+            sql += " LIMIT 20"
+        sql = re.sub(r"\bLIMIT\s+\d+", "LIMIT 20", sql, flags=re.IGNORECASE)
+        try:
+            with self.bot.db_manager.connection() as conn:
+                conn.execute("PRAGMA query_only = ON")
+                cursor = conn.cursor()
+                cursor.execute(sql)
+                rows = cursor.fetchall()
+                if not rows:
+                    return "(no results)"
+                lines = []
+                for row in rows[:20]:
+                    parts = [str(v) for v in row if v is not None]
+                    lines.append(", ".join(parts))
+                return "\n".join(lines)
+        except Exception as e:
+            self.logger.warning(f"LLM SQL execution error: {e} | SQL: {sql[:200]}")
+            return f"(query error: {e})"
 
     def _clean_ai_response(self, content: str, max_length: int) -> str:
         cleaned = content or ""
@@ -651,7 +1026,7 @@ class LlmCommand(BaseCommand):
                     current_page = ""
                 else:
                     # Single word exceeds limit, truncate it
-                    pages.append(word[:self.chars_per_page - 3] + "...")
+                    pages.append(word[: self.chars_per_page - 3] + "...")
                     word_idx += 1
 
                 # Check if we've reached the maximum page count
@@ -662,7 +1037,7 @@ class LlmCommand(BaseCommand):
                         last_page = pages[-1]
                         marker = " [...]"
                         if len(last_page) + len(marker) > self.chars_per_page:
-                            pages[-1] = last_page[:self.chars_per_page - len(marker)].rstrip() + marker
+                            pages[-1] = last_page[: self.chars_per_page - len(marker)].rstrip() + marker
                         else:
                             pages[-1] = last_page + marker
                     return pages
@@ -690,6 +1065,11 @@ class LlmCommand(BaseCommand):
 
         user_key = self._user_key(message)
         history = self._get_context_history(user_key) if user_key else []
+
+        # Look up sender's GPS position for distance-based queries
+        self._sender_position = None
+        if self.llm_db_query_enabled:
+            self._get_sender_position(message)
 
         # Build the payload with current time and context injected in system prompt
         payload = self._build_payload(prompt=prompt, history=history)
@@ -724,6 +1104,37 @@ class LlmCommand(BaseCommand):
         except (ValueError, TypeError, IndexError, AttributeError, KeyError) as e:
             self.logger.warning(f"LLM command parse error: {e}")
             return await self.send_response(message, "LLM error: could not parse response.")
+
+        # Check if LLM wants to query the database
+        if self.llm_db_query_enabled:
+            sql = self._extract_sql(content)
+            if sql:
+                self.logger.info(f"LLM requested DB query: {sql}")
+                sql_results = await asyncio.to_thread(self._execute_sql, sql)
+                self.logger.debug(f"SQL results: {sql_results[:500]}")
+                # Second LLM call: format the results into a mesh-friendly answer
+                followup_prompt = (
+                    f"The query returned these results:\n{sql_results}\n\n"
+                    f"Answer the original question: {prompt}\n\n"
+                    "FORMAT RULES (mesh network, max 150 chars per message):\n"
+                    "- One item per line: 'name: X km' or 'name: value'\n"
+                    "- NEVER show raw coordinates (lat/lon), only distance with unit (km or m)\n"
+                    "- Max 5 items, no tables, no pipes\n"
+                    "- Total response under 400 chars"
+                )
+                followup_payload = self._build_payload(prompt=followup_prompt)
+                try:
+                    resp2 = await asyncio.to_thread(
+                        requests.post, self.endpoint, json=followup_payload, timeout=self.timeout_seconds
+                    )
+                    if resp2.status_code == 200:
+                        data2 = resp2.json()
+                        content = data2["choices"][0]["message"]["content"].strip()
+                        self.logger.debug(f"LLM followup response: {content[:200]}")
+                    else:
+                        content = sql_results
+                except requests.RequestException:
+                    content = sql_results
 
         # Clean the response first
         if self.pagination_enabled:

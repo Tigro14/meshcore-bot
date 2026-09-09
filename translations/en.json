@@ -83,6 +83,16 @@
       "repeaters",
       "rp"
     ],
+    "near": [
+      "near",
+      "n",
+      "proche"
+    ],
+    "ask": [
+      "ask",
+      "query",
+      "sql"
+    ],
     "solarforecast": [
       "sf",
       "solarforecast"
@@ -477,6 +487,14 @@
     "repeater": {
       "description": "Manage repeater contacts and purging operations (DM only)",
       "admin_only": "Repeater command requires admin access"
+    },
+    "near": {
+      "description": "Nearest stations by GPS distance (usage: near [count] [role] [prefix])",
+      "usage": "near [count] [role] [prefix] - e.g. near 10, near 5 sensor, near 10 E1F0"
+    },
+    "ask": {
+      "description": "Query the mesh database with natural language (contacts, messages, paths, stats)",
+      "usage": "ask <question> - e.g. ask top 10 senders 30d, ask how many repeaters 7d, ask longest path"
     },
     "airplanes": {
       "description": "Get aircraft overhead (usage: airplanes [location] [options] or overhead [lat,lon])",
