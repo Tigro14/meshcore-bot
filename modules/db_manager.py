@@ -23,6 +23,35 @@ from .db_retention import (
 from .security_utils import VALID_JOURNAL_MODES
 
 
+_READONLY_FORBIDDEN_KEYWORDS = re.compile(
+    r"\b(DROP|DELETE|UPDATE|INSERT|CREATE|ALTER|REPLACE|"
+    r"ATTACH|DETACH|PRAGMA|VACUUM|REINDEX|GRANT|REVOKE|"
+    r"BEGIN|COMMIT|ROLLBACK|SAVEPOINT)\b",
+    re.IGNORECASE,
+)
+
+
+def validate_readonly_sql(sql: str) -> tuple[bool, str]:
+    """Validate that an SQL query is a read-only SELECT.
+
+    Returns (True, "") if valid, (False, reason) if rejected.
+    """
+    cleaned = re.sub(r"--[^\n]*", " ", sql)
+    cleaned = re.sub(r"/\*.*?\*/", " ", cleaned, flags=re.DOTALL)
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return False, "empty query"
+    if not re.match(r"^(SELECT|WITH)\b", cleaned, re.IGNORECASE):
+        return False, f"must start with SELECT or WITH, got: {cleaned[:30]}"
+    body = cleaned.rstrip(";")
+    if ";" in body:
+        return False, "multiple statements not allowed"
+    m = _READONLY_FORBIDDEN_KEYWORDS.search(cleaned)
+    if m:
+        return False, f"forbidden keyword: {m.group(1).upper()}"
+    return True, ""
+
+
 def _adapt_sqlite_date(val: date) -> str:
     return val.isoformat()
 

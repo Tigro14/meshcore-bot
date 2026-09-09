@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
+from ..db_manager import validate_readonly_sql
 from ..models import MeshMessage
 from ..solar_conditions import get_moon, get_sun
 from ..utils import geocode_city_sync, get_cpu_temperature, get_cpu_usage, get_ram_usage
@@ -948,6 +949,9 @@ class LlmCommand(BaseCommand):
 
     def _execute_sql(self, sql: str) -> str:
         """Execute a read-only SQL query and return compact results."""
+        ok, reason = validate_readonly_sql(sql)
+        if not ok:
+            return f"(rejected: {reason})"
         if not re.search(r"\bLIMIT\s+\d+", sql, re.IGNORECASE):
             sql += " LIMIT 20"
         sql = re.sub(r"\bLIMIT\s+\d+", "LIMIT 20", sql, flags=re.IGNORECASE)
