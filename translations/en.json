@@ -83,6 +83,11 @@
       "repeaters",
       "rp"
     ],
+    "near": [
+      "near",
+      "n",
+      "proche"
+    ],
     "solarforecast": [
       "sf",
       "solarforecast"
@@ -477,6 +482,10 @@
     "repeater": {
       "description": "Manage repeater contacts and purging operations (DM only)",
       "admin_only": "Repeater command requires admin access"
+    },
+    "near": {
+      "description": "Nearest stations by GPS distance (usage: near [count] [role] [prefix])",
+      "usage": "near [count] [role] [prefix] - e.g. near 10, near 5 sensor, near 10 E1F0"
     },
     "airplanes": {
       "description": "Get aircraft overhead (usage: airplanes [location] [options] or overhead [lat,lon])",
