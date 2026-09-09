@@ -336,11 +336,12 @@ class BotDataViewer:
         """
         from logging.handlers import RotatingFileHandler
 
-        # Read configured log level from [Logging] section
-        configured_level_name = 'DEBUG'
-        if getattr(self, 'config', None) is not None and self.config.has_section('Logging'):
-            configured_level_name = self.config.get('Logging', 'log_level', fallback='DEBUG').strip().upper() or 'DEBUG'
-        configured_level = getattr(logging, configured_level_name, logging.DEBUG)
+        # Determine log level from [Web_Viewer] debug setting
+        # debug=true -> DEBUG, debug=false -> INFO
+        web_debug = False
+        if getattr(self, 'config', None) is not None and self.config.has_section('Web_Viewer'):
+            web_debug = self.config.getboolean('Web_Viewer', 'debug', fallback=False)
+        configured_level = logging.DEBUG if web_debug else logging.INFO
 
         # Get or create logger (don't use basicConfig as it may conflict with existing logging)
         self.logger = logging.getLogger('modern_web_viewer')
@@ -376,7 +377,7 @@ class BotDataViewer:
 
         # Create console handler
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(max(configured_level, logging.INFO))
+        console_handler.setLevel(configured_level)
         console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
