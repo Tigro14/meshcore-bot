@@ -116,16 +116,27 @@ class NearCommand(BaseCommand):
             label = f" {role}" if role else " répéteur"
             return await self.send_response(message, f"Aucun{label} avec GPS trouvé.")
 
+        max_length = self.get_max_message_length(message)
+        # Calculate max name length so all lines fit in max_length
+        # Each line: "name: X.X km" or "name: XXX m" + newline
+        # Budget: max_length - newlines - distance parts
+        n = len(rows)
+        newline_cost = n - 1
+        # Worst case distance: ": XXX m" = 7 chars, ": X.X km" = 8 chars
+        dist_cost = n * 8
+        name_budget = (max_length - newline_cost - dist_cost) // n
+        name_budget = max(5, name_budget)
+
         lines = []
         for name, dist in rows:
+            display_name = name[:name_budget] if len(name) > name_budget else name
             if dist < 1.0:
-                lines.append(f"{name}: {dist * 1000:.0f} m")
+                lines.append(f"{display_name}: {dist * 1000:.0f} m")
             else:
-                lines.append(f"{name}: {dist:.1f} km")
+                lines.append(f"{display_name}: {dist:.1f} km")
 
         response = "\n".join(lines)
-        max_length = self.get_max_message_length(message)
         if len(response) > max_length:
-            response = response[: max_length - 1] + "/"
+            response = response[:max_length]
 
         return await self.send_response(message, response)
