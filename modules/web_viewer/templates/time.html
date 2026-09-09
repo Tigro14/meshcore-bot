@@ -54,21 +54,31 @@
                 <i class="fas fa-info-circle"></i> Configuration
             </div>
             <div class="card-body">
+                <div class="alert alert-light border small mb-3">
+                    <i class="fas fa-info-circle me-1"></i>
+                    <strong>FR:</strong> Cette fonction envoie la commande <code id="desc-command">clock sync admin</code> par DM aux nœuds ci-dessus pour synchroniser leur horloge.<br>
+                    La commande n'est envoyée <strong>que si le drift constaté dépasse le seuil max</strong> indiqué en bas de page (sinon le sync est sauté).<br>
+                    Pour que cela fonctionne, le nœud cible doit avoir ajouté le public key du bot dans sa liste d'<strong>admins</strong> :<br>
+                    <code class="user-select-all" id="desc-bot-pubkey">...</code><br><br>
+                    <strong>EN:</strong> This feature sends <code id="desc-command-en">clock sync admin</code> via DM to each listed node to sync its clock.<br>
+                    The command is only sent <strong>if the observed drift exceeds the max threshold</strong> shown below (otherwise the sync is skipped).<br>
+                    For this to work, the target node must have added the bot's public key to its <strong>admins</strong> list:<br>
+                    <code class="user-select-all" id="desc-bot-pubkey-en">...</code>
+                </div>
                 <div class="row">
                     <div class="col-md-6">
                         <h6>Clock_Sync_Admin Settings:</h6>
                         <ul class="mb-0">
                             <li><strong>Enabled:</strong> <span id="config-enabled">-</span></li>
-                            <li><strong>Schedule (local time):</strong> <span id="config-schedule">-</span></li>
+                            <li><strong>Schedule (cron):</strong> <code id="config-schedule">-</code></li>
                             <li><strong>Command Payload:</strong> <code id="config-payload">-</code></li>
+                            <li><strong>Min Sync Drift:</strong> <span id="config-min-drift">-</span> s</li>
                         </ul>
                     </div>
                     <div class="col-md-6">
                         <h6>Dashboard Settings:</h6>
                         <ul class="mb-0">
-                            <li><strong>Hop Radius:</strong> <span id="config-hop-radius">-</span> hops</li>
-                            <li><strong>Check Window:</strong> <span id="config-check-window">-</span> hours</li>
-                            <li><strong>Max Drift:</strong> <span id="config-max-drift">-</span> seconds</li>
+                            <li><strong>Max Clock Drift:</strong> <span id="config-max-drift">-</span> seconds</li>
                         </ul>
                     </div>
                 </div>
@@ -235,11 +245,32 @@
                     this.updateClockDrift(stats.clock_sync_dashboard);
                 }
 
-                // Load targets from DB
+                // Load targets + config from DB
                 const targetsResponse = await fetch('/api/clock-sync-targets-admin');
                 if (targetsResponse.ok) {
                     const targetsData = await targetsResponse.json();
-                    this.updateTargets(targetsData);
+                    this.updateTargets(targetsData.targets || []);
+                    if (targetsData.config) {
+                        const cfg = targetsData.config;
+                        this.updateElement('config-enabled', cfg.enabled ? 'Yes' : 'No');
+                        this.updateElement('config-schedule', cfg.schedule || '0 3 * * *');
+                        this.updateElement('config-payload', cfg.command_payload || 'clock sync admin');
+                        this.updateElement('config-min-drift', cfg.min_sync_drift ?? 60);
+                        this.updateElement('config-max-drift', cfg.max_clock_drift_seconds ?? 300);
+                        // Fill description fields
+                        const cmd = cfg.command_payload || 'clock sync admin';
+                        const pubkey = cfg.bot_public_key || '...';
+                        this.updateElement('desc-command', cmd);
+                        this.updateElement('desc-command-en', cmd);
+                        this.updateElement('desc-bot-pubkey', pubkey);
+                        this.updateElement('desc-bot-pubkey-en', pubkey);
+                        // Update enabled badge
+                        const badge = document.getElementById('clock-sync-enabled-badge');
+                        if (badge) {
+                            badge.textContent = cfg.enabled ? 'Enabled' : 'Disabled';
+                            badge.className = cfg.enabled ? 'badge bg-success' : 'badge bg-secondary';
+                        }
+                    }
                 }
             } catch (error) {
                 console.error('Error loading data:', error);
@@ -264,21 +295,48 @@
                 return;
             }
 
-            let html = '<table class="table table-sm align-middle mb-0"><tbody>';
+            let html = '<table class="table table-sm align-middle mb-0">';
+            html += '<thead><tr><th>Target</th><th>Status</th><th>Last Sync</th><th class="text-end">Actions</th></tr></thead><tbody>';
             targets.forEach(t => {
                 const id = t.id;
-                const name = this.escapeHtml(t.target || t.name || 'unknown');
+                const displayTarget = this.escapeHtml(t.target || 'unknown');
+                const contactName = t.contact_name ? this.escapeHtml(t.contact_name) : '';
                 const enabled = t.enabled ? 1 : 0;
                 const toggleClass = enabled ? 'btn-outline-success' : 'btn-outline-secondary';
                 const toggleIcon = enabled ? 'fa-check' : 'fa-pause';
+                const toggleTitle = enabled ? 'Click to disable' : 'Click to enable';
+
+                // Sync status
+                let syncBadge = '<span class="badge bg-secondary">No data</span>';
+                if (t.last_sync_at) {
+                    if (t.last_sync_success) {
+                        syncBadge = '<span class="badge bg-success"><i class="fas fa-check"></i> OK</span>';
+                    } else {
+                        syncBadge = `<span class="badge bg-danger" title="${this.escapeHtml(t.last_sync_error || '')}"><i class="fas fa-times"></i> Fail</span>`;
+                    }
+                }
+
+                // Last sync time
+                let lastSync = '-';
+                if (t.last_sync_at) {
+                    lastSync = this.formatTimestamp(t.last_sync_at);
+                }
+
+                const deleteTitle = `Delete target ${displayTarget}`;
+
                 html += `<tr>
-                    <td><code>${name}</code></td>
+                    <td>
+                        <strong>${contactName || displayTarget}</strong>
+                        ${contactName ? `<br><code class="small">${displayTarget.substring(0, 16)}...</code>` : ''}
+                    </td>
+                    <td>${syncBadge}</td>
+                    <td class="text-muted small">${lastSync}</td>
                     <td class="text-end">
                         <div class="d-flex gap-1 justify-content-end">
-                            <button class="btn btn-sm ${toggleClass}" onclick="document.querySelector('#TimeViewer').toggleTarget(${id}, ${enabled})">
+                            <button class="btn btn-sm ${toggleClass}" title="${toggleTitle}" onclick="document.querySelector('#TimeViewer').toggleTarget(${id}, ${enabled})">
                                 <i class="fas ${toggleIcon}"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="document.querySelector('#TimeViewer').promptDelete(${id}, '${name.replace(/'/g, "\\'")}')">
+                            <button class="btn btn-sm btn-outline-danger" title="${deleteTitle}" onclick="document.querySelector('#TimeViewer').promptDelete(${id}, '${(contactName || displayTarget).replace(/'/g, "\\'")}')">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -287,6 +345,17 @@
             });
             html += '</tbody></table>';
             container.innerHTML = html;
+        }
+
+        formatTimestamp(ts) {
+            if (!ts) return '-';
+            const date = new Date(ts.includes('T') || ts.includes(' ') ? ts : ts * 1000);
+            const now = new Date();
+            const diff = Math.floor((now - date) / 1000);
+            if (diff < 60) return `${diff}s ago`;
+            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+            return `${Math.floor(diff / 86400)}d ago`;
         }
 
         async toggleTarget(id, currentEnabled) {
