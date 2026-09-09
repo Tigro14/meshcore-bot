@@ -384,6 +384,9 @@ class BotDataViewer:
         # Prevent propagation to root logger to avoid duplicate messages
         self.logger.propagate = False
 
+        # Suppress werkzeug request logging (noisy in journal)
+        logging.getLogger('werkzeug').setLevel(logging.WARNING)
+
     def _config_int(self, section: str, option: str, fallback: int) -> int:
         """Read an int config value, falling back on a missing or malformed entry."""
         try:
