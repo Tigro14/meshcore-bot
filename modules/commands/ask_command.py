@@ -41,12 +41,16 @@ class AskCommand(BaseCommand):
     cooldown_seconds = 30
     category = "special"
 
-    short_description = "Query the mesh database with natural language"
-    usage = "ask <question>"
+    short_description = "Query the mesh database with natural language (contacts, messages, paths, stats)"
+    usage = "ask <question about the mesh>"
     examples = [
-        "ask how many repeaters are there",
-        "ask top 5 most active senders last 7 days",
-        "ask who are the neighbors of Cergy",
+        "ask combien de répéteurs actifs sur 7 jours",
+        "ask top 10 expéditeurs sur 30 jours",
+        "ask quel est le chemin le plus long observé",
+        "ask évolution des contacts uniques sur 30 jours",
+        "ask les nœuds avec le meilleur SNR",
+        "ask combien de messages par jour cette semaine",
+        "ask quels pays sont représentés dans le mesh",
     ]
 
     def __init__(self, bot: Any):
@@ -187,10 +191,12 @@ class AskCommand(BaseCommand):
             f"The query returned these results:\n{sql_results}\n\n"
             f"Answer the question: {question}\n\n"
             "FORMAT RULES (mesh network, max 150 chars per message):\n"
-            "- One item per line: 'name: X km' or 'name: value'\n"
-            "- NEVER show raw coordinates (lat/lon), only distance with unit (km or m)\n"
-            "- Max 5 items, no tables, no pipes\n"
-            "- Total response under 400 chars"
+            "- One item per line: 'name: value unit'\n"
+            "- Use the CORRECT unit for the data: km/m for distance, messages for counts, days/hours for time, % for percentages\n"
+            "- NEVER show raw coordinates (lat/lon)\n"
+            "- Max 10 items, no tables, no pipes\n"
+            "- Total response under 500 chars\n"
+            "- If the data is a single aggregate (count, total), just answer with the number and its unit"
         )
         payload = {
             "messages": [

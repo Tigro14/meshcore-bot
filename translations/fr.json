@@ -81,6 +81,11 @@
       "n",
       "proche"
     ],
+    "ask": [
+      "ask",
+      "query",
+      "sql"
+    ],
     "solarforecast": [
       "sf",
       "solarforecast"
@@ -391,6 +396,10 @@
     "near": {
       "description": "Stations les plus proches par distance GPS (usage: near [nb] [rôle] [prefix])",
       "usage": "near [nb] [rôle] [prefix] - Ex: near 10, near 5 sensor, near 10 E1F0"
+    },
+    "ask": {
+      "description": "Query la DB du mesh en langage naturel (contacts, messages, chemins, stats)",
+      "usage": "ask <question> - Ex: ask top 10 expéditeurs 30j, ask combien de répéteurs 7j, ask chemin le plus long"
     },
     "aqi": {
       "description": "Indice qualité air pour lieu (usage: aqi paris, aqi lyon, aqi vancouver canada, aqi 47.6,-122.3, ou aqi help)",
