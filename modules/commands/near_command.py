@@ -33,8 +33,8 @@ class NearCommand(BaseCommand):
             return False
         return super().can_execute(message)
 
-    def _parse_args(self, message: MeshMessage) -> tuple[int, str | None]:
-        """Parse optional count and role from the message."""
+    def _parse_args(self, message: MeshMessage) -> tuple[int, str | None, str | None]:
+        """Parse optional count, role, and target node prefix from the message."""
         prefix = (self.bot.config.get("Bot", "command_prefix", fallback="") or "").strip()
         content = message.content or ""
         keywords_alt = "|".join(re.escape(k) for k in [self.name] + self.keywords)
@@ -47,13 +47,16 @@ class NearCommand(BaseCommand):
 
         count = 5
         role = None
+        target_prefix = None
         tokens = rest.split()
         for t in tokens:
             if t.isdigit():
                 count = max(1, min(20, int(t)))
             elif t in ("repeater", "sensor", "companion", "roomserver"):
                 role = t
-        return count, role
+            elif re.match(r"^[0-9A-Fa-f]{4}$", t):
+                target_prefix = t.upper()
+        return count, role, target_prefix
 
     def _get_sender_position(self, message: MeshMessage) -> tuple[float, float] | None:
         """Look up the sender's GPS position."""
@@ -80,12 +83,34 @@ class NearCommand(BaseCommand):
             pass
         return None
 
-    async def execute(self, message: MeshMessage) -> bool:
-        count, role = self._parse_args(message)
+    def _get_node_position_by_prefix(self, node_prefix: str) -> tuple[float, float] | None:
+        """Look up a node's GPS position by its 4-char key prefix."""
+        try:
+            with self.bot.db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT latitude, longitude FROM complete_contact_tracking WHERE public_key LIKE ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 LIMIT 1",
+                    (f"{node_prefix.lower()}%",),
+                )
+                row = cursor.fetchone()
+                if row:
+                    return (float(row[0]), float(row[1]))
+        except Exception:
+            pass
+        return None
 
-        pos = self._get_sender_position(message)
-        if not pos:
-            return await self.send_response(message, "Position GPS introuvable pour calculer les distances.")
+    async def execute(self, message: MeshMessage) -> bool:
+        count, role, target_prefix = self._parse_args(message)
+
+        pos = None
+        if target_prefix:
+            pos = self._get_node_position_by_prefix(target_prefix)
+            if not pos:
+                return await self.send_response(message, f"Node {target_prefix} sans GPS trouvé.")
+        else:
+            pos = self._get_sender_position(message)
+            if not pos:
+                return await self.send_response(message, "Position GPS introuvable pour calculer les distances.")
 
         lat, lon = pos
         limit = count
