@@ -270,9 +270,22 @@ class AskCommand(BaseCommand):
         max_length = self.get_max_message_length(message)
         if len(text) <= max_length:
             return await self.send_response(message, text)
-        pages = [text[i:i + max_length] for i in range(0, len(text), max_length)]
+        lines = text.split("\n")
+        pages: list[str] = []
+        current = ""
+        for line in lines:
+            candidate = f"{current}\n{line}" if current else line
+            if len(candidate) <= max_length:
+                current = candidate
+            else:
+                if current:
+                    pages.append(current)
+                current = line
+        if current:
+            pages.append(current)
+        total = len(pages)
         for i, page in enumerate(pages):
-            suffix = f" ({i+1}/{len(pages)})" if len(pages) > 1 else ""
+            suffix = f" ({i+1}/{total})" if total > 1 else ""
             await self.send_response(message, page + suffix)
             await asyncio.sleep(0.3)
         return True
