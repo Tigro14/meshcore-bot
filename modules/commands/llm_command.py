@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
+from ..db_manager import validate_readonly_sql
 from ..models import MeshMessage
 from ..solar_conditions import get_moon, get_sun
 from ..utils import geocode_city_sync, get_cpu_temperature, get_cpu_usage, get_ram_usage

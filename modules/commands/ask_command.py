@@ -10,6 +10,7 @@ from typing import Any
 
 import requests
 
+from ..db_manager import validate_readonly_sql
 from ..models import MeshMessage
 from .base_command import BaseCommand
 
@@ -161,8 +162,9 @@ class AskCommand(BaseCommand):
 
     def _execute_sql(self, sql: str) -> str:
         """Execute a read-only SQL query and return compact results."""
-        if not sql.strip().upper().startswith("SELECT"):
-            return "(not a SELECT query)"
+        ok, reason = validate_readonly_sql(sql)
+        if not ok:
+            return f"(rejected: {reason})"
         if not re.search(r"\bLIMIT\s+\d+", sql, re.IGNORECASE):
             sql += " LIMIT 20"
         sql = re.sub(r"\bLIMIT\s+\d+", "LIMIT 20", sql, flags=re.IGNORECASE)
