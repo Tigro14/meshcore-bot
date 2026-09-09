@@ -636,7 +636,7 @@
 {% endblock %}
 
 {% block extra_js %}
-        <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
         <script nonce="{{ g.csp_nonce }}">
 // IS_ADMIN comes from base.html (display hint only; mutations are enforced
 // server-side via authenticated_admin). Redeclaring it here is a SyntaxError.
@@ -2240,12 +2240,13 @@ class ModernContactsManager {
         // Generate QR code for the public key
         const qrContainer = document.getElementById('qrCodeContainer');
         if (qrContainer && publicKey) {
-            QRCode.toCanvas(qrContainer, publicKey, {
+            new QRCode(qrContainer, {
+                text: publicKey,
                 width: 160,
-                margin: 2,
-                color: { dark: '#000000', light: '#ffffff' }
-            }, function(err) {
-                if (err) console.error('QR generation error:', err);
+                height: 160,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M
             });
         }
     }
