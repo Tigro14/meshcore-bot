@@ -2197,16 +2197,16 @@ class BotDataViewer:
                         except Exception:
                             pass
                         targets.append(t)
-                # Enrich with clock drift (same as /contacts)
-                try:
-                    drift_samples = self._get_latest_clock_drift_samples(cursor)
-                    for t in targets:
-                        name = t.get('contact_name') or t['target']
-                        sample = drift_samples.get(name)
-                        if sample:
-                            t['clock_drift'] = sample.get('drift')
-                except Exception:
-                    pass
+                    # Enrich with clock drift (same as /contacts)
+                    try:
+                        drift_samples = self._get_latest_clock_drift_samples(cursor)
+                        for t in targets:
+                            name = t.get('contact_name') or t['target']
+                            sample = drift_samples.get(name)
+                            if sample:
+                                t['clock_drift'] = sample.get('drift')
+                    except Exception:
+                        pass
                 # Include config info + bot public key
                 config_info = {
                     'enabled': self.config.getboolean('Clock_Sync_Admin', 'enabled', fallback=False),
