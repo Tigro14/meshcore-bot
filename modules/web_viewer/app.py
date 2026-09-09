@@ -2197,6 +2197,16 @@ class BotDataViewer:
                         except Exception:
                             pass
                         targets.append(t)
+                # Enrich with clock drift (same as /contacts)
+                try:
+                    drift_samples = self._get_latest_clock_drift_samples(cursor)
+                    for t in targets:
+                        name = t.get('contact_name') or t['target']
+                        sample = drift_samples.get(name)
+                        if sample:
+                            t['clock_drift'] = sample.get('drift')
+                except Exception:
+                    pass
                 # Include config info + bot public key
                 config_info = {
                     'enabled': self.config.getboolean('Clock_Sync_Admin', 'enabled', fallback=False),
@@ -2205,16 +2215,21 @@ class BotDataViewer:
                     'min_sync_drift': self.config.getint('Clock_Sync_Admin', 'min_sync_drift', fallback=60),
                     'max_clock_drift_seconds': self.config.getint('Clock_Sync_Admin', 'dashboard_max_clock_drift_seconds', fallback=300),
                 }
-                try:
-                    cursor2 = conn.cursor()
-                    cursor2.execute(
-                        "SELECT public_key FROM complete_contact_tracking WHERE is_currently_tracked=1 AND hop_count=0 LIMIT 1"
-                    )
-                    bot_row = cursor2.fetchone()
-                    if bot_row:
-                        config_info['bot_public_key'] = bot_row[0]
-                except Exception:
-                    pass
+                # Bot public key: config first, then DB fallback
+                bot_key = self.config.get('Clock_Sync_Admin', 'bot_public_key', fallback='')
+                if not bot_key:
+                    try:
+                        cursor2 = conn.cursor()
+                        cursor2.execute(
+                            "SELECT public_key FROM complete_contact_tracking WHERE name LIKE '%Bot%' LIMIT 1"
+                        )
+                        bot_row = cursor2.fetchone()
+                        if bot_row:
+                            bot_key = bot_row[0]
+                    except Exception:
+                        pass
+                if bot_key:
+                    config_info['bot_public_key'] = bot_key
                 return jsonify({'targets': targets, 'config': config_info})
             except Exception as e:
                 self.logger.error(f"Error listing clock sync targets: {e}")
@@ -2241,6 +2256,34 @@ class BotDataViewer:
                 return jsonify({'error': f'Target "{target}" already exists'}), 409
             except Exception as e:
                 self.logger.error(f"Error adding clock sync target: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/clock-sync-targets-admin/<int:target_id>/history', methods=['GET'])
+        def api_clock_sync_targets_admin_history(target_id):
+            """Get last 5 clock sync interactions for a target"""
+            try:
+                with self._with_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT target FROM clock_sync_targets WHERE id = ?",
+                        (target_id,),
+                    )
+                    row = cursor.fetchone()
+                    if not row:
+                        return jsonify({'error': 'Target not found'}), 404
+                    target_key = row[0]
+                    cursor.execute(
+                        "SELECT success, error_message, sent_at FROM clock_sync_admin_log WHERE public_key = ? OR target_name = ? ORDER BY sent_at DESC LIMIT 5",
+                        (target_key, target_key),
+                    )
+                    logs = cursor.fetchall()
+                    history = [
+                        {'success': bool(l[0]), 'error': l[1], 'at': l[2]}
+                        for l in logs if l
+                    ]
+                return jsonify({'history': history})
+            except Exception as e:
+                self.logger.error(f"Error getting clock sync history: {e}")
                 return jsonify({'error': str(e)}), 500
 
         @self.app.route('/api/clock-sync-targets-admin/<int:target_id>', methods=['PUT'])
