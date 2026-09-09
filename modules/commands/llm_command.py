@@ -163,7 +163,7 @@ class LlmCommand(BaseCommand):
             "Llm_Command", "context_include_system_metrics", fallback=True, value_type="bool"
         )
         self.llm_db_query_enabled = self.get_config_value(
-            "Llm_Command", "db_query_enabled", fallback=True, value_type="bool"
+            "Llm_Command", "db_query_enabled", fallback=False, value_type="bool"
         )
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
