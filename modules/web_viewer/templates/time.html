@@ -26,11 +26,27 @@
                     <i class="fas fa-info-circle me-1"></i>
                     <strong>FR:</strong> Cette fonction envoie la commande <code id="desc-command">clock sync admin</code> par DM aux nœuds ci-dessous pour synchroniser leur horloge.<br>
                     La commande n'est envoyée <strong>que si le drift constaté dépasse le seuil max</strong> indiqué plus bas (sinon le sync est sauté).<br>
-                    Pour que cela fonctionne, le nœud cible doit avoir ajouté le public key du bot dans sa liste d'<strong>admins</strong> :<br>
+                    Pour que cela fonctionne, le nœud cible doit avoir ajouté le bot dans sa liste d'<strong>admins</strong>.<br><br>
+                    <strong>Méthode Android (la plus simple) :</strong><br>
+                    1. Ouvrez l'app Meshtastic sur le nœud cible<br>
+                    2. Allez dans <strong>Admin → Contrôle d'accès</strong><br>
+                    3. Appuyez sur le bouton <strong>"+"</strong> pour ajouter un accès<br>
+                    4. Cherchez et sélectionnez <strong id="desc-bot-name">...</strong> dans les contacts<br>
+                    5. Réglez le niveau sur <strong>Admin</strong><br>
+                    6. Validez avec la <strong>coche</strong> en haut à droite<br><br>
+                    <strong>Alternative (pubkey) :</strong> Ajouter manuellement la public key du bot :<br>
                     <code class="user-select-all" id="desc-bot-pubkey">...</code><br><br>
                     <strong>EN:</strong> This feature sends <code id="desc-command-en">clock sync admin</code> via DM to each listed node to sync its clock.<br>
                     The command is only sent <strong>if the observed drift exceeds the max threshold</strong> shown below (otherwise the sync is skipped).<br>
-                    For this to work, the target node must have added the bot's public key to its <strong>admins</strong> list:<br>
+                    For this to work, the target node must have added the bot to its <strong>admins</strong> list.<br><br>
+                    <strong>Android method (easiest):</strong><br>
+                    1. Open the Meshtastic app on the target node<br>
+                    2. Go to <strong>Admin → Access Control</strong><br>
+                    3. Tap the <strong>"+"</strong> button to add access<br>
+                    4. Search and select <strong id="desc-bot-name-en">...</strong> from contacts<br>
+                    5. Set level to <strong>Admin</strong><br>
+                    6. Confirm with the <strong>checkmark</strong> in the top right<br><br>
+                    <strong>Alternative (pubkey):</strong> Manually add the bot's public key:<br>
                     <code class="user-select-all" id="desc-bot-pubkey-en">...</code>
                 </div>
                 <div class="row">
@@ -312,10 +328,13 @@
                         // Fill description fields
                         const cmd = cfg.command_payload || 'clock sync admin';
                         const pubkey = cfg.bot_public_key || '...';
+                        const botName = cfg.bot_name || 'MeshCore Bot';
                         this.updateElement('desc-command', cmd);
                         this.updateElement('desc-command-en', cmd);
                         this.updateElement('desc-bot-pubkey', pubkey);
                         this.updateElement('desc-bot-pubkey-en', pubkey);
+                        this.updateElement('desc-bot-name', botName);
+                        this.updateElement('desc-bot-name-en', botName);
                         // Update enabled badge
                         const badge = document.getElementById('clock-sync-enabled-badge');
                         if (badge) {

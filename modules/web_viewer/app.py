@@ -2211,13 +2211,14 @@ class BotDataViewer:
                                 t['clock_drift'] = sample.get('drift')
                     except Exception:
                         pass
-                # Include config info + bot public key
+                # Include config info + bot public key + bot name
                 config_info = {
                     'enabled': self.config.getboolean('Clock_Sync_Admin', 'enabled', fallback=False),
                     'schedule': self.config.get('Clock_Sync_Admin', 'schedule', fallback='0 3 * * *'),
                     'command_payload': self.config.get('Clock_Sync_Admin', 'command_payload', fallback='clock sync admin'),
                     'min_sync_drift': self.config.getint('Clock_Sync_Admin', 'min_sync_drift', fallback=60),
                     'max_clock_drift_seconds': self.config.getint('Clock_Sync_Admin', 'dashboard_max_clock_drift_seconds', fallback=300),
+                    'bot_name': (self.config.get('Bot', 'bot_name', fallback='MeshCore Bot') or '').strip() or 'MeshCore Bot',
                 }
                 # Bot public key: config first, then DB fallback
                 bot_key = self.config.get('Clock_Sync_Admin', 'bot_public_key', fallback='')
