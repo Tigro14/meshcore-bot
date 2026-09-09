@@ -70,6 +70,7 @@ class AskCommand(BaseCommand):
         self.max_tokens = max(
             8, min(500, self.get_config_value("Llm_Command", "max_tokens", fallback=200, value_type="int"))
         )
+        self.model = self.get_config_value("Llm_Command", "model", fallback="", value_type="str")
 
     def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
         if not self.ask_enabled:
@@ -132,7 +133,7 @@ class AskCommand(BaseCommand):
             "No explanations, no markdown, just the SQL. "
             "Use LIMIT 20. Read-only. " + DB_SCHEMA + haversine + pos_info
         )
-        payload = {
+        payload: dict[str, Any] = {
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question},
@@ -141,6 +142,8 @@ class AskCommand(BaseCommand):
             "temperature": 0.1,
             "top_p": 0.9,
         }
+        if self.model:
+            payload["model"] = self.model
         try:
             response = requests.post(self.endpoint, json=payload, timeout=self.timeout_seconds)
             if response.status_code != 200:
@@ -200,7 +203,7 @@ class AskCommand(BaseCommand):
             "- Total response under 500 chars\n"
             "- If the data is a single aggregate (count, total), just answer with the number and its unit"
         )
-        payload = {
+        payload: dict[str, Any] = {
             "messages": [
                 {
                     "role": "system",
@@ -212,6 +215,8 @@ class AskCommand(BaseCommand):
             "temperature": 0.2,
             "top_p": 0.9,
         }
+        if self.model:
+            payload["model"] = self.model
         try:
             response = requests.post(self.endpoint, json=payload, timeout=self.timeout_seconds)
             if response.status_code == 200:
