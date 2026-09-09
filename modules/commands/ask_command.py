@@ -21,13 +21,13 @@ Tables:
 - mesh_connections: from_prefix, to_prefix, from_public_key, to_public_key, observation_count, last_seen, geographic_distance
 - neighbor_links: self_public_key, neighbor_public_key, last_snr, best_snr, last_status, last_seen
 - daily_stats: date, public_key, advert_count
-- packet_stream: timestamp, type, data(JSON)
 
 Notes:
 - last_heard is a datetime string (ISO format)
 - timestamp in message_stats is Unix epoch (integer)
 - Use LIMIT 20 max
 - Read-only: SELECT only
+- Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0
 """
 
 
@@ -82,13 +82,50 @@ class AskCommand(BaseCommand):
         match = pattern.match(content)
         return match.group(1).strip() if match else None
 
-    def _generate_sql(self, question: str) -> str | None:
+    def _get_sender_position(self, message: MeshMessage) -> tuple[float, float] | None:
+        """Look up the sender's GPS position from the DB."""
+        sender_id = message.sender_id or ""
+        if not sender_id:
+            return None
+        try:
+            with self.bot.db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT latitude, longitude FROM complete_contact_tracking WHERE name = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 LIMIT 1",
+                    (sender_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    cursor.execute(
+                        "SELECT latitude, longitude FROM complete_contact_tracking WHERE public_key = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 LIMIT 1",
+                        (sender_id,),
+                    )
+                    row = cursor.fetchone()
+                if row:
+                    return (float(row[0]), float(row[1]))
+        except Exception:
+            pass
+        return None
+
+    def _generate_sql(self, question: str, sender_pos: tuple[float, float] | None) -> str | None:
         """Ask the LLM to generate a SQL query for the question."""
+        pos_info = ""
+        haversine = ""
+        if sender_pos:
+            lat, lon = sender_pos
+            pos_info = f"\nUser position: {lat:.5f}, {lon:.5f} (use for distance calculations)"
+            haversine = (
+                f"\nHaversine formula: 6371*2*ASIN(SQRT("
+                f"POWER(SIN(RADIANS(latitude-{lat:.5f})/2),2)+"
+                f"COS(RADIANS({lat:.5f}))*COS(RADIANS(latitude))*"
+                f"POWER(SIN(RADIANS(longitude-{lon:.5f})/2),2)))"
+            )
+
         system_prompt = (
             "You are a SQL query generator for a mesh network database. "
             "Given a question, respond with ONLY a single SQL SELECT query. "
             "No explanations, no markdown, just the SQL. "
-            "Use LIMIT 20. Read-only. " + DB_SCHEMA
+            "Use LIMIT 20. Read-only. " + DB_SCHEMA + haversine + pos_info
         )
         payload = {
             "messages": [
@@ -105,15 +142,12 @@ class AskCommand(BaseCommand):
                 return None
             data = response.json()
             content = data["choices"][0]["message"]["content"].strip()
-            # Extract SQL from response (handle markdown code blocks)
             sql_match = re.search(r"```(?:sql)?\s*(SELECT.+?)```", content, re.DOTALL | re.IGNORECASE)
             if sql_match:
                 return sql_match.group(1).strip()
-            # Try to find raw SELECT
             select_match = re.search(r"(SELECT\s+.+?)(?:;\s*)$", content, re.DOTALL | re.IGNORECASE)
             if select_match:
                 return select_match.group(1).strip()
-            # Fallback: if it starts with SELECT, use as-is
             if content.upper().startswith("SELECT"):
                 return content.rstrip(";").strip()
             return None
@@ -121,15 +155,12 @@ class AskCommand(BaseCommand):
             self.logger.warning(f"Ask command SQL generation error: {e}")
             return None
 
-    def _execute_sql(self, sql: str) -> tuple[list[str], list[tuple]] | None:
-        """Execute a read-only SQL query with LIMIT enforcement."""
-        # Enforce read-only
+    def _execute_sql(self, sql: str) -> str:
+        """Execute a read-only SQL query and return compact results."""
         if not sql.strip().upper().startswith("SELECT"):
-            return None
-        # Enforce LIMIT
+            return "(not a SELECT query)"
         if not re.search(r"\bLIMIT\s+\d+", sql, re.IGNORECASE):
-            sql = sql.rstrip(";") + " LIMIT 20"
-        # Cap LIMIT at 20
+            sql += " LIMIT 20"
         sql = re.sub(r"\bLIMIT\s+\d+", "LIMIT 20", sql, flags=re.IGNORECASE)
         sql = sql.rstrip(";")
 
@@ -138,21 +169,49 @@ class AskCommand(BaseCommand):
                 conn.execute("PRAGMA query_only = ON")
                 cursor = conn.cursor()
                 cursor.execute(sql)
-                columns = [desc[0] for desc in cursor.description] if cursor.description else []
                 rows = cursor.fetchall()
-                return columns, rows
+                if not rows:
+                    return "(no results)"
+                lines = []
+                for row in rows[:20]:
+                    parts = [str(v) for v in row if v is not None]
+                    lines.append(", ".join(parts))
+                return "\n".join(lines)
         except Exception as e:
             self.logger.warning(f"Ask command SQL execution error: {e} | SQL: {sql[:200]}")
-            return None
+            return f"(query error: {e})"
 
-    def _format_results(self, columns: list[str], rows: list[tuple]) -> str:
-        """Format query results as a readable string."""
-        if not rows:
-            return "(no results)"
-        lines = [" | ".join(columns)]
-        for row in rows[:20]:
-            lines.append(" | ".join(str(v) if v is not None else "-" for v in row))
-        return "\n".join(lines)
+    def _format_followup(self, question: str, sql_results: str) -> str | None:
+        """Second LLM call to format results into a mesh-friendly answer."""
+        prompt = (
+            f"The query returned these results:\n{sql_results}\n\n"
+            f"Answer the question: {question}\n\n"
+            "FORMAT RULES (mesh network, max 150 chars per message):\n"
+            "- One item per line: 'name: X km' or 'name: value'\n"
+            "- NEVER show raw coordinates (lat/lon), only distance with unit (km or m)\n"
+            "- Max 5 items, no tables, no pipes\n"
+            "- Total response under 400 chars"
+        )
+        payload = {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a concise assistant on a low-bandwidth mesh network. Reply briefly.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 150,
+            "temperature": 0.2,
+            "top_p": 0.9,
+        }
+        try:
+            response = requests.post(self.endpoint, json=payload, timeout=self.timeout_seconds)
+            if response.status_code == 200:
+                data = response.json()
+                return data["choices"][0]["message"]["content"].strip()
+        except (requests.RequestException, KeyError, IndexError) as e:
+            self.logger.warning(f"Ask command followup error: {e}")
+        return None
 
     async def execute(self, message: MeshMessage) -> bool:
         question = self._extract_question(message)
@@ -162,24 +221,28 @@ class AskCommand(BaseCommand):
 
         self.logger.info(f"Ask command: {question}")
 
+        # Get sender position for distance-based queries
+        sender_pos = self._get_sender_position(message)
+
         # Step 1: Generate SQL
-        sql = await asyncio.to_thread(self._generate_sql, question)
+        sql = await asyncio.to_thread(self._generate_sql, question, sender_pos)
         if not sql:
             return await self.send_response(message, "Could not generate a query. Try rephrasing.")
 
         self.logger.debug(f"Ask command generated SQL: {sql}")
 
         # Step 2: Execute
-        result = await asyncio.to_thread(self._execute_sql, sql)
-        if result is None:
-            return await self.send_response(message, "Query failed. Try a simpler question.")
+        sql_results = await asyncio.to_thread(self._execute_sql, sql)
+        self.logger.debug(f"Ask command SQL results: {sql_results[:500]}")
 
-        columns, rows = result
-        formatted = self._format_results(columns, rows)
+        # Step 3: Format with LLM followup
+        formatted = await asyncio.to_thread(self._format_followup, question, sql_results)
+        if not formatted:
+            formatted = sql_results
 
         # Truncate for mesh message limits
         max_length = self.get_max_message_length(message)
         if len(formatted) > max_length:
-            formatted = formatted[: max_length - 3] + "..."
+            formatted = formatted[:max_length]
 
         return await self.send_response(message, formatted)
