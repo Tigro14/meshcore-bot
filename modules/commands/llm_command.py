@@ -815,7 +815,8 @@ class LlmCommand(BaseCommand):
                     "- neighbor_links: self_public_key, neighbor_public_key, last_snr, last_status, last_seen\n"
                     "- daily_stats: date, public_key, advert_count\n"
                     "Rules: SELECT only, LIMIT 20 max, last_heard is ISO datetime string, timestamp is unix int.\n"
-                    f"For distance use Haversine: 6371*2*ASIN(SQRT(POWER(SIN(RADIANS(lat2-{(self._sender_position[0] if self._sender_position else self.bot_latitude or 48.85):.5f})/2),2)+COS(RADIANS({(self._sender_position[0] if self._sender_position else self.bot_latitude or 48.85):.5f})*COS(RADIANS(lat2))*POWER(SIN(RADIANS(lon2-{(self._sender_position[1] if self._sender_position else self.bot_longitude or 2.35):.5f})/2),2)))\n"
+                    "IMPORTANT: Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0\n"
+                    f"Haversine formula: 6371*2*ASIN(SQRT(POWER(SIN(RADIANS(lat2-{(self._sender_position[0] if self._sender_position else self.bot_latitude or 48.85):.5f})/2),2)+COS(RADIANS({(self._sender_position[0] if self._sender_position else self.bot_latitude or 48.85):.5f})*COS(RADIANS(lat2))*POWER(SIN(RADIANS(lon2-{(self._sender_position[1] if self._sender_position else self.bot_longitude or 2.35):.5f})/2),2)))\n"
                     f"{pos_info}\n"
                     "If you can answer without querying, just answer normally."
                 )
