@@ -3594,7 +3594,9 @@ class MessageHandler:
             return
 
         # Check for keywords and custom syntax
+        self.logger.info(f"DEBUG: About to call check_keywords, content='{message.content}'")
         keyword_matches = self.bot.command_manager.check_keywords(message)
+        self.logger.info(f"DEBUG: check_keywords returned {keyword_matches}")
 
         help_response_sent = False
         plugin_command_with_response_matched = False
