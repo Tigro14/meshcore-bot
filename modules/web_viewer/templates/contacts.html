@@ -630,6 +630,7 @@
 {% endblock %}
 
 {% block extra_js %}
+        <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
         <script nonce="{{ g.csp_nonce }}">
 class ModernContactsManager {
     constructor() {
@@ -2172,7 +2173,8 @@ class ModernContactsManager {
             console.error('Error loading advertisement data:', err);
         }
 
-        // Create a modal to display the advertisement data
+        // Create a modal to display the advertisement data + QR code
+        const publicKey = contact.public_key || userId;
         const modalHtml = `
             <div class="modal fade" id="advertModal" tabindex="-1">
                 <div class="modal-dialog modal-lg">
@@ -2182,14 +2184,26 @@ class ModernContactsManager {
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body">
-                            <pre class="bg-light p-3 rounded" style="background-color: var(--bg-secondary); color: var(--text-color);">${this.escapeHtml(JSON.stringify(advertData, null, 2))}</pre>
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <pre class="bg-light p-3 rounded" style="background-color: var(--bg-secondary); color: var(--text-color); max-height: 400px; overflow-y: auto;">${this.escapeHtml(JSON.stringify(advertData, null, 2))}</pre>
+                                </div>
+                                <div class="col-md-4 text-center">
+                                    <h6><i class="fas fa-qrcode me-1"></i>Scan to add node</h6>
+                                    <p class="small text-muted">Meshtastic → Admin → Add Node → Scan QR</p>
+                                    <div id="qrCodeContainer" class="d-inline-block"></div>
+                                    <div class="mt-2">
+                                        <code class="small user-select-all" style="word-break: break-all;">${this.escapeHtml(publicKey)}</code>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                         </div>
                     </div>
                 </div>
-                                    </div>
+            </div>
         `;
         
         // Remove existing modal if any
@@ -2204,6 +2218,18 @@ class ModernContactsManager {
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById('advertModal'));
         modal.show();
+
+        // Generate QR code for the public key
+        const qrContainer = document.getElementById('qrCodeContainer');
+        if (qrContainer && publicKey) {
+            QRCode.toCanvas(qrContainer, publicKey, {
+                width: 160,
+                margin: 2,
+                color: { dark: '#000000', light: '#ffffff' }
+            }, function(err) {
+                if (err) console.error('QR generation error:', err);
+            });
+        }
     }
     
     async geocodeContact(userId, buttonElement = null) {
