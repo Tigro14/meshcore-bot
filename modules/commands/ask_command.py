@@ -30,7 +30,7 @@ Notes:
 - Read-only: SELECT only
 - Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0
 - No firmware version or hardware/model info is stored in this database. If asked about version or hardware, reply: 'not tracked in DB'
-- Do NOT query the bbs_messages table (per-user store-and-forward, not mesh analytics)
+- Only query the tables listed above. Do NOT query: bbs_messages, bot_metadata, channels, clock_sync_*, command_stats, daily_rollup, dashboard_snapshot, feed_*, generic_cache, geocoding_cache, greeted_users, greeter_rollout, neighbor_observations, packet_stream, purging_log, schema_version
 """
 
 
@@ -244,7 +244,17 @@ class AskCommand(BaseCommand):
         ]
         return await self._send_truncated(message, "\n".join(lines))
 
-    _EXCLUDED_TABLES = {"bbs_messages", "clock_sync_admin_log"}
+    _ASK_TABLES = {
+        "complete_contact_tracking",
+        "message_stats",
+        "observed_paths",
+        "mesh_connections",
+        "neighbor_links",
+        "daily_stats",
+        "repeater_contacts",
+        "unique_advert_packets",
+        "path_stats",
+    }
 
     async def _handle_tables(self, message: MeshMessage) -> bool:
         try:
@@ -253,7 +263,7 @@ class AskCommand(BaseCommand):
                 cursor.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
                 )
-                tables = [row[0] for row in cursor.fetchall() if row[0] not in self._EXCLUDED_TABLES]
+                tables = [row[0] for row in cursor.fetchall() if row[0] in self._ASK_TABLES]
                 lines = []
                 for table in tables:
                     cursor.execute(f'PRAGMA table_info("{table}")')
