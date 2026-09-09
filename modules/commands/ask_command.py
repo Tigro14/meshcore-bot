@@ -277,9 +277,9 @@ class AskCommand(BaseCommand):
 
         q_lower = question.lower().strip()
         if q_lower in ("help", "?", "h"):
-            return self._handle_help(message)
+            return await self._handle_help(message)
         if q_lower in ("tables", "schema", "db"):
-            return self._handle_tables(message)
+            return await self._handle_tables(message)
 
         self.logger.info(f"Ask command: {question}")
 
