@@ -1117,10 +1117,10 @@ class LlmCommand(BaseCommand):
                     f"The query returned these results:\n{sql_results}\n\n"
                     f"Answer the original question: {prompt}\n\n"
                     "FORMAT RULES (mesh network, max 150 chars per message):\n"
-                    "- One item per line, short (name + key info only)\n"
-                    "- No tables, no pipes, no columns\n"
-                    "- Max 5 items, format: 'name: value' or 'name (X km)'\n"
-                    "- Total response under 500 chars"
+                    "- One item per line: 'name: X km' or 'name: value'\n"
+                    "- NEVER show raw coordinates (lat/lon), only distance with unit (km or m)\n"
+                    "- Max 5 items, no tables, no pipes\n"
+                    "- Total response under 400 chars"
                 )
                 followup_payload = self._build_payload(prompt=followup_prompt)
                 try:
