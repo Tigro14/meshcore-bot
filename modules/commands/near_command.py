@@ -115,6 +115,7 @@ class NearCommand(BaseCommand):
         lat, lon = pos
         limit = count
 
+        sender_key = (message.sender_id or "").strip()
         try:
             with self.bot.db_manager.connection() as conn:
                 cursor = conn.cursor()
@@ -128,6 +129,8 @@ class NearCommand(BaseCommand):
                     "FROM complete_contact_tracking "
                     "WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0"
                 )
+                if sender_key:
+                    sql += f" AND public_key != '{sender_key}'"
                 if role:
                     sql += f" AND role = '{role}'"
                 sql += f" ORDER BY dist ASC LIMIT {max(limit, 20)}"
