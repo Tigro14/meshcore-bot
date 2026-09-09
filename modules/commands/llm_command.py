@@ -956,13 +956,12 @@ class LlmCommand(BaseCommand):
                 conn.execute("PRAGMA query_only = ON")
                 cursor = conn.cursor()
                 cursor.execute(sql)
-                columns = [desc[0] for desc in cursor.description] if cursor.description else []
                 rows = cursor.fetchall()
                 if not rows:
                     return "(no results)"
                 lines = []
                 for row in rows[:20]:
-                    parts = [f"{c}={v}" for c, v in zip(columns, row, strict=True) if v is not None]
+                    parts = [str(v) for v in row if v is not None]
                     lines.append(", ".join(parts))
                 return "\n".join(lines)
         except Exception as e:
