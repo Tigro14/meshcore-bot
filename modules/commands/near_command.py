@@ -118,46 +118,40 @@ class NearCommand(BaseCommand):
 
         max_length = self.get_max_message_length(message)
         min_name_len = 12
-        # Each line costs: name_len + ": X.X km" (8) or ": XXX m" (7) → use 8 worst case
-        # Total for n lines: n * (name_len + 8) + (n-1) newlines <= max_length
-        # Solve for max n with a given name_len:
-        # n * (name_len + 8) + n - 1 <= max_length
-        # n * (name_len + 9) <= max_length + 1
-        # n <= (max_length + 1) / (name_len + 9)
 
-        # Try to fit as many rows as possible, starting with full name length
-        # and reducing name length down to min_name_len
-        best_lines: list[str] = []
-        for name_len in range(30, min_name_len - 1, -1):
-            max_n = (max_length + 1) // (name_len + 9)
-            if max_n < 1:
-                continue
-            count = min(len(rows), max_n)
+        # Priority: maximize station count. Truncate names to fit.
+        # Each line: name + ": X.X km" (8) worst case. Total: n*(name_len+8) + (n-1) <= max_length
+        # Max possible count with min_name_len: (max_length+1) // (min_name_len + 9)
+        max_possible = (max_length + 1) // (min_name_len + 9)
+        target_count = min(len(rows), max(limit, max_possible)) if limit > 1 else max_possible
+        target_count = min(target_count, len(rows), max_possible)
+
+        # Find name_len that fits target_count lines
+        # n*(name_len+8) + (n-1) <= max_length → name_len <= (max_length+1)/n - 9
+        name_len = (max_length + 1) // target_count - 9
+        name_len = max(min_name_len, min(name_len, 30))
+
+        lines = []
+        for name, dist in rows[:target_count]:
+            display_name = name[:name_len] if len(name) > name_len else name
+            if dist < 1.0:
+                lines.append(f"{display_name}: {dist * 1000:.0f} m")
+            else:
+                lines.append(f"{display_name}: {dist:.1f} km")
+
+        response = "\n".join(lines)
+        if len(response) > max_length:
+            # Shrink name_len and retry
+            name_len = min_name_len
             lines = []
-            for name, dist in rows[:count]:
+            for name, dist in rows[:target_count]:
                 display_name = name[:name_len] if len(name) > name_len else name
                 if dist < 1.0:
                     lines.append(f"{display_name}: {dist * 1000:.0f} m")
                 else:
                     lines.append(f"{display_name}: {dist:.1f} km")
             response = "\n".join(lines)
-            if len(response) <= max_length:
-                best_lines = lines
-                break
-
-        if not best_lines:
-            # Fallback: use min_name_len
-            max_n = (max_length + 1) // (min_name_len + 9)
-            count = min(len(rows), max(1, max_n))
-            for name, dist in rows[:count]:
-                display_name = name[:min_name_len] if len(name) > min_name_len else name
-                if dist < 1.0:
-                    best_lines.append(f"{display_name}: {dist * 1000:.0f} m")
-                else:
-                    best_lines.append(f"{display_name}: {dist:.1f} km")
-
-        response = "\n".join(best_lines)
-        if len(response) > max_length:
-            response = response[:max_length]
+            if len(response) > max_length:
+                response = response[:max_length]
 
         return await self.send_response(message, response)
