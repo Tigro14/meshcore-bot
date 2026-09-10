@@ -80,16 +80,33 @@ def graphql_list_pages(base_url: str, token: str, locale: str, timeout: float, v
     return [p for p in pages if isinstance(p, dict) and p.get("path")]
 
 
-def fetch_markdown(base_url: str, page_path: str, token: str, timeout: float, verify_ssl: bool) -> tuple[str, str]:
+def fetch_markdown(
+    base_url: str,
+    page_path: str,
+    token: str,
+    timeout: float,
+    verify_ssl: bool,
+    locale: str = "fr",
+) -> tuple[str, str]:
     clean_path = page_path.strip("/")
     encoded_path = quote(clean_path)
+    locale = (locale or "").strip("/")
     candidates = [
         f"/s/{encoded_path}?format=md",
         f"/s/{encoded_path}/raw",
         f"/s/{encoded_path}",
+        f"/s/{locale}/{encoded_path}?format=md" if locale else "",
+        f"/s/{locale}/{encoded_path}/raw" if locale else "",
+        f"/s/{locale}/{encoded_path}" if locale else "",
+        f"/{locale}/{encoded_path}?format=md" if locale else "",
+        f"/{locale}/{encoded_path}" if locale else "",
     ]
+    attempted: list[str] = []
     for candidate in candidates:
+        if not candidate:
+            continue
         url = urljoin(base_url.rstrip("/") + "/", candidate.lstrip("/"))
+        attempted.append(url)
         headers = {"Authorization": "Bearer " + token} if token else None
         response = requests.get(url, headers=headers, timeout=timeout, verify=verify_ssl)
         if response.status_code != 200:
@@ -101,7 +118,9 @@ def fetch_markdown(base_url: str, page_path: str, token: str, timeout: float, ve
             text = _strip_html(text)
         if text:
             return text, url
-    raise RuntimeError(f"Unable to fetch markdown for path '{page_path}' via /s/")
+    raise RuntimeError(
+        f"Unable to fetch markdown for path '{page_path}'. Tried: {', '.join(attempted)}"
+    )
 
 
 def allowed_path(page_path: str, prefixes: list[str]) -> bool:
@@ -133,7 +152,7 @@ def collect_to_jsonl(
             if not page_path:
                 continue
             try:
-                markdown, source_url = fetch_markdown(base_url, page_path, token, timeout, verify_ssl)
+                markdown, source_url = fetch_markdown(base_url, page_path, token, timeout, verify_ssl, locale)
             except Exception as exc:
                 print(f"warn: skip {page_path}: {exc}", file=sys.stderr)
                 continue
