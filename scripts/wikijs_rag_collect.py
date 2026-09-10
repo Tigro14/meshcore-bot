@@ -78,7 +78,7 @@ def _graphql_list_pages(base_url: str, token: str, locale: str, timeout: float, 
     return [p for p in pages if isinstance(p, dict) and p.get("path")]
 
 
-def _fetch_markdown(base_url: str, page_path: str, timeout: float, verify_ssl: bool) -> tuple[str, str]:
+def _fetch_markdown(base_url: str, page_path: str, token: str, timeout: float, verify_ssl: bool) -> tuple[str, str]:
     clean_path = page_path.strip("/")
     encoded_path = quote(clean_path)
     candidates = [
@@ -88,7 +88,8 @@ def _fetch_markdown(base_url: str, page_path: str, timeout: float, verify_ssl: b
     ]
     for candidate in candidates:
         url = urljoin(base_url.rstrip("/") + "/", candidate.lstrip("/"))
-        response = requests.get(url, timeout=timeout, verify=verify_ssl)
+        headers = {"Authorization": "Bearer " + token} if token else None
+        response = requests.get(url, headers=headers, timeout=timeout, verify=verify_ssl)
         if response.status_code != 200:
             continue
         text = (response.text or "").strip()
@@ -147,7 +148,7 @@ def main() -> int:
             if not page_path:
                 continue
             try:
-                markdown, source_url = _fetch_markdown(args.base_url, page_path, args.timeout, verify_ssl)
+                markdown, source_url = _fetch_markdown(args.base_url, page_path, args.token, args.timeout, verify_ssl)
             except Exception as exc:
                 print(f"warn: skip {page_path}: {exc}", file=sys.stderr)
                 continue
