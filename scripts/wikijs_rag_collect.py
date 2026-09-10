@@ -142,7 +142,8 @@ def collect_to_jsonl(
     pages = graphql_list_pages(base_url, token, locale, timeout, verify_ssl)
     selected = [page for page in pages if allowed_path(str(page.get("path", "")), prefixes)]
     output_path = os.path.abspath(output)
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_dir = os.path.dirname(output_path) or "."
+    os.makedirs(output_dir, exist_ok=True)
 
     fetched = 0
     with open(output_path, "w", encoding="utf-8") as out:
