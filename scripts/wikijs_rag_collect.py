@@ -115,7 +115,7 @@ def main() -> int:
     parser.add_argument(
         "--allow-prefix",
         action="append",
-        default=["configuration/", "demarrer/", "ressources/"],
+        default=None,
         help="Allowed page path prefix (repeat option for multiple values)",
     )
     parser.add_argument("--max-chars", type=int, default=700, help="Max chars per chunk")
@@ -126,6 +126,7 @@ def main() -> int:
     if not args.token:
         print("error: missing Wiki.js token (--token or WIKIJS_TOKEN)", file=sys.stderr)
         return 2
+    allow_prefixes = args.allow_prefix or ["configuration/", "demarrer/", "ressources/"]
 
     verify_ssl = not args.insecure
     try:
@@ -134,7 +135,7 @@ def main() -> int:
         print(f"error: GraphQL page listing failed: {exc}", file=sys.stderr)
         return 1
 
-    selected = [page for page in pages if _allowed_path(str(page.get("path", "")), args.allow_prefix)]
+    selected = [page for page in pages if _allowed_path(str(page.get("path", "")), allow_prefixes)]
     output_path = os.path.abspath(args.output)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 

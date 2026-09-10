@@ -25,6 +25,10 @@ def _compact_whitespace(text: str) -> str:
 class LocalWikiRag:
     """Simple lexical retriever over locally cached Wiki.js markdown."""
 
+    _SCORE_TERM_OVERLAP = 4
+    _SCORE_TITLE_PATH_MATCH = 2
+    _SCORE_EXACT_PHRASE_MATCH = 5
+
     _STOPWORDS = {
         "the",
         "and",
@@ -146,10 +150,10 @@ class LocalWikiRag:
             if not overlap:
                 continue
             title_path = f"{chunk.get('title', '')} {chunk.get('path', '')}".lower()
-            score = len(overlap) * 4
-            score += sum(2 for term in overlap if term in title_path)
+            score = len(overlap) * self._SCORE_TERM_OVERLAP
+            score += sum(self._SCORE_TITLE_PATH_MATCH for term in overlap if term in title_path)
             if query_norm and query_norm in _normalize_text(content):
-                score += 5
+                score += self._SCORE_EXACT_PHRASE_MATCH
             scored.append((score, chunk))
 
         if not scored:
