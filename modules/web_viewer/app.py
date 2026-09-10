@@ -48,7 +48,9 @@ from modules.security_utils import (
     SafeUrlPolicy,
     create_safe_requests_session,
     safe_requests_request,
+    sanitize_name,
     validate_external_url,
+    validate_pubkey_format,
     validate_sql_identifier,
 )
 from modules.version_info import resolve_runtime_version
@@ -143,6 +145,40 @@ def _validate_feed_interval(raw: object) -> int:
     if interval <= 0:
         raise ValueError("check_interval_seconds must be a positive integer")
     return interval
+
+
+def _validate_clock_sync_target(raw: Any) -> tuple[bool, str, str]:
+    """Validate a Clock_Sync_Admin target (node name or public key).
+
+    Guards against malicious input (HTML/JS injection, binary/control bytes,
+    over-long strings) before it is stored and later rendered in the UI or sent
+    as a DM recipient. Returns ``(ok, cleaned_value, error_message)``.
+
+    Accepts either a full 64-char hex public key, or a node name made of unicode
+    word characters plus space / hyphen / dot / slash / apostrophe. Everything
+    else (``< > " ` & = ( ) { } [ ]`` and control chars) is rejected.
+    """
+    value = (str(raw) if raw is not None else "").strip()
+    if not value:
+        return False, "", "target is required"
+    # Strip control characters (binary, newlines, tabs, nulls, ANSI escapes) and cap length.
+    value = sanitize_name(value, max_length=64).strip()
+    if not value:
+        return False, "", "target is required"
+    if len(value) > 64:
+        return False, value, "target too long (max 64 characters)"
+    # A full public key is always acceptable (stored lowercased).
+    if validate_pubkey_format(value, expected_length=64):
+        return True, value.lower(), ""
+    # Otherwise a node name: strict allowlist. re.UNICODE is default for str patterns,
+    # so \\w covers letters/digits/underscore in any script.
+    if re.fullmatch(r"[\w \-\.\/']+", value):
+        return True, value, ""
+    return (
+        False,
+        value,
+        "target contains invalid characters (allowed: letters, digits, space, - _ . / ')",
+    )
 
 
 class NeighborEvidenceKeys(NamedTuple):
@@ -2240,23 +2276,101 @@ class BotDataViewer:
                 self.logger.error(f"Error listing clock sync targets: {e}")
                 return jsonify({'error': str(e)}), 500
 
+        @self.app.route('/api/clock-sync-targets-admin/resolve', methods=['GET'])
+        def api_clock_sync_targets_admin_resolve():
+            """Resolve a typed name/pubkey to known nodes (name + public_key) for autocomplete.
+
+            Matches exact name, exact pubkey, name prefix, or pubkey prefix
+            (case-insensitive), ordered by relevance. Backed by the persistent
+            complete_contact_tracking table so it works even when the node is not
+            in the live radio contact table.
+            """
+            needle = sanitize_name(request.args.get('target') or '', max_length=64).strip().strip('"\'')
+            if not needle:
+                return jsonify({'matches': [], 'exact': False})
+            # Escape LIKE wildcards so a typed % or _ is matched literally, not as a wildcard.
+            needle_like = needle.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            try:
+                with self._with_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        SELECT name, public_key,
+                            CASE
+                                WHEN lower(name) = lower(?) THEN 0
+                                WHEN lower(public_key) = lower(?) THEN 1
+                                WHEN lower(name) LIKE lower(?) || '%' ESCAPE '\\' THEN 2
+                                WHEN lower(public_key) LIKE lower(?) || '%' ESCAPE '\\' THEN 3
+                                ELSE 4
+                            END AS rank
+                        FROM complete_contact_tracking
+                        WHERE lower(name) = lower(?)
+                           OR lower(public_key) = lower(?)
+                           OR lower(name) LIKE lower(?) || '%' ESCAPE '\\'
+                           OR lower(public_key) LIKE lower(?) || '%' ESCAPE '\\'
+                        ORDER BY rank, name
+                        LIMIT 10
+                        """,
+                        (needle, needle, needle_like, needle_like, needle, needle, needle_like, needle_like),
+                    )
+                    rows = cursor.fetchall()
+                    matches = [
+                        {'name': r[0], 'public_key': r[1]}
+                        for r in rows
+                        if r and r[0] and r[1]
+                    ]
+                    exact = bool(matches) and (
+                        matches[0]['name'].lower() == needle.lower()
+                        or matches[0]['public_key'].lower() == needle.lower()
+                    )
+                return jsonify({'matches': matches, 'exact': exact})
+            except Exception as e:
+                self.logger.error(f"Error resolving clock sync target: {e}")
+                return jsonify({'error': str(e)}), 500
+
         @self.app.route('/api/clock-sync-targets-admin', methods=['POST'])
         def api_clock_sync_targets_admin_add():
-            """Add a clock sync target"""
+            """Add a clock sync target.
+
+            Accepts {target, public_key?}. When a valid public key (64 hex chars)
+            is supplied it is stored as the canonical target identifier — this is
+            the stable key the scheduler resolves against, so the cron job works
+            even if the node's display name later changes or is absent from the
+            live contact table. Falls back to storing the name when no key given.
+            """
             data = request.get_json(silent=True) or {}
             target = (data.get('target') or '').strip().strip('"\'')
-            if not target:
-                return jsonify({'error': 'target is required'}), 400
+            public_key = (data.get('public_key') or '').strip().strip('"\'')
+
+            # Validate the target (name or pubkey) against malicious input.
+            ok, target, error = _validate_clock_sync_target(target)
+            if not ok:
+                return jsonify({'error': error}), 400
+
+            # Validate the optional public key (must be a full 64-char hex key).
+            public_key_valid = bool(public_key) and validate_pubkey_format(public_key, expected_length=64)
+            if public_key and not public_key_valid:
+                return jsonify({'error': 'public_key must be a 64-character hex string'}), 400
+
+            # Prefer the public key as the stored identifier when it is a full key.
+            stored = public_key.lower() if public_key_valid else target
+
             try:
                 with self._with_db_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
                         "INSERT INTO clock_sync_targets (target) VALUES (?)",
-                        (target,),
+                        (stored,),
                     )
                     conn.commit()
                     new_id = cursor.lastrowid
-                return jsonify({'id': new_id, 'target': target, 'enabled': True}), 201
+                return jsonify({
+                    'id': new_id,
+                    'target': stored,
+                    'name': target,
+                    'public_key': public_key.lower() if public_key_valid else None,
+                    'enabled': True,
+                }), 201
             except sqlite3.IntegrityError:
                 return jsonify({'error': f'Target "{target}" already exists'}), 409
             except Exception as e:

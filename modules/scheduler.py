@@ -305,6 +305,38 @@ class MessageScheduler:
                     public_key[:12],
                 )
                 return contact_data
+
+        # Fallback: resolve against the persistent complete_contact_tracking table.
+        # This keeps the cron job working even when the node is not present in the
+        # live radio contact table (e.g. radio restarted / contact purged), as long
+        # as it was ever tracked. Stored targets are usually full pubkeys, so this
+        # is the most reliable resolution path.
+        db_manager = getattr(self.bot, "db_manager", None)
+        if db_manager:
+            try:
+                with db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT name, public_key FROM complete_contact_tracking "
+                        "WHERE lower(public_key) = lower(?) OR lower(name) = lower(?) "
+                        "OR lower(public_key) LIKE lower(?) || '%' LIMIT 1",
+                        (needle, needle, needle),
+                    )
+                    row = cursor.fetchone()
+                    if row and row[0] and row[1]:
+                        self.logger.debug(
+                            "Clock_Sync_Admin resolved target %s via DB fallback (%s...)",
+                            sanitize_name(needle),
+                            row[1][:12],
+                        )
+                        return {
+                            "name": row[0],
+                            "adv_name": row[0],
+                            "public_key": row[1],
+                        }
+            except Exception as exc:
+                self.logger.debug("Clock_Sync_Admin DB fallback resolve failed: %s", exc)
+
         self.logger.debug(
             "Clock_Sync_Admin could not resolve target %s",
             sanitize_name(needle),

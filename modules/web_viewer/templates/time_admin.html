@@ -10,6 +10,23 @@
     .target-row:hover {
         background-color: rgba(0, 0, 0, 0.03);
     }
+    .target-suggestion {
+        cursor: pointer;
+        padding: 0.45rem 0.75rem;
+        border-left: 3px solid transparent;
+    }
+    .target-suggestion:hover {
+        background-color: rgba(0, 0, 0, 0.05);
+        border-left-color: #0d6efd;
+    }
+    .target-suggestion .sug-name {
+        font-weight: 600;
+    }
+    .target-suggestion .sug-key {
+        font-size: 0.75rem;
+        color: #6c757d;
+        font-family: 'Courier New', monospace;
+    }
 </style>
 {% endblock %}
 
@@ -33,9 +50,10 @@
             </div>
             <div class="card-body">
                 <form id="add-target-form" class="row g-2 align-items-end">
-                    <div class="col-md-6">
+                    <div class="col-md-6 position-relative">
                         <label for="new-target" class="form-label">Target (contact name or public key)</label>
-                        <input type="text" class="form-control" id="new-target" placeholder="e.g. Alice or 7e0123456789abcdef" required>
+                        <input type="text" class="form-control" id="new-target" placeholder="e.g. Alice or 7e0123456789abcdef" required autocomplete="off">
+                        <div id="target-suggestions" class="list-group position-absolute w-100 shadow" style="z-index: 1050; display: none;"></div>
                     </div>
                     <div class="col-auto">
                         <button type="submit" class="btn btn-primary" id="add-target-btn">
@@ -78,7 +96,79 @@
         init() {
             const form = document.getElementById('add-target-form');
             if (form) form.addEventListener('submit', (e) => this.addTarget(e));
+            const input = document.getElementById('new-target');
+            if (input) input.addEventListener('input', () => this.onTargetInput());
+            // Close the suggestions dropdown when clicking outside of it
+            document.addEventListener('click', (e) => {
+                const box = document.getElementById('target-suggestions');
+                if (box && box.style.display !== 'none' && !box.contains(e.target) && e.target !== input) {
+                    this.hideSuggestions();
+                }
+            });
             this.loadTargets();
+        }
+
+        onTargetInput() {
+            const input = document.getElementById('new-target');
+            if (!input) return;
+            const value = (input.value || '').trim();
+            // Reset any previously selected pubkey when the text changes
+            this._selectedPubkey = null;
+            if (value.length < 2) {
+                this.hideSuggestions();
+                return;
+            }
+            // Debounce the lookup
+            clearTimeout(this._lookupTimer);
+            this._lookupTimer = setTimeout(() => this.runLookup(value), 250);
+        }
+
+        async runLookup(value) {
+            try {
+                const resp = await fetch('/api/clock-sync-targets-admin/resolve?target=' + encodeURIComponent(value));
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const matches = data.matches || [];
+                // Only show the dropdown if the user is still on this value
+                const input = document.getElementById('new-target');
+                if (input && (input.value || '').trim() !== value) return;
+                if (matches.length > 0) {
+                    this.renderSuggestions(matches);
+                } else {
+                    this.hideSuggestions();
+                }
+            } catch (err) {
+                // ignore lookup errors; user can still submit by name
+            }
+        }
+
+        renderSuggestions(matches) {
+            const box = document.getElementById('target-suggestions');
+            if (!box) return;
+            box.innerHTML = '';
+            matches.forEach(m => {
+                const el = document.createElement('button');
+                el.type = 'button';
+                el.className = 'list-group-item list-group-item-action target-suggestion';
+                el.innerHTML = `<span class="sug-name">${this.escapeHtml(m.name)}</span> ` +
+                    `<span class="sug-key">${this.escapeHtml((m.public_key || '').slice(0, 12))}…</span>`;
+                el.addEventListener('click', () => this.selectSuggestion(m));
+                box.appendChild(el);
+            });
+            box.style.display = 'block';
+        }
+
+        selectSuggestion(m) {
+            const input = document.getElementById('new-target');
+            if (input) input.value = m.name;
+            this._selectedPubkey = m.public_key;
+            this.hideSuggestions();
+            if (input) input.focus();
+        }
+
+        hideSuggestions() {
+            const box = document.getElementById('target-suggestions');
+            if (box) box.style.display = 'none';
         }
 
         showAddAlert(message, kind) {
@@ -93,23 +183,60 @@
             e.preventDefault();
             const input = document.getElementById('new-target');
             const btn = document.getElementById('add-target-btn');
-            const target = (input.value || '').trim();
-            if (!target) return;
+            const typed = (input.value || '').trim();
+            if (!typed) return;
+
+            // Resolve the typed value to a known node (name + pubkey) for confirmation.
+            // If the user picked a suggestion, we already have its pubkey.
+            let name = typed;
+            let pubkey = this._selectedPubkey || null;
+            try {
+                const resp = await fetch('/api/clock-sync-targets-admin/resolve?target=' + encodeURIComponent(typed));
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const matches = data.matches || [];
+                    if (!pubkey && matches.length > 0) {
+                        // Prefer an exact match, else the first (best-ranked) match
+                        const exact = matches.find(m => m.name.toLowerCase() === typed.toLowerCase() || m.public_key.toLowerCase() === typed.toLowerCase());
+                        const pick = exact || matches[0];
+                        name = pick.name;
+                        pubkey = pick.public_key;
+                    }
+                }
+            } catch (err) {
+                // fall through with name-only
+            }
+
+            // Confirm the name / pubkey pair before adding.
+            let message;
+            if (pubkey) {
+                message = `Add clock sync target?\n\nName: ${name}\nPublic key: ${pubkey}`;
+            } else {
+                message = `No known node matches "${typed}".\n\nAdd by name only?\nName: ${name}`;
+            }
+            if (!confirm(message)) {
+                this.hideSuggestions();
+                return;
+            }
 
             if (btn) btn.disabled = true;
             try {
+                const body = { target: name };
+                if (pubkey) body.public_key = pubkey;
                 const resp = await fetch('/api/clock-sync-targets-admin', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Requested-With': 'XMLHttpRequest',
                     },
-                    body: JSON.stringify({ target }),
+                    body: JSON.stringify(body),
                 });
                 const data = await resp.json();
                 if (resp.ok) {
-                    this.showAddAlert(`Target "${target}" added.`, 'success');
+                    this.showAddAlert(`Target "${name}" added.`, 'success');
                     input.value = '';
+                    this._selectedPubkey = null;
+                    this.hideSuggestions();
                     this.loadTargets();
                 } else {
                     this.showAddAlert(data.error || 'Failed to add target.', 'danger');
@@ -200,14 +327,22 @@
                     ? `<button class="btn btn-sm btn-outline-warning" onclick="admin.toggleTarget(${t.id}, false)" title="Disable"><i class="fas fa-pause"></i></button>`
                     : `<button class="btn btn-sm btn-outline-success" onclick="admin.toggleTarget(${t.id}, true)" title="Enable"><i class="fas fa-play"></i></button>`;
 
+                const displayName = t.contact_name || t.target;
+                const pk = t.public_key || (t.target && t.target.length === 64 ? t.target : '');
+                const pkCell = pk
+                    ? `<div class="small text-muted" style="font-family:'Courier New',monospace;">${this.escapeHtml(pk.slice(0, 12))}…</div>`
+                    : '';
                 html += `
                     <tr class="target-row">
-                        <td><code>${this.escapeHtml(t.target)}</code></td>
+                        <td>
+                            <div class="fw-semibold">${this.escapeHtml(displayName)}</div>
+                            ${pkCell}
+                        </td>
                         <td>${statusBadge}</td>
                         <td class="text-muted small">${this.escapeHtml(t.created_at || '')}</td>
                         <td class="text-end">
                             ${toggleAction}
-                            <button class="btn btn-sm btn-outline-danger ms-1" onclick="admin.deleteTarget(${t.id}, '${this.escapeHtml(t.target)}')" title="Delete"><i class="fas fa-trash"></i></button>
+                            <button class="btn btn-sm btn-outline-danger ms-1" onclick="admin.deleteTarget(${t.id}, '${this.escapeHtml(displayName)}')" title="Delete"><i class="fas fa-trash"></i></button>
                         </td>
                     </tr>
                 `;
