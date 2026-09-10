@@ -259,6 +259,15 @@
                         </div>
                     </div>
                     <div class="col-md-2">
+                        <label for="filter-node-labels" class="form-label">&nbsp;</label>
+                        <div class="d-flex align-items-center" style="min-height: 38px;">
+                            <div class="form-check mb-0">
+                                <input type="checkbox" class="form-check-input" id="filter-node-labels">
+                                <label class="form-check-label" for="filter-node-labels" title="Show the short name (adv_name) of each node directly on the map, like the graph view">Show Node Labels</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
                         <label for="filter-search" class="form-label">Search Node</label>
                         <input type="text" class="form-control" id="filter-search" placeholder="Name, prefix, or path...">
                     </div>
@@ -417,6 +426,30 @@
     }
     .mesh-node-popup .prefix-byte:last-child {
         margin-right: 0;
+    }
+    /* Permanent node label (short name) shown on the map when "Show Node Labels" is on.
+       Colored by the mesh display theme (.mesh-dark), like the other map chrome. */
+    .mesh-node-label {
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        border-radius: 4px;
+        color: #1a1a1a;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 1px 5px;
+        white-space: nowrap;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+    .mesh-node-label::before {
+        border-top-color: rgba(255, 255, 255, 0.9);
+    }
+    .mesh-dark .mesh-node-label {
+        background: rgba(20, 24, 31, 0.9);
+        border-color: rgba(255, 255, 255, 0.25);
+        color: #e5e7eb;
+    }
+    .mesh-dark .mesh-node-label::before {
+        border-top-color: rgba(20, 24, 31, 0.9);
     }
     /* Legend for connection highlighting.
        Colored by the mesh display theme (.mesh-dark), not the site theme, because
@@ -717,6 +750,20 @@
     // Helper function to create unique node identifier
     function getNodeId(node) {
         return `${node.prefix}-${node.latitude.toFixed(6)}-${node.longitude.toFixed(6)}`;
+    }
+
+    // Short display label for a node: prefer the Meshtastic short name (adv_name),
+    // otherwise fall back to a truncated long name (same rules as the graph view).
+    function getNodeShortLabel(node) {
+        if (node.adv_name) return node.adv_name;
+        const nm = node.name || '';
+        if (nm.length > 25) {
+            return node.prefix.toUpperCase() + ': ' + (nm.length > 15 ? nm.substring(0, 15) + '...' : nm);
+        }
+        if (nm.length > 20) {
+            return nm.substring(0, 20) + '...';
+        }
+        return nm;
     }
 
     // Resolve an edge prefix (2, 4, or 6 hex chars) to a node when node.prefix may be longer or equal.
@@ -1473,6 +1520,11 @@
             applyFilters();
             saveFilters();
         });
+        document.getElementById('filter-node-labels').addEventListener('change', () => {
+            saveFilters();
+            if (typeof applyFilters === 'function') applyFilters();
+            else if (typeof renderMap === 'function') renderMap();
+        });
         document.getElementById('filter-evidence').addEventListener('change', onEvidenceChange);
         document.getElementById('filter-search').addEventListener('input', handleSearchInput);
 
@@ -1793,6 +1845,7 @@
                 edgeDays: document.getElementById('filter-edge-days').value,
                 nodeDays: document.getElementById('filter-node-days').value,
                 starredOnly: document.getElementById('filter-starred').checked,
+                nodeLabels: document.getElementById('filter-node-labels').checked,
                 evidence: document.getElementById('filter-evidence').value,
                 colorMode: edgeColorMode
                 // Note: searchTerm is NOT saved - it should not persist across reloads
@@ -1825,6 +1878,9 @@
                 }
                 if (filters.starredOnly !== undefined) {
                     document.getElementById('filter-starred').checked = filters.starredOnly;
+                }
+                if (filters.nodeLabels !== undefined) {
+                    document.getElementById('filter-node-labels').checked = filters.nodeLabels;
                 }
                 if (['all', 'multibyte', 'neighbors'].includes(filters.evidence)) {
                     document.getElementById('filter-evidence').value = filters.evidence;
@@ -2364,7 +2420,21 @@
                 className: 'mesh-node-popup',
                 autoPan: false  // Prevent bounding box/auto-pan when popup opens
             });
-            
+
+            // Optional visible label (short name / adv_name), same behavior as the graph view
+            const labelsToggle = document.getElementById('filter-node-labels');
+            if (labelsToggle && labelsToggle.checked) {
+                const shortLabel = getNodeShortLabel(node);
+                if (shortLabel) {
+                    marker.bindTooltip(escapeHtml(shortLabel), {
+                        permanent: true,
+                        direction: 'top',
+                        className: 'mesh-node-label',
+                        opacity: 1
+                    });
+                }
+            }
+
             // Add click handler to highlight connections - pass the actual node object
             marker.on('click', (e) => {
                 // Clear path highlights when clicking a node
