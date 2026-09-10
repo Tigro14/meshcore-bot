@@ -85,11 +85,16 @@
                 <div id="clock-sync-run-now-alert" class="alert d-none" role="alert"></div>
 
                 <!-- Add target -->
-                <div class="input-group mb-3" style="max-width: 500px;">
-                    <input type="text" class="form-control" id="new-target-input" placeholder="Name or public key...">
-                    <button class="btn btn-outline-primary" id="add-target-btn" type="button">
-                        <i class="fas fa-plus me-1"></i>Add
-                    </button>
+                <div class="mb-3" style="max-width: 500px;">
+                    <div class="position-relative">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="new-target-input" placeholder="Name or public key..." autocomplete="off">
+                            <button class="btn btn-outline-primary" id="add-target-btn" type="button">
+                                <i class="fas fa-plus me-1"></i>Add
+                            </button>
+                        </div>
+                        <div id="target-suggestions" class="list-group position-absolute w-100 shadow" style="z-index: 1050; display: none;"></div>
+                    </div>
                 </div>
 
                 <!-- Targets list -->
@@ -165,7 +170,17 @@
             const addBtn = document.getElementById('add-target-btn');
             if (addBtn) addBtn.addEventListener('click', () => this.addTarget());
             const input = document.getElementById('new-target-input');
-            if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.addTarget(); });
+            if (input) {
+                input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.addTarget(); });
+                input.addEventListener('input', () => this.onTargetInput());
+            }
+            // Close the suggestions dropdown when clicking outside of it
+            document.addEventListener('click', (e) => {
+                const box = document.getElementById('target-suggestions');
+                if (box && box.style.display !== 'none' && !box.contains(e.target) && e.target !== input) {
+                    this.hideSuggestions();
+                }
+            });
 
             const confirmBtn = document.getElementById('confirm-delete-btn');
             if (confirmBtn) confirmBtn.addEventListener('click', () => this.confirmDelete());
@@ -222,19 +237,127 @@
             }
         }
 
+        // Client-side validation mirroring the backend: block control/binary chars
+        // and HTML/JS injection vectors (< > " ` & = ( ) { } [ ]) before submit.
+        validateTarget(value) {
+            if (!value) return { ok: false, error: 'Target is required' };
+            if (value.length > 64) return { ok: false, error: 'Target too long (max 64 characters)' };
+            // Full 64-char hex public key is always acceptable
+            if (/^[0-9a-fA-F]{64}$/.test(value)) return { ok: true };
+            // Node name: unicode word chars + space / hyphen / dot / slash / apostrophe
+            if (/^[\w \-\.\/' ]+$/.test(value)) return { ok: true };
+            return { ok: false, error: 'Invalid characters (allowed: letters, digits, space, - _ . / \')' };
+        }
+
+        onTargetInput() {
+            const input = document.getElementById('new-target-input');
+            if (!input) return;
+            const value = (input.value || '').trim();
+            this._selectedPubkey = null;
+            if (value.length < 2) {
+                this.hideSuggestions();
+                return;
+            }
+            clearTimeout(this._lookupTimer);
+            this._lookupTimer = setTimeout(() => this.runLookup(value), 250);
+        }
+
+        async runLookup(value) {
+            try {
+                const resp = await fetch('/api/clock-sync-targets-admin/resolve?target=' + encodeURIComponent(value));
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const matches = data.matches || [];
+                const input = document.getElementById('new-target-input');
+                if (input && (input.value || '').trim() !== value) return;
+                if (matches.length > 0) this.renderSuggestions(matches);
+                else this.hideSuggestions();
+            } catch (err) { /* ignore */ }
+        }
+
+        renderSuggestions(matches) {
+            const box = document.getElementById('target-suggestions');
+            if (!box) return;
+            box.innerHTML = '';
+            matches.forEach(m => {
+                const el = document.createElement('button');
+                el.type = 'button';
+                el.className = 'list-group-item list-group-item-action';
+                el.style.cssText = 'cursor:pointer;padding:0.45rem 0.75rem;border-left:3px solid transparent;';
+                el.onmouseover = () => { el.style.backgroundColor = 'rgba(0,0,0,0.05)'; el.style.borderLeftColor = '#0d6efd'; };
+                el.onmouseout = () => { el.style.backgroundColor = ''; el.style.borderLeftColor = 'transparent'; };
+                el.innerHTML = `<span style="font-weight:600;">${this.escapeHtml(m.name)}</span> ` +
+                    `<span style="font-size:0.75rem;color:#6c757d;font-family:'Courier New',monospace;">${this.escapeHtml((m.public_key || '').slice(0, 12))}…</span>`;
+                el.addEventListener('click', () => this.selectSuggestion(m));
+                box.appendChild(el);
+            });
+            box.style.display = 'block';
+        }
+
+        selectSuggestion(m) {
+            const input = document.getElementById('new-target-input');
+            if (input) input.value = m.name;
+            this._selectedPubkey = m.public_key;
+            this.hideSuggestions();
+            if (input) input.focus();
+        }
+
+        hideSuggestions() {
+            const box = document.getElementById('target-suggestions');
+            if (box) box.style.display = 'none';
+        }
+
         async addTarget() {
             const input = document.getElementById('new-target-input');
             const value = (input.value || '').trim();
             if (!value) return;
+
+            // Client-side validation (defense in depth; backend re-validates)
+            const v = this.validateTarget(value);
+            if (!v.ok) {
+                alert(v.error);
+                return;
+            }
+
+            // Resolve to a known node (name + pubkey) for confirmation.
+            let name = value;
+            let pubkey = this._selectedPubkey || null;
             try {
+                const resp = await fetch('/api/clock-sync-targets-admin/resolve?target=' + encodeURIComponent(value));
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const matches = data.matches || [];
+                    if (!pubkey && matches.length > 0) {
+                        const exact = matches.find(m => m.name.toLowerCase() === value.toLowerCase() || m.public_key.toLowerCase() === value.toLowerCase());
+                        const pick = exact || matches[0];
+                        name = pick.name;
+                        pubkey = pick.public_key;
+                    }
+                }
+            } catch (err) { /* fall through with name-only */ }
+
+            // Confirm the name / pubkey pair before adding.
+            const message = pubkey
+                ? `Add clock sync target?\n\nName: ${name}\nPublic key: ${pubkey}`
+                : `No known node matches "${value}".\n\nAdd by name only?\nName: ${name}`;
+            if (!confirm(message)) {
+                this.hideSuggestions();
+                return;
+            }
+
+            try {
+                const body = { target: name };
+                if (pubkey) body.public_key = pubkey;
                 const resp = await fetch('/api/clock-sync-targets-admin', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify({ target: value }),
+                    body: JSON.stringify(body),
                 });
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data.error || 'Failed to add');
                 input.value = '';
+                this._selectedPubkey = null;
+                this.hideSuggestions();
                 this.loadData();
             } catch (err) {
                 alert('Add failed: ' + err.message);
