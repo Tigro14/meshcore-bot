@@ -10,7 +10,7 @@ import json
 import os
 import re
 import sys
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 
 import requests
 
@@ -18,6 +18,19 @@ GRAPHQL_LIST_PAGES = """
 query ListPages($locale: String!, $limit: Int!) {
   pages {
     list(locale: $locale, limit: $limit) {
+      id
+      path
+      title
+      updatedAt
+    }
+  }
+}
+"""
+
+GRAPHQL_LIST_PAGES_NO_LOCALE = """
+query ListPages($limit: Int!) {
+  pages {
+    list(limit: $limit) {
       id
       path
       title
@@ -65,19 +78,98 @@ def split_chunks(markdown: str, max_chars: int) -> list[str]:
     return chunks
 
 
-def graphql_list_pages(base_url: str, token: str, locale: str, timeout: float, verify_ssl: bool) -> list[dict]:
-    endpoint = urljoin(base_url.rstrip("/") + "/", "graphql")
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = "Bearer " + token
-    payload = {"query": GRAPHQL_LIST_PAGES, "variables": {"locale": locale, "limit": 10000}}
-    response = requests.post(endpoint, json=payload, headers=headers, timeout=timeout, verify=verify_ssl)
+def _graphql_request(
+    endpoint: str, headers: dict[str, str], query: str, variables: dict[str, object], timeout: float, verify_ssl: bool
+) -> list[dict]:
+    response = requests.post(
+        endpoint,
+        json={"query": query, "variables": variables},
+        headers=headers,
+        timeout=timeout,
+        verify=verify_ssl,
+    )
     response.raise_for_status()
     data = response.json()
     pages = data.get("data", {}).get("pages", {}).get("list", [])
     if not isinstance(pages, list):
         return []
     return [p for p in pages if isinstance(p, dict) and p.get("path")]
+
+
+def _sitemap_list_pages(base_url: str, timeout: float, verify_ssl: bool) -> list[dict]:
+    sitemap_url = urljoin(base_url.rstrip("/") + "/", "sitemap.xml")
+    response = requests.get(sitemap_url, timeout=timeout, verify=verify_ssl)
+    response.raise_for_status()
+    xml_text = response.text or ""
+    locs = re.findall(r"<loc>(.*?)</loc>", xml_text, flags=re.IGNORECASE | re.DOTALL)
+    base_host = urlparse(base_url).netloc.lower()
+    pages: list[dict] = []
+    seen: set[str] = set()
+    for raw_loc in locs:
+        loc = raw_loc.strip()
+        if not loc:
+            continue
+        parsed = urlparse(loc)
+        if parsed.netloc.lower() != base_host:
+            continue
+        path = parsed.path.strip("/")
+        if not path:
+            continue
+        parts = [part for part in path.split("/") if part]
+        if parts and re.fullmatch(r"[a-z]{2}(?:-[A-Z]{2})?", parts[0]):
+            parts = parts[1:]
+        clean_path = "/".join(parts).strip("/")
+        if not clean_path or clean_path in seen:
+            continue
+        seen.add(clean_path)
+        pages.append(
+            {
+                "id": None,
+                "path": clean_path,
+                "title": parts[-1].replace("_", " ") if parts else clean_path,
+                "updatedAt": None,
+            }
+        )
+    return pages
+
+
+def graphql_list_pages(base_url: str, token: str, locale: str, timeout: float, verify_ssl: bool) -> list[dict]:
+    endpoint = urljoin(base_url.rstrip("/") + "/", "graphql")
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    pages: list[dict] = []
+
+    if locale:
+        try:
+            pages = _graphql_request(
+                endpoint,
+                headers,
+                GRAPHQL_LIST_PAGES,
+                {"locale": locale, "limit": 10000},
+                timeout,
+                verify_ssl,
+            )
+        except Exception:
+            pages = []
+    if not pages:
+        try:
+            pages = _graphql_request(
+                endpoint,
+                headers,
+                GRAPHQL_LIST_PAGES_NO_LOCALE,
+                {"limit": 10000},
+                timeout,
+                verify_ssl,
+            )
+        except Exception:
+            pages = []
+    if not pages:
+        try:
+            pages = _sitemap_list_pages(base_url, timeout, verify_ssl)
+        except Exception:
+            pages = []
+    return pages
 
 
 def fetch_markdown(
