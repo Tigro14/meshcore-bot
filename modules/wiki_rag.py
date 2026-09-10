@@ -149,7 +149,7 @@ class LocalWikiRag:
             overlap = query_terms.intersection(chunk_terms)
             if not overlap:
                 continue
-            title_path = f"{chunk.get('title', '')} {chunk.get('path', '')}".lower()
+            title_path = _normalize_text(f"{chunk.get('title', '')} {chunk.get('path', '')}")
             score = len(overlap) * self._SCORE_TERM_OVERLAP
             score += sum(self._SCORE_TITLE_PATH_MATCH for term in overlap if term in title_path)
             if query_norm and query_norm in _normalize_text(content):
