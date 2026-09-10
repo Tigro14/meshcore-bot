@@ -11,7 +11,7 @@ import json
 import os
 import sys
 
-from wikijs_rag_collect import _allowed_path, _fetch_markdown, _graphql_list_pages, _split_chunks
+from wikijs_rag_collect import allowed_path, fetch_markdown, graphql_list_pages, split_chunks
 
 
 def main() -> int:
@@ -37,12 +37,12 @@ def main() -> int:
     prefixes = args.prefix or ["meshcore/"]
 
     try:
-        pages = _graphql_list_pages(args.base_url, args.token, args.locale, args.timeout, verify_ssl)
+        pages = graphql_list_pages(args.base_url, args.token, args.locale, args.timeout, verify_ssl)
     except Exception as exc:
         print(f"error: GraphQL list failed: {exc}", file=sys.stderr)
         return 1
 
-    selected = [page for page in pages if _allowed_path(str(page.get("path", "")), prefixes)]
+    selected = [page for page in pages if allowed_path(str(page.get("path", "")), prefixes)]
 
     output_path = os.path.abspath(args.output)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -54,7 +54,7 @@ def main() -> int:
             if not page_path:
                 continue
             try:
-                markdown, source_url = _fetch_markdown(args.base_url, page_path, args.token, args.timeout, verify_ssl)
+                markdown, source_url = fetch_markdown(args.base_url, page_path, args.token, args.timeout, verify_ssl)
             except Exception as exc:
                 print(f"warn: skip {page_path}: {exc}", file=sys.stderr)
                 continue
@@ -65,7 +65,7 @@ def main() -> int:
                 "updated_at": page.get("updatedAt"),
                 "source_url": source_url,
                 "content": markdown,
-                "chunks": _split_chunks(markdown, max(200, args.max_chars)),
+                "chunks": split_chunks(markdown, max(200, args.max_chars)),
             }
             out.write(json.dumps(record, ensure_ascii=False) + "\n")
             fetched += 1

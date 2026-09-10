@@ -297,6 +297,7 @@ dashboard_max_clock_drift_seconds = 300
 # Seconds to wait for a DM reply from each target before marking as unreplied.
 # Default: 60. Increase on slow/lossy links.
 clock_sync_admin_reply_window_seconds = 60
+
 [Channels]
 # Channels to monitor (comma-separated)
 # Bot will only respond to messages on these channels

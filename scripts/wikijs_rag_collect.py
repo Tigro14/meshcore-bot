@@ -109,6 +109,22 @@ def _allowed_path(page_path: str, prefixes: list[str]) -> bool:
     return any(normalized.startswith(prefix.strip("/").lower()) for prefix in prefixes)
 
 
+def split_chunks(markdown: str, max_chars: int) -> list[str]:
+    return _split_chunks(markdown, max_chars)
+
+
+def graphql_list_pages(base_url: str, token: str, locale: str, timeout: float, verify_ssl: bool) -> list[dict]:
+    return _graphql_list_pages(base_url, token, locale, timeout, verify_ssl)
+
+
+def fetch_markdown(base_url: str, page_path: str, token: str, timeout: float, verify_ssl: bool) -> tuple[str, str]:
+    return _fetch_markdown(base_url, page_path, token, timeout, verify_ssl)
+
+
+def allowed_path(page_path: str, prefixes: list[str]) -> bool:
+    return _allowed_path(page_path, prefixes)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Collect Wiki.js pages for local lexical RAG.")
     parser.add_argument("--base-url", required=True, help="Wiki.js base URL (e.g. https://wiki.example.org)")
@@ -135,7 +151,7 @@ def main() -> int:
         print(f"error: GraphQL page listing failed: {exc}", file=sys.stderr)
         return 1
 
-    selected = [page for page in pages if _allowed_path(str(page.get("path", "")), allow_prefixes)]
+    selected = [page for page in pages if allowed_path(str(page.get("path", "")), allow_prefixes)]
     output_path = os.path.abspath(args.output)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -147,7 +163,7 @@ def main() -> int:
             if not page_path:
                 continue
             try:
-                markdown, source_url = _fetch_markdown(args.base_url, page_path, args.token, args.timeout, verify_ssl)
+                markdown, source_url = fetch_markdown(args.base_url, page_path, args.token, args.timeout, verify_ssl)
             except Exception as exc:
                 print(f"warn: skip {page_path}: {exc}", file=sys.stderr)
                 continue
@@ -158,7 +174,7 @@ def main() -> int:
                 "updated_at": page.get("updatedAt"),
                 "source_url": source_url,
                 "content": markdown,
-                "chunks": _split_chunks(markdown, max(200, args.max_chars)),
+                "chunks": split_chunks(markdown, max(200, args.max_chars)),
             }
             out.write(json.dumps(record, ensure_ascii=False) + "\n")
             fetched += 1
