@@ -39,7 +39,7 @@ def _strip_html(text: str) -> str:
     return " ".join(text.split()).strip()
 
 
-def _split_chunks(markdown: str, max_chars: int) -> list[str]:
+def split_chunks(markdown: str, max_chars: int) -> list[str]:
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", markdown) if p.strip()]
     chunks: list[str] = []
     current = ""
@@ -65,7 +65,7 @@ def _split_chunks(markdown: str, max_chars: int) -> list[str]:
     return chunks
 
 
-def _graphql_list_pages(base_url: str, token: str, locale: str, timeout: float, verify_ssl: bool) -> list[dict]:
+def graphql_list_pages(base_url: str, token: str, locale: str, timeout: float, verify_ssl: bool) -> list[dict]:
     endpoint = urljoin(base_url.rstrip("/") + "/", "graphql")
     headers = {"Content-Type": "application/json"}
     if token:
@@ -80,7 +80,7 @@ def _graphql_list_pages(base_url: str, token: str, locale: str, timeout: float, 
     return [p for p in pages if isinstance(p, dict) and p.get("path")]
 
 
-def _fetch_markdown(base_url: str, page_path: str, token: str, timeout: float, verify_ssl: bool) -> tuple[str, str]:
+def fetch_markdown(base_url: str, page_path: str, token: str, timeout: float, verify_ssl: bool) -> tuple[str, str]:
     clean_path = page_path.strip("/")
     encoded_path = quote(clean_path)
     candidates = [
@@ -104,25 +104,9 @@ def _fetch_markdown(base_url: str, page_path: str, token: str, timeout: float, v
     raise RuntimeError(f"Unable to fetch markdown for path '{page_path}' via /s/")
 
 
-def _allowed_path(page_path: str, prefixes: list[str]) -> bool:
+def allowed_path(page_path: str, prefixes: list[str]) -> bool:
     normalized = page_path.strip("/").lower()
     return any(normalized.startswith(prefix.strip("/").lower()) for prefix in prefixes)
-
-
-def split_chunks(markdown: str, max_chars: int) -> list[str]:
-    return _split_chunks(markdown, max_chars)
-
-
-def graphql_list_pages(base_url: str, token: str, locale: str, timeout: float, verify_ssl: bool) -> list[dict]:
-    return _graphql_list_pages(base_url, token, locale, timeout, verify_ssl)
-
-
-def fetch_markdown(base_url: str, page_path: str, token: str, timeout: float, verify_ssl: bool) -> tuple[str, str]:
-    return _fetch_markdown(base_url, page_path, token, timeout, verify_ssl)
-
-
-def allowed_path(page_path: str, prefixes: list[str]) -> bool:
-    return _allowed_path(page_path, prefixes)
 
 
 def main() -> int:
@@ -146,7 +130,7 @@ def main() -> int:
 
     verify_ssl = not args.insecure
     try:
-        pages = _graphql_list_pages(args.base_url, args.token, args.locale, args.timeout, verify_ssl)
+        pages = graphql_list_pages(args.base_url, args.token, args.locale, args.timeout, verify_ssl)
     except Exception as exc:
         print(f"error: GraphQL page listing failed: {exc}", file=sys.stderr)
         return 1

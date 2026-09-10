@@ -1341,6 +1341,7 @@ condense_paths = true
 require_path_bytes_greater_or_equal_to = 0
 # Optional response when rejected by path-byte requirement; leave empty for silent reject
 require_path_bytes_failure_response =
+
 [Greeter_Command]
 # Enable greeter to greet users on first channel message (true/false)
 enabled = false
