@@ -880,6 +880,13 @@ def _m0026_clock_sync_targets(cursor: sqlite3.Cursor) -> None:
     )
 
 
+def _m0027_clock_sync_targets_auto_clkreboot(cursor: sqlite3.Cursor) -> None:
+    """Per-target opt-in for auto-clkreboot when a target reports a clock-ahead
+    error, plus a timestamp to enforce a cooldown between automatic reboots."""
+    _add_column(cursor, "clock_sync_targets", "auto_clkreboot_enabled", "BOOLEAN DEFAULT 0")
+    _add_column(cursor, "clock_sync_targets", "last_clkreboot_at", "INTEGER")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -913,6 +920,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (24, "bbs_messages table", _m0024_bbs_messages_table),
     (25, "clock_sync_admin_log table", _m0025_clock_sync_admin_log),
     (26, "clock_sync_targets table", _m0026_clock_sync_targets),
+    (27, "clock_sync_targets: auto_clkreboot_enabled, last_clkreboot_at", _m0027_clock_sync_targets_auto_clkreboot),
 ]
 
 
