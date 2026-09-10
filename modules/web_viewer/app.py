@@ -2811,7 +2811,8 @@ class BotDataViewer:
                         role,
                         is_starred,
                         last_heard,
-                        last_advert_timestamp
+                        last_advert_timestamp,
+                        raw_advert_data
                     FROM complete_contact_tracking
                     WHERE role IN ('repeater', 'roomserver')
                     AND latitude IS NOT NULL
@@ -2824,29 +2825,26 @@ class BotDataViewer:
                 cursor.execute(query)
                 rows = cursor.fetchall()
 
-                # Build pubkey -> adv_name lookup from live contacts (in-process bot).
-                # adv_name is the Meshtastic short name; absent when the viewer runs standalone.
-                pubkey_to_adv_name: dict[str, str] = {}
-                bot = getattr(self, 'bot', None)
-                meshcore = getattr(bot, 'meshcore', None) if bot else None
-                contacts = getattr(meshcore, 'contacts', None) if meshcore else None
-                if isinstance(contacts, dict):
-                    for contact_data in contacts.values():
-                        if not isinstance(contact_data, dict):
-                            continue
-                        public_key = (contact_data.get("public_key", "") or "").strip()
-                        adv_name = (contact_data.get("adv_name", "") or "").strip()
-                        if public_key and adv_name:
-                            pubkey_to_adv_name[public_key] = adv_name
-
                 nodes = []
                 for row in rows:
-                    public_key = row['public_key'] or ""
+                    # adv_name (Meshtastic short name) is stored inside raw_advert_data JSON.
+                    # The web viewer runs as a separate process, so read it from the DB.
+                    adv_name = None
+                    raw = row['raw_advert_data']
+                    if raw:
+                        try:
+                            parsed = json.loads(raw)
+                            if isinstance(parsed, dict):
+                                candidate = (parsed.get('adv_name') or '').strip()
+                                if candidate:
+                                    adv_name = candidate
+                        except (ValueError, TypeError):
+                            adv_name = None
                     nodes.append({
-                        'public_key': public_key,
+                        'public_key': row['public_key'],
                         'prefix': row['prefix'].lower(),
                         'name': row['name'] or f"Node {row['prefix']}",
-                        'adv_name': pubkey_to_adv_name.get(public_key) or None,
+                        'adv_name': adv_name,
                         'latitude': float(row['latitude']),
                         'longitude': float(row['longitude']),
                         'role': row['role'],
