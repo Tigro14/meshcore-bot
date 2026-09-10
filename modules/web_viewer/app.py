@@ -2824,12 +2824,29 @@ class BotDataViewer:
                 cursor.execute(query)
                 rows = cursor.fetchall()
 
+                # Build pubkey -> adv_name lookup from live contacts (in-process bot).
+                # adv_name is the Meshtastic short name; absent when the viewer runs standalone.
+                pubkey_to_adv_name: dict[str, str] = {}
+                bot = getattr(self, 'bot', None)
+                meshcore = getattr(bot, 'meshcore', None) if bot else None
+                contacts = getattr(meshcore, 'contacts', None) if meshcore else None
+                if isinstance(contacts, dict):
+                    for contact_data in contacts.values():
+                        if not isinstance(contact_data, dict):
+                            continue
+                        public_key = (contact_data.get("public_key", "") or "").strip()
+                        adv_name = (contact_data.get("adv_name", "") or "").strip()
+                        if public_key and adv_name:
+                            pubkey_to_adv_name[public_key] = adv_name
+
                 nodes = []
                 for row in rows:
+                    public_key = row['public_key'] or ""
                     nodes.append({
-                        'public_key': row['public_key'],
+                        'public_key': public_key,
                         'prefix': row['prefix'].lower(),
                         'name': row['name'] or f"Node {row['prefix']}",
+                        'adv_name': pubkey_to_adv_name.get(public_key) or None,
                         'latitude': float(row['latitude']),
                         'longitude': float(row['longitude']),
                         'role': row['role'],
