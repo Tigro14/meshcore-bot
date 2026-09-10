@@ -1,5 +1,6 @@
 """Tests for modules.commands.llm_command."""
 
+import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -468,3 +469,47 @@ class TestLlmCommand:
             assert result is True
             assert command_mock_bot.command_manager.send_response.call_args[0][1] == "trop chaud:"
 
+    def test_build_payload_injects_wiki_rag_context_when_enabled(self, command_mock_bot, tmp_path):
+        self._enable_llm(command_mock_bot)
+        index_file = tmp_path / "wiki_pages.jsonl"
+        index_file.write_text(
+            json.dumps(
+                {
+                    "path": "configuration/radio",
+                    "title": "Configuration Radio",
+                    "source_url": "https://wiki.local/s/configuration/radio",
+                    "chunks": ["Pour activer le mode debug radio, régler debug_mode sur true."],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        command_mock_bot.config.set("Llm_Command", "wiki_rag_enabled", "true")
+        command_mock_bot.config.set("Llm_Command", "wiki_rag_index_path", str(index_file))
+        cmd = LlmCommand(command_mock_bot)
+
+        payload = cmd._build_payload(prompt="comment activer debug radio")
+        system_messages = [m["content"] for m in payload["messages"] if m["role"] == "system"]
+        assert any("Wiki.js context" in msg for msg in system_messages)
+
+    def test_build_payload_skips_wiki_rag_when_disabled(self, command_mock_bot, tmp_path):
+        self._enable_llm(command_mock_bot)
+        index_file = tmp_path / "wiki_pages.jsonl"
+        index_file.write_text(
+            json.dumps(
+                {
+                    "path": "configuration/radio",
+                    "title": "Configuration Radio",
+                    "chunks": ["debug_mode sur true"],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        command_mock_bot.config.set("Llm_Command", "wiki_rag_enabled", "false")
+        command_mock_bot.config.set("Llm_Command", "wiki_rag_index_path", str(index_file))
+        cmd = LlmCommand(command_mock_bot)
+
+        payload = cmd._build_payload(prompt="comment activer debug radio")
+        system_messages = [m["content"] for m in payload["messages"] if m["role"] == "system"]
+        assert all("Wiki.js context" not in msg for msg in system_messages)

@@ -17,6 +17,7 @@ from ..db_manager import validate_readonly_sql
 from ..models import MeshMessage
 from ..solar_conditions import get_moon, get_sun
 from ..utils import geocode_city_sync, get_cpu_temperature, get_cpu_usage, get_ram_usage
+from ..wiki_rag import LocalWikiRag
 from .base_command import BaseCommand
 
 
@@ -169,6 +170,32 @@ class LlmCommand(BaseCommand):
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
         )
+        self.wiki_rag_enabled = self.get_config_value(
+            "Llm_Command", "wiki_rag_enabled", fallback=False, value_type="bool"
+        )
+        self.wiki_rag_index_path = self.get_config_value(
+            "Llm_Command",
+            "wiki_rag_index_path",
+            fallback="data/wiki_rag/wiki_pages.jsonl",
+            value_type="str",
+        )
+        self.wiki_rag_max_chunks = max(
+            1, min(8, self.get_config_value("Llm_Command", "wiki_rag_max_chunks", fallback=3, value_type="int"))
+        )
+        self.wiki_rag_chunk_chars = max(
+            120,
+            min(
+                1200,
+                self.get_config_value("Llm_Command", "wiki_rag_chunk_chars", fallback=450, value_type="int"),
+            ),
+        )
+        self.wiki_rag_min_term_len = max(
+            2,
+            min(
+                8,
+                self.get_config_value("Llm_Command", "wiki_rag_min_term_len", fallback=3, value_type="int"),
+            ),
+        )
         # Weather location for LLM context (defaults to Paris, France)
         self.context_weather_location = self.get_config_value(
             "Llm_Command", "context_weather_location", fallback="Paris, France", value_type="str"
@@ -181,6 +208,14 @@ class LlmCommand(BaseCommand):
         self._cached_context_breakdown: list[dict[str, Any]] = []
         self._cached_commands_list = None
         self._sender_position: tuple[float, float] | None = None
+        self.wiki_rag: LocalWikiRag | None = None
+        if self.wiki_rag_enabled:
+            self.wiki_rag = LocalWikiRag(
+                self.wiki_rag_index_path,
+                max_chunks=self.wiki_rag_max_chunks,
+                max_chars_per_chunk=self.wiki_rag_chunk_chars,
+                min_term_len=self.wiki_rag_min_term_len,
+            )
 
         # CPU temperature cooling threshold (in degrees Celsius)
         self.cpu_temp_threshold = max(
@@ -899,6 +934,7 @@ class LlmCommand(BaseCommand):
         prompt: str = "",
         history: list[dict[str, str]] | None = None,
         messages: list[dict[str, Any]] | None = None,
+        include_rag: bool = True,
     ) -> dict[str, Any]:
         """Build the API payload for the LLM request.
 
@@ -924,6 +960,13 @@ class LlmCommand(BaseCommand):
             # Build messages from prompt and history
             system_prompt = self._inject_current_time_into_prompt(self.system_prompt)
             messages = [{"role": "system", "content": system_prompt}]
+            if include_rag and prompt and self.wiki_rag:
+                try:
+                    rag_context = self.wiki_rag.build_context(prompt)
+                    if rag_context:
+                        messages.append({"role": "system", "content": rag_context})
+                except Exception as e:
+                    self.logger.warning(f"Failed to build Wiki.js RAG context: {e}")
             if history:
                 messages.extend(history)
             if prompt:
@@ -1126,7 +1169,7 @@ class LlmCommand(BaseCommand):
                     "- Max 5 items, no tables, no pipes\n"
                     "- Total response under 400 chars"
                 )
-                followup_payload = self._build_payload(prompt=followup_prompt)
+                followup_payload = self._build_payload(prompt=followup_prompt, include_rag=False)
                 try:
                     resp2 = await asyncio.to_thread(
                         requests.post, self.endpoint, json=followup_payload, timeout=self.timeout_seconds
