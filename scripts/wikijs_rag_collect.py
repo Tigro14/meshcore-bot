@@ -295,7 +295,7 @@ def main() -> int:
             verify_ssl=verify_ssl,
         )
     except Exception as exc:
-        print(f"error: GraphQL page listing failed: {exc}", file=sys.stderr)
+        print(f"error: collection failed: {exc}", file=sys.stderr)
         return 1
 
     print(f"ok: listed={listed} selected={selected} fetched={fetched} output={output_path}")
