@@ -67,7 +67,9 @@ def _split_chunks(markdown: str, max_chars: int) -> list[str]:
 
 def _graphql_list_pages(base_url: str, token: str, locale: str, timeout: float, verify_ssl: bool) -> list[dict]:
     endpoint = urljoin(base_url.rstrip("/") + "/", "graphql")
-    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + token}
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
     payload = {"query": GRAPHQL_LIST_PAGES, "variables": {"locale": locale, "limit": 10000}}
     response = requests.post(endpoint, json=payload, headers=headers, timeout=timeout, verify=verify_ssl)
     response.raise_for_status()
@@ -124,9 +126,6 @@ def main() -> int:
     parser.add_argument("--insecure", action="store_true", help="Disable TLS verification")
     args = parser.parse_args()
 
-    if not args.token:
-        print("error: missing Wiki.js token (--token or WIKIJS_TOKEN)", file=sys.stderr)
-        return 2
     allow_prefixes = args.allow_prefix or ["configuration/", "demarrer/", "ressources/"]
 
     verify_ssl = not args.insecure
