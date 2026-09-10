@@ -244,8 +244,9 @@
             if (value.length > 64) return { ok: false, error: 'Target too long (max 64 characters)' };
             // Full 64-char hex public key is always acceptable
             if (/^[0-9a-fA-F]{64}$/.test(value)) return { ok: true };
-            // Node name: unicode word chars + space / hyphen / dot / slash / apostrophe
-            if (/^[\w \-\.\/' ]+$/.test(value)) return { ok: true };
+            // Node name: unicode letters/digits/underscore + space / hyphen / dot / slash / apostrophe.
+            // (JS \w is ASCII-only, so use \p{L}/\p{N} with the u flag to accept accented names like "FR78 Préfounet")
+            if (/^(?:[\p{L}\p{N}_]|[ \-\.\/' ])+$/u.test(value)) return { ok: true };
             return { ok: false, error: 'Invalid characters (allowed: letters, digits, space, - _ . / \')' };
         }
 
