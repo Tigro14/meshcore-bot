@@ -9,7 +9,6 @@ import json
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any
 
 
 def _normalize_text(text: str) -> str:
