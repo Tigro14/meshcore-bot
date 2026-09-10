@@ -2941,7 +2941,7 @@ class BotDataViewer:
 
                 nodes = []
                 for row in rows:
-                    # adv_name (Meshtastic short name) is stored inside raw_advert_data JSON.
+                    # adv_name (Meshcore short name) is stored inside raw_advert_data JSON.
                     # The web viewer runs as a separate process, so read it from the DB.
                     adv_name = None
                     raw = row['raw_advert_data']

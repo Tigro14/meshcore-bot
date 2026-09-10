@@ -752,7 +752,7 @@
         return `${node.prefix}-${node.latitude.toFixed(6)}-${node.longitude.toFixed(6)}`;
     }
 
-    // Short display label for a node: prefer the Meshtastic short name (adv_name),
+    // Short display label for a node: prefer the Meshcore short name (adv_name),
     // otherwise fall back to a truncated long name (same rules as the graph view).
     function getNodeShortLabel(node) {
         if (node.adv_name) return node.adv_name;

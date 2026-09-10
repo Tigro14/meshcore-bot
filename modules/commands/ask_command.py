@@ -31,7 +31,8 @@ Notes:
 - Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0
 - No firmware version or hardware/model info is stored in this database. If asked about version or hardware, reply: 'not tracked in DB'
 - Only query the tables listed above. Do NOT query: bbs_messages, bot_metadata, channels, clock_sync_*, command_stats, daily_rollup, dashboard_snapshot, feed_*, generic_cache, geocoding_cache, greeted_users, greeter_rollout, neighbor_observations, packet_stream, purging_log, schema_version
-- ALWAYS resolve public_key to name: JOIN complete_contact_tracking c ON c.public_key = <table>.public_key and SELECT c.name. Truncate names to 15 chars: SUBSTR(c.name, 1, 15) AS name
+- ALWAYS resolve public_key to name: JOIN complete_contact_tracking c ON c.public_key = <table>.public_key and SELECT c.name. Truncate names to 15 chars: SUBSTR(c.name, 1, 15) AS name. Never SELECT a raw public_key or prefix as the primary identifier.
+- When selecting a distance, alias it with its unit, e.g. ROUND(<haversine>,1) AS distance_km
 """
 
 
@@ -193,6 +194,87 @@ class AskCommand(BaseCommand):
             self.logger.warning(f"Ask command SQL execution error: {e} | SQL: {sql[:200]}")
             return f"(query error: {e})"
 
+    # Date + time (with optional fraction). Bare dates (no time) are kept.
+    _DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$")
+
+    def _question_asks_for_datetime(self, question: str) -> bool:
+        """Return True if the question is specifically about a date/time (keep timestamps)."""
+        q = (question or "").lower()
+        markers = (
+            "date", "jour", "quand", "qu'elle", "qu'elle est", "dernier", "derniere", "dernière",
+            "récent", "recente", "récente", "recent", "latest", "when", "time", "heure",
+            "timestamp", "moment", "plus récent", "plus recemment", "plus récente",
+        )
+        return any(m in q for m in markers)
+
+    def _postprocess_results(self, results: str, keep_datetime: bool = False) -> str:
+        """Clean raw SQL results before they are formatted for the mesh.
+
+        1. Replace hex public keys / prefixes with node names (best-effort).
+           The LLM sometimes selects a ``public_key`` (hex, commonly 64 chars but
+           occasionally longer) or a short prefix (e.g. ``from_prefix``) instead of a
+           name. Each such token is resolved against ``complete_contact_tracking``
+           (exact match first, then prefix) and swapped for the node name.
+           A token is a candidate if it is 8+ hex chars; prefix matching is only
+           attempted when it contains at least one hex letter (a-f), so pure numeric
+           values (timestamps, counts) are not mistaken for key prefixes.
+        2. Drop verbose ISO datetimes (date + time) to save message space — unless
+           the question is specifically about a date/time, in which case they are kept.
+        """
+        if not results or not results.strip():
+            return results
+        candidates: set[str] = set()
+        for line in results.splitlines():
+            for part in line.split(", "):
+                p = part.strip()
+                if re.fullmatch(r"[0-9a-fA-F]{8,}", p):
+                    candidates.add(p.lower())
+        name_map: dict[str, str] = {}
+        if candidates:
+            try:
+                with self.bot.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    for cand in candidates:
+                        name = None
+                        # 1) Exact match (any length).
+                        cursor.execute(
+                            "SELECT name FROM complete_contact_tracking WHERE public_key = ? LIMIT 1",
+                            (cand,),
+                        )
+                        row = cursor.fetchone()
+                        if row:
+                            name = row[0]
+                        # 2) Prefix match, only if the token has at least one hex letter.
+                        if not name and re.search(r"[a-fA-F]", cand):
+                            cursor.execute(
+                                "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1",
+                                (cand + "%",),
+                            )
+                            row = cursor.fetchone()
+                            if row:
+                                name = row[0]
+                        if name:
+                            name_map[cand] = name[:15]
+            except Exception as e:
+                self.logger.debug(f"Ask command pubkey->name resolution error: {e}")
+
+        def _process_part(part: str) -> str | None:
+            p = part.strip()
+            # Resolve a public key / prefix to a name.
+            if p.lower() in name_map:
+                return name_map[p.lower()]
+            # Drop verbose datetimes unless the question is about a date/time.
+            if not keep_datetime and self._DATETIME_RE.match(p):
+                return None
+            return part
+
+        out_lines = []
+        for line in results.splitlines():
+            parts = [processed for processed in (_process_part(part) for part in line.split(", ")) if processed is not None]
+            if parts:
+                out_lines.append(", ".join(parts))
+        return "\n".join(out_lines)
+
     def _format_followup(self, question: str, sql_results: str) -> str | None:
         """Second LLM call to format results into a mesh-friendly answer."""
         prompt = (
@@ -200,8 +282,9 @@ class AskCommand(BaseCommand):
             f"Answer the question: {question}\n\n"
             "FORMAT RULES (mesh network, max 150 chars per message):\n"
             "- One item per line: 'name: value unit'\n"
-            "- Use the CORRECT unit for the data: km/m for distance, messages for counts, days/hours for time, % for percentages\n"
-            "- NEVER show raw coordinates (lat/lon)\n"
+            "- ALWAYS attach a unit to every number: km for distance, hops for path length, messages for counts, days/hours/minutes for time, % for percentages, dBm for signal strength, bytes for data\n"
+            "- Use node NAMES, never hex public keys or short prefixes\n"
+            "- NEVER show raw coordinates (lat/lon) or raw hex keys\n"
             "- Max 10 items, no tables, no pipes\n"
             "- Total response under 500 chars\n"
             "- If the data is a single aggregate (count, total), just answer with the number and its unit"
@@ -327,6 +410,10 @@ class AskCommand(BaseCommand):
 
         # Step 2: Execute
         sql_results = await asyncio.to_thread(self._execute_sql, sql)
+        # Step 2b: Post-process — resolve pubkeys to names, drop verbose datetimes
+        #          (unless the question is specifically about a date/time).
+        keep_dt = self._question_asks_for_datetime(question)
+        sql_results = await asyncio.to_thread(self._postprocess_results, sql_results, keep_dt)
         self.logger.debug(f"Ask command SQL results: {sql_results[:500]}")
 
         # Step 3: Format with LLM followup
