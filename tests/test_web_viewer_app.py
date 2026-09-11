@@ -1,10 +1,14 @@
 """Tests for modules.web_viewer.app — BotDataViewer Flask app."""
 
 import json
+import shutil
 import sqlite3
+import subprocess
+import threading
 import time
 from configparser import ConfigParser
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -454,7 +458,997 @@ class TestApiExportPaths:
 
 
 # ---------------------------------------------------------------------------
-# api_geocode_contact
+# api_mesh_edges (evidence modes)
+# ---------------------------------------------------------------------------
+
+
+def _seed_observed_path(db_path, path_hex, bytes_per_hop, observation_count=1,
+                        last_seen=None, packet_type='advert'):
+    """Insert an observed_paths row; from/to prefixes derived from the path."""
+    hex_chars = bytes_per_hop * 2
+    hops = [path_hex[i:i + hex_chars] for i in range(0, len(path_hex), hex_chars)]
+    ts = last_seen or time.strftime('%Y-%m-%dT%H:%M:%S')
+    with sqlite3.connect(db_path, timeout=60) as conn:
+        conn.execute("""
+            INSERT INTO observed_paths
+            (from_prefix, to_prefix, path_hex, path_length, bytes_per_hop,
+             packet_type, observation_count, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (hops[0], hops[-1], path_hex, len(path_hex) // 2, bytes_per_hop,
+              packet_type, observation_count, ts, ts))
+        conn.commit()
+
+
+def _insert_neighbor_link(conn, self_key, neighbor_key, *, last_seen,
+                          observation_count=1):
+    """Insert a confirmed zero-hop link, the strongest evidence class."""
+    conn.execute(
+        """
+        INSERT INTO neighbor_links
+            (self_public_key, neighbor_public_key, first_seen, last_seen,
+             observation_count, snr_sum, snr_count, best_snr, last_snr,
+             last_status, scopes)
+        VALUES (?, ?, ?, ?, ?, 5.0, 1, 5.0, 5.0, 'responded', '')
+        """,
+        (self_key, neighbor_key, last_seen, last_seen, observation_count),
+    )
+
+
+class TestApiMeshEdgesEvidence:
+    def test_nodes_days_filter_is_applied_in_database(self, viewer_with_db):
+        recent = time.strftime('%Y-%m-%dT%H:%M:%S')
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.executemany(
+                """
+                INSERT INTO complete_contact_tracking
+                    (public_key, name, role, last_heard, latitude, longitude)
+                VALUES (?, ?, 'repeater', ?, 45.0, -122.0)
+                """,
+                [
+                    ('aa' * 32, 'Recent', recent),
+                    ('bb' * 32, 'Old', '2020-01-01T00:00:00'),
+                ],
+            )
+            conn.commit()
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/nodes?days=7')
+            assert response.status_code == 200
+            names = {node['name'] for node in json.loads(response.data)['nodes']}
+            assert names == {'Recent'}
+
+    def test_default_mode_tags_evidence_by_key_length(self, viewer_with_db):
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.execute("""
+                INSERT INTO mesh_connections (from_prefix, to_prefix, observation_count)
+                VALUES ('aa', 'bb', 5), ('aabb', 'ccdd', 3)
+            """)
+            conn.commit()
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/edges')
+            assert response.status_code == 200
+            edges = {(e['from_prefix'], e['to_prefix']): e
+                     for e in json.loads(response.data)['edges']}
+            assert edges[('aa', 'bb')]['evidence'] == 'singlebyte'
+            assert edges[('aabb', 'ccdd')]['evidence'] == 'multibyte'
+
+    def test_multibyte_mode_derives_consecutive_pairs(self, viewer_with_db):
+        # 2-byte path with 3 hops -> two directed edges; 1-byte row excluded
+        _seed_observed_path(viewer_with_db.db_path, 'aaaabbbbcccc', 2, observation_count=2)
+        _seed_observed_path(viewer_with_db.db_path, 'ddee', 1, observation_count=9)
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/edges?evidence=multibyte')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['evidence'] == 'multibyte'
+            edges = {(e['from_prefix'], e['to_prefix']): e for e in data['edges']}
+            assert set(edges) == {('aaaa', 'bbbb'), ('bbbb', 'cccc')}
+            edge = edges[('aaaa', 'bbbb')]
+            assert edge['observation_count'] == 2
+            assert edge['path_count'] == 1
+            assert edge['evidence'] == 'multibyte'
+            assert edge['avg_hop_position'] == 1
+            assert edges[('bbbb', 'cccc')]['avg_hop_position'] == 2
+
+    def test_multibyte_mode_coalesces_unique_lower_resolution(self, viewer_with_db):
+        # One 3-byte edge plus a 2-byte observation of the same link:
+        # unique prefix match, so the 2-byte counts merge into the 3-byte edge
+        _seed_observed_path(viewer_with_db.db_path, 'aaaa11bbbb22', 3, observation_count=4)
+        _seed_observed_path(viewer_with_db.db_path, 'aaaabbbb', 2, observation_count=3)
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/edges?evidence=multibyte')
+            data = json.loads(response.data)
+            edges = {(e['from_prefix'], e['to_prefix']): e for e in data['edges']}
+            assert set(edges) == {('aaaa11', 'bbbb22')}
+            assert edges[('aaaa11', 'bbbb22')]['observation_count'] == 7
+            assert edges[('aaaa11', 'bbbb22')]['path_count'] == 2
+
+    def test_multibyte_mode_keeps_ambiguous_resolutions_separate(self, viewer_with_db):
+        # Two distinct 3-byte edges share the same 4-char truncation:
+        # the 2-byte observation is ambiguous and must stay its own edge
+        _seed_observed_path(viewer_with_db.db_path, 'aaaa11bbbb22', 3)
+        _seed_observed_path(viewer_with_db.db_path, 'aaaa33bbbb44', 3)
+        _seed_observed_path(viewer_with_db.db_path, 'aaaabbbb', 2)
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/edges?evidence=multibyte')
+            data = json.loads(response.data)
+            keys = {(e['from_prefix'], e['to_prefix']) for e in data['edges']}
+            assert keys == {('aaaa11', 'bbbb22'), ('aaaa33', 'bbbb44'), ('aaaa', 'bbbb')}
+
+    def test_multibyte_mode_min_observations_applied_after_merge(self, viewer_with_db):
+        _seed_observed_path(viewer_with_db.db_path, 'aaaa11bbbb22', 3, observation_count=2)
+        _seed_observed_path(viewer_with_db.db_path, 'aaaabbbb', 2, observation_count=2)
+        _seed_observed_path(viewer_with_db.db_path, 'cccc55dddd66', 3, observation_count=1)
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/edges?evidence=multibyte&min_observations=4')
+            data = json.loads(response.data)
+            keys = {(e['from_prefix'], e['to_prefix']) for e in data['edges']}
+            # merged edge has 4 observations and survives; the other has 1
+            assert keys == {('aaaa11', 'bbbb22')}
+
+    def test_multibyte_mode_days_filter(self, viewer_with_db):
+        _seed_observed_path(viewer_with_db.db_path, 'aaaa11bbbb22', 3,
+                            last_seen='2020-01-01T00:00:00')
+        _seed_observed_path(viewer_with_db.db_path, 'cccc55dddd66', 3)
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/edges?evidence=multibyte&days=7')
+            data = json.loads(response.data)
+            keys = {(e['from_prefix'], e['to_prefix']) for e in data['edges']}
+            assert keys == {('cccc55', 'dddd66')}
+
+    def test_multibyte_days_preserves_lifetime_cross_resolution_merge(self, viewer_with_db):
+        # The selected window controls edge visibility, not the lifetime
+        # identity/count aggregation. A recent 2-byte observation must still
+        # resolve to the unique older 3-byte edge.
+        _seed_observed_path(
+            viewer_with_db.db_path,
+            'aaaa11bbbb22',
+            3,
+            observation_count=4,
+            last_seen='2020-01-01T00:00:00',
+        )
+        _seed_observed_path(
+            viewer_with_db.db_path,
+            'aaaabbbb',
+            2,
+            observation_count=3,
+        )
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/edges?evidence=multibyte&days=7')
+            data = json.loads(response.data)
+            edges = {(e['from_prefix'], e['to_prefix']): e for e in data['edges']}
+            assert set(edges) == {('aaaa11', 'bbbb22')}
+            assert edges[('aaaa11', 'bbbb22')]['observation_count'] == 7
+            assert edges[('aaaa11', 'bbbb22')]['path_count'] == 2
+
+    def test_window_preserves_lifetime_prefix_resolution(self, viewer_with_db):
+        old = '2020-01-01T00:00:00'
+        recent = time.strftime('%Y-%m-%dT%H:%M:%S')
+        _seed_observed_path(
+            viewer_with_db.db_path,
+            'aaaa11bbbb22',
+            3,
+            last_seen=old,
+        )
+        _seed_observed_path(
+            viewer_with_db.db_path,
+            'ccccdddd',
+            2,
+            last_seen=recent,
+        )
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.executemany(
+                """
+                INSERT INTO mesh_connections
+                    (from_prefix, to_prefix, observation_count, last_seen)
+                VALUES (?, ?, 1, ?)
+                """,
+                [
+                    ('aaaa11', 'bbbb22', old),
+                    ('cccc', 'dddd', recent),
+                ],
+            )
+            conn.commit()
+
+        with viewer_with_db.app.test_client() as client:
+            for evidence in ('all', 'multibyte'):
+                response = client.get(
+                    f'/api/mesh/edges?evidence={evidence}&days=7'
+                )
+                data = json.loads(response.data)
+                assert data['prefix_hex_chars'] == 6
+                assert {
+                    (edge['from_prefix'], edge['to_prefix'])
+                    for edge in data['edges']
+                } == {('cccc', 'dddd')}
+
+    def test_multibyte_days_uses_exact_timestamp_cutoff(
+        self, viewer_with_db, monkeypatch
+    ):
+        fixed_now = datetime(2026, 7, 29, 15, 0, 0)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    return fixed_now
+                return fixed_now.replace(tzinfo=timezone.utc).astimezone(tz)
+
+        monkeypatch.setattr('modules.web_viewer.app.datetime', FixedDateTime)
+        cutoff = fixed_now - timedelta(days=7)
+        _seed_observed_path(
+            viewer_with_db.db_path,
+            'aaaa11bbbb22',
+            3,
+            last_seen=(cutoff - timedelta(seconds=1)).isoformat(),
+        )
+        _seed_observed_path(
+            viewer_with_db.db_path,
+            'cccc55dddd66',
+            3,
+            last_seen=cutoff.isoformat(),
+        )
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/edges?evidence=multibyte&days=7')
+            data = json.loads(response.data)
+            assert {
+                (edge['from_prefix'], edge['to_prefix'])
+                for edge in data['edges']
+            } == {('cccc55', 'dddd66')}
+
+    def test_neighbor_label_matches_on_full_public_keys(self, viewer_with_db):
+        """MeshGraph keeps some 1-byte edges but fills in the keys discovery gave it.
+
+        add_edge refuses to promote a 1-byte edge with no public key (several
+        nodes still share it), so a 3-byte prefix comparison alone would leave a
+        confirmed neighbour labelled 'singlebyte'.
+        """
+        self_key, neighbor_key = 'aa' * 32, 'bb' * 32
+        recent = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.execute(
+                """
+                INSERT INTO mesh_connections
+                    (from_prefix, to_prefix, from_public_key, to_public_key,
+                     observation_count, last_seen)
+                VALUES ('aa', 'bb', ?, ?, 5, ?)
+                """,
+                (self_key, neighbor_key, recent),
+            )
+            _insert_neighbor_link(conn, self_key, neighbor_key, last_seen=recent)
+            conn.commit()
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/edges')
+            edges = {(e['from_prefix'], e['to_prefix']): e
+                     for e in json.loads(response.data)['edges']}
+            assert edges[('aa', 'bb')]['evidence'] == 'neighbors'
+
+    def test_stale_neighbor_evidence_does_not_relabel_a_recent_edge(
+        self, viewer_with_db
+    ):
+        """neighbor_links is never pruned, so a link last heard years ago must not
+        claim a recent path-derived edge is a current direct neighbour."""
+        self_key, neighbor_key = 'aa' * 32, 'bb' * 32
+        recent = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.execute(
+                """
+                INSERT INTO mesh_connections
+                    (from_prefix, to_prefix, observation_count, last_seen)
+                VALUES (?, ?, 5, ?)
+                """,
+                (self_key[:6], neighbor_key[:6], recent),
+            )
+            _insert_neighbor_link(conn, self_key, neighbor_key,
+                                  last_seen='2020-01-01T00:00:00+00:00')
+            conn.commit()
+
+        key = (self_key[:6], neighbor_key[:6])
+        with viewer_with_db.app.test_client() as client:
+            windowed = json.loads(
+                client.get('/api/mesh/edges?days=7').data
+            )['edges']
+            assert {(e['from_prefix'], e['to_prefix']): e
+                    for e in windowed}[key]['evidence'] == 'multibyte'
+
+            # Unwindowed, the lifetime evidence still stands.
+            lifetime = json.loads(client.get('/api/mesh/edges').data)['edges']
+            assert {(e['from_prefix'], e['to_prefix']): e
+                    for e in lifetime}[key]['evidence'] == 'neighbors'
+
+    def test_stats_include_multibyte_edge_count(self, viewer_with_db):
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.execute("""
+                INSERT INTO mesh_connections (from_prefix, to_prefix, observation_count)
+                VALUES ('aa', 'bb', 5), ('aabb', 'ccdd', 3), ('aabb11', 'ccdd22', 1)
+            """)
+            conn.commit()
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/mesh/stats')
+            assert response.status_code == 200
+            stats = json.loads(response.data)
+            assert stats['total_edges'] == 3
+            assert stats['multibyte_edges'] == 2
+
+
+class TestMultibyteMeshAggregateCache:
+    def test_reuses_lifetime_aggregate_across_filtered_requests(
+        self, viewer_with_db
+    ):
+        _seed_observed_path(
+            viewer_with_db.db_path,
+            'aaaa11bbbb22',
+            3,
+            observation_count=5,
+        )
+
+        with patch.object(
+            viewer_with_db,
+            '_compute_multibyte_evidence_edges',
+            wraps=viewer_with_db._compute_multibyte_evidence_edges,
+        ) as compute:
+            with viewer_with_db.app.test_client() as client:
+                first = client.get('/api/mesh/edges?evidence=multibyte')
+                second = client.get(
+                    '/api/mesh/edges?evidence=multibyte&min_observations=4&days=7'
+                )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert compute.call_count == 1
+
+    def test_recomputes_after_cache_window(self, viewer_with_db):
+        with patch.object(
+            viewer_with_db,
+            '_compute_multibyte_evidence_edges',
+            return_value=[],
+        ) as compute:
+            viewer_with_db._aggregate_multibyte_evidence_edges()
+            viewer_with_db._multibyte_graph_cache_created_at -= (
+                viewer_with_db._mesh_graph_cache_seconds + 1
+            )
+            viewer_with_db._aggregate_multibyte_evidence_edges()
+
+        assert compute.call_count == 2
+
+    def test_forced_refresh_bypasses_warm_cache(self, viewer_with_db):
+        _seed_observed_path(
+            viewer_with_db.db_path,
+            'aaaa11bbbb22',
+            3,
+        )
+        with patch.object(
+            viewer_with_db,
+            '_compute_multibyte_evidence_edges',
+            wraps=viewer_with_db._compute_multibyte_evidence_edges,
+        ) as compute:
+            with viewer_with_db.app.test_client() as client:
+                first = client.get('/api/mesh/edges?evidence=multibyte')
+                _seed_observed_path(
+                    viewer_with_db.db_path,
+                    'cccc55dddd66',
+                    3,
+                )
+                cached = client.get('/api/mesh/edges?evidence=multibyte')
+                refreshed = client.get(
+                    '/api/mesh/edges?evidence=multibyte&refresh=1'
+                )
+
+        assert {
+            edge['from_prefix'] for edge in first.get_json()['edges']
+        } == {'aaaa11'}
+        assert {
+            edge['from_prefix'] for edge in cached.get_json()['edges']
+        } == {'aaaa11'}
+        assert {
+            edge['from_prefix'] for edge in refreshed.get_json()['edges']
+        } == {'aaaa11', 'cccc55'}
+        assert compute.call_count == 2
+
+    def test_concurrent_cold_requests_share_one_computation(
+        self, viewer_with_db
+    ):
+        started = threading.Event()
+        release = threading.Event()
+        computed = [{'from_prefix': 'aaaa', 'to_prefix': 'bbbb'}]
+
+        def slow_compute():
+            started.set()
+            assert release.wait(timeout=2)
+            return computed
+
+        results = []
+        with patch.object(
+            viewer_with_db,
+            '_compute_multibyte_evidence_edges',
+            side_effect=slow_compute,
+        ) as compute:
+            first = threading.Thread(
+                target=lambda: results.append(
+                    viewer_with_db._aggregate_multibyte_evidence_edges()
+                )
+            )
+            second = threading.Thread(
+                target=lambda: results.append(
+                    viewer_with_db._aggregate_multibyte_evidence_edges()
+                )
+            )
+            first.start()
+            assert started.wait(timeout=2)
+            second.start()
+            release.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        assert not first.is_alive()
+        assert not second.is_alive()
+        assert compute.call_count == 1
+        assert results == [computed, computed]
+
+    def test_concurrent_refresh_serves_stale_cache(self, viewer_with_db):
+        stale = [{'from_prefix': 'old', 'to_prefix': 'edge'}]
+        fresh = [{'from_prefix': 'new', 'to_prefix': 'edge'}]
+        viewer_with_db._multibyte_graph_cache_edges = stale
+        viewer_with_db._multibyte_graph_cache_created_at = 0
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_compute():
+            started.set()
+            assert release.wait(timeout=2)
+            return fresh
+
+        refreshed = []
+        with patch.object(
+            viewer_with_db,
+            '_compute_multibyte_evidence_edges',
+            side_effect=slow_compute,
+        ) as compute:
+            worker = threading.Thread(
+                target=lambda: refreshed.append(
+                    viewer_with_db._aggregate_multibyte_evidence_edges()
+                )
+            )
+            worker.start()
+            assert started.wait(timeout=2)
+            concurrent = viewer_with_db._aggregate_multibyte_evidence_edges()
+            release.set()
+            worker.join(timeout=2)
+
+        assert not worker.is_alive()
+        assert concurrent is stale
+        assert refreshed == [fresh]
+        assert compute.call_count == 1
+
+    def test_concurrent_cold_failure_is_shared(self, viewer_with_db):
+        started = threading.Event()
+        release = threading.Event()
+        errors = []
+
+        def failing_compute():
+            started.set()
+            assert release.wait(timeout=2)
+            raise sqlite3.OperationalError('temporary failure')
+
+        def aggregate():
+            try:
+                viewer_with_db._aggregate_multibyte_evidence_edges()
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch.object(
+            viewer_with_db,
+            '_compute_multibyte_evidence_edges',
+            side_effect=failing_compute,
+        ) as compute:
+            first = threading.Thread(target=aggregate)
+            second = threading.Thread(target=aggregate)
+            first.start()
+            assert started.wait(timeout=2)
+            second.start()
+            release.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        assert not first.is_alive()
+        assert not second.is_alive()
+        assert compute.call_count == 1
+        assert len(errors) == 2
+        assert any(isinstance(exc, sqlite3.OperationalError) for exc in errors)
+        assert any(isinstance(exc, RuntimeError) for exc in errors)
+
+    def test_stale_failure_uses_retry_backoff(self, viewer_with_db):
+        stale = [{'from_prefix': 'old', 'to_prefix': 'edge'}]
+        viewer_with_db._multibyte_graph_cache_edges = stale
+        viewer_with_db._multibyte_graph_cache_created_at = 0
+
+        with patch.object(
+            viewer_with_db,
+            '_compute_multibyte_evidence_edges',
+            side_effect=sqlite3.OperationalError('temporary failure'),
+        ) as compute:
+            first = viewer_with_db._aggregate_multibyte_evidence_edges()
+            with pytest.raises(RuntimeError, match='retry suppressed'):
+                viewer_with_db._aggregate_multibyte_evidence_edges(
+                    force_refresh=True
+                )
+            viewer_with_db._multibyte_graph_cache_failure_at -= (
+                viewer_with_db._multibyte_graph_cache_retry_seconds + 1
+            )
+            third = viewer_with_db._aggregate_multibyte_evidence_edges()
+
+        assert first is stale
+        assert third is stale
+        assert compute.call_count == 2
+        assert viewer_with_db._multibyte_graph_cache_failure == (
+            'OperationalError',
+            'temporary failure',
+        )
+
+    def test_forced_failure_returns_500_while_normal_request_serves_stale(
+        self, viewer_with_db
+    ):
+        viewer_with_db._multibyte_graph_cache_edges = []
+        viewer_with_db._multibyte_graph_cache_created_at = 0
+
+        with patch.object(
+            viewer_with_db,
+            '_compute_multibyte_evidence_edges',
+            side_effect=sqlite3.OperationalError('temporary failure'),
+        ) as compute:
+            with viewer_with_db.app.test_client() as client:
+                forced = client.get(
+                    '/api/mesh/edges?evidence=multibyte&refresh=1'
+                )
+                normal = client.get('/api/mesh/edges?evidence=multibyte')
+
+        assert forced.status_code == 500
+        assert forced.get_json()['error'] == 'An internal error occurred'
+        assert normal.status_code == 200
+        assert normal.get_json()['edges'] == []
+        assert compute.call_count == 1
+
+
+def test_mesh_template_coalesces_live_refreshes():
+    source = (
+        Path(__file__).parents[1]
+        / 'modules'
+        / 'web_viewer'
+        / 'templates'
+        / 'mesh.html'
+    ).read_text(encoding='utf-8')
+
+    assert 'const MESH_LIVE_REFRESH_MS = 30000;' in source
+    assert 'const MESH_LIVE_REFRESH_RETRY_MS = 6000;' in source
+    assert "document.addEventListener('visibilitychange'" in source
+    assert 'scheduleMeshLiveRefresh(reloadNodes);' in source
+    assert "socket.on('mesh_edge_updated', () => onMeshUpdate(false));" in source
+    assert 'while (pendingMeshLoad)' in source
+    assert "fetchMeshJson(edgesUrl, 'edges')" in source
+    assert "loadData({ skipRender: true }).then" not in source
+
+
+@pytest.mark.skipif(shutil.which('node') is None, reason='Node.js not installed')
+def test_mesh_refresh_coordinator_handles_bursts_visibility_and_failures():
+    source = (
+        Path(__file__).parents[1]
+        / 'modules'
+        / 'web_viewer'
+        / 'templates'
+        / 'mesh.html'
+    ).read_text(encoding='utf-8')
+
+    def extract(start, end):
+        return source[source.index(start):source.index(end)]
+
+    coordinator = '\n'.join([
+        extract(
+            '    function normalizeMeshLoadOptions',
+            '    function mergeMeshLoadOptions',
+        ),
+        extract(
+            '    function mergeMeshLoadOptions',
+            '    // Load nodes and edges.',
+        ),
+        extract('    function loadData', '    async function drainMeshLoads'),
+        extract(
+            '    async function drainMeshLoads',
+            '    async function performMeshLoad',
+        ),
+        extract(
+            '    async function refreshData',
+            '    function scheduleMeshLiveRefresh',
+        ),
+        extract(
+            '    function scheduleMeshLiveRefresh',
+            '    async function runScheduledMeshRefresh',
+        ),
+        extract(
+            '    async function runScheduledMeshRefresh',
+            '    function exportView',
+        ),
+    ])
+
+    script = f"""
+    let meshLoadInFlight = null;
+    let pendingMeshLoad = null;
+    let meshLiveRefreshTimer = null;
+    let meshLiveRefreshPending = false;
+    let meshLiveRefreshNeedsNodes = false;
+    let meshLiveRefreshRunning = false;
+    let meshLiveRefreshRetryCount = 0;
+    let meshLiveRefreshActiveReloadsNodes = false;
+    const MESH_LIVE_REFRESH_MS = 10;
+    const MESH_LIVE_REFRESH_RETRY_MS = 10;
+    const MESH_LIVE_REFRESH_MAX_RETRIES = 2;
+    let currentView = 'graph';
+    let document = {{hidden: false}};
+    let loadCount = 0;
+    let statsCount = 0;
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    let forcedLoads = 0;
+    let blockFirst = false;
+    let failBlockedFirst = false;
+    let firstStartedResolve;
+    let firstReleaseResolve;
+    let firstStarted = new Promise(resolve => firstStartedResolve = resolve);
+    let firstRelease = new Promise(resolve => firstReleaseResolve = resolve);
+
+    async function performMeshLoad(options) {{
+        loadCount++;
+        if (options.forceRefresh) forcedLoads++;
+        concurrent++;
+        maxConcurrent = Math.max(maxConcurrent, concurrent);
+        if (blockFirst && loadCount === 1) {{
+            firstStartedResolve();
+            await firstRelease;
+            concurrent--;
+            if (failBlockedFirst) {{
+                throw new Error('expected first-load failure');
+            }}
+            return;
+        }}
+        await new Promise(resolve => setTimeout(resolve, 2));
+        concurrent--;
+    }}
+    async function loadStats() {{ statsCount++; }}
+    function applyFilters() {{}}
+
+    const SETTLE_TIMEOUT_MS = 2000;
+
+    function coordinatorIdle() {{
+        return !meshLiveRefreshPending
+            && !meshLiveRefreshRunning
+            && meshLiveRefreshTimer === null
+            && meshLoadInFlight === null
+            && pendingMeshLoad === null;
+    }}
+
+    // Wait for the coordinator to come to rest instead of sleeping a fixed span.
+    // A 10ms timer on a loaded CI runner can fire tens of ms late, so a fixed wait
+    // samples the state machine mid-retry and reports a half-finished count as a
+    // logic failure. Two consecutive idle observations are required so the gap
+    // between a load settling and its retry being armed is not read as rest.
+    async function waitForIdle(label) {{
+        const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+        let idleStreak = 0;
+        while (idleStreak < 2) {{
+            idleStreak = coordinatorIdle() ? idleStreak + 1 : 0;
+            if (idleStreak < 2 && Date.now() > deadline) {{
+                throw new Error(
+                    `timed out after ${{SETTLE_TIMEOUT_MS}}ms waiting for ${{label}} to settle`
+                );
+            }}
+            await new Promise(resolve => setTimeout(resolve, 1));
+        }}
+    }}
+
+    {coordinator}
+
+    (async () => {{
+        for (let i = 0; i < 100; i++) scheduleMeshLiveRefresh(false);
+        await waitForIdle('burst coalescing');
+        const burst = {{loadCount, statsCount, maxConcurrent}};
+
+        loadCount = 0;
+        statsCount = 0;
+        maxConcurrent = 0;
+        document.hidden = true;
+        scheduleMeshLiveRefresh(false);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const hiddenLoads = loadCount;
+        document.hidden = false;
+        await runScheduledMeshRefresh();
+        const visibleLoads = loadCount;
+
+        loadCount = 0;
+        maxConcurrent = 0;
+        blockFirst = true;
+        failBlockedFirst = true;
+        firstStarted = new Promise(resolve => firstStartedResolve = resolve);
+        firstRelease = new Promise(resolve => firstReleaseResolve = resolve);
+        const first = loadData({{reloadNodes: true}});
+        await firstStarted;
+        const trailing = loadData({{reloadNodes: false}});
+        firstReleaseResolve();
+        await Promise.all([first, trailing]);
+        const failureQueue = {{
+            loadCount,
+            maxConcurrent,
+            pending: pendingMeshLoad !== null
+        }};
+
+        loadCount = 0;
+        statsCount = 0;
+        forcedLoads = 0;
+        blockFirst = true;
+        failBlockedFirst = true;
+        firstStarted = new Promise(resolve => firstStartedResolve = resolve);
+        firstRelease = new Promise(resolve => firstReleaseResolve = resolve);
+        scheduleMeshLiveRefresh(true, 10);
+        await firstStarted;
+        firstReleaseResolve();
+        await waitForIdle('scheduled retry');
+        const scheduledRetry = {{
+            loadCount,
+            statsCount,
+            forcedLoads,
+            pending: meshLiveRefreshPending,
+            retries: meshLiveRefreshRetryCount
+        }};
+
+        loadCount = 0;
+        statsCount = 0;
+        forcedLoads = 0;
+        blockFirst = false;
+        failBlockedFirst = false;
+        scheduleMeshLiveRefresh(false, 20);
+        await refreshData();
+        await waitForIdle('manual refresh absorbing the timer');
+        const manualAbsorbsTimer = {{
+            loadCount,
+            statsCount,
+            forcedLoads,
+            pending: meshLiveRefreshPending
+        }};
+
+        loadCount = 0;
+        statsCount = 0;
+        forcedLoads = 0;
+        blockFirst = true;
+        failBlockedFirst = true;
+        firstStarted = new Promise(resolve => firstStartedResolve = resolve);
+        firstRelease = new Promise(resolve => firstReleaseResolve = resolve);
+        scheduleMeshLiveRefresh(false, 20);
+        const failedManualPromise = refreshData().catch(() => {{}});
+        await firstStarted;
+        firstReleaseResolve();
+        await failedManualPromise;
+        await waitForIdle('failed manual refresh retry');
+        const failedManualRetries = {{
+            loadCount,
+            forcedLoads,
+            pending: meshLiveRefreshPending,
+            retries: meshLiveRefreshRetryCount
+        }};
+
+        loadCount = 0;
+        statsCount = 0;
+        forcedLoads = 0;
+        blockFirst = true;
+        failBlockedFirst = false;
+        firstStarted = new Promise(resolve => firstStartedResolve = resolve);
+        firstRelease = new Promise(resolve => firstReleaseResolve = resolve);
+        scheduleMeshLiveRefresh(true, 0);
+        await firstStarted;
+        const activeManualPromise = refreshData();
+        firstReleaseResolve();
+        await activeManualPromise;
+        await waitForIdle('manual refresh reusing the active load');
+        const manualReusesActiveRefresh = {{
+            loadCount,
+            forcedLoads,
+            pending: meshLiveRefreshPending
+        }};
+
+        console.log(JSON.stringify({{
+            burst,
+            hiddenLoads,
+            visibleLoads,
+            failureQueue,
+            scheduledRetry,
+            manualAbsorbsTimer,
+            failedManualRetries,
+            manualReusesActiveRefresh
+        }}));
+    }})().catch(error => {{
+        console.error(error);
+        process.exitCode = 1;
+    }});
+    """
+
+    completed = subprocess.run(
+        [shutil.which('node'), '-'],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=True,
+        # Generous: the script now waits on coordinator state rather than the clock,
+        # so a genuine stall reports which phase failed to settle instead of dying
+        # here with no detail.
+        timeout=60,
+    )
+    result = json.loads(completed.stdout.strip())
+
+    assert result['burst'] == {
+        'loadCount': 1,
+        'statsCount': 1,
+        'maxConcurrent': 1,
+    }
+    assert result['hiddenLoads'] == 0
+    assert result['visibleLoads'] == 1
+    assert result['failureQueue'] == {
+        'loadCount': 2,
+        'maxConcurrent': 1,
+        'pending': False,
+    }
+    assert result['scheduledRetry'] == {
+        'loadCount': 2,
+        'statsCount': 2,
+        'forcedLoads': 2,
+        'pending': False,
+        'retries': 0,
+    }
+    assert result['manualAbsorbsTimer'] == {
+        'loadCount': 1,
+        'statsCount': 1,
+        'forcedLoads': 1,
+        'pending': False,
+    }
+    assert result['failedManualRetries'] == {
+        'loadCount': 2,
+        'forcedLoads': 2,
+        'pending': False,
+        'retries': 0,
+    }
+    assert result['manualReusesActiveRefresh'] == {
+        'loadCount': 1,
+        'forcedLoads': 1,
+        'pending': False,
+    }
+
+
+@pytest.mark.skipif(shutil.which('node') is None, reason='Node.js not installed')
+def test_mesh_fetch_rejects_http_errors_and_invalid_payloads():
+    source = (
+        Path(__file__).parents[1]
+        / 'modules'
+        / 'web_viewer'
+        / 'templates'
+        / 'mesh.html'
+    ).read_text(encoding='utf-8')
+    helper = source[
+        source.index('    function isValidMeshNode'):
+        source.index('    // Load statistics')
+    ]
+    script = f"""
+    {helper}
+    (async () => {{
+        global.fetch = async () => ({{
+            ok: false,
+            status: 500,
+            json: async () => ({{error: 'temporary failure'}})
+        }});
+        let httpError = '';
+        try {{
+            await fetchMeshJson('/api/mesh/edges', 'edges');
+        }} catch (error) {{
+            httpError = error.message;
+        }}
+
+        global.fetch = async () => ({{
+            ok: true,
+            status: 200,
+            json: async () => ({{edges: null}})
+        }});
+        let shapeError = '';
+        try {{
+            await fetchMeshJson('/api/mesh/edges', 'edges');
+        }} catch (error) {{
+            shapeError = error.message;
+        }}
+
+        global.fetch = async () => ({{
+            ok: true,
+            status: 200,
+            json: async () => ({{edges: [null]}})
+        }});
+        let nestedShapeError = '';
+        try {{
+            await fetchMeshJson('/api/mesh/edges', 'edges');
+        }} catch (error) {{
+            nestedShapeError = error.message;
+        }}
+
+        global.fetch = async () => ({{
+            ok: true,
+            status: 200,
+            json: async () => ({{nodes: [{{}}]}})
+        }});
+        let emptyNodeError = '';
+        try {{
+            await fetchMeshJson('/api/mesh/nodes', 'nodes');
+        }} catch (error) {{
+            emptyNodeError = error.message;
+        }}
+
+        global.fetch = async () => ({{
+            ok: true,
+            status: 200,
+            json: async () => ({{nodes: [{{
+                public_key: 'aabb',
+                prefix: 'aa',
+                name: 'Node',
+                latitude: '1.0',
+                longitude: 2.0
+            }}]}})
+        }});
+        let typedNodeError = '';
+        try {{
+            await fetchMeshJson('/api/mesh/nodes', 'nodes');
+        }} catch (error) {{
+            typedNodeError = error.message;
+        }}
+        console.log(JSON.stringify({{
+            httpError,
+            shapeError,
+            nestedShapeError,
+            emptyNodeError,
+            typedNodeError
+        }}));
+    }})().catch(error => {{
+        console.error(error);
+        process.exitCode = 1;
+    }});
+    """
+    completed = subprocess.run(
+        [shutil.which('node'), '-'],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=5,
+    )
+    result = json.loads(completed.stdout.strip())
+    assert result['httpError'] == (
+        'Mesh request failed (500): temporary failure'
+    )
+    assert result['shapeError'] == (
+        'Mesh response from /api/mesh/edges is missing edges'
+    )
+    assert result['nestedShapeError'] == (
+        'Mesh response from /api/mesh/edges contains invalid edges'
+    )
+    assert result['emptyNodeError'] == (
+        'Mesh response from /api/mesh/nodes contains invalid nodes'
+    )
+    assert result['typedNodeError'] == (
+        'Mesh response from /api/mesh/nodes contains invalid nodes'
+    )
+
+
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 
 

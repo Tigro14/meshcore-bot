@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -17,15 +18,26 @@ from modules.web_viewer.app import BotDataViewer
 
 LOGGER = logging.getLogger("test-neighbor-edges")
 
-from datetime import datetime, timezone
 
 SELF_KEY = "ff" * 32
 KEY_A = "aa" * 32
 KEY_B = "bb" * 32
 
-# RECENT is relative to now so the 30-day window never drifts stale.
-RECENT = datetime.now(timezone.utc).isoformat()
-ANCIENT = "2020-01-01T00:00:00+00:00"
+
+def ago(days: float) -> str:
+    """A fixture timestamp `days` before now, in the format the bot stores.
+
+    These have to be relative: the days= filters compare last_seen against
+    wall-clock now, so an absolute "recent" literal silently ages out of the
+    window and turns the filter tests red on a date nobody picked.
+    """
+    stamp = datetime.now(timezone.utc) - timedelta(days=days)
+    return stamp.replace(microsecond=0).isoformat()
+
+
+RECENT = ago(1)          # inside every window these tests exercise
+EARLIER = ago(250)       # a lifetime first_seen, well outside a 30-day window
+ANCIENT = ago(365 * 6)   # outside any window the viewer offers
 
 
 class ViewerStub:
@@ -87,7 +99,7 @@ def seeded(viewer):
     with viewer._with_db_connection() as conn:
         insert_link(conn, SELF_KEY, KEY_A, observations=4, snr_sum=30.0,
                     snr_count=4, best_snr=9.5, last_snr=7.0,
-                    first_seen="2026-01-01T00:00:00+00:00", last_seen=RECENT)
+                    first_seen=EARLIER, last_seen=RECENT)
         insert_link(conn, SELF_KEY, KEY_B, observations=1, snr_sum=-3.0,
                     snr_count=1, best_snr=-3.0, last_snr=-3.0,
                     last_seen=ANCIENT)
@@ -137,7 +149,7 @@ def test_edges_are_tagged_and_treated_as_first_hop(seeded):
 def test_edges_preserve_lifetime_counts_and_timestamps(seeded):
     edge = find_edge(seeded._compute_neighbor_evidence_edges(), SELF_KEY, KEY_A)
     assert edge["observation_count"] == 4
-    assert edge["first_seen"] == "2026-01-01T00:00:00+00:00"
+    assert edge["first_seen"] == EARLIER
     assert edge["last_seen"] == RECENT
 
 
@@ -195,7 +207,7 @@ def test_edge_keys_honour_the_days_window(seeded):
     """neighbor_links is never pruned, so stale evidence must not label edges."""
     keys = seeded._neighbor_evidence_edge_keys(days=30)
     assert (SELF_KEY[:6], KEY_A[:6]) in keys.prefixes
-    # KEY_B was last heard in 2020.
+    # KEY_B was last heard years ago.
     assert (SELF_KEY[:6], KEY_B[:6]) not in keys.prefixes
     assert (SELF_KEY, KEY_B) not in keys.public_keys
 
