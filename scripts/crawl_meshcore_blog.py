@@ -13,10 +13,9 @@ import re
 import sys
 from collections import deque
 from html import unescape
-from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.parse import urldefrag, urljoin, urlparse
 
 import requests
-
 from wikijs_rag_collect import split_chunks
 
 
