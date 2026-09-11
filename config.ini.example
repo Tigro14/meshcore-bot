@@ -1571,6 +1571,10 @@ enabled = true
 [Repeater_Command]
 enabled = true
 # channels =
+[Multibyte_Command]
+enabled = true
+# List currently-tracked local repeaters still on 1-byte routing (most recent first)
+# channels =
 [Ping_Command]
 enabled = true
 # channels =
