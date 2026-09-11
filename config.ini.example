@@ -298,6 +298,9 @@ dashboard_max_clock_drift_seconds = 300
 # Default: 60. Increase on slow/lossy links.
 clock_sync_admin_reply_window_seconds = 60
 
+# Bot public key for clock sync admin dashboard. If empty, the bot looks up
+# its own public key from the database (first contact whose name contains 'Bot').
+# bot_public_key =
 # A target whose clock is already ahead of real time replies
 # "ERR: clock cannot go backwards" — a normal clock sync can never fix that
 # (the firmware refuses to move a clock backward). Per-target opt-in
