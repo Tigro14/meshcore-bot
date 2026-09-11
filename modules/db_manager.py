@@ -22,7 +22,6 @@ from .db_retention import (
 )
 from .security_utils import VALID_JOURNAL_MODES
 
-
 _READONLY_FORBIDDEN_KEYWORDS = re.compile(
     r"\b(DROP|DELETE|UPDATE|INSERT|CREATE|ALTER|REPLACE|"
     r"ATTACH|DETACH|PRAGMA|VACUUM|REINDEX|GRANT|REVOKE|"
