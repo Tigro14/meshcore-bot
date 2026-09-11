@@ -110,7 +110,7 @@ def get_weather_openmeteo(
     # Fetch fresh data from API
     url = "https://api.open-meteo.com/v1/forecast"
 
-    params = {
+    params: dict[str, str | float | int] = {
         "latitude": lat,
         "longitude": lon,
         "hourly": "temperature_2m,precipitation,precipitation_probability,wind_speed_10m,weather_code",
