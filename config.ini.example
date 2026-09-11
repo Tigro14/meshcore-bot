@@ -1359,6 +1359,7 @@ condense_paths = true
 require_path_bytes_greater_or_equal_to = 0
 # Optional response when rejected by path-byte requirement; leave empty for silent reject
 require_path_bytes_failure_response =
+
 [Greeter_Command]
 # Enable greeter to greet users on first channel message (true/false)
 enabled = false
@@ -1631,6 +1632,17 @@ context_include_system_metrics = false
 
 # Cache TTL for injected context (seconds)
 context_cache_seconds = 60
+
+# Optional local Wiki.js lexical RAG (no embeddings / no vector DB)
+wiki_rag_enabled = false
+# Local JSONL produced by scripts/wikijs_rag_collect.py
+wiki_rag_index_path = data/wiki_rag/wiki_pages.jsonl
+# Number of retrieved chunks injected into the prompt
+wiki_rag_max_chunks = 3
+# Max chars per injected chunk
+wiki_rag_chunk_chars = 450
+# Minimum token length for lexical matching
+wiki_rag_min_term_len = 3
 
 # Conversation history window (seconds) and max turns to retain
 # context_window_seconds = 600
