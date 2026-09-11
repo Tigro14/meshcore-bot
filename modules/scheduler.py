@@ -38,6 +38,13 @@ from .utils import (
 )
 
 _CHANNEL_OPERATION_TYPES = ('add', 'remove')
+
+# Exact firmware reply (CommonCLI.cpp) when a `clock sync` target's clock is
+# already ahead of the timestamp it was sent — the only situation that
+# produces this specific text. A normal clock sync can never fix it (the
+# firmware refuses to move a clock backward); only `clkreboot` (force-reset
+# to a fixed past date, then reboot) recovers such a target.
+CLOCK_AHEAD_ERROR_TEXT = "ERR: clock cannot go backwards"
 _RADIO_OPERATION_TYPES = (
     'radio_reboot',
     'radio_connect',
@@ -272,6 +279,59 @@ class MessageScheduler:
         return self._parse_clock_sync_admin_targets(
             self.bot.config.get("Clock_Sync_Admin", "targets", fallback="")
         )
+
+    def _get_clock_sync_target_row(self, target: str) -> Optional[dict[str, Any]]:
+        """Fetch the auto-clkreboot opt-in + cooldown state for a configured target string.
+
+        Returns None if the target has no DB row (e.g. config.ini-only targets,
+        which predate this feature and simply never qualify for auto-clkreboot).
+        """
+        db_manager = getattr(self.bot, "db_manager", None)
+        if not db_manager:
+            return None
+        try:
+            with db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, auto_clkreboot_enabled, last_clkreboot_at "
+                    "FROM clock_sync_targets WHERE target = ?",
+                    (target,),
+                )
+                row = cursor.fetchone()
+        except Exception as exc:
+            self.logger.debug(
+                "Clock_Sync_Admin auto-clkreboot row lookup failed for %s: %s",
+                sanitize_name(target),
+                exc,
+            )
+            return None
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "auto_clkreboot_enabled": bool(row[1]),
+            "last_clkreboot_at": row[2],
+        }
+
+    def _mark_clock_sync_target_clkreboot_sent(self, target: str) -> None:
+        """Record that an auto-clkreboot was just sent to *target*, for cooldown tracking."""
+        db_manager = getattr(self.bot, "db_manager", None)
+        if not db_manager:
+            return
+        try:
+            with db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE clock_sync_targets SET last_clkreboot_at = ? WHERE target = ?",
+                    (int(time.time()), target),
+                )
+                conn.commit()
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to record auto-clkreboot timestamp for %s: %s",
+                sanitize_name(target),
+                exc,
+            )
 
     def _resolve_clock_sync_target_contact(self, identifier: str) -> dict[str, Any] | None:
         """Resolve configured identifier to a mesh contact by name or public key/prefix."""
@@ -576,6 +636,123 @@ class MessageScheduler:
                 e,
             )
 
+    async def _maybe_auto_clkreboot(
+        self,
+        target: str,
+        public_key: str,
+        contact_name: str,
+        recipient: str,
+        reply_text: str,
+        target_row: Optional[dict[str, Any]],
+    ) -> None:
+        """Force-reset a target's clock via `clkreboot` when it reports the
+        clock-ahead firmware error and has opted in, then schedule a
+        follow-up `clock sync` once it has had time to reboot.
+
+        Gated on: (1) the reply being the exact clock-ahead error text, (2)
+        a per-target opt-in (`auto_clkreboot_enabled` in clock_sync_targets,
+        off by default, toggled from the /time admin UI), and (3) a cooldown
+        since the last automatic clkreboot of this same target, so a device
+        with a persistent clock problem does not get reboot-looped.
+        """
+        if (reply_text or "").strip() != CLOCK_AHEAD_ERROR_TEXT:
+            return
+        if not target_row or not target_row.get("auto_clkreboot_enabled"):
+            return
+
+        cooldown_days = self.bot.config.getint(
+            "Clock_Sync_Admin", "auto_clkreboot_cooldown_days", fallback=7
+        )
+        last = target_row.get("last_clkreboot_at")
+        if last is not None:
+            elapsed = time.time() - float(last)
+            if elapsed < cooldown_days * 86400:
+                self.logger.info(
+                    "Clock_Sync_Admin: %s is clock-ahead but was auto-clkrebooted "
+                    "%.1fd ago (cooldown %dd) — skipping to avoid a reboot loop",
+                    sanitize_name(contact_name),
+                    elapsed / 86400,
+                    cooldown_days,
+                )
+                return
+
+        command_manager = getattr(self.bot, "command_manager", None)
+        if command_manager is None or not hasattr(command_manager, "send_dm"):
+            return
+
+        self.logger.warning(
+            "Clock_Sync_Admin: %s reported %r and has auto-clkreboot enabled — sending clkreboot",
+            sanitize_name(contact_name),
+            CLOCK_AHEAD_ERROR_TEXT,
+        )
+        try:
+            await command_manager.send_dm(recipient, "clkreboot", skip_user_rate_limit=True)
+        except Exception as exc:
+            self.logger.warning(
+                "Clock_Sync_Admin: clkreboot send failed for %s: %s",
+                sanitize_name(contact_name),
+                exc,
+            )
+            return
+
+        self._mark_clock_sync_target_clkreboot_sent(target)
+
+        if self._apscheduler is None:
+            return
+        delay = max(
+            0,
+            self.bot.config.getint(
+                "Clock_Sync_Admin", "auto_clkreboot_resync_delay_seconds", fallback=60
+            ),
+        )
+        job_id = f"clock_sync_admin_post_clkreboot_{hashlib.sha1(target.encode()).hexdigest()[:12]}"
+        try:
+            self._apscheduler.add_job(
+                self._post_clkreboot_resync_job_sync,
+                trigger=DateTrigger(run_date=self.get_current_time() + datetime.timedelta(seconds=delay)),
+                id=job_id,
+                replace_existing=True,
+                kwargs={"recipient": recipient, "contact_name": contact_name},
+            )
+            self.logger.info(
+                "Clock_Sync_Admin: scheduled follow-up clock sync for %s in %ds (post-clkreboot)",
+                sanitize_name(contact_name),
+                delay,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Clock_Sync_Admin: could not schedule post-clkreboot follow-up for %s: %s",
+                sanitize_name(contact_name),
+                exc,
+            )
+
+    def _post_clkreboot_resync_job_sync(self, recipient: str, contact_name: str) -> None:
+        """APScheduler sync wrapper: resend the clock-sync payload once, giving
+        a target time to finish rebooting after an auto-clkreboot."""
+        self._run_async_on_main_loop(
+            self._post_clkreboot_resync_job_async(recipient, contact_name), timeout=60.0
+        )
+
+    async def _post_clkreboot_resync_job_async(self, recipient: str, contact_name: str) -> None:
+        command_manager = getattr(self.bot, "command_manager", None)
+        if command_manager is None or not hasattr(command_manager, "send_dm"):
+            return
+        payload = self._get_clock_sync_admin_payload()
+        if not payload:
+            return
+        try:
+            await command_manager.send_dm(recipient, payload, skip_user_rate_limit=True)
+            self.logger.info(
+                "Clock_Sync_Admin: post-clkreboot follow-up clock sync sent to %s",
+                sanitize_name(contact_name),
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Clock_Sync_Admin: post-clkreboot follow-up clock sync failed for %s: %s",
+                sanitize_name(contact_name),
+                exc,
+            )
+
     def run_clock_sync_admin_job_sync(self) -> None:
         """APScheduler sync wrapper for the async Clock_Sync_Admin DM run."""
         self._run_async_on_main_loop(self._run_clock_sync_admin_job_async(), timeout=300.0)
@@ -686,12 +863,17 @@ class MessageScheduler:
                 sanitize_name(contact_name),
                 sanitize_name(recipient),
             )
+            # Fetched once per target: only used to (a) decide whether the ok=True
+            # fast path below is worth the extra reply-wait latency, and (b) gate
+            # _maybe_auto_clkreboot's opt-in + cooldown check.
+            target_row = self._get_clock_sync_target_row(target)
             try:
                 ok = await command_manager.send_dm(
                     recipient,
                     payload,
                     skip_user_rate_limit=True,
                 )
+                reply_text = ""
                 if ok:
                     sent_count += 1
                     self.logger.info(
@@ -700,6 +882,14 @@ class MessageScheduler:
                     )
                     # Log successful send
                     self._log_clock_sync_admin_attempt(public_key, contact_name, True)
+                    # A radio ACK only confirms delivery, not what the firmware
+                    # replied — only pay the reply-wait latency here for targets
+                    # that opted into auto-clkreboot, since that's the only
+                    # place the reply's content matters on this path.
+                    if target_row and target_row.get("auto_clkreboot_enabled"):
+                        _, reply_text = await self._wait_for_clock_sync_reply(
+                            public_key, run_started_at
+                        )
                 else:
                     reply_ok, reply_text = await self._wait_for_clock_sync_reply(
                         public_key, run_started_at
@@ -728,6 +918,11 @@ class MessageScheduler:
                         self._log_clock_sync_admin_attempt(
                             public_key, contact_name, False, "Send returned False"
                         )
+
+                if reply_text:
+                    await self._maybe_auto_clkreboot(
+                        target, public_key, contact_name, recipient, reply_text, target_row
+                    )
             except Exception as e:
                 failed_count += 1
                 self.logger.warning(

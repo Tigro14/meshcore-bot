@@ -18,6 +18,7 @@ make test-no-cov
 
 # Specific file
 .venv/bin/pytest tests/test_enums.py -v
+.venv/bin/pytest tests/test_wiki_rag.py -v --no-cov
 
 # Specific class or function
 .venv/bin/pytest tests/test_message_handler.py::TestShouldProcessMessage -v
@@ -46,8 +47,7 @@ make test-no-cov
 |--------------|-----------------------------------------------------------------|
 | `source`     | `modules/`                                                      |
 | `omit`       | `tests/`, `.venv/`                                              |
-| `fail_under` | `35` — raised 2026-03-16; currently 36.72%; target 40%          |
-|              | (hardware-dependent modules cap realistic ceiling at ~40-42%)   |
+| `fail_under` | `50`                                                            |
 
 ---
 
@@ -79,7 +79,11 @@ pytest --cov=modules --cov-report=html
 
 # Coverage for a single module
 pytest tests/test_message_handler.py \
-  --cov=modules.message_handler --cov-report=term-missing
+  --cov=modules.message_handler --cov-report=term-missing --cov-fail-under=0
+
+# Coverage for local wiki RAG module
+pytest tests/test_wiki_rag.py \
+  --cov=modules.wiki_rag --cov-report=term-missing --cov-fail-under=0
 ```
 
 ---
