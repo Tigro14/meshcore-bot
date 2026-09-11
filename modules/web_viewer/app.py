@@ -44,7 +44,6 @@ from flask import (
 from flask_socketio import SocketIO, disconnect, emit
 
 from modules.security_utils import (
-    VALID_JOURNAL_MODES,
     SafeUrlPolicy,
     create_safe_requests_session,
     safe_requests_request,
@@ -99,15 +98,16 @@ def _strip_ansi_codes(text: str) -> str:
 
 from modules.config_snapshot import config_to_redacted_sections
 from modules.feed_format import format_feed_message
-from modules.feed_manager import FeedManager
 from modules.ini_writer import IniValueError, update_ini_values
 from modules.repeater_manager import RepeaterManager, validate_repeater_tables
+from modules.scheduled_message_admin import (
+    SECTION as SCHEDULED_MESSAGES_SECTION,
+)
 from modules.scheduled_message_admin import (
     compose_value,
     describe_schedule,
     read_entries,
     validate_entry,
-    SECTION as SCHEDULED_MESSAGES_SECTION,
 )
 from modules.settings_schema import (
     build_plugin_settings_view,
@@ -115,14 +115,12 @@ from modules.settings_schema import (
     validate_field,
 )
 from modules.settings_store import get_settings_store
-from modules.url_shortener import _coerce_url_string
-from modules.utils import calculate_distance, resolve_path
+from modules.utils import resolve_path
 from modules.web_viewer.config_panels import CONFIG_PANELS, PANEL_CATEGORIES
 from modules.web_viewer.dashboard_stats import (
     SERIES_METRICS,
     TOP_KINDS,
     DashboardStatsService,
-    humanize_span,
 )
 from modules.web_viewer.integration import normalized_web_viewer_password
 
@@ -372,12 +370,16 @@ class BotDataViewer:
         """
         from logging.handlers import RotatingFileHandler
 
-        # Determine log level from [Web_Viewer] debug setting
-        # debug=true -> DEBUG, debug=false -> INFO
-        web_debug = False
-        if getattr(self, 'config', None) is not None and self.config.has_section('Web_Viewer'):
-            web_debug = self.config.getboolean('Web_Viewer', 'debug', fallback=False)
-        configured_level = logging.DEBUG if web_debug else logging.INFO
+        # Determine log level from [Logging] log_level, matching the main bot.
+        # Falls back to the legacy [Web_Viewer] debug boolean (true -> DEBUG).
+        configured_level = logging.INFO
+        cfg = getattr(self, 'config', None)
+        if cfg is not None:
+            if cfg.has_section('Logging') and cfg.has_option('Logging', 'log_level'):
+                level_name = cfg.get('Logging', 'log_level').strip().upper()
+                configured_level = getattr(logging, level_name, logging.INFO)
+            elif cfg.has_section('Web_Viewer') and cfg.getboolean('Web_Viewer', 'debug', fallback=False):
+                configured_level = logging.DEBUG
 
         # Get or create logger (don't use basicConfig as it may conflict with existing logging)
         self.logger = logging.getLogger('modern_web_viewer')
@@ -411,9 +413,10 @@ class BotDataViewer:
         else:
             self.logger.info("No [Logging] log_file configured; web viewer logging is console-only")
 
-        # Create console handler
+        # Create console handler.  The journal keeps an INFO floor so that a
+        # DEBUG [Logging] log_level does not duplicate debug writes to the journal.
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(configured_level)
+        console_handler.setLevel(max(configured_level, logging.INFO))
         console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
@@ -1795,7 +1798,6 @@ class BotDataViewer:
                 # overwriting the active database immediately.
                 from modules.database_restore import (
                     DatabaseRestoreError,
-                    pending_restore_path,
                     stage_database_restore,
                 )
                 try:
@@ -2820,8 +2822,6 @@ class BotDataViewer:
                     pass
 
                 # ── Pagination ──────────────────────────────────────────────
-                has_page = pagination_requested and 'page' in request.args
-                has_page_size = pagination_requested and 'page_size' in request.args
                 use_pagination = pagination_requested
 
                 if use_pagination:
@@ -4842,7 +4842,7 @@ class BotDataViewer:
                     )
                     conn.commit()
                     op_id = cursor.lastrowid
-                
+
                 self.logger.info(f"Queued announcement to channel {channel}: {message}")
                 return jsonify({'success': True, 'operation_id': op_id, 'message': 'Announcement queued'})
             except Exception as e:

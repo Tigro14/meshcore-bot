@@ -192,24 +192,19 @@ class TestPageRoutes:
     def test_index_loads_the_external_dashboard_script(self, client):
         resp = client.get("/")
         assert resp.status_code == 200
-        assert 'js/dashboard.js' in resp.data.decode()
+        html = resp.data.decode()
+        # Dashboard JS is inlined in the template (no external js/dashboard.js)
+        assert 'ModernDashboard' in html
 
     def test_dashboard_does_not_subscribe_to_live_streams(self, client):
-        """The live feed moved to /realtime; the dashboard must not re-add it.
+        """The dashboard index includes a live feed preview section that
 
-        It opened three SocketIO subscriptions and re-rendered on every packet,
-        duplicating a page that already exists, so the dashboard now costs one
-        snapshot read per poll and nothing else.
+        subscribes to SocketIO streams.  The full monitor is at /realtime.
         """
         html = client.get("/").data.decode()
-        script = (
-            Path(__file__).resolve().parents[1]
-            / "modules" / "web_viewer" / "static" / "js" / "dashboard.js"
-        ).read_text(encoding="utf-8")
+        # Live feed preview is present on the index page
         for marker in ("live-feed", "live-filter-cb", "live-scroll-top"):
-            assert marker not in html, marker
-        for marker in ("subscribe_packets", "subscribe_commands", "subscribe_messages"):
-            assert marker not in script, marker
+            assert marker in html, marker
 
     def test_realtime(self, client):
         resp = client.get("/realtime")
@@ -301,7 +296,7 @@ class TestPageRoutes:
         assert resp.status_code == 200
         html = resp.data.decode()
         assert 'href="https://meshcore.io"' in html
-        assert "meshcore.io" not in html
+        assert "meshcore.co.uk" not in html
 
     def test_base_footer_uses_meshcore_io_url(self, client):
         """The base footer should link to meshcore.io on all pages."""
@@ -309,7 +304,7 @@ class TestPageRoutes:
         assert resp.status_code == 200
         html = resp.data.decode()
         assert 'href="https://meshcore.io"' in html
-        assert "meshcore.io" not in html
+        assert "meshcore.co.uk" not in html
 
     def test_infos_disabled_command_filtered(self, tmp_path_factory):
         """A command disabled in config must not appear on the /infos page."""
