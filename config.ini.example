@@ -298,6 +298,21 @@ dashboard_max_clock_drift_seconds = 300
 # Default: 60. Increase on slow/lossy links.
 clock_sync_admin_reply_window_seconds = 60
 
+# A target whose clock is already ahead of real time replies
+# "ERR: clock cannot go backwards" — a normal clock sync can never fix that
+# (the firmware refuses to move a clock backward). Per-target opt-in
+# (toggle in the /time admin UI, off by default) lets the bot recover such a
+# target automatically: send `clkreboot` (force-resets its clock to a fixed
+# past date and reboots it), wait, then resend the clock sync.
+
+# Minimum days between two automatic clkreboots of the same target, so a
+# device with a persistent clock problem does not get reboot-looped.
+# Default: 7.
+auto_clkreboot_cooldown_days = 7
+
+# Seconds to wait after sending clkreboot before sending the follow-up clock
+# sync, so the target has time to actually finish rebooting. Default: 60.
+auto_clkreboot_resync_delay_seconds = 60
 [Channels]
 # Channels to monitor (comma-separated)
 # Bot will only respond to messages on these channels
