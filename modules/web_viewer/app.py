@@ -2206,14 +2206,22 @@ class BotDataViewer:
                 with self._with_db_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "SELECT id, target, enabled, created_at FROM clock_sync_targets ORDER BY id"
+                        "SELECT id, target, enabled, created_at, auto_clkreboot_enabled, last_clkreboot_at "
+                        "FROM clock_sync_targets ORDER BY id"
                     )
                     rows = cursor.fetchall()
                     targets = []
                     for r in rows:
                         if not r:
                             continue
-                        t = {'id': r[0], 'target': r[1], 'enabled': bool(r[2]), 'created_at': r[3]}
+                        t = {
+                            'id': r[0],
+                            'target': r[1],
+                            'enabled': bool(r[2]),
+                            'created_at': r[3],
+                            'auto_clkreboot_enabled': bool(r[4]),
+                            'last_clkreboot_at': r[5],
+                        }
                         # Enrich with contact name and last sync info
                         try:
                             cursor.execute(
@@ -2409,22 +2417,41 @@ class BotDataViewer:
 
         @self.app.route('/api/clock-sync-targets-admin/<int:target_id>', methods=['PUT'])
         def api_clock_sync_targets_admin_update(target_id):
-            """Update a clock sync target (enable/disable)"""
+            """Update a clock sync target: enable/disable, and/or opt in or out of
+            auto-clkreboot (force-reset this target's clock, then resync it, when
+            it reports a clock-ahead firmware error — off by default per target)."""
             data = request.get_json(silent=True) or {}
             enabled = data.get('enabled')
-            if enabled is None:
-                return jsonify({'error': 'enabled is required'}), 400
+            auto_clkreboot_enabled = data.get('auto_clkreboot_enabled')
+            if enabled is None and auto_clkreboot_enabled is None:
+                return jsonify({'error': 'enabled or auto_clkreboot_enabled is required'}), 400
+
+            set_clauses = []
+            params = []
+            if enabled is not None:
+                set_clauses.append('enabled = ?')
+                params.append(1 if enabled else 0)
+            if auto_clkreboot_enabled is not None:
+                set_clauses.append('auto_clkreboot_enabled = ?')
+                params.append(1 if auto_clkreboot_enabled else 0)
+            params.append(target_id)
+
             try:
                 with self._with_db_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "UPDATE clock_sync_targets SET enabled = ? WHERE id = ?",
-                        (1 if enabled else 0, target_id),
+                        f"UPDATE clock_sync_targets SET {', '.join(set_clauses)} WHERE id = ?",
+                        params,
                     )
                     conn.commit()
                     if cursor.rowcount == 0:
                         return jsonify({'error': 'Target not found'}), 404
-                return jsonify({'id': target_id, 'enabled': bool(enabled)})
+                response = {'id': target_id}
+                if enabled is not None:
+                    response['enabled'] = bool(enabled)
+                if auto_clkreboot_enabled is not None:
+                    response['auto_clkreboot_enabled'] = bool(auto_clkreboot_enabled)
+                return jsonify(response)
             except Exception as e:
                 self.logger.error(f"Error updating clock sync target: {e}")
                 return jsonify({'error': str(e)}), 500

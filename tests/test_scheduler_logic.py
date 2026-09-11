@@ -674,6 +674,169 @@ class TestClockSyncAdminMinDrift:
 
 
 # ---------------------------------------------------------------------------
+# TestClockSyncAdminAutoClkreboot (auto-clkreboot for clock-ahead targets)
+# ---------------------------------------------------------------------------
+
+
+class TestClockSyncAdminAutoClkreboot:
+    """A target whose clock is ahead of real time can never be fixed by a
+    normal clock sync (firmware refuses to move a clock backward). Per-target
+    opt-in auto-clkreboot should recover it: clkreboot, then a follow-up sync."""
+
+    @staticmethod
+    def _seed_clock_sync_targets(db_path, target, auto_clkreboot_enabled, last_clkreboot_at=None):
+        import sqlite3
+
+        with sqlite3.connect(db_path, timeout=60) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS clock_sync_targets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    target TEXT NOT NULL UNIQUE,
+                    enabled BOOLEAN NOT NULL DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    auto_clkreboot_enabled BOOLEAN DEFAULT 0,
+                    last_clkreboot_at INTEGER
+                )
+                """
+            )
+            cursor.execute(
+                "INSERT INTO clock_sync_targets (target, auto_clkreboot_enabled, last_clkreboot_at) "
+                "VALUES (?, ?, ?)",
+                (target, 1 if auto_clkreboot_enabled else 0, last_clkreboot_at),
+            )
+            conn.commit()
+
+    @staticmethod
+    def _attach_db(scheduler, db_path):
+        import contextlib
+        import sqlite3
+
+        conn = sqlite3.connect(db_path, timeout=60)
+        scheduler.bot.db_manager = Mock()
+        scheduler.bot.db_manager.connection.return_value = contextlib.nullcontext(conn)
+        return conn
+
+    def _context(self, scheduler, pubkey, contact_name, send_dm_side_effect):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "enabled", "true")
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", pubkey)
+        scheduler.bot.config.set("Clock_Sync_Admin", "command_payload", "clock sync admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "auto_clkreboot_cooldown_days", "7")
+        scheduler.bot.config.set("Clock_Sync_Admin", "auto_clkreboot_resync_delay_seconds", "60")
+        scheduler.bot.connected = True
+        scheduler.bot.is_radio_zombie = False
+        scheduler.bot.is_radio_offline = False
+        scheduler.bot.meshcore = Mock()
+        scheduler.bot.meshcore.get_contact_by_name = Mock(side_effect=lambda value: None)
+        scheduler.bot.meshcore.contacts = {
+            "t": {"name": contact_name, "public_key": pubkey},
+        }
+        scheduler.bot.meshcore.dispatcher = Mock()
+        scheduler.bot.meshcore.dispatcher.wait_for_event = AsyncMock(
+            return_value=Event(
+                EventType.CONTACT_MSG_RECV,
+                {
+                    "type": "PRIV",
+                    "pubkey_prefix": pubkey[:12],
+                    "sender_timestamp": int(time.time()),
+                    "text": "ERR: clock cannot go backwards",
+                },
+                {"pubkey_prefix": pubkey[:12]},
+            )
+        )
+        scheduler.bot.command_manager = Mock()
+        scheduler.bot.command_manager.send_dm = AsyncMock(side_effect=send_dm_side_effect)
+        scheduler._apscheduler = Mock()
+
+    def test_ahead_target_with_opt_in_sends_clkreboot_and_schedules_resync(self, scheduler, tmp_path):
+        db_path = str(tmp_path / "bot.db")
+        pubkey = "cc" + "0" * 62
+        self._seed_clock_sync_targets(db_path, pubkey, auto_clkreboot_enabled=True)
+        self._attach_db(scheduler, db_path)
+        # 1st send_dm: "clock sync admin" (ok=True fast path, reply fetched
+        # because auto_clkreboot is opted in). 2nd: the "clkreboot" DM.
+        self._context(scheduler, pubkey, "AheadRep", send_dm_side_effect=[True, True])
+
+        asyncio.run(scheduler._run_clock_sync_admin_job_async())
+
+        assert scheduler.bot.command_manager.send_dm.await_count == 2
+        scheduler.bot.command_manager.send_dm.assert_any_await(
+            pubkey, "clkreboot", skip_user_rate_limit=True
+        )
+        assert scheduler._apscheduler.add_job.call_count == 1
+        _, kwargs = scheduler._apscheduler.add_job.call_args
+        assert kwargs["kwargs"] == {"recipient": pubkey, "contact_name": "AheadRep"}
+
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT last_clkreboot_at FROM clock_sync_targets WHERE target = ?", (pubkey,)
+        ).fetchone()
+        conn.close()
+        assert row[0] is not None
+
+    def test_ahead_target_via_no_ack_reply_path_still_triggers_clkreboot(self, scheduler, tmp_path):
+        db_path = str(tmp_path / "bot.db")
+        pubkey = "cc" + "0" * 62
+        self._seed_clock_sync_targets(db_path, pubkey, auto_clkreboot_enabled=True)
+        self._attach_db(scheduler, db_path)
+        # 1st send_dm: no radio ACK -> falls back to the reply-wait, which
+        # returns the same ERR text. 2nd: the "clkreboot" DM.
+        self._context(scheduler, pubkey, "AheadRep", send_dm_side_effect=[False, True])
+
+        asyncio.run(scheduler._run_clock_sync_admin_job_async())
+
+        assert scheduler.bot.command_manager.send_dm.await_count == 2
+        scheduler.bot.command_manager.send_dm.assert_any_await(
+            pubkey, "clkreboot", skip_user_rate_limit=True
+        )
+        assert scheduler._apscheduler.add_job.call_count == 1
+
+    def test_ahead_target_without_opt_in_does_not_send_clkreboot(self, scheduler, tmp_path):
+        db_path = str(tmp_path / "bot.db")
+        pubkey = "cc" + "0" * 62
+        self._seed_clock_sync_targets(db_path, pubkey, auto_clkreboot_enabled=False)
+        self._attach_db(scheduler, db_path)
+        self._context(scheduler, pubkey, "AheadRep", send_dm_side_effect=[True])
+
+        asyncio.run(scheduler._run_clock_sync_admin_job_async())
+
+        assert scheduler.bot.command_manager.send_dm.await_count == 1
+        scheduler._apscheduler.add_job.assert_not_called()
+
+    def test_ahead_target_in_cooldown_does_not_send_clkreboot(self, scheduler, tmp_path):
+        db_path = str(tmp_path / "bot.db")
+        pubkey = "cc" + "0" * 62
+        self._seed_clock_sync_targets(
+            db_path, pubkey, auto_clkreboot_enabled=True, last_clkreboot_at=int(time.time()) - 3600
+        )
+        self._attach_db(scheduler, db_path)
+        self._context(scheduler, pubkey, "AheadRep", send_dm_side_effect=[True])
+
+        asyncio.run(scheduler._run_clock_sync_admin_job_async())
+
+        assert scheduler.bot.command_manager.send_dm.await_count == 1
+        scheduler._apscheduler.add_job.assert_not_called()
+
+    def test_post_clkreboot_resync_job_resends_payload(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "command_payload", "clock sync admin")
+        scheduler.bot.command_manager = Mock()
+        scheduler.bot.command_manager.send_dm = AsyncMock(return_value=True)
+
+        asyncio.run(
+            scheduler._post_clkreboot_resync_job_async("cc" + "0" * 62, "AheadRep")
+        )
+
+        scheduler.bot.command_manager.send_dm.assert_awaited_once_with(
+            "cc" + "0" * 62, "clock sync admin", skip_user_rate_limit=True
+        )
+
+
+# ---------------------------------------------------------------------------
 # TestSetupIntervalAdvertising
 # ---------------------------------------------------------------------------
 
