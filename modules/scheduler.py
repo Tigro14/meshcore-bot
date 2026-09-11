@@ -2268,26 +2268,26 @@ class MessageScheduler:
 
     async def _send_announcement_op(self, payload: dict):
         """Send an announcement message to a channel.
-        
+
         Args:
             payload: dict with 'channel' and 'message' keys
-            
+
         Returns:
             tuple: (success: bool, result_payload: dict)
         """
         try:
             channel = payload.get('channel', '').strip()
             message = payload.get('message', '').strip()
-            
+
             if not channel:
                 return False, {'error': 'Channel is required'}
             if not message:
                 return False, {'error': 'Message is required'}
-            
+
             # Check if bot is connected
             if not self.bot.connected or not self.bot.meshcore:
                 return False, {'error': 'Bot not connected to radio'}
-            
+
             # Send the message using the command manager
             success = await self.bot.command_manager.send_channel_message(
                 channel=channel,
@@ -2295,13 +2295,13 @@ class MessageScheduler:
                 command_id=f"announcement_{int(time.time())}",
                 skip_user_rate_limit=True  # Skip rate limiting for announcements
             )
-            
+
             if success:
                 self.logger.info(f"Announcement sent to {channel}: {message}")
                 return True, {'success': True, 'channel': channel, 'message': message}
             else:
                 return False, {'error': f'Failed to send announcement to channel {channel}'}
-                
+
         except Exception as e:
             self.logger.error(f"Send announcement failed: {e}")
             return False, {'error': str(e)}
