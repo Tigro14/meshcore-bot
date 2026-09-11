@@ -4,13 +4,11 @@ Weather utilities for MeshCore Bot
 Provides Open-Meteo API integration with SQLite caching
 """
 
-import json
 import logging
 import time
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
 import requests
-
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +64,7 @@ def get_weather_openmeteo(
     forecast_days: int = 2,
     model: str = "meteofrance_arome_france_hd",
     timezone: str = "Europe/Paris"
-) -> Tuple[Optional[dict], Optional[str]]:
+) -> tuple[Optional[dict], Optional[str]]:
     """Get weather forecast from Open-Meteo API with SQLite caching.
 
     Uses a two-tier caching strategy:

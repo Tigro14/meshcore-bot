@@ -3,11 +3,8 @@
 Unit tests for utils_weather module
 """
 
-import json
 import time
 from unittest.mock import Mock, patch
-
-import pytest
 
 from modules.utils_weather import get_weather_code_emoji, get_weather_openmeteo
 
