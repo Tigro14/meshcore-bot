@@ -4,23 +4,21 @@ Weather utilities for MeshCore Bot
 Provides Open-Meteo API integration with SQLite caching
 """
 
-import json
 import logging
 import time
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
 import requests
-
 
 logger = logging.getLogger(__name__)
 
 
 def get_weather_code_emoji(code: int) -> str:
     """Convert WMO weather code to emoji.
-    
+
     Args:
         code: WMO weather code.
-        
+
     Returns:
         str: Weather emoji.
     """
@@ -54,7 +52,7 @@ def get_weather_code_emoji(code: int) -> str:
         96: "⛈️",     # Thunderstorm with Hail
         99: "⛈️"      # Severe Thunderstorm
     }
-    
+
     return emoji_map.get(code, "🌤️")
 
 
@@ -66,14 +64,14 @@ def get_weather_openmeteo(
     forecast_days: int = 2,
     model: str = "meteofrance_arome_france_hd",
     timezone: str = "Europe/Paris"
-) -> Tuple[Optional[dict], Optional[str]]:
+) -> tuple[Optional[dict], Optional[str]]:
     """Get weather forecast from Open-Meteo API with SQLite caching.
-    
+
     Uses a two-tier caching strategy:
     - Fresh data (< 5 minutes): Return immediately
     - Stale data (5 min - 1 hour): Return cached data immediately
     - Very stale data (> 1 hour): Fetch fresh data from API
-    
+
     Args:
         lat: Latitude coordinate.
         lon: Longitude coordinate.
@@ -82,7 +80,7 @@ def get_weather_openmeteo(
         forecast_days: Number of forecast days (default: 2, max: 16).
         model: Weather model to use (default: meteofrance_arome_france_hd).
         timezone: Timezone for forecast (default: Europe/Paris).
-        
+
     Returns:
         Tuple[Optional[dict], Optional[str]]: Weather data dict and error message.
         Returns (data, None) on success, (None, error_msg) on failure.
@@ -90,97 +88,97 @@ def get_weather_openmeteo(
     # Create cache key from coordinates
     cache_key = f"weather_{lat:.4f}_{lon:.4f}"
     cache_type = "openmeteo_weather"
-    
+
     # Check cache first
     now = time.time()
     cached_data = persistence.get_cached_json(cache_key, cache_type)
-    
+
     if cached_data and 'timestamp' in cached_data:
         cache_age = now - cached_data['timestamp']
-        
+
         # Fresh data (< 5 minutes)
         if cache_age < 300:  # 5 minutes
             logger.debug(f"Using fresh cached weather data (age: {cache_age:.0f}s)")
             return cached_data.get('data'), None
-        
+
         # Stale data (5 minutes - 1 hour) - return it immediately
         # Note: Background refresh could be added in the future if needed
         if cache_age < 3600:  # 1 hour (3600 seconds)
             logger.debug(f"Using stale cached weather data (age: {cache_age:.0f}s)")
             return cached_data.get('data'), None
-    
+
     # Fetch fresh data from API
     url = "https://api.open-meteo.com/v1/forecast"
-    
-    params = {
+
+    params: dict[str, str | float | int] = {
         "latitude": lat,
         "longitude": lon,
         "hourly": "temperature_2m,precipitation,precipitation_probability,wind_speed_10m,weather_code",
         "timezone": timezone,
         "forecast_days": forecast_days,
     }
-    
+
     # Add model if specified (empty string means auto-select)
     if model:
         params["models"] = model
-    
+
     try:
         response = requests.get(url, params=params, timeout=10)
-        
+
         if not response.ok:
             error_msg = f"Open-Meteo API error: {response.status_code}"
             logger.warning(error_msg)
-            
+
             # Return stale cache if available as fallback
             if cached_data and 'data' in cached_data:
                 logger.info("Falling back to stale cached data due to API error")
                 return cached_data['data'], None
-            
+
             return None, error_msg
-        
+
         data = response.json()
-        
+
         # Cache the result with timestamp
         cache_entry = {
             'timestamp': now,
             'data': data
         }
-        
+
         # Cache for 2 hours (data will be considered stale after 1 hour)
         persistence.cache_json(cache_key, cache_entry, cache_type, cache_hours=2)
-        
+
         logger.debug(f"Fetched and cached fresh weather data for ({lat:.4f}, {lon:.4f})")
         return data, None
-        
+
     except requests.exceptions.Timeout:
         error_msg = "Open-Meteo API timeout"
         logger.warning(error_msg)
-        
+
         # Return stale cache if available as fallback
         if cached_data and 'data' in cached_data:
             logger.info("Falling back to stale cached data due to timeout")
             return cached_data['data'], None
-        
+
         return None, error_msg
-        
+
     except requests.exceptions.RequestException as e:
         error_msg = f"Open-Meteo API request failed: {e}"
         logger.warning(error_msg)
-        
+
         # Return stale cache if available as fallback
         if cached_data and 'data' in cached_data:
             logger.info("Falling back to stale cached data due to request error")
             return cached_data['data'], None
-        
+
         return None, error_msg
-        
+
     except Exception as e:
         error_msg = f"Unexpected error fetching weather: {e}"
         logger.error(error_msg)
-        
+
         # Return stale cache if available as fallback
         if cached_data and 'data' in cached_data:
             logger.info("Falling back to stale cached data due to unexpected error")
             return cached_data['data'], None
-        
+
         return None, error_msg

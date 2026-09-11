@@ -668,7 +668,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/js-sha256/0.11.0/sha256.min.js"></script>
 
     <!-- Base JavaScript -->
-    <script nonce="{{ g.csp_nonce }}">
+    <script nonce="{{ g.csp_nonce }}" data-ws-enabled="{{ websocket_enabled|lower }}">
         // Global connection management
         class ModernConnectionManager {
             constructor() {
@@ -685,7 +685,7 @@
                 // Use io() without forceNew so that realtime.html's io() shares
                 // this same manager/socket.  forceNew created a second independent
                 // connection that interfered with the realtime-page socket.
-                const wsEnabled = {{ websocket_enabled | lower }};
+                const wsEnabled = document.currentScript.dataset.wsEnabled === 'true';
                 this.socket = io({
                     transports: wsEnabled ? ['websocket', 'polling'] : ['polling'],
                     upgrade: wsEnabled,

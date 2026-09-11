@@ -1005,23 +1005,23 @@ class GlobalWxCommand(BaseCommand):
             # Current conditions - API should return in Fahrenheit when requested
             temp_val = current.get('temperature_2m', 0)
             temp = int(temp_val) if temp_val is not None else 0
-            
+
             feels_like_val = current.get('apparent_temperature', temp)
             feels_like = int(feels_like_val) if feels_like_val is not None else temp
-            
+
             dewpoint = current.get('dewpoint_2m')
-            
+
             humidity_val = current.get('relative_humidity_2m', 0)
             humidity = int(humidity_val) if humidity_val is not None else 0
-            
+
             wind_speed_val = current.get('wind_speed_10m', 0)
             wind_speed = int(wind_speed_val) if wind_speed_val is not None else 0
-            
+
             wind_direction = self._degrees_to_direction(current.get('wind_direction_10m', 0))
-            
+
             wind_gusts_val = current.get('wind_gusts_10m', 0)
             wind_gusts = int(wind_gusts_val) if wind_gusts_val is not None else 0
-            
+
             visibility = current.get('visibility')
             pressure = current.get('surface_pressure')
             weather_code = current.get('weather_code', 0)
@@ -1398,16 +1398,16 @@ class GlobalWxCommand(BaseCommand):
 
     def _normalize_weather_code(self, code: Any) -> int:
         """Normalize weather code to a valid integer, with fallback to 0.
-        
+
         Args:
             code: Weather code (int, float, str, or None).
-            
+
         Returns:
             int: Normalized weather code (0 if invalid).
         """
         if code is None:
             return 0
-        
+
         # Try to convert to integer
         try:
             return int(code)
@@ -1425,7 +1425,7 @@ class GlobalWxCommand(BaseCommand):
         """
         # Normalize code to valid integer
         code = self._normalize_weather_code(code)
-        
+
         # Try to get from translations first
         key = f"commands.gwx.weather_descriptions.{code}"
         description = self.translate(key)
@@ -1478,7 +1478,7 @@ class GlobalWxCommand(BaseCommand):
         """
         # Normalize code to valid integer
         code = self._normalize_weather_code(code)
-        
+
         emoji_map = {
             0: "☀️",      # Clear
             1: "🌤️",     # Mostly Clear

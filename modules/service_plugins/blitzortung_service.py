@@ -152,8 +152,8 @@ class BlitzortungService(BaseServicePlugin):
         self.blitz_buffer: list[dict[str, Any]] = []
         self.seen_blitz_keys: set[str] = set()
         self.mqtt_client: Optional[Any] = None
-        self._mqtt_task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
-        self._lightning_task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
+        self._mqtt_task: Optional[asyncio.Task] = None
+        self._lightning_task: Optional[asyncio.Task] = None
 
         self.logger.info(
             "Blitzortung service initialized: channel=%s threshold=%d window=%ds "
