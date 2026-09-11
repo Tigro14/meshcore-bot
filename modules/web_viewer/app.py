@@ -99,6 +99,12 @@ def _strip_ansi_codes(text: str) -> str:
 from modules.config_snapshot import config_to_redacted_sections
 from modules.feed_format import format_feed_message
 from modules.ini_writer import IniValueError, update_ini_values
+from modules.multibyte_detection import (
+    bucket_hop_chunks,
+    chunks_from_multibyte_path_hex,
+    collect_multibyte_hop_chunks,
+    compute_path_encoding_badge,
+)
 from modules.repeater_manager import RepeaterManager, validate_repeater_tables
 from modules.scheduled_message_admin import (
     SECTION as SCHEDULED_MESSAGES_SECTION,
@@ -6420,15 +6426,7 @@ class BotDataViewer:
     @staticmethod
     def _chunks_from_multibyte_path_hex(path_hex: str, bytes_per_hop: int) -> list[str]:
         """Split path hex into per-hop segments for 2- or 3-byte hop encoding."""
-        if not path_hex or bytes_per_hop not in (2, 3):
-            return []
-        step = bytes_per_hop * 2
-        out: list[str] = []
-        for i in range(0, len(path_hex), step):
-            seg = path_hex[i : i + step]
-            if len(seg) == step:
-                out.append(seg.lower())
-        return out
+        return chunks_from_multibyte_path_hex(path_hex, bytes_per_hop)
 
     def _count_multibyte_packets_from_stream_json(self, cursor, cutoff_ts: float) -> int:
         """Count packet_stream rows (type=packet) since cutoff with bytes_per_hop in (2, 3). JSON parse fallback."""
@@ -6669,10 +6667,7 @@ class BotDataViewer:
     @staticmethod
     def _bucket_hop_chunks(multibyte_hop_chunks: set[str]) -> dict[int, set[str]]:
         """Bucket hop-prefix chunks by length (4 or 6) for O(1) prefix matching."""
-        return {
-            4: {c for c in multibyte_hop_chunks if len(c) == 4},
-            6: {c for c in multibyte_hop_chunks if len(c) == 6},
-        }
+        return bucket_hop_chunks(multibyte_hop_chunks)
 
     def _collect_multibyte_hop_chunks(
         self, cursor, recent_days: int | None = None
@@ -6683,32 +6678,7 @@ class BotDataViewer:
         window are used. Default (None) keeps full history — used by the contacts API badge.
         Dashboard 7d stats pass ``recent_days=7`` so percentages match the chart title.
         """
-        chunks: set[str] = set()
-        try:
-            extra = ""
-            if recent_days is not None:
-                d = max(1, min(int(recent_days), 366))
-                extra = f" AND date(last_seen) >= date('now', '-{d} days')"
-            cursor.execute(
-                f"""
-                SELECT path_hex, bytes_per_hop FROM observed_paths
-                WHERE bytes_per_hop IN (2, 3) AND path_hex IS NOT NULL AND length(path_hex) > 0
-                {extra}
-                """
-            )
-            for row in cursor.fetchall():
-                ph = row["path_hex"]
-                bph = row["bytes_per_hop"]
-                try:
-                    bph_i = int(bph) if bph is not None else 0
-                except (TypeError, ValueError):
-                    bph_i = 0
-                for c in self._chunks_from_multibyte_path_hex(ph, bph_i):
-                    if len(c) in (4, 6):
-                        chunks.add(c)
-        except Exception as e:
-            self.logger.debug(f"Could not load multibyte hop chunks: {e}")
-        return chunks
+        return collect_multibyte_hop_chunks(cursor, recent_days=recent_days, logger=self.logger)
 
     def _compute_path_encoding_badge(
         self,
@@ -6717,62 +6687,7 @@ class BotDataViewer:
         multibyte_hop_chunks: set[str],
     ) -> str | None:
         """Return 'multibyte', 'one_byte', or None for contacts path-encoding badge."""
-        pk = row["public_key"] or ""
-        role = (row["role"] or "").lower()
-        obph_raw = row["out_bytes_per_hop"]
-        obph: int | None
-        try:
-            obph = int(obph_raw) if obph_raw is not None else None
-        except (TypeError, ValueError):
-            obph = None
-        if obph is not None and obph not in (1, 2, 3):
-            obph = None
-
-        out_path_len = row["out_path_len"]
-        if out_path_len is None:
-            out_path_len = -1
-        try:
-            out_path_len = int(out_path_len)
-        except (TypeError, ValueError):
-            out_path_len = -1
-
-        advert_count = row["advert_count"] or 0
-
-        def norm_bph(b: Any) -> int:
-            if b is None:
-                return 1
-            try:
-                i = int(b)
-                return i if i in (1, 2, 3) else 1
-            except (TypeError, ValueError):
-                return 1
-
-        # Multibyte evidence
-        if obph in (2, 3):
-            return "multibyte"
-        for p in all_paths:
-            if norm_bph(p.get("bytes_per_hop")) in (2, 3):
-                return "multibyte"
-        if role in ("repeater", "roomserver") and pk:
-            pk_low = pk.lower()
-            for chunk in multibyte_hop_chunks:
-                if pk_low.startswith(chunk):
-                    return "multibyte"
-
-        # One-byte: positive signal and no multibyte observation
-        has_signal = bool(
-            advert_count > 0 or len(all_paths) > 0 or out_path_len >= 0
-        )
-        if not has_signal:
-            return None
-
-        if obph is not None and obph != 1:
-            return None
-        for p in all_paths:
-            if norm_bph(p.get("bytes_per_hop")) != 1:
-                return None
-
-        return "one_byte"
+        return compute_path_encoding_badge(row, all_paths, multibyte_hop_chunks)
 
     def _contact_has_multibyte_path_evidence(
         self,
