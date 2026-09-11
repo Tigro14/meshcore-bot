@@ -185,6 +185,11 @@ python3 scripts/crawl_meshcore_bzh_wiki.py \
   --prefix ressources/ \
   --prefix materiel/ \
   --output data/wiki_rag/meshcore_bzh_wiki_pages.jsonl
+
+# Blog category (non-Wiki.js)
+python3 scripts/crawl_meshcore_blog.py \
+  --category-url https://serveurperso.in/archives/category/meshcore \
+  --output data/wiki_rag/serveurperso_meshcore.jsonl
 ```
 
 2. Point `Llm_Command` at the generated index:
@@ -199,6 +204,15 @@ wiki_rag_min_term_len = 3
 ```
 
 3. Restart the bot (or reload command settings where applicable).
+
+If you use multiple sources, merge them into one index file first:
+
+```bash
+cat data/wiki_rag/meshcore_wiki_pages.jsonl \
+    data/wiki_rag/meshcore_bzh_wiki_pages.jsonl \
+    data/wiki_rag/serveurperso_meshcore.jsonl \
+  > data/wiki_rag/wiki_pages.jsonl
+```
 
 #### Troubleshooting empty output files
 
