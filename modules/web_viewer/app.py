@@ -4849,6 +4849,41 @@ class BotDataViewer:
                 self.logger.error(f"Error queuing announcement: {e}")
                 return jsonify({'error': 'Failed to queue announcement'}), 500
 
+        @self.app.route('/api/radio/advert', methods=['POST'])
+        def api_radio_advert():
+            """Send a zero-hop or flood self-advertisement from the device.
+            Body: {flood: bool} (default true — the Radio page only has a
+            single "Send Advert Flood" button today; zero-hop is reachable
+            via this same endpoint if a future UI adds it).
+
+            The worker (`_radio_advert_op`, `scheduler.py`) already existed
+            and already worked (used by `startup_advert`) — 'radio_advert'
+            was even already listed in `_RADIO_OPERATION_TYPES` and already
+            dispatched by `_process_radio_operations`. Only this route (and
+            the button's own JS handler, see `radio.html`) were missing —
+            found 2026-09-12 while investigating why "Send Advert Flood"
+            silently did nothing.
+            """
+            try:
+                data = request.get_json(silent=True) or {}
+                flood = bool(data.get('flood', True))
+                payload = {'flood': flood}
+
+                with self.db_manager.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO channel_operations (operation_type, payload_data, status) VALUES ('radio_advert', ?, 'pending')",
+                        (json.dumps(payload),)
+                    )
+                    conn.commit()
+                    op_id = cursor.lastrowid
+
+                self.logger.info(f"Queued radio advert (flood={flood})")
+                return jsonify({'success': True, 'operation_id': op_id})
+            except Exception as e:
+                self.logger.error(f"Error queuing radio advert: {e}")
+                return jsonify({'error': 'Failed to queue advert'}), 500
+
         # ── Plugins settings panel ───────────────────────────────────────────
 
         @self.app.route('/api/plugins')

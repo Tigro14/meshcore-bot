@@ -328,6 +328,7 @@ class RadioManager {
         await this.loadRadioStatus();
         this.setupEventHandlers();
         this.setupRadioParamsHandlers();
+        this.setupAdvertHandler();
         this.readRadioParams({ silent: true });
 
         // Auto-refresh every 30 seconds
@@ -1003,6 +1004,60 @@ class RadioManager {
     setupRadioParamsHandlers() {
         document.getElementById('readRadioParamsBtn').addEventListener('click', () => this.readRadioParams());
         document.getElementById('writeRadioParamsBtn').addEventListener('click', () => this.writeRadioParams());
+    }
+
+    // "Send Advert Flood" (Jean-Marc, 2026-09-12: "le send advert flood ne
+    // semble pas marcher") — the button existed in the HTML with no click
+    // handler at all, and there was no backend route either. The worker
+    // side (`_radio_advert_op`, already used by `startup_advert`) was
+    // already correct — only this wiring was missing. Reuses
+    // `nodeSettingsAlert` (the alert box already in this card) and
+    // `pollRadioParamsOp` (already used by `writeRadioParams`) rather than
+    // introducing new ones.
+    setupAdvertHandler() {
+        const btn = document.getElementById('sendAdvertFloodBtn');
+        if (btn) btn.addEventListener('click', () => this.sendAdvertFlood());
+    }
+
+    async sendAdvertFlood() {
+        const btn = document.getElementById('sendAdvertFloodBtn');
+        btn.disabled = true;
+        this.setNodeSettingsAlert('', '');
+        try {
+            const resp = await fetch('/api/radio/advert', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify({ flood: true })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.operation_id) {
+                this.setNodeSettingsAlert('danger', data.error || 'Failed to queue advert');
+                return;
+            }
+            const result = await this.pollRadioParamsOp(data.operation_id);
+            if (result && result.status === 'completed') {
+                this.setNodeSettingsAlert('success', 'Flood advert sent.');
+            } else {
+                this.setNodeSettingsAlert('danger', result?.error_message || 'Advert failed');
+            }
+        } catch (e) {
+            this.setNodeSettingsAlert('danger', 'Error: ' + e.message);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    setNodeSettingsAlert(type, message) {
+        const alert = document.getElementById('nodeSettingsAlert');
+        if (!alert) return;
+        if (!message) {
+            alert.style.display = 'none';
+            alert.textContent = '';
+            return;
+        }
+        alert.className = `alert alert-${type}`;
+        alert.textContent = message;
+        alert.style.display = 'block';
     }
 
     populateAnnouncementChannels() {
