@@ -272,8 +272,14 @@ semantic versioning.
   catalog, merged over the distributed one key by key, so you can translate a
   local command or override a single shipped string without editing a file that
   an upgrade will replace. Defaults to the `translations/` directory inside
-  `[Bot] local_dir_path`, resolved to an absolute path so it does not depend on
-  the working directory.
+  `[Bot] local_dir_path`, resolved to an absolute path so it does not depend on the
+  working directory.
+
+- The optional LLM RAG can now collect and refresh a path-scoped corpus from any
+  Wiki.js instance. It supports either Guest source access or a Wiki.js API key,
+  publishes indexes atomically, retrieves structure-aware sections with explicit
+  score thresholds, and isolates wiki answers from unrelated conversational and
+  local context.
 
 ### Changed
 
@@ -387,6 +393,14 @@ semantic versioning.
 - ARMv7 service and Debian-package installs use the piwheels index and the shipped
   compatibility constraints consistently, avoiding source builds and incompatible
   dependency selections on 32-bit Raspberry Pi systems (#269).
+
+- The optional LLM RAG can now collect and refresh a path-scoped corpus from any
+  Wiki.js instance. It supports either Guest source access or a Wiki.js API key,
+  publishes indexes atomically, retrieves structure-aware sections with explicit
+  score thresholds, and isolates wiki answers from unrelated conversational and
+  local context.
+
+### Fixed
 
 - Published packet payloads carry UTC in every time field, not just `timestamp`
   (#278). `time` and `date` came from a local `datetime.now()` while the
