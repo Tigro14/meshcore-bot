@@ -1655,14 +1655,36 @@ context_cache_seconds = 60
 
 # Optional local Wiki.js lexical RAG (no embeddings / no vector DB)
 wiki_rag_enabled = false
-# Local JSONL produced by scripts/wikijs_rag_collect.py
+# Base URL of any Wiki.js instance (no site-specific URL is built into the bot)
+wiki_site_url =
+# Optional locale passed to Wiki.js pages.list (empty = all visible locales)
+wiki_locale =
+# Optional Wiki.js API key. Prefer the MESHCORE_WIKI_API_KEY environment variable.
+# With no key, the Guest group must be allowed to read pages and read source
+# (read:pages and read:source) for every selected path.
+wiki_api_key =
+# Refresh successful indexes after this many seconds; 0 disables automatic refresh
+wiki_refresh_interval_seconds = 86400
+# Verify the Wiki.js HTTPS certificate (keep enabled outside isolated test systems)
+wiki_verify_ssl = true
+# Comma-separated page path prefixes. Use * only to explicitly index every visible page.
+# Automatic refresh remains disabled when this is empty.
+wiki_allowed_paths =
+# Local atomic JSONL index. A last-success marker is stored alongside it.
 wiki_rag_index_path = data/wiki_rag/wiki_pages.jsonl
-# Number of retrieved chunks injected into the prompt
-wiki_rag_max_chunks = 3
-# Max chars per injected chunk
-wiki_rag_chunk_chars = 450
+# Number of independently scored sections injected into the prompt
+wiki_rag_max_chunks = 2
+# Per-section and total prompt budgets
+wiki_rag_chunk_chars = 1400
+wiki_rag_max_context_chars = 2400
 # Minimum token length for lexical matching
 wiki_rag_min_term_len = 3
+# Absolute and relative relevance thresholds
+wiki_rag_min_score = 6
+wiki_rag_relative_score = 0.55
+# Optional comma-separated search stopwords and aliases (alias=canonical)
+wiki_rag_stopwords =
+wiki_rag_aliases =
 
 # Conversation history window (seconds) and max turns to retain
 # context_window_seconds = 600
