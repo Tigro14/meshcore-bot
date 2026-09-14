@@ -571,6 +571,37 @@ class BotDataViewer:
             config.read(config_path)
         return config
 
+    def _load_merged_config(self):
+        """Load base config.ini plus its local overlay, mirroring core.py.
+
+        core.py's ``_read_config_snapshot`` reads the base ``config.ini``,
+        looks up ``[Bot] local_dir_path`` (fallback ``"local"``), resolves it
+        relative to the bot root, and — if ``<local_dir_path>/config.ini``
+        exists — reads it into the *same* parser so it overlays the base
+        values section-by-section/key-by-key. The web viewer needs the same
+        merged view so settings edited via the local overlay show up here.
+        """
+        base_parser = configparser.ConfigParser()
+        if os.path.exists(self.config_path):
+            base_parser.read(self.config_path, encoding="utf-8")
+        base_sections = set(base_parser.sections())
+
+        local_dir_path_str = base_parser.get("Bot", "local_dir_path", fallback="local")
+        self.local_dir = Path(resolve_path(local_dir_path_str, self._config_base))
+        self.local_config_path = str(self.local_dir / "config.ini")
+
+        local_only = configparser.ConfigParser()
+        if os.path.exists(self.local_config_path):
+            local_only.read(self.local_config_path, encoding="utf-8")
+        local_sections = set(local_only.sections())
+
+        if os.path.exists(self.local_config_path):
+            base_parser.read(self.local_config_path, encoding="utf-8")
+
+        self._base_sections = base_sections
+        self._local_sections = local_sections
+        return base_parser
+
     def _get_version_info(self) -> dict[str, str | None]:
         """Get version info for footer via centralized version resolver. Never raises."""
         info = resolve_runtime_version(self.bot_root)
