@@ -169,15 +169,15 @@ class TestFormatSeen:
     def test_zero_seconds(self):
         from modules.commands.multibyte_command import MultibyteCommand
 
-        assert MultibyteCommand._format_seen(str(datetime.now())) == "0s ago"
+        assert MultibyteCommand._format_seen(str(datetime.now())) == "0s"
 
     def test_hours(self):
         from modules.commands.multibyte_command import MultibyteCommand
 
         t = datetime.now() - timedelta(hours=3)
-        assert MultibyteCommand._format_seen(str(t)) == "3h ago"
+        assert MultibyteCommand._format_seen(str(t)) == "3h"
 
     def test_invalid_falls_back_to_raw(self):
         from modules.commands.multibyte_command import MultibyteCommand
 
-        assert MultibyteCommand._format_seen("not-a-date") == "not-a-date"
+        assert MultibyteCommand._format_seen("not-a-date") == "not-a-da"

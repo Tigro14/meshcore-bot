@@ -62,35 +62,50 @@ class MultibyteCommand(BaseCommand):
 
     @staticmethod
     def _format_seen(last_heard: Any) -> str:
-        """Human 'seen' age for an ISO datetime string."""
+        """Compact 'seen' age for an ISO datetime string."""
         if not last_heard:
-            return "unknown"
+            return "?"
         try:
             dt = datetime.fromisoformat(str(last_heard))
         except (TypeError, ValueError):
-            return str(last_heard)[:16]
+            return str(last_heard)[:8]
         secs = max(0, int((datetime.now() - dt).total_seconds()))
         if secs < 60:
-            return f"{secs}s ago"
+            return f"{secs}s"
         mins = secs // 60
         if mins < 60:
-            return f"{mins}m ago"
+            return f"{mins}m"
         hours = mins // 60
         if hours < 24:
-            return f"{hours}h ago"
-        return f"{hours // 24}d ago"
+            return f"{hours}h"
+        return f"{hours // 24}d"
 
-    def _format_response(self, results: list[dict[str, Any]], total: int, top: int) -> str:
-        """Render the list (or the all-multibyte case) for a channel message."""
+    def _format_response(
+        self,
+        results: list[dict[str, Any]],
+        total: int,
+        top: int,
+        max_len: int,
+    ) -> str:
+        """Render the list (or the all-multibyte case) within ``max_len`` UTF-8 bytes.
+
+        The fixed description ("1-byte local repeaters, most recent first") lives
+        in the help text; the on-air reply keeps only the count and as many lines
+        as fit in the RF budget.
+        """
         if not results:
-            return f"All {total} currently-tracked repeaters are multibyte ✓"
+            return f"All {total} tracked repeaters multibyte ✓"
 
-        lines = [f"1-byte local repeaters ({len(results)} of {total} tracked, most recent first):"]
+        lines = [f"1B {len(results)} of {total}:"]
         for i, r in enumerate(results[:top], 1):
             name = (r.get("name") or "Unknown")[:24]
             adv = r.get("advert_count") or 0
             seen = self._format_seen(r.get("last_heard"))
-            lines.append(f"{i}. {name} · {adv} adv · {seen}")
+            line = f"{i}. {name} · {adv} adv · {seen}"
+            candidate = "\n".join(lines + [line])
+            if len(candidate.encode("utf-8")) > max_len:
+                break
+            lines.append(line)
         return "\n".join(lines)
 
     async def execute(self, message: MeshMessage) -> bool:
@@ -112,9 +127,13 @@ class MultibyteCommand(BaseCommand):
             await self.send_response(message, f"❌ Error: {e}")
             return True
 
-        await self.send_response(message, self._format_response(results, total, top))
+        max_len = self.get_max_message_length(message)
+        await self.send_response(message, self._format_response(results, total, top, max_len))
         return True
 
     def get_help_text(self) -> str:
         """Get help text for the multibyte command."""
-        return f"multibyte [N] — list local repeaters still on 1-byte routing (N = max, default {self.DEFAULT_TOP})"
+        return (
+            f"multibyte [N] — 1-byte local repeaters, most recent first (N max, default {self.DEFAULT_TOP}). "
+            f"Reply: '1B n of t:' + 'name · adv · seen'; 'All ... multibyte' = none left"
+        )

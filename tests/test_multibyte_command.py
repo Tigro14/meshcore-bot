@@ -68,7 +68,7 @@ async def test_execute_lists_one_byte_only(tmp_path):
     out = sent[0]
     assert "Alpha" in out
     assert "Bravo" not in out
-    assert "of 2 tracked" in out
+    assert "1B 1 of 2:" in out
 
 
 async def test_execute_all_multibyte(tmp_path):
@@ -84,7 +84,7 @@ async def test_execute_all_multibyte(tmp_path):
     sent = []
     cmd.send_response = AsyncMock(side_effect=lambda msg, text: sent.append(text))
     await cmd.execute(mock_message(content="multibyte"))
-    assert "All 1 currently-tracked repeaters are multibyte" in sent[0]
+    assert "All 1 tracked repeaters multibyte" in sent[0]
 
 
 async def test_execute_top_arg(tmp_path):
@@ -113,6 +113,34 @@ async def test_execute_top_arg(tmp_path):
     out = sent[0]
     assert "Alpha" in out
     assert "Charlie" not in out
+
+
+async def test_response_fits_rf_budget(tmp_path):
+    db_path = str(tmp_path / "mb.db")
+    now = datetime.now()
+    conn = _make_db(db_path)
+    for i in range(5):
+        _add_repeater(
+            conn,
+            f"{i:02d}22334455667788",
+            "VeryLongRepeaterNameHere",
+            tracked=1,
+            obph=1,
+            opl=0,
+            adv=123,
+            last=str(now - timedelta(hours=i + 1)),
+        )
+    conn.commit()
+    conn.close()
+    bot = _make_bot(db_path)
+    cmd = MultibyteCommand(bot)
+
+    sent = []
+    cmd.send_response = AsyncMock(side_effect=lambda msg, text: sent.append(text))
+    msg = mock_message(content="multibyte")
+    await cmd.execute(msg)
+    out = sent[0]
+    assert len(out.encode("utf-8")) <= cmd.get_max_message_length(msg)
 
 
 async def test_disabled_command_not_executed(tmp_path):
