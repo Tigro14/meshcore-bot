@@ -34,9 +34,9 @@ dependencies = [
     "pytz>=2023.3",
     "aiohttp>=3.8.0",
     # 2.3.8+ required for zero-hop neighbour discovery (see requirements.txt)
-    # <2.3.10: 2.3.10 deasserts DTR on serial open (serial_cx.py), which ESP32
-    # USB-CDC nodes answer no CMD_APP_START handshake for ("No response from
-    # meshcore node"). Re-allow once the library ships a DTR opt-out.
+    # <2.3.10: 2.3.10 deasserts DTR on serial open (serial_cx.py), which nRF52
+    # native USB-CDC nodes answer no CMD_APP_START handshake for ("No response
+    # from meshcore node"). Re-allow once the library ships a DTR opt-out.
     "meshcore>=2.3.8,<2.3.10",
     "openmeteo-requests>=1.7.2",
     "requests-cache>=1.1.1",
