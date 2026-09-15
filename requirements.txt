@@ -15,7 +15,10 @@ pytz>=2023.3
 aiohttp>=3.8.0
 # 2.3.8+ is required, not merely preferred: send_node_discover_req / req_regions_sync
 # (zero-hop neighbour discovery) and the bounded, serialised BLE write both landed there.
-meshcore>=2.3.8
+# <2.3.10: 2.3.10 deasserts DTR on serial open (serial_cx.py connection_made); ESP32
+# USB-CDC nodes then answer no CMD_APP_START handshake ("No response from meshcore
+# node"). Re-allow once the library ships a DTR opt-out.
+meshcore>=2.3.8,<2.3.10
 openmeteo-requests>=1.7.2
 requests-cache>=1.1.1
 retry-requests>=1.0.0
