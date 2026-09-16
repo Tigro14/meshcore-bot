@@ -1751,12 +1751,11 @@ class BotDataViewer:
         def api_maintenance_backup_now():
             """Trigger an immediate DB backup outside the normal schedule."""
             try:
-                bot = getattr(self, 'bot', None)
-                scheduler = getattr(bot, 'scheduler', None) if bot else None
-                if scheduler is None or not hasattr(scheduler, 'run_db_backup'):
-                    return jsonify({'success': False, 'error': 'Scheduler not available'}), 503
-                scheduler.run_db_backup()
-                # Read outcome written by _run_db_backup
+                runner = getattr(self, '_maintenance_runner', None)
+                if runner is None:
+                    return jsonify({'success': False, 'error': 'Maintenance runner not available'}), 503
+                runner.run_db_backup()
+                # Read the outcome written by MaintenanceRunner.
                 path = self.db_manager.get_metadata('maint.status.db_backup_path') or ''
                 outcome = self.db_manager.get_metadata('maint.status.db_backup_outcome') or ''
                 if outcome.startswith('error'):
