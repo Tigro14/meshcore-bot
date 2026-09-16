@@ -47,6 +47,12 @@ semantic versioning.
   "no ACK received after retries" and skipped the delivery bookkeeping for
   messages the recipient had in fact received.
 
+  A channel sender is a display name, not an identity — MeshCore's channel
+  messages carry no public key — so DM warnings only go to a name the radio
+  already holds a contact for, and a message with no `Name: ` prefix is counted
+  but never warned. `docs/region-warnings.md` says so plainly rather than
+  implying the bot knows who it is talking to.
+
 ### Fixed
 
 - `[Joke_Command] joke_enabled` and `[DadJoke_Command] dadjoke_enabled` are now
