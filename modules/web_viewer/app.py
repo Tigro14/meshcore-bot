@@ -4170,15 +4170,20 @@ class BotDataViewer:
         def _queue_config_reload():
             try:
                 with self.db_manager.connection() as conn:
-                    conn.cursor().execute(
+                    cursor = conn.cursor()
+                    cursor.execute(
                         "INSERT INTO channel_operations (operation_type, status) "
                         "VALUES ('config_reload', 'pending')"
                     )
                     conn.commit()
-                return True
+                    return cursor.lastrowid
             except Exception:
                 self.logger.exception("Failed to queue config reload")
-                return False
+                return None
+
+        def _queue_config_reload():
+            """Ask the bot to re-read config.ini; it re-registers scheduled jobs."""
+            return _queue_config_reload_id() is not None
 
         schedule_write_lock = threading.Lock()
 

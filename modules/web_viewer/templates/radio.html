@@ -220,6 +220,108 @@
                 </div>
             </div>
 
+            <!-- Region Scopes -->
+            <div class="card mb-4" id="region-scopes-card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-map-marked-alt me-2"></i>Region Scopes</h5>
+                    <small class="text-muted" id="regionScopeTarget"></small>
+                </div>
+                <div class="card-body">
+                    <div id="regionScopeAlert" style="display:none"></div>
+
+                    <p class="text-muted small mb-4">
+                        A region code confines a channel message to repeaters holding that
+                        region's key, instead of flooding the whole mesh. These are bot
+                        settings in <code>config.ini</code>, not device settings, so they
+                        are not read from or written to the radio — the radio's own
+                        <a href="#node-settings-card">Default Region Scope</a> is above, and
+                        only covers sends the bot does not scope itself. See the
+                        <a href="/region-warnings">Region Warnings</a> page for how much
+                        unscoped traffic this mesh actually carries.
+                    </p>
+
+                    <div class="alert alert-warning py-2 px-3 small" id="regionScopeLegacy"
+                         style="display:none"></div>
+
+                    <!-- Incoming allowlist -->
+                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
+                        Which scopes the bot replies to
+                    </h6>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="radio" name="regionScopeMode"
+                               id="regionScopeModeAll" value="all">
+                        <label class="form-check-label" for="regionScopeModeAll">
+                            Reply whatever the scope
+                            <span class="text-muted">— every message the bot hears on a monitored channel.</span>
+                        </label>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="radio" name="regionScopeMode"
+                               id="regionScopeModeList" value="list">
+                        <label class="form-check-label" for="regionScopeModeList">
+                            Only these scopes
+                            <span class="text-muted">— reply mirrors the scope it came in on.</span>
+                        </label>
+                    </div>
+                    <div class="ms-4 ps-2 border-start" id="regionScopeListFields">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label" for="regionScopeList">Region scopes</label>
+                                <input type="text" class="form-control" id="regionScopeList"
+                                       placeholder="e.g. #west, #east" autocomplete="off">
+                                <small class="form-text text-muted">
+                                    Comma-separated. The leading <code>#</code> is added if you omit it.
+                                </small>
+                            </div>
+                            <div class="col-md-6 d-flex align-items-center">
+                                <div class="form-check mt-md-4">
+                                    <input class="form-check-input" type="checkbox" id="regionScopeAllowGlobal">
+                                    <label class="form-check-label" for="regionScopeAllowGlobal">
+                                        Also reply to unscoped (global) messages
+                                        <small class="d-block text-muted">
+                                            Adds <code>*</code>. Without it, a sender with no region set
+                                            gets no reply.
+                                        </small>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Outgoing default -->
+                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
+                        Default outgoing scope
+                    </h6>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label" for="regionScopeOutgoing">Scope</label>
+                            <input type="text" class="form-control" id="regionScopeOutgoing"
+                                   placeholder="blank = global flood" autocomplete="off">
+                            <small class="form-text text-muted">
+                                Used for sends that have no scope of their own — scheduled
+                                messages, feeds, webhooks — and for a reply whose incoming
+                                scope could not be matched. It never overrides a mirrored
+                                reply scope.
+                            </small>
+                        </div>
+                        <div class="col-md-8">
+                            <div id="regionScopeChannelOverrides" class="small text-muted"></div>
+                        </div>
+                    </div>
+
+                    <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
+                        <button type="button" class="btn btn-warning" id="saveRegionScopesBtn">
+                            <span class="spinner-border spinner-border-sm me-1" id="saveRegionScopesSpinner"
+                                  style="display:none" role="status"></span>
+                            <i class="fas fa-save me-1"></i>Save Region Scopes
+                        </button>
+                        <small id="regionScopeStatus" class="text-muted"></small>
+                    </div>
+                </div>
+            </div>
+
             <!-- Channel Management -->
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
