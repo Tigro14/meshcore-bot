@@ -1045,6 +1045,7 @@ class BotDataViewer:
                 'contacts',
                 'plugins_page',
                 'greeter',
+                'region_warnings_page',
                 'logs',
                 'multibyte_rollout',
                 'mesh',
@@ -1139,6 +1140,11 @@ class BotDataViewer:
         def greeter():
             """Greeter management page"""
             return render_template('greeter.html')
+
+        @self.app.route('/region-warnings')
+        def region_warnings_page():
+            """Regional flood scope monitoring and warning settings."""
+            return render_template('region_warnings.html')
 
         @self.app.route('/feeds')
         def feeds():
