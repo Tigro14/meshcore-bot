@@ -2263,6 +2263,20 @@ class BotDataViewer:
                                 t['clock_drift'] = sample.get('drift')
                     except Exception:
                         pass
+                    # Enrich with battery level (same Battery_Monitor data as
+                    # /contacts' badge — these are the same devices, since
+                    # Battery_Monitor polls exactly this target list).
+                    try:
+                        battery_samples = self._get_latest_battery_samples(cursor)
+                        for t in targets:
+                            pubkey = t.get('public_key')
+                            sample = battery_samples.get(pubkey) if pubkey else None
+                            if sample:
+                                t['battery_voltage'] = sample['voltage']
+                                t['battery_observed_at'] = sample['observed_at']
+                                t['battery_status'] = self._battery_status(sample['voltage'])
+                    except Exception:
+                        pass
                 # Include config info + bot public key + bot name
                 config_info = {
                     'enabled': self.config.getboolean('Clock_Sync_Admin', 'enabled', fallback=False),

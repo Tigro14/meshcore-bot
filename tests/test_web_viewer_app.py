@@ -2770,3 +2770,60 @@ class TestTrackingDataBatteryFields:
         assert row['battery_voltage'] is None
         assert row['battery_status'] is None
         assert row['battery_observed_at'] is None
+
+
+class TestClockSyncTargetsAdminBatteryEnrichment:
+    """Battery fields on /api/clock-sync-targets-admin (Time page badge)."""
+
+    def test_battery_fields_present_for_resolved_target(self, viewer_with_db):
+        pubkey = 'cc' * 32
+        now_sql = time.strftime('%Y-%m-%d %H:%M:%S')
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.execute(
+                "INSERT INTO complete_contact_tracking "
+                "(public_key, name, role, device_type, first_heard, last_heard) "
+                "VALUES (?, 'RepA', 'repeater', 'repeater', ?, ?)",
+                (pubkey, now_sql, now_sql),
+            )
+            conn.execute(
+                "INSERT INTO clock_sync_targets (target, enabled) VALUES (?, 1)",
+                (pubkey,),
+            )
+            conn.execute(
+                "INSERT INTO battery_observations (public_key, voltage, observed_at) VALUES (?, ?, ?)",
+                (pubkey, 3.9, now_sql),
+            )
+            conn.commit()
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/clock-sync-targets-admin')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            target = next(t for t in data['targets'] if t['target'] == pubkey)
+            assert target['public_key'] == pubkey
+            assert target['battery_voltage'] == 3.9
+            assert target['battery_status'] == 'ok'
+            assert target['battery_observed_at'] is not None
+
+    def test_battery_fields_absent_when_never_polled(self, viewer_with_db):
+        pubkey = 'dd' * 32
+        now_sql = time.strftime('%Y-%m-%d %H:%M:%S')
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.execute(
+                "INSERT INTO complete_contact_tracking "
+                "(public_key, name, role, device_type, first_heard, last_heard) "
+                "VALUES (?, 'RepB', 'repeater', 'repeater', ?, ?)",
+                (pubkey, now_sql, now_sql),
+            )
+            conn.execute(
+                "INSERT INTO clock_sync_targets (target, enabled) VALUES (?, 1)",
+                (pubkey,),
+            )
+            conn.commit()
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/clock-sync-targets-admin')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            target = next(t for t in data['targets'] if t['target'] == pubkey)
+            assert 'battery_voltage' not in target

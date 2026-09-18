@@ -157,6 +157,7 @@
         constructor() {
             this.refreshInterval = null;
             this.deleteTargetId = null;
+            this.lastTargetsData = [];
             this.init();
         }
 
@@ -484,6 +485,7 @@
             if (!container) return;
 
             const targets = Array.isArray(data) ? data : (data.targets || []);
+            this.lastTargetsData = targets;
 
             if (targets.length === 0) {
                 container.innerHTML = `<div class="alert alert-info mb-0"><i class="fas fa-info-circle"></i> No targets configured. Add one above.</div>`;
@@ -491,7 +493,7 @@
             }
 
             let html = '<table class="table table-sm align-middle mb-0">';
-            html += '<thead><tr><th>Target</th><th>Drift</th><th>Status</th><th>Auto clkreboot</th><th>Last Sync</th><th class="text-end">Actions</th></tr></thead><tbody>';
+            html += '<thead><tr><th>Target</th><th>Drift</th><th>Status</th><th>Battery</th><th>Auto clkreboot</th><th>Last Sync</th><th class="text-end">Actions</th></tr></thead><tbody>';
             targets.forEach(t => {
                 const id = t.id;
                 const displayTarget = this.escapeHtml(t.target || 'unknown');
@@ -519,6 +521,26 @@
                     }
                 }
 
+                // Battery (Battery_Monitor polls this same target list)
+                let batteryHtml = '<span class="text-muted">-</span>';
+                if (t.public_key && t.battery_voltage !== undefined && t.battery_voltage !== null) {
+                    const batteryClass = {
+                        'critical': 'bg-danger',
+                        'low': 'bg-warning text-dark',
+                        'ok': 'bg-success',
+                    }[t.battery_status] || 'bg-secondary';
+                    // Only the pubkey (not the attacker-controlled advert name)
+                    // goes into the attribute -- showBatteryHistory looks the
+                    // name up from lastTargetsData by public_key, same reasoning
+                    // as this file's own promptDelete/showHistory calls already
+                    // apply to displayName.
+                    batteryHtml = `<span class="badge ${batteryClass} battery-badge" style="cursor:pointer"
+                                        data-public-key="${t.public_key}"
+                                        title="Click for 7-day history">
+                                     <i class="fas fa-battery-half me-1"></i>${t.battery_voltage.toFixed(2)}V
+                                   </span>`;
+                }
+
                 // Last sync time
                 let lastSync = '-';
                 if (t.last_sync_at) {
@@ -538,6 +560,7 @@
                     </td>
                     <td>${driftHtml}</td>
                     <td>${syncBadge}</td>
+                    <td>${batteryHtml}</td>
                     <td>
                         <div class="form-check form-switch mb-0" title="If this target replies 'clock cannot go backwards' (its clock is ahead of real time -- a normal sync can never fix that), automatically clkreboot it then resync it">
                             <input class="form-check-input" type="checkbox" role="switch" ${autoClkrebootChecked}
@@ -559,6 +582,86 @@
             });
             html += '</tbody></table>';
             container.innerHTML = html;
+            this.setupBatteryBadges();
+        }
+
+        setupBatteryBadges() {
+            document.querySelectorAll('.battery-badge').forEach(badge => {
+                if (badge.dataset.setup === 'true') return;
+                badge.dataset.setup = 'true';
+                badge.addEventListener('click', () => this.showBatteryHistory(badge.dataset.publicKey));
+            });
+        }
+
+        async showBatteryHistory(publicKey) {
+            const target = this.lastTargetsData.find(t => t.public_key === publicKey);
+            const displayName = target ? this.escapeHtml(target.contact_name || target.target || 'Unknown') : 'Unknown';
+            const modalHtml = `
+                <div class="modal fade" id="batteryHistoryModal" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="fas fa-battery-half me-2"></i>${displayName} — last 7 days</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div id="battery-history-content" class="text-center">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            const existingModal = document.getElementById('batteryHistoryModal');
+            if (existingModal) existingModal.remove();
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            const modal = new bootstrap.Modal(document.getElementById('batteryHistoryModal'));
+            modal.show();
+            document.getElementById('batteryHistoryModal').addEventListener('hidden.bs.modal', () => {
+                document.getElementById('batteryHistoryModal').remove();
+            });
+
+            const content = document.getElementById('battery-history-content');
+            try {
+                const resp = await fetch(`/api/battery/${encodeURIComponent(publicKey)}/history?days=7`);
+                if (!resp.ok) throw new Error('Failed to load battery history');
+                const data = await resp.json();
+                const points = data.points || [];
+                if (points.length === 0) {
+                    content.innerHTML = '<div class="text-muted text-center">No battery data yet.</div>';
+                    return;
+                }
+                content.innerHTML = '<canvas id="battery-history-chart" height="120"></canvas>';
+                const ctx = document.getElementById('battery-history-chart');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: points.map(p => this.formatTimestamp(p.observed_at)),
+                        datasets: [{
+                            label: 'Voltage (V)',
+                            data: points.map(p => p.voltage),
+                            borderColor: '#0d6efd',
+                            backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                            tension: 0.2,
+                            fill: true,
+                            pointRadius: 2,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: { title: { display: true, text: 'Volts' } },
+                        },
+                    },
+                });
+            } catch (err) {
+                content.innerHTML = `<div class="text-danger text-center">${this.escapeHtml(err.message)}</div>`;
+            }
         }
 
         formatTimestamp(ts) {
