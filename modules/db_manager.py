@@ -89,6 +89,7 @@ class DBManager:
         'observed_paths',  # Repeater manager - observed paths from adverts and messages
         'neighbor_links',  # Zero-hop neighbor discovery - current adjacency
         'neighbor_observations',  # Zero-hop neighbor discovery - per-cycle history
+        'battery_observations',  # Battery_Monitor - battery voltage history
     }
 
     def __init__(self, bot: Any, db_path: str = "meshcore_bot.db"):

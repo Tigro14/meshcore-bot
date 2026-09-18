@@ -887,6 +887,34 @@ def _m0027_clock_sync_targets_auto_clkreboot(cursor: sqlite3.Cursor) -> None:
     _add_column(cursor, "clock_sync_targets", "last_clkreboot_at", "INTEGER")
 
 
+def _m0028_battery_observations(cursor: sqlite3.Cursor) -> None:
+    """Battery voltage history for Battery_Monitor (see modules/scheduler.py).
+
+    A single append-only time series, not a links+observations split like
+    migration 22's neighbor tables: there is no "current adjacency" question
+    here to answer separately, just "what did this device report and when" —
+    the latest-per-device value the web viewer badge needs is a cheap
+    ``MAX(observed_at)`` query away, so a second "current state" table would
+    only duplicate data for no real benefit at this volume (one row per
+    polled device per hour, per Battery_Monitor's polling interval).
+    """
+    cursor.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS battery_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            public_key TEXT NOT NULL,
+            voltage REAL NOT NULL,
+            observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_battery_observations_pubkey_time
+            ON battery_observations(public_key, observed_at);
+        CREATE INDEX IF NOT EXISTS idx_battery_observations_observed_at
+            ON battery_observations(observed_at);
+        """
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -921,6 +949,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (25, "clock_sync_admin_log table", _m0025_clock_sync_admin_log),
     (26, "clock_sync_targets table", _m0026_clock_sync_targets),
     (27, "clock_sync_targets: auto_clkreboot_enabled, last_clkreboot_at", _m0027_clock_sync_targets_auto_clkreboot),
+    (28, "battery_observations table", _m0028_battery_observations),
 ]
 
 

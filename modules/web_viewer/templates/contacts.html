@@ -985,6 +985,7 @@ class ModernContactsManager {
                                 <div class="d-flex align-items-center min-w-0">${this.formatHops(contact)}</div>
                                 <div class="d-flex align-items-center gap-1"><span class="text-muted small">Bytes/hop:</span>${this.formatPathBytes(contact)}</div>
                                 ${this.formatPathEncodingBadge(contact)}
+                                ${this.formatBattery(contact)}
                                 </div>
                                 <div class="d-flex align-items-center gap-1">
                                     <span class="badge bg-success">${Number(contact.advert_count) || 0}</span>
@@ -1054,7 +1055,7 @@ class ModernContactsManager {
                 <td>${this.formatLocation(contact)}</td>
                 <td>${this.formatDistance(contact)}</td>
                 <td>${this.formatSignal(contact)}</td>
-                <td><div class="d-flex flex-column align-items-start gap-1">${this.formatHops(contact)}${this.formatPathEncodingBadge(contact)}</div></td>
+                <td><div class="d-flex flex-column align-items-start gap-1">${this.formatHops(contact)}${this.formatPathEncodingBadge(contact)}${this.formatBattery(contact)}</div></td>
                 <td>${this.formatPathBytes(contact)}</td>
                 <td>${this.formatTimestamp(contact.first_heard)}</td>
                 <td>${this.formatTimeAgo(contact.last_seen)}</td>
@@ -1088,6 +1089,7 @@ class ModernContactsManager {
 
         // Setup path tooltips after rendering
         this.setupPathTooltips();
+        this.setupBatteryBadges();
         this.setupDriftTooltips();
         this.updateBulkDeleteButton();
         this.updateSelectAllCheckbox();
@@ -1642,6 +1644,110 @@ class ModernContactsManager {
         } else {
             // No path data
             return `<span class="badge bg-primary">${hopCount}</span>`;
+        }
+    }
+
+    formatBattery(contact) {
+        const v = contact.battery_voltage;
+        if (v === null || v === undefined) return '';
+        const statusClass = {
+            'critical': 'bg-danger',
+            'low': 'bg-warning text-dark',
+            'ok': 'bg-success',
+        }[contact.battery_status] || 'bg-secondary';
+        const seen = contact.battery_observed_at ? this.formatTimestamp(contact.battery_observed_at) : '';
+        // Only the pubkey (not the attacker-controlled advert name) goes into
+        // the attribute — showBatteryHistory looks the name up from
+        // filteredData by userId, same reasoning as showDeleteConfirmation's
+        // own comment: escaping an untrusted name for an HTML attribute is a
+        // second XSS-prone code path to get right, so this codebase avoids
+        // needing it at all rather than relying on the escaping being correct.
+        return `<span class="badge ${statusClass} battery-badge"
+                      style="cursor: pointer;"
+                      data-user-id="${this.escapeAttribute(contact.user_id)}"
+                      data-bs-toggle="tooltip"
+                      data-bs-placement="top"
+                      title="${this.escapeAttribute("Cliquer pour l'historique sur 7 jours" + (seen ? ' — dernière lecture: ' + seen : ''))}">
+                  <i class="fas fa-battery-half me-1"></i>${v.toFixed(2)}V
+                </span>`;
+    }
+
+    setupBatteryBadges() {
+        document.querySelectorAll('.battery-badge').forEach(badge => {
+            if (badge.dataset.setup === 'true') return;
+            badge.dataset.setup = 'true';
+            badge.addEventListener('click', () => this.showBatteryHistory(badge.dataset.userId));
+        });
+    }
+
+    async showBatteryHistory(userId) {
+        const contact = this.filteredData.find(c => c.user_id === userId);
+        const username = contact ? (contact.username || 'Unknown') : 'Unknown';
+        const modalHtml = `
+            <div class="modal fade" id="batteryHistoryModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="fas fa-battery-half me-2"></i>${this.escapeHtml(username)} — 7 derniers jours</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="battery-history-content" class="text-center">
+                                <i class="fas fa-spinner fa-spin"></i> Chargement...
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        const existingModal = document.getElementById('batteryHistoryModal');
+        if (existingModal) existingModal.remove();
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        const modal = new bootstrap.Modal(document.getElementById('batteryHistoryModal'));
+        modal.show();
+        document.getElementById('batteryHistoryModal').addEventListener('hidden.bs.modal', () => {
+            document.getElementById('batteryHistoryModal').remove();
+        });
+
+        const content = document.getElementById('battery-history-content');
+        try {
+            const resp = await fetch(`/api/battery/${encodeURIComponent(userId)}/history?days=7`);
+            if (!resp.ok) throw new Error('Failed to load battery history');
+            const data = await resp.json();
+            const points = data.points || [];
+            if (points.length === 0) {
+                content.innerHTML = '<div class="text-muted text-center">Aucune donnée de batterie pour le moment.</div>';
+                return;
+            }
+            content.innerHTML = '<canvas id="battery-history-chart" height="120"></canvas>';
+            const ctx = document.getElementById('battery-history-chart');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: points.map(p => this.formatTimestamp(p.observed_at)),
+                    datasets: [{
+                        label: 'Tension (V)',
+                        data: points.map(p => p.voltage),
+                        borderColor: '#0d6efd',
+                        backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                        tension: 0.2,
+                        fill: true,
+                        pointRadius: 2,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: { title: { display: true, text: 'Volts' } },
+                    },
+                },
+            });
+        } catch (err) {
+            content.innerHTML = `<div class="text-danger text-center">${this.escapeHtml(err.message)}</div>`;
         }
     }
 

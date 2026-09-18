@@ -305,6 +305,41 @@ class TestSetupScheduledMessages:
         assert "clock_sync_admin_daily" not in job_ids
         self._teardown(scheduler)
 
+    def test_battery_monitor_job_registered_when_enabled(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", "rep-1,rep-2")
+        scheduler.bot.config.add_section("Battery_Monitor")
+        scheduler.bot.config.set("Battery_Monitor", "enabled", "true")
+        scheduler.bot.config.set("Battery_Monitor", "poll_interval_hours", "1")
+        self._setup_and_call(scheduler)
+        job_ids = {job.id for job in scheduler._apscheduler.get_jobs()}
+        assert "battery_monitor_poll" in job_ids
+        self._teardown(scheduler)
+
+    def test_battery_monitor_job_not_registered_when_disabled(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", "rep-1")
+        scheduler.bot.config.add_section("Battery_Monitor")
+        scheduler.bot.config.set("Battery_Monitor", "enabled", "false")
+        self._setup_and_call(scheduler)
+        job_ids = {job.id for job in scheduler._apscheduler.get_jobs()}
+        assert "battery_monitor_poll" not in job_ids
+        self._teardown(scheduler)
+
+    def test_battery_monitor_job_not_registered_when_no_section(self, scheduler):
+        self._setup_and_call(scheduler)
+        job_ids = {job.id for job in scheduler._apscheduler.get_jobs()}
+        assert "battery_monitor_poll" not in job_ids
+        self._teardown(scheduler)
+
+    def test_battery_monitor_job_not_registered_when_no_targets(self, scheduler):
+        scheduler.bot.config.add_section("Battery_Monitor")
+        scheduler.bot.config.set("Battery_Monitor", "enabled", "true")
+        self._setup_and_call(scheduler)
+        job_ids = {job.id for job in scheduler._apscheduler.get_jobs()}
+        assert "battery_monitor_poll" not in job_ids
+        self._teardown(scheduler)
+
 
 class TestClockSyncAdminScheduler:
     def test_parse_targets_deduplicates_and_strips(self, scheduler):
@@ -507,6 +542,147 @@ class TestClockSyncAdminScheduler:
         record.assert_called_once_with(
             "deadbeef00112233", "TargetA", False, "Send returned False"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestBatteryMonitorScheduler
+# ---------------------------------------------------------------------------
+
+
+class TestBatteryMonitorScheduler:
+    """Tests for the Battery_Monitor telemetry poll (req_telemetry_sync)."""
+
+    def test_extract_voltage_from_lpp_finds_type_116(self, scheduler):
+        lpp = [
+            {"channel": 0, "type": 1, "value": 42},
+            {"channel": 1, "type": 116, "value": 3.87},
+        ]
+        assert scheduler._extract_voltage_from_lpp(lpp) == 3.87
+
+    def test_extract_voltage_from_lpp_returns_none_when_absent(self, scheduler):
+        assert scheduler._extract_voltage_from_lpp([{"channel": 0, "type": 1, "value": 42}]) is None
+
+    def test_extract_voltage_from_lpp_returns_none_on_malformed_input(self, scheduler):
+        assert scheduler._extract_voltage_from_lpp(None) is None
+        assert scheduler._extract_voltage_from_lpp("not-a-list") is None
+        assert scheduler._extract_voltage_from_lpp([{"type": 116, "value": "oops"}]) is None
+
+    def _battery_context(self, scheduler, *targets):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", ",".join(targets))
+        scheduler.bot.config.add_section("Battery_Monitor")
+        scheduler.bot.config.set("Battery_Monitor", "enabled", "true")
+        scheduler.bot.config.set("Battery_Monitor", "request_gap_seconds", "0")
+        scheduler.bot.connected = True
+        scheduler.bot.is_radio_zombie = False
+        scheduler.bot.is_radio_offline = False
+        scheduler.bot.meshcore = Mock()
+        scheduler.bot.meshcore.get_contact_by_name = Mock(side_effect=lambda value: None)
+        scheduler.bot.meshcore.commands = Mock()
+        scheduler.bot.meshcore.commands.req_telemetry_sync = AsyncMock(
+            return_value=[{"channel": 0, "type": 116, "value": 3.9}]
+        )
+        return scheduler
+
+    def test_poll_skipped_when_disabled(self, scheduler):
+        scheduler.bot.config.add_section("Battery_Monitor")
+        scheduler.bot.config.set("Battery_Monitor", "enabled", "false")
+        result = asyncio.run(scheduler._run_battery_monitor_job_async())
+        assert result == {'success': False, 'error': 'Battery_Monitor is disabled'}
+
+    def test_poll_skipped_when_not_connected(self, scheduler):
+        scheduler.bot.config.add_section("Battery_Monitor")
+        scheduler.bot.config.set("Battery_Monitor", "enabled", "true")
+        scheduler.bot.connected = False
+        result = asyncio.run(scheduler._run_battery_monitor_job_async())
+        assert result['success'] is False
+
+    def test_poll_skipped_when_no_targets(self, scheduler):
+        scheduler.bot.config.add_section("Battery_Monitor")
+        scheduler.bot.config.set("Battery_Monitor", "enabled", "true")
+        scheduler.bot.connected = True
+        scheduler.bot.is_radio_zombie = False
+        scheduler.bot.is_radio_offline = False
+        result = asyncio.run(scheduler._run_battery_monitor_job_async())
+        assert result == {'success': False, 'error': 'No targets configured'}
+
+    def test_poll_stores_voltage_for_resolved_targets(self, scheduler):
+        self._battery_context(scheduler, "deadbeef0011", "cafef00d0022")
+        scheduler.bot.meshcore.contacts = {
+            "a": {"name": "RepA", "public_key": "deadbeef0011"},
+            "b": {"name": "RepB", "public_key": "cafef00d0022"},
+        }
+        stored = []
+        scheduler._store_battery_observation = lambda pk, v: stored.append((pk, v))
+
+        result = asyncio.run(scheduler._run_battery_monitor_job_async())
+
+        assert result == {'success': True, 'polled': 2, 'stored': 2, 'failed': 0}
+        assert stored == [("deadbeef0011", 3.9), ("cafef00d0022", 3.9)]
+        assert scheduler.bot.meshcore.commands.req_telemetry_sync.await_count == 2
+
+    def test_poll_skips_unknown_target(self, scheduler):
+        self._battery_context(scheduler, "unknown-target")
+        scheduler.bot.meshcore.contacts = {}
+        stored = []
+        scheduler._store_battery_observation = lambda pk, v: stored.append((pk, v))
+
+        result = asyncio.run(scheduler._run_battery_monitor_job_async())
+
+        assert result == {'success': True, 'polled': 0, 'stored': 0, 'failed': 1}
+        assert stored == []
+
+    def test_poll_counts_failure_on_timeout(self, scheduler):
+        self._battery_context(scheduler, "deadbeef0011")
+        scheduler.bot.meshcore.contacts = {
+            "a": {"name": "RepA", "public_key": "deadbeef0011"},
+        }
+        scheduler.bot.meshcore.commands.req_telemetry_sync = AsyncMock(
+            side_effect=asyncio.TimeoutError()
+        )
+        stored = []
+        scheduler._store_battery_observation = lambda pk, v: stored.append((pk, v))
+
+        result = asyncio.run(scheduler._run_battery_monitor_job_async())
+
+        assert result == {'success': True, 'polled': 1, 'stored': 0, 'failed': 1}
+        assert stored == []
+        assert any(
+            "timed out" in str(call).lower()
+            for call in scheduler.bot.logger.warning.call_args_list
+        )
+
+    def test_poll_counts_failure_when_no_voltage_in_reply(self, scheduler):
+        self._battery_context(scheduler, "deadbeef0011")
+        scheduler.bot.meshcore.contacts = {
+            "a": {"name": "RepA", "public_key": "deadbeef0011"},
+        }
+        scheduler.bot.meshcore.commands.req_telemetry_sync = AsyncMock(return_value=[])
+        stored = []
+        scheduler._store_battery_observation = lambda pk, v: stored.append((pk, v))
+
+        result = asyncio.run(scheduler._run_battery_monitor_job_async())
+
+        assert result == {'success': True, 'polled': 1, 'stored': 0, 'failed': 1}
+        assert stored == []
+
+    def test_store_battery_observation_inserts_row(self, scheduler):
+        import sqlite3
+        import contextlib
+
+        conn = sqlite3.connect(":memory:")
+        conn.execute(
+            "CREATE TABLE battery_observations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, public_key TEXT NOT NULL, "
+            "voltage REAL NOT NULL, observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+        scheduler.bot.db_manager = Mock()
+        scheduler.bot.db_manager.connection.return_value = contextlib.nullcontext(conn)
+
+        scheduler._store_battery_observation("deadbeef0011", 3.87)
+
+        row = conn.execute("SELECT public_key, voltage FROM battery_observations").fetchone()
+        assert row == ("deadbeef0011", 3.87)
 
 
 # ---------------------------------------------------------------------------

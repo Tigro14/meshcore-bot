@@ -566,3 +566,46 @@ class TestBbsAndClockSyncAdminTablesReinstated:
             row[0] for row in conn.execute("SELECT version FROM schema_version")
         }
         assert {24, 25} <= applied
+
+
+class TestBatteryObservations:
+    """Battery voltage history for Battery_Monitor (see modules/scheduler.py)."""
+
+    def test_table_created(self, runner, conn):
+        runner.run()
+        assert _table_exists(conn.cursor(), "battery_observations") is True
+
+    def test_columns(self, runner, conn):
+        runner.run()
+        cursor = conn.cursor()
+        for column in ["public_key", "voltage", "observed_at"]:
+            assert _column_exists(cursor, "battery_observations", column) is True
+
+    def test_indexes_are_table_qualified(self, runner, conn):
+        """SQLite index names are database-global (see migration 20)."""
+        runner.run()
+        for idx in [
+            "idx_battery_observations_pubkey_time",
+            "idx_battery_observations_observed_at",
+        ]:
+            row = conn.execute(
+                "SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?",
+                (idx,),
+            ).fetchone()
+            assert row is not None, f"missing index {idx}"
+            assert row[0] == "battery_observations"
+
+    def test_migration_is_idempotent(self, conn, logger):
+        MigrationRunner(conn, logger).run()
+        MigrationRunner(conn, logger).run()
+        applied = conn.execute(
+            "SELECT COUNT(*) FROM schema_version WHERE version = 28"
+        ).fetchone()[0]
+        assert applied == 1
+
+    def test_battery_observations_is_writable_by_the_db_manager(self, runner, conn):
+        """DBManager.ALLOWED_TABLES gates create/drop/retention helpers."""
+        from modules.db_manager import DBManager
+
+        runner.run()
+        assert "battery_observations" in DBManager.ALLOWED_TABLES

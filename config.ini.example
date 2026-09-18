@@ -316,6 +316,33 @@ auto_clkreboot_cooldown_days = 7
 # Seconds to wait after sending clkreboot before sending the follow-up clock
 # sync, so the target has time to actually finish rebooting. Default: 60.
 auto_clkreboot_resync_delay_seconds = 60
+
+[Battery_Monitor]
+# Optional periodic battery-telemetry poll for repeaters/room-servers/sensors.
+# Reuses Clock_Sync_Admin's target list above (no separate targets setting) --
+# those are the devices the bot already has admin rights on. Sends a
+# telemetry request (binary protocol, not a DM) to each target on an
+# interval, and stores the reported battery voltage for the contacts-page
+# badge and its 7-day history chart.
+enabled = false
+
+# How often to poll each target, in hours. Default: 1.
+poll_interval_hours = 1
+
+# Seconds to wait for a telemetry reply from one target before giving up on
+# it and moving to the next. Default: 20.
+request_timeout_seconds = 20
+
+# Pause between successive targets' requests, so a full poll cycle never
+# fires requests back-to-back with zero pacing. Default: 2.
+request_gap_seconds = 2
+
+# Voltage thresholds for the contacts-page badge colour (green above
+# low_voltage, yellow between low_voltage and critical_voltage, red at or
+# below critical_voltage). Tune to your actual battery chemistry/wiring --
+# there is no universal voltage-to-percentage curve.
+low_voltage = 3.7
+critical_voltage = 3.4
 [Channels]
 # Channels to monitor (comma-separated)
 # Bot will only respond to messages on these channels
@@ -1089,6 +1116,10 @@ mesh_connections_retention_days = 7
 # grows very slowly and a long window is cheap. The neighbor_links aggregate that
 # the mesh graph reads is never pruned.
 neighbor_observations_retention_days = 365
+#
+# Battery voltage history (see [Battery_Monitor]). One row per polled target
+# per poll_interval_hours, so volume is small even at a generous window.
+battery_observations_retention_days = 90
 [Path_Command]
 # Enable or disable the path command
 enabled = true

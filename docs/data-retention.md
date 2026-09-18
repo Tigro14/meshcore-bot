@@ -13,6 +13,7 @@ daily_stats_retention_days = 90
 observed_paths_retention_days = 90
 purging_log_retention_days = 90
 mesh_connections_retention_days = 7
+battery_observations_retention_days = 90
 ```
 
 Stats tables (message_stats, command_stats, path_stats) use **`[Stats_Command]`** `data_retention_days` (default 7); the scheduler runs that cleanup daily as well. Stats are **collected** by default with **`collect_stats = true`** under `[Stats_Command]`, even if the user-facing `stats` chat command is disabled with `enabled = false`. Set **`collect_stats = false`** only if you want to stop writing those dashboard stats tables.
@@ -27,6 +28,7 @@ Stats tables (message_stats, command_stats, path_stats) use **`[Stats_Command]`*
 | **observed_paths** | Path strings from adverts and messages | 90 days |
 | **purging_log** | Audit trail for repeater purges | 90 days |
 | **mesh_connections** | Path graph edges (in-memory + DB); should be ≥ Path_Command `graph_edge_expiration_days` | 7 days |
+| **battery_observations** | Battery voltage history from `[Battery_Monitor]` polling | 90 days |
 | **message_stats, command_stats, path_stats** | Stats command data | 7 days (`[Stats_Command]` `data_retention_days`) |
 | **daily_rollup** | Per-day dashboard rollups, so trends outlive the tables above | 400 days (`[Web_Viewer]` `dashboard_snapshot_history_days`) |
 | **dashboard_snapshot** | Single-row current-state payload for the dashboard | Overwritten in place |

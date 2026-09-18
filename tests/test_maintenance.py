@@ -249,3 +249,44 @@ class TestRunDbBackupIntegration:
         dst = sqlite3.connect(str(backups[0]))
         assert dst.execute("SELECT i FROM x").fetchone()[0] == 1
         dst.close()
+
+
+# ---------------------------------------------------------------------------
+# _cleanup_battery_observations (Battery_Monitor voltage history retention)
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupBatteryObservations:
+    def _make_runner(self):
+        bot = Mock()
+        bot.logger = Mock()
+        return MaintenanceRunner(bot, get_current_time=lambda: datetime.datetime.now())
+
+    def test_deletes_rows_older_than_retention_window(self):
+        runner = self._make_runner()
+        runner.bot.db_manager.delete_timestamp_rows_in_chunks = Mock(return_value=5)
+
+        runner._cleanup_battery_observations(90)
+
+        runner.bot.db_manager.delete_timestamp_rows_in_chunks.assert_called_once()
+        args, kwargs = runner.bot.db_manager.delete_timestamp_rows_in_chunks.call_args
+        assert args[0] == "battery_observations"
+        assert args[1] == "observed_at"
+        assert kwargs.get("progress_label") == "battery observations"
+
+    def test_skips_when_retention_days_not_positive(self):
+        runner = self._make_runner()
+        runner.bot.db_manager.delete_timestamp_rows_in_chunks = Mock()
+
+        runner._cleanup_battery_observations(0)
+
+        runner.bot.db_manager.delete_timestamp_rows_in_chunks.assert_not_called()
+
+    def test_missing_table_does_not_raise(self):
+        """A pre-migration-28 database must not abort the rest of retention."""
+        runner = self._make_runner()
+        runner.bot.db_manager.delete_timestamp_rows_in_chunks = Mock(
+            side_effect=sqlite3.OperationalError("no such table: battery_observations")
+        )
+
+        runner._cleanup_battery_observations(90)  # must not raise

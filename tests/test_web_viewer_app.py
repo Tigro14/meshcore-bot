@@ -2627,3 +2627,146 @@ class TestClockDriftFreshness:
         flagged = clock_stats.get("out_of_sync_nodes")
         assert [node["name"] for node in flagged] == ["BrokenClock"]
         assert flagged[0]["drift_seconds"] == 600
+
+
+# ---------------------------------------------------------------------------
+# Battery_Monitor: /api/battery/<public_key>/history, _get_latest_battery_samples,
+# _battery_status
+# ---------------------------------------------------------------------------
+
+
+class TestApiBatteryHistory:
+    def test_returns_points_within_window_only(self, viewer_with_db):
+        pubkey = 'aa' * 32
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.execute(
+                "INSERT INTO battery_observations (public_key, voltage, observed_at) VALUES (?, ?, ?)",
+                (pubkey, 3.9, time.strftime('%Y-%m-%d %H:%M:%S')),
+            )
+            conn.execute(
+                "INSERT INTO battery_observations (public_key, voltage, observed_at) VALUES (?, ?, ?)",
+                (pubkey, 3.7, '2020-01-01 00:00:00'),
+            )
+            conn.commit()
+
+        with viewer_with_db.app.test_client() as client:
+            response = client.get(f'/api/battery/{pubkey}/history?days=7')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['public_key'] == pubkey
+            assert [p['voltage'] for p in data['points']] == [3.9]
+
+    def test_returns_empty_points_for_unknown_device(self, viewer_with_db):
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/battery/unknownkey/history')
+            assert response.status_code == 200
+            assert json.loads(response.data)['points'] == []
+
+    def test_days_param_is_clamped_to_thirty(self, viewer_with_db):
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/battery/aa/history?days=9999')
+            assert response.status_code == 200
+            assert json.loads(response.data)['days'] == 30
+
+    def test_invalid_days_param_falls_back_to_seven(self, viewer_with_db):
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/api/battery/aa/history?days=not-a-number')
+            assert response.status_code == 200
+            assert json.loads(response.data)['days'] == 7
+
+
+class TestGetLatestBatterySamples:
+    def test_returns_most_recent_reading_per_device(self, viewer_with_db):
+        pubkey = 'bb' * 32
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.executemany(
+                "INSERT INTO battery_observations (public_key, voltage, observed_at) VALUES (?, ?, ?)",
+                [
+                    (pubkey, 3.5, '2026-01-01 00:00:00'),
+                    (pubkey, 4.0, '2026-01-02 00:00:00'),
+                ],
+            )
+            conn.commit()
+
+        conn = viewer_with_db._get_db_connection()
+        try:
+            samples = viewer_with_db._get_latest_battery_samples(conn.cursor())
+        finally:
+            conn.close()
+        assert samples[pubkey]['voltage'] == 4.0
+        assert samples[pubkey]['observed_at'] == '2026-01-02 00:00:00'
+
+    def test_empty_table_returns_empty_dict(self, viewer_with_db):
+        conn = viewer_with_db._get_db_connection()
+        try:
+            samples = viewer_with_db._get_latest_battery_samples(conn.cursor())
+        finally:
+            conn.close()
+        assert samples == {}
+
+
+class TestBatteryStatus:
+    def test_classifies_by_configured_thresholds(self, mock_viewer):
+        mock_viewer.config.add_section('Battery_Monitor')
+        mock_viewer.config.set('Battery_Monitor', 'low_voltage', '3.7')
+        mock_viewer.config.set('Battery_Monitor', 'critical_voltage', '3.4')
+        assert mock_viewer._battery_status(None) is None
+        assert mock_viewer._battery_status(4.1) == 'ok'
+        assert mock_viewer._battery_status(3.6) == 'low'
+        assert mock_viewer._battery_status(3.2) == 'critical'
+
+    def test_defaults_when_no_config_section(self, mock_viewer):
+        assert mock_viewer._battery_status(4.0) == 'ok'
+        assert mock_viewer._battery_status(3.0) == 'critical'
+
+
+class TestTrackingDataBatteryFields:
+    """Battery fields threaded through _get_tracking_data (contacts-page badge)."""
+
+    def _seed_contact(self, db_path, public_key, name):
+        now_sql = time.strftime('%Y-%m-%d %H:%M:%S')
+        with sqlite3.connect(db_path, timeout=60) as conn:
+            conn.execute(
+                """
+                INSERT INTO complete_contact_tracking
+                (public_key, name, role, device_type, hop_count,
+                 first_heard, last_heard, advert_count, is_currently_tracked)
+                VALUES (?, ?, 'repeater', 'repeater', 1, ?, ?, 1, 1)
+                """,
+                (public_key, name, now_sql, now_sql),
+            )
+            conn.commit()
+
+    def _find(self, tracking, public_key):
+        for row in tracking:
+            if row['user_id'] == public_key:
+                return row
+        return None
+
+    def test_battery_fields_present_when_polled(self, viewer_with_db):
+        pubkey = 'ee' * 32
+        self._seed_contact(viewer_with_db.db_path, pubkey, 'Polled')
+        with sqlite3.connect(viewer_with_db.db_path, timeout=60) as conn:
+            conn.execute(
+                "INSERT INTO battery_observations (public_key, voltage, observed_at) VALUES (?, ?, ?)",
+                (pubkey, 3.9, time.strftime('%Y-%m-%d %H:%M:%S')),
+            )
+            conn.commit()
+
+        result = viewer_with_db._get_tracking_data(since='all')
+        row = self._find(result['tracking_data'], pubkey)
+        assert row is not None
+        assert row['battery_voltage'] == 3.9
+        assert row['battery_status'] == 'ok'
+        assert row['battery_observed_at'] is not None
+
+    def test_battery_fields_none_when_never_polled(self, viewer_with_db):
+        pubkey = 'ff' * 32
+        self._seed_contact(viewer_with_db.db_path, pubkey, 'NeverPolled')
+
+        result = viewer_with_db._get_tracking_data(since='all')
+        row = self._find(result['tracking_data'], pubkey)
+        assert row is not None
+        assert row['battery_voltage'] is None
+        assert row['battery_status'] is None
+        assert row['battery_observed_at'] is None
