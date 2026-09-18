@@ -1095,7 +1095,7 @@ class MessageScheduler:
                 # to diagnose remotely without a temporary log_level=DEBUG
                 # change and restart.
                 self.logger.warning(
-                    "Battery_Monitor: no voltage (LPP type 116) in telemetry reply from %s...: %r",
+                    "Battery_Monitor: no voltage reading in telemetry reply from %s...: %r",
                     public_key[:12], lpp
                 )
                 continue
@@ -1112,13 +1112,22 @@ class MessageScheduler:
     @staticmethod
     def _extract_voltage_from_lpp(lpp: Any) -> Optional[float]:
         """Pull the first voltage reading (LPP type 116, volts) out of a
-        decoded telemetry response — see the ``meshcore`` library's
-        ``lpp_json_encoder.py`` for the ``{"channel", "type", "value"}``
-        shape this reads."""
+        decoded telemetry response.
+
+        ``entry["type"]`` is the *name string* ``"voltage"``, not the raw
+        numeric LPP code 116 — confirmed both on real hardware (2026-09-18:
+        a reply that genuinely carried a voltage reading was being silently
+        discarded because of this) and by reading ``cayennelpp``'s own
+        source: ``LppData.type`` holds an ``LppType`` object, and
+        ``meshcore``'s ``lpp_json_encoder`` resolves *that* object through
+        its own numeric-to-name table (``my_lpp_types[obj.type][0]``) before
+        it ever reaches this dict — so by the time this function sees it,
+        the numeric code has already been translated to ``"voltage"``.
+        """
         if not isinstance(lpp, list):
             return None
         for entry in lpp:
-            if isinstance(entry, dict) and entry.get("type") == 116:
+            if isinstance(entry, dict) and entry.get("type") == "voltage":
                 value = entry.get("value")
                 if isinstance(value, (int, float)):
                     return float(value)

@@ -552,20 +552,23 @@ class TestClockSyncAdminScheduler:
 class TestBatteryMonitorScheduler:
     """Tests for the Battery_Monitor telemetry poll (req_telemetry_sync)."""
 
-    def test_extract_voltage_from_lpp_finds_type_116(self, scheduler):
+    def test_extract_voltage_from_lpp_finds_voltage_entry(self, scheduler):
+        # Real shape confirmed on real hardware (2026-09-18): entry["type"]
+        # is the resolved name string "voltage", not the raw numeric LPP
+        # code 116 -- see _extract_voltage_from_lpp's own doc comment.
         lpp = [
-            {"channel": 0, "type": 1, "value": 42},
-            {"channel": 1, "type": 116, "value": 3.87},
+            {"channel": 1, "type": "voltage", "value": 4.11},
+            {"channel": 1, "type": "temperature", "value": 26.0},
         ]
-        assert scheduler._extract_voltage_from_lpp(lpp) == 3.87
+        assert scheduler._extract_voltage_from_lpp(lpp) == 4.11
 
     def test_extract_voltage_from_lpp_returns_none_when_absent(self, scheduler):
-        assert scheduler._extract_voltage_from_lpp([{"channel": 0, "type": 1, "value": 42}]) is None
+        assert scheduler._extract_voltage_from_lpp([{"channel": 0, "type": "temperature", "value": 42}]) is None
 
     def test_extract_voltage_from_lpp_returns_none_on_malformed_input(self, scheduler):
         assert scheduler._extract_voltage_from_lpp(None) is None
         assert scheduler._extract_voltage_from_lpp("not-a-list") is None
-        assert scheduler._extract_voltage_from_lpp([{"type": 116, "value": "oops"}]) is None
+        assert scheduler._extract_voltage_from_lpp([{"type": "voltage", "value": "oops"}]) is None
 
     def _battery_context(self, scheduler, *targets):
         scheduler.bot.config.add_section("Clock_Sync_Admin")
@@ -580,7 +583,7 @@ class TestBatteryMonitorScheduler:
         scheduler.bot.meshcore.get_contact_by_name = Mock(side_effect=lambda value: None)
         scheduler.bot.meshcore.commands = Mock()
         scheduler.bot.meshcore.commands.req_telemetry_sync = AsyncMock(
-            return_value=[{"channel": 0, "type": 116, "value": 3.9}]
+            return_value=[{"channel": 0, "type": "voltage", "value": 3.9}]
         )
         return scheduler
 
