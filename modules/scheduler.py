@@ -1080,7 +1080,7 @@ class MessageScheduler:
                 continue
             except Exception as exc:
                 failed += 1
-                self.logger.debug(
+                self.logger.warning(
                     "Battery_Monitor: telemetry request to %s... failed: %s", public_key[:12], exc
                 )
                 continue
@@ -1088,8 +1088,15 @@ class MessageScheduler:
             voltage = self._extract_voltage_from_lpp(lpp)
             if voltage is None:
                 failed += 1
-                self.logger.debug(
-                    "Battery_Monitor: no voltage reading in telemetry from %s...", public_key[:12]
+                # Logged at warning (not debug) with the raw reply included --
+                # confirmed on real hardware (2026-09-18) that this exact case
+                # is silent otherwise at the default INFO log level, which
+                # made a real "polled=2 stored=0 failed=2" result impossible
+                # to diagnose remotely without a temporary log_level=DEBUG
+                # change and restart.
+                self.logger.warning(
+                    "Battery_Monitor: no voltage (LPP type 116) in telemetry reply from %s...: %r",
+                    public_key[:12], lpp
                 )
                 continue
 
