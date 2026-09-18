@@ -1656,6 +1656,8 @@ class ModernContactsManager {
             'ok': 'bg-success',
         }[contact.battery_status] || 'bg-secondary';
         const seen = contact.battery_observed_at ? this.formatTimestamp(contact.battery_observed_at) : '';
+        const pct = contact.battery_percent;
+        const pctText = (pct === null || pct === undefined) ? '' : ` / ${pct}%`;
         // Only the pubkey (not the attacker-controlled advert name) goes into
         // the attribute — showBatteryHistory looks the name up from
         // filteredData by userId, same reasoning as showDeleteConfirmation's
@@ -1668,7 +1670,7 @@ class ModernContactsManager {
                       data-bs-toggle="tooltip"
                       data-bs-placement="top"
                       title="${this.escapeAttribute("Cliquer pour l'historique sur 7 jours" + (seen ? ' — dernière lecture: ' + seen : ''))}">
-                  <i class="fas fa-battery-half me-1"></i>${v.toFixed(2)}V
+                  <i class="fas fa-battery-half me-1"></i>${v.toFixed(2)}V${pctText}
                 </span>`;
     }
 

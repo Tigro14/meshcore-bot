@@ -534,10 +534,12 @@
                     // name up from lastTargetsData by public_key, same reasoning
                     // as this file's own promptDelete/showHistory calls already
                     // apply to displayName.
+                    const pct = t.battery_percent;
+                    const pctText = (pct === undefined || pct === null) ? '' : ` / ${pct}%`;
                     batteryHtml = `<span class="badge ${batteryClass} battery-badge" style="cursor:pointer"
                                         data-public-key="${t.public_key}"
                                         title="Click for 7-day history">
-                                     <i class="fas fa-battery-half me-1"></i>${t.battery_voltage.toFixed(2)}V
+                                     <i class="fas fa-battery-half me-1"></i>${t.battery_voltage.toFixed(2)}V${pctText}
                                    </span>`;
                 }
 

@@ -2275,6 +2275,7 @@ class BotDataViewer:
                                 t['battery_voltage'] = sample['voltage']
                                 t['battery_observed_at'] = sample['observed_at']
                                 t['battery_status'] = self._battery_status(sample['voltage'])
+                                t['battery_percent'] = self._battery_percent(sample['voltage'])
                     except Exception:
                         pass
                 # Include config info + bot public key + bot name
@@ -7077,6 +7078,9 @@ class BotDataViewer:
                     'battery_status': self._battery_status(
                         battery_sample['voltage'] if battery_sample is not None else None
                     ),
+                    'battery_percent': self._battery_percent(
+                        battery_sample['voltage'] if battery_sample is not None else None
+                    ),
                 })
 
             # Get server statistics for daily tracking using direct database queries
@@ -7422,6 +7426,24 @@ class BotDataViewer:
         if voltage <= low:
             return 'low'
         return 'ok'
+
+    @staticmethod
+    def _battery_percent(voltage: float | None) -> int | None:
+        """Rough voltage-to-percentage estimate for display alongside the
+        raw voltage — same linear 3.0V=0% / 4.2V=100% mapping the companion
+        firmware itself uses for its own screen battery icon
+        (``examples/companion_radio/ui-new/UITask.cpp``'s
+        ``renderBatteryIndicator``, ``BATT_MIN_MILLIVOLTS``/
+        ``BATT_MAX_MILLIVOLTS``), so this matches what the device's own
+        display already shows rather than inventing a different curve.
+        Real Li-ion discharge isn't linear, but neither is the firmware's
+        own estimate — consistency with the device's own screen matters
+        more here than curve accuracy.
+        """
+        if voltage is None:
+            return None
+        percent = (voltage - 3.0) * 100 / (4.2 - 3.0)
+        return max(0, min(100, round(percent)))
 
     def _calculate_distance(self, lat1, lon1, lat2, lon2):
         """Calculate distance between two points using Haversine formula"""

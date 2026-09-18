@@ -2720,6 +2720,26 @@ class TestBatteryStatus:
         assert mock_viewer._battery_status(3.0) == 'critical'
 
 
+class TestBatteryPercent:
+    """Same 3.0V=0%/4.2V=100% linear mapping as the companion firmware's own
+    screen battery icon (UITask.cpp's renderBatteryIndicator) -- kept
+    consistent with what the device's own display already shows."""
+
+    def test_none_when_no_reading(self, mock_viewer):
+        assert mock_viewer._battery_percent(None) is None
+
+    def test_matches_firmware_endpoints(self, mock_viewer):
+        assert mock_viewer._battery_percent(3.0) == 0
+        assert mock_viewer._battery_percent(4.2) == 100
+
+    def test_midpoint_and_rounding(self, mock_viewer):
+        assert mock_viewer._battery_percent(3.6) == 50
+
+    def test_clamped_outside_the_normal_range(self, mock_viewer):
+        assert mock_viewer._battery_percent(2.5) == 0
+        assert mock_viewer._battery_percent(4.5) == 100
+
+
 class TestTrackingDataBatteryFields:
     """Battery fields threaded through _get_tracking_data (contacts-page badge)."""
 
@@ -2759,6 +2779,7 @@ class TestTrackingDataBatteryFields:
         assert row['battery_voltage'] == 3.9
         assert row['battery_status'] == 'ok'
         assert row['battery_observed_at'] is not None
+        assert row['battery_percent'] == 75
 
     def test_battery_fields_none_when_never_polled(self, viewer_with_db):
         pubkey = 'ff' * 32
@@ -2770,6 +2791,7 @@ class TestTrackingDataBatteryFields:
         assert row['battery_voltage'] is None
         assert row['battery_status'] is None
         assert row['battery_observed_at'] is None
+        assert row['battery_percent'] is None
 
 
 class TestClockSyncTargetsAdminBatteryEnrichment:
@@ -2804,6 +2826,7 @@ class TestClockSyncTargetsAdminBatteryEnrichment:
             assert target['battery_voltage'] == 3.9
             assert target['battery_status'] == 'ok'
             assert target['battery_observed_at'] is not None
+            assert target['battery_percent'] == 75
 
     def test_battery_fields_absent_when_never_polled(self, viewer_with_db):
         pubkey = 'dd' * 32

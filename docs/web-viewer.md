@@ -273,7 +273,11 @@ window; older days stay frozen at the value recorded then.
 ### Battery Level
 When `[Battery_Monitor]` is enabled (see [Command reference](command-reference.md#schedule)),
 each polled device's contact row shows a coloured voltage badge (green/yellow/red,
-thresholds configurable via `low_voltage`/`critical_voltage`). Click the badge for a
+thresholds configurable via `low_voltage`/`critical_voltage`), e.g. `4.10V / 92%`.
+The percentage is a rough estimate (linear 3.0V=0% / 4.2V=100%), the same mapping
+the companion firmware itself uses for its own screen battery icon — not an exact
+state-of-charge, but consistent with what the device's own display already shows.
+Click the badge for a
 7-day rolling chart of that device's voltage history. Polling reuses the
 `[Clock_Sync_Admin]` target list — there is no separate target configuration for
 battery monitoring. The same badge also appears in the Time page's target table
