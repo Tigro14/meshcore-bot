@@ -326,8 +326,10 @@ auto_clkreboot_resync_delay_seconds = 60
 # badge and its 7-day history chart.
 enabled = false
 
-# How often to poll each target, in hours. Default: 1.
-poll_interval_hours = 1
+# Cron schedule (same format/timezone as [Clock_Sync_Admin] schedule) for
+# how often to poll every target. Default: every 6 hours, aligned to
+# midnight (00:00/06:00/12:00/18:00) rather than a plain hourly interval.
+schedule = 0 0,6,12,18 * * *
 
 # Seconds to wait for a telemetry reply from one target before giving up on
 # it and moving to the next. Default: 20.

@@ -21,7 +21,6 @@ from typing import Any, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 from meshcore.events import EventType
 
 from .maintenance import MaintenanceRunner
@@ -189,7 +188,7 @@ class MessageScheduler:
                     self.logger.warning(f"Error setting up scheduled message '{schedule_key}': {e}")
 
         self._setup_clock_sync_admin_job(tz)
-        self._setup_battery_monitor_job()
+        self._setup_battery_monitor_job(tz)
         self._apscheduler.start()
         self.logger.info(f"APScheduler started with {len(self.scheduled_messages)} scheduled message(s)")
 
@@ -247,7 +246,7 @@ class MessageScheduler:
             len(targets),
         )
 
-    def _setup_battery_monitor_job(self) -> None:
+    def _setup_battery_monitor_job(self, tz) -> None:
         """Register the periodic battery-telemetry poll, reusing the
         Clock_Sync_Admin target list (see [[project_meshcore-bot]] discussion,
         2026-09-18): those are the devices the bot already holds admin
@@ -256,6 +255,15 @@ class MessageScheduler:
         explicitly (same convention as ``[Clock_Sync_Admin]``) before this
         job is ever registered, so existing deployments don't suddenly gain
         new mesh traffic on an upgrade.
+
+        Cron-based (same ``parse_schedule_key`` mechanism as
+        Clock_Sync_Admin's own ``schedule``), not a plain hourly interval —
+        real-world tuning (2026-09-18, after the first production test)
+        settled on every 6h aligned to midnight (``0 0,6,12,18 * * *``)
+        rather than a fixed hourly cadence, and a cron string can express
+        that alignment; ``IntervalTrigger`` cannot (it fires every N hours
+        from whenever the job was *registered*, not from a fixed wall-clock
+        anchor).
         """
         if self._apscheduler is None:
             return
@@ -267,25 +275,26 @@ class MessageScheduler:
             self.logger.info("Battery_Monitor schedule disabled")
             return
 
+        schedule_raw = (self.bot.config.get("Battery_Monitor", "schedule", fallback="0 0,6,12,18 * * *") or "").strip()
+        parsed = parse_schedule_key(schedule_raw, tz)
+        if parsed.trigger is None:
+            self.logger.warning("Battery_Monitor invalid schedule %r; job not registered", schedule_raw)
+            return
+
         targets = self._get_clock_sync_targets()
         if not targets:
             self.logger.warning("Battery_Monitor has no targets configured (uses Clock_Sync_Admin's target list); job not registered")
             return
 
-        poll_hours = self.bot.config.getfloat("Battery_Monitor", "poll_interval_hours", fallback=1.0)
-        if poll_hours <= 0:
-            self.logger.warning("Battery_Monitor poll_interval_hours must be positive; job not registered")
-            return
-
         self._apscheduler.add_job(
             self.run_battery_monitor_job_sync,
-            IntervalTrigger(hours=poll_hours),
+            parsed.trigger,
             id="battery_monitor_poll",
             replace_existing=True,
         )
         self.logger.info(
-            "Scheduled Battery_Monitor job: every %.2g hour(s) (%d target(s))",
-            poll_hours,
+            "Scheduled Battery_Monitor job: %s (%d target(s))",
+            parsed.display_label,
             len(targets),
         )
 

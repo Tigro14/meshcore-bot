@@ -310,10 +310,32 @@ class TestSetupScheduledMessages:
         scheduler.bot.config.set("Clock_Sync_Admin", "targets", "rep-1,rep-2")
         scheduler.bot.config.add_section("Battery_Monitor")
         scheduler.bot.config.set("Battery_Monitor", "enabled", "true")
-        scheduler.bot.config.set("Battery_Monitor", "poll_interval_hours", "1")
+        scheduler.bot.config.set("Battery_Monitor", "schedule", "0 0,6,12,18 * * *")
         self._setup_and_call(scheduler)
         job_ids = {job.id for job in scheduler._apscheduler.get_jobs()}
         assert "battery_monitor_poll" in job_ids
+        self._teardown(scheduler)
+
+    def test_battery_monitor_job_registered_with_default_schedule(self, scheduler):
+        """No explicit `schedule` -- falls back to every 6h aligned to midnight."""
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", "rep-1")
+        scheduler.bot.config.add_section("Battery_Monitor")
+        scheduler.bot.config.set("Battery_Monitor", "enabled", "true")
+        self._setup_and_call(scheduler)
+        job_ids = {job.id for job in scheduler._apscheduler.get_jobs()}
+        assert "battery_monitor_poll" in job_ids
+        self._teardown(scheduler)
+
+    def test_battery_monitor_job_not_registered_when_schedule_invalid(self, scheduler):
+        scheduler.bot.config.add_section("Clock_Sync_Admin")
+        scheduler.bot.config.set("Clock_Sync_Admin", "targets", "rep-1")
+        scheduler.bot.config.add_section("Battery_Monitor")
+        scheduler.bot.config.set("Battery_Monitor", "enabled", "true")
+        scheduler.bot.config.set("Battery_Monitor", "schedule", "invalid schedule")
+        self._setup_and_call(scheduler)
+        job_ids = {job.id for job in scheduler._apscheduler.get_jobs()}
+        assert "battery_monitor_poll" not in job_ids
         self._teardown(scheduler)
 
     def test_battery_monitor_job_not_registered_when_disabled(self, scheduler):
