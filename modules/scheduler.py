@@ -2388,6 +2388,24 @@ class MessageScheduler:
                 elif op_type == 'clock_sync_admin_run_now':
                     result_payload = await self._run_clock_sync_admin_job_async()
                     success = bool(result_payload.get('success'))
+                    # Battery_Monitor polls this exact same target list, so an
+                    # explicit "Run Now" is also the natural moment to refresh
+                    # battery readings on demand (e.g. right after deploying,
+                    # rather than waiting for the next hourly tick). Best-effort
+                    # and never allowed to affect this operation's own
+                    # success/error — a battery-poll hiccup is not a
+                    # Clock_Sync_Admin failure, and _run_battery_monitor_job_async
+                    # already no-ops cleanly when Battery_Monitor is disabled.
+                    try:
+                        battery_result = await self._run_battery_monitor_job_async()
+                        self.logger.info(
+                            "Battery_Monitor run (triggered by Clock_Sync_Admin Run Now): %s",
+                            battery_result,
+                        )
+                    except Exception as battery_exc:
+                        self.logger.warning(
+                            "Battery_Monitor run (triggered by Run Now) failed: %s", battery_exc
+                        )
                 elif op_type == 'send_announcement':
                     payload = json.loads(op['payload_data'] or '{}')
                     success, result_payload = await self._send_announcement_op(payload)

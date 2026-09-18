@@ -276,7 +276,10 @@ each polled device's contact row shows a coloured voltage badge (green/yellow/re
 thresholds configurable via `low_voltage`/`critical_voltage`). Click the badge for a
 7-day rolling chart of that device's voltage history. Polling reuses the
 `[Clock_Sync_Admin]` target list — there is no separate target configuration for
-battery monitoring.
+battery monitoring. The same badge also appears in the Time page's target table
+(same devices, same data). Clicking **Run Now** on the Time page triggers an
+immediate battery poll alongside the clock-sync run, instead of waiting for the
+next hourly tick.
 
 ### Config
 - Categorized configuration topics in a left navigation column

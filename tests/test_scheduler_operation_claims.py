@@ -371,3 +371,36 @@ def test_other_host_processing_owner_stays_blocked_conservatively(tmp_path):
     reboot_radio.assert_not_awaited()
     assert _operation(manager, active_id)["status"] == "processing"
     assert _operation(manager, pending_id)["status"] == "pending"
+
+
+def test_run_now_also_triggers_a_battery_poll(tmp_path):
+    """Clock_Sync_Admin's 'Run Now' also refreshes Battery_Monitor readings —
+    both poll the exact same target list, and this saves waiting for the
+    next hourly tick right after a deploy."""
+    manager = _initialize_database(tmp_path)
+    op_id = _insert_operation(manager, "clock_sync_admin_run_now")
+    scheduler = _make_scheduler(manager)
+    scheduler._run_clock_sync_admin_job_async = AsyncMock(return_value={"success": True})
+    scheduler._run_battery_monitor_job_async = AsyncMock(
+        return_value={"success": True, "polled": 2, "stored": 2, "failed": 0}
+    )
+
+    asyncio.run(scheduler._process_radio_operations())
+
+    scheduler._run_clock_sync_admin_job_async.assert_awaited_once()
+    scheduler._run_battery_monitor_job_async.assert_awaited_once()
+    assert _operation(manager, op_id)["status"] == "completed"
+
+
+def test_run_now_battery_poll_failure_does_not_fail_the_clock_sync_result(tmp_path):
+    """A battery-poll hiccup must never be reported as a Clock_Sync_Admin failure."""
+    manager = _initialize_database(tmp_path)
+    op_id = _insert_operation(manager, "clock_sync_admin_run_now")
+    scheduler = _make_scheduler(manager)
+    scheduler._run_clock_sync_admin_job_async = AsyncMock(return_value={"success": True})
+    scheduler._run_battery_monitor_job_async = AsyncMock(side_effect=RuntimeError("boom"))
+
+    asyncio.run(scheduler._process_radio_operations())
+
+    scheduler._run_battery_monitor_job_async.assert_awaited_once()
+    assert _operation(manager, op_id)["status"] == "completed"
