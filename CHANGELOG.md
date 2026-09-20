@@ -85,7 +85,6 @@ semantic versioning.
 
 ### Fixed
 
-<<<<<<< HEAD
 - `[Joke_Command] joke_enabled` and `[DadJoke_Command] dadjoke_enabled` are now
   listed in the shared legacy-alias table. Both commands accepted that spelling
   at runtime through their own fallback, but the settings UI read only the
@@ -109,16 +108,6 @@ semantic versioning.
   channel scan three times, keep an empty result out of the valid cache and
   database, then fail the connection cleanly so the normal restart/reconnect
   path can try again instead of running a bot that cannot route replies.
-=======
-- `outgoing_flood_scope_override = none` is now read as global flood on the
-  send path, as it already was everywhere else. `send_channel_message` tested
-  the raw value against a fixed tuple, so the lowercase spelling became the
-  region `#none` and sent scoped.
-- Striped and hovered table rows in the web viewer's dark mode no longer render
-  Bootstrap's light-theme text color on a dark background (about 1.3:1
-  contrast). The dark overrides set a background but not a color, so every
-  `.table-striped` page was affected.
->>>>>>> 16cce92 (feat(region): set region scopes from the Radio page (#283))
 - Daily Weather Service forecasts now retry transient Open-Meteo failures at
   5, 15, and 30 minutes after the original run (#264). HTTP 429, 500, 502, 503,
   and 504 responses plus transport failures use one replaceable retry job,
