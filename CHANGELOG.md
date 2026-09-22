@@ -36,7 +36,18 @@ semantic versioning.
   the bot's default; `wx_international` was reaching for the private
   `_response_translator` ContextVar to do this.
 
+- The optional LLM RAG can now collect and refresh a path-scoped corpus from any
+  Wiki.js instance. It supports either Guest source access or a Wiki.js API key,
+  publishes indexes atomically, retrieves structure-aware sections with explicit
+  score thresholds, and isolates wiki answers from unrelated conversational and
+  local context.
+
 ### Fixed
+
+- Wiki RAG setup questions now prefer complete command procedures over link
+  directories and diagrams, retain ordered save and verification steps within a
+  dedicated context budget, and emit compact plain text without unsolicited local
+  examples.
 
 - Published packet payloads carry UTC in every time field, not just `timestamp`
   (#278). `time` and `date` came from a local `datetime.now()` while the

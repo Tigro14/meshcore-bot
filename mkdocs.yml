@@ -60,6 +60,7 @@ nav:
     - Local plugins and services: local-plugins.md
     - Check-in API: checkin-api.md
     - Path Command: path-command-config.md
+    - Universal Wiki.js RAG: wiki-rag.md
     - Config validation: config-validation.md
   - Web Viewer: web-viewer.md
   - Command Reference:
