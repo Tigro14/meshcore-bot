@@ -250,6 +250,12 @@
                         </select>
                     </div>
                     <div class="col-md-2">
+                        <label for="filter-country" class="form-label">Country Heard</label>
+                        <select class="form-select" id="filter-country">
+                            <option value="">All Countries</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
                         <label for="filter-starred" class="form-label">&nbsp;</label>
                         <div class="d-flex align-items-center" style="min-height: 38px;">
                             <div class="form-check mb-0">
@@ -711,6 +717,7 @@
     let meshLiveRefreshRunning = false;
     let meshLiveRefreshRetryCount = 0;
     let meshLiveRefreshActiveReloadsNodes = false;
+    let restoredCountryFilter = '';
 
     const PREFIX_HEX_CHARS = parseInt('{{ prefix_hex_chars|default(2) }}', 10);
     const MESH_LIVE_REFRESH_MS = 30000;
@@ -1526,6 +1533,11 @@
             else if (typeof renderMap === 'function') renderMap();
         });
         document.getElementById('filter-evidence').addEventListener('change', onEvidenceChange);
+        document.getElementById('filter-country').addEventListener('change', () => {
+            restoredCountryFilter = document.getElementById('filter-country').value;
+            applyFilters();
+            saveFilters();
+        });
         document.getElementById('filter-search').addEventListener('input', handleSearchInput);
 
         // Initialize modal instances once
@@ -1817,6 +1829,7 @@
 
             allEdges = nextEdges;
             allNodes = nextNodes;
+            updateCountryOptions();
             graphPrefixHexChars = nextPrefixHexChars;
             nodeMap = nextNodeMap;
             nodeMapByKey = nextNodeMapByKey;
@@ -1847,6 +1860,7 @@
                 starredOnly: document.getElementById('filter-starred').checked,
                 nodeLabels: document.getElementById('filter-node-labels').checked,
                 evidence: document.getElementById('filter-evidence').value,
+                country: document.getElementById('filter-country').value,
                 colorMode: edgeColorMode
                 // Note: searchTerm is NOT saved - it should not persist across reloads
             };
@@ -1885,6 +1899,9 @@
                 if (['all', 'multibyte', 'neighbors'].includes(filters.evidence)) {
                     document.getElementById('filter-evidence').value = filters.evidence;
                 }
+                if (typeof filters.country === 'string') {
+                    restoredCountryFilter = filters.country;
+                }
                 if (filters.colorMode === 'age' || filters.colorMode === 'heat') {
                     edgeColorMode = filters.colorMode;
                 }
@@ -1893,6 +1910,43 @@
         } catch (error) {
             console.debug('Error loading filters:', error);
         }
+    }
+
+    function normalizeCountryName(country) {
+        const value = String(country || '').trim();
+        if (!value) return '';
+        const key = value.toLowerCase();
+        if (['us', 'usa', 'united states', 'united states of america'].includes(key)) {
+            return 'United States';
+        }
+        if (['uk', 'gb', 'gbr', 'united kingdom', 'great britain'].includes(key)) {
+            return 'United Kingdom';
+        }
+        return value;
+    }
+
+    function updateCountryOptions() {
+        const select = document.getElementById('filter-country');
+        if (!select) return;
+        const wanted = select.value || restoredCountryFilter;
+        const countries = [...new Set(allNodes
+            .map(node => normalizeCountryName(node.country))
+            .filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b));
+
+        select.replaceChildren();
+        const allOption = document.createElement('option');
+        allOption.value = '';
+        allOption.textContent = 'All Countries';
+        select.appendChild(allOption);
+        countries.forEach(country => {
+            const option = document.createElement('option');
+            option.value = country;
+            option.textContent = country;
+            select.appendChild(option);
+        });
+        select.value = countries.includes(wanted) ? wanted : '';
+        restoredCountryFilter = select.value;
     }
     
     // Apply filters
@@ -1906,6 +1960,7 @@
         const edgeDays = document.getElementById('filter-edge-days').value;
         const nodeDays = document.getElementById('filter-node-days').value;
         const starredOnly = document.getElementById('filter-starred').checked;
+        const selectedCountry = document.getElementById('filter-country').value;
         const searchTerm = document.getElementById('filter-search').value.toLowerCase();
         
         // Filter edges
@@ -1937,6 +1992,7 @@
         // so e0 nodes with no edges still appear on the map (with 0 connections).
         filteredNodes = candidateNodes.filter(node => {
             if (starredOnly && !node.is_starred) return false;
+            if (selectedCountry && normalizeCountryName(node.country) !== selectedCountry) return false;
             // Only apply text search if it's not a path (path resolution is handled separately)
             if (searchTerm && !detectPathInput(searchTerm)) {
                 const nameMatch = node.name.toLowerCase().includes(searchTerm);
@@ -1952,6 +2008,14 @@
         filteredNodes.forEach(node => {
             filteredNodeMap[node.prefix] = node;
             if (node.public_key) filteredNodeMapByKey[node.public_key] = node;
+        });
+
+        // Keep only connections whose two endpoints are visible. This makes the
+        // country selector affect the map, graph, heat scale, and edge counter
+        // consistently instead of merely hiding the endpoint markers.
+        filteredEdges = filteredEdges.filter(edge => {
+            const { fromNode, toNode } = resolveEdgeEndpoints(edge);
+            return Boolean(fromNode && toNode);
         });
 
         // Per-node degree and observation totals for sizing and heat coloring
