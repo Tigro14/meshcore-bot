@@ -433,6 +433,7 @@
                         </a>
                     </li>
                     {% endif %}
+                    {% if not auth_enabled or is_admin %}
                     <li class="nav-item">
                         <a class="nav-link" href="/radio">
                             <i class="fas fa-broadcast-tower"></i> Radio
@@ -453,10 +454,24 @@
                             <i class="fas fa-info-circle"></i> Infos
                         </a>
                     </li>
+                    {% endif %}
                 </ul>
                 
                 <!-- Dark Mode Toggle and Connection Status -->
                 <div class="navbar-nav d-flex align-items-center">
+                    {% if auth_enabled %}
+                    <div class="nav-item me-3">
+                        {% if is_admin %}
+                        <a href="/logout" class="btn btn-sm btn-outline-light">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </a>
+                        {% else %}
+                        <a href="/login" class="btn btn-sm btn-outline-light">
+                            <i class="fas fa-sign-in-alt"></i> Admin Login
+                        </a>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                     <div class="nav-item me-3">
                         <button class="dark-mode-toggle" id="dark-mode-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">
                             <i class="fas fa-moon" id="dark-mode-icon"></i>
@@ -494,12 +509,14 @@
                         <i class="fas fa-clock me-1"></i>Since: <span id="zombie-since-text">{{ radio_zombie_since or '' }}</span>
                     </span>
                 </div>
+                {% if not auth_enabled or is_admin %}
                 <div class="d-flex gap-2 align-items-center flex-shrink-0">
                     <span class="small opacity-75">After power cycling:</span>
                     <button id="zombie-recover-btn" class="btn btn-warning btn-sm fw-semibold" type="button">
                         <i class="fas fa-power-off me-1"></i>Restart Bot Processing
                     </button>
                 </div>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -516,12 +533,14 @@
                         <i class="fas fa-clock me-1"></i>Since: <span id="offline-since-text">{{ radio_offline_since or '' }}</span>
                     </span>
                 </div>
+                {% if not auth_enabled or is_admin %}
                 <div class="d-flex gap-2 align-items-center flex-shrink-0">
                     <span class="small opacity-75">Once radio is fixed:</span>
                     <button id="offline-clear-btn" class="btn btn-dark btn-sm fw-semibold" type="button">
                         <i class="fas fa-check me-1"></i>Clear Offline Flag
                     </button>
                 </div>
+                {% endif %}
             </div>
         </div>
     </div>

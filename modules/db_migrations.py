@@ -800,7 +800,7 @@ def _m0023_observed_paths_zero_hop_signal(cursor: sqlite3.Cursor) -> None:
     _add_column(cursor, "observed_paths", "snr", "REAL")
     _add_column(cursor, "observed_paths", "rssi", "REAL")
 
-def _m0024_region_scope_tables(cursor: sqlite3.Cursor) -> None:
+def _m0029_region_scope_tables(cursor: sqlite3.Cursor) -> None:
     """Storage for regional flood-scope observation and the warnings it drives.
 
     ``region_scope_daily`` is a per-day, per-channel tally of how each channel
@@ -846,7 +846,6 @@ def _m0024_region_scope_tables(cursor: sqlite3.Cursor) -> None:
             ON region_warning_events(sender_id, created_at);
         """
     )
-
 
 def _m0024_bbs_messages_table(cursor: sqlite3.Cursor) -> None:
     """Create bbs_messages table for per-user store-and-forward BBS service.
@@ -997,6 +996,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (26, "clock_sync_targets table", _m0026_clock_sync_targets),
     (27, "clock_sync_targets: auto_clkreboot_enabled, last_clkreboot_at", _m0027_clock_sync_targets_auto_clkreboot),
     (28, "battery_observations table", _m0028_battery_observations),
+    (29, "region_scope_daily table", _m0029_region_scope_tables),
 ]
 
 
