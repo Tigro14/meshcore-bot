@@ -1054,6 +1054,22 @@ class TestApplyStartupFloodScope:
 
         assert result is True
 
+    def test_returns_false_for_non_ok_result(self, tmp_path):
+        from meshcore.events import EventType
+
+        bot = self._make_bot(tmp_path)
+        bot.config.set("Channels", "startup_flood_scope", "fr-idf")
+        bot.meshcore = MagicMock()
+        bot.meshcore.is_connected = True
+
+        result_event = MagicMock()
+        result_event.type = EventType.CURRENT_TIME
+        bot.meshcore.commands.set_flood_scope = MagicMock(return_value=_make_coro(result_event))
+
+        result = asyncio.run(bot.apply_startup_flood_scope())
+
+        assert result is False
+
 # ---------------------------------------------------------------------------
 # _BotAdminServer — admin HTTP API
 # ---------------------------------------------------------------------------

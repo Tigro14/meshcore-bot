@@ -2174,13 +2174,13 @@ long_jokes = false
             )
             return False
 
-        scope_to_use = "*" if raw_scope in ("*", "0", "None") or raw_scope.lower() == "none" else (
+        scope_to_use = "*" if raw_scope == "*" or raw_scope.lower() == "none" else (
             CommandManager._normalize_scope_name(raw_scope)
         )
         try:
             self.logger.info("Applying startup flood scope: %s", scope_to_use)
             result = await self.meshcore.commands.set_flood_scope(scope_to_use)
-            if result is None or getattr(result, "type", None) == EventType.ERROR:
+            if result is None or getattr(result, "type", None) != EventType.OK:
                 self.logger.warning(
                     "Failed to apply startup flood scope %s: %s",
                     scope_to_use,

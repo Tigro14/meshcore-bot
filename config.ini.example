@@ -358,6 +358,7 @@ monitor_channels = #mybotchannel
 # right after the bot finishes its clock sync.
 # This sets the radio's default MeshCore region until another command changes it.
 # You can use "fr-idf" or "#fr-idf" (the # is added if missing).
+# Use "*" or "None" to reset back to global flood at startup.
 # startup_flood_scope = #fr-idf
 
 # Enable DM responses

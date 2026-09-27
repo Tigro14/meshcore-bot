@@ -39,6 +39,7 @@ token =
 # Example: monitor_channels = Public,#bot,#fr,#fr-idf,#test
 monitor_channels = general,test,emergency
 # Optional startup region applied after clock sync
+# Use "*" or "None" to reset to global flood
 # startup_flood_scope = #fr-idf
 respond_to_dms = true
 max_response_hops = 7
