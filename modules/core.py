@@ -2174,6 +2174,8 @@ long_jokes = false
             )
             return False
 
+        # '*' / 'none' are global-scope sentinels; do not run them through
+        # _normalize_scope_name() or they would become hashtag names.
         scope_to_use = "*" if raw_scope == "*" or raw_scope.lower() == "none" else (
             CommandManager._normalize_scope_name(raw_scope)
         )
@@ -2190,7 +2192,7 @@ long_jokes = false
             self.logger.info("✓ Startup flood scope applied: %s", scope_to_use)
             return True
         except (OSError, AttributeError, ValueError, KeyError) as e:
-            self.logger.warning(f"Error applying startup flood scope: {e}")
+            self.logger.warning("Error applying startup flood scope: %s", e)
             return False
 
     async def set_device_name(self) -> bool:
