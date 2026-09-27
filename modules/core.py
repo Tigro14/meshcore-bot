@@ -1826,6 +1826,9 @@ long_jokes = false
                 # Set radio clock if needed
                 await self.set_radio_clock()
 
+                # Apply configured default flood scope after clock sync
+                await self.apply_startup_flood_scope()
+
                 # Set device name to match config if needed
                 await self.set_device_name()
 
@@ -2152,6 +2155,42 @@ long_jokes = false
 
         except (OSError, AttributeError, ValueError, KeyError) as e:
             self.logger.warning(f"Error checking/setting radio clock: {e}")
+            return False
+
+    async def apply_startup_flood_scope(self) -> bool:
+        """Apply a persistent radio flood scope from config after startup clock sync."""
+        raw_scope = self.config.get("Channels", "startup_flood_scope", fallback="").strip()
+        if not raw_scope:
+            return True
+
+        if not self.meshcore or not self.meshcore.is_connected:
+            self.logger.warning("Cannot apply startup flood scope - not connected to device")
+            return False
+
+        if not hasattr(self.meshcore.commands, "set_flood_scope"):
+            self.logger.warning(
+                "startup_flood_scope is set to %r but meshcore.commands.set_flood_scope is unavailable",
+                raw_scope,
+            )
+            return False
+
+        scope_to_use = "*" if raw_scope in ("*", "0", "None") or raw_scope.lower() == "none" else (
+            CommandManager._normalize_scope_name(raw_scope)
+        )
+        try:
+            self.logger.info("Applying startup flood scope: %s", scope_to_use)
+            result = await self.meshcore.commands.set_flood_scope(scope_to_use)
+            if result is None or getattr(result, "type", None) == EventType.ERROR:
+                self.logger.warning(
+                    "Failed to apply startup flood scope %s: %s",
+                    scope_to_use,
+                    result,
+                )
+                return False
+            self.logger.info("✓ Startup flood scope applied: %s", scope_to_use)
+            return True
+        except (OSError, AttributeError, ValueError, KeyError) as e:
+            self.logger.warning(f"Error applying startup flood scope: {e}")
             return False
 
     async def set_device_name(self) -> bool:

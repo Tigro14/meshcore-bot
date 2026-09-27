@@ -1003,6 +1003,57 @@ monitor_channels = #general
         assert result is True
         bot.meshcore.commands.set_time.assert_called_once_with(1000)  # no offset
 
+
+class TestApplyStartupFloodScope:
+    def _make_bot(self, tmp_path: Path) -> "MeshCoreBot":
+        config_file = tmp_path / "config.ini"
+        db_path = tmp_path / "bot.db"
+        _write_config(config_file, db_path)
+        return MeshCoreBot(config_file=str(config_file))
+
+    def test_applies_normalized_scope(self, tmp_path):
+        from meshcore.events import EventType
+
+        bot = self._make_bot(tmp_path)
+        bot.config.set("Channels", "startup_flood_scope", "fr-idf")
+        bot.meshcore = MagicMock()
+        bot.meshcore.is_connected = True
+
+        result_event = MagicMock()
+        result_event.type = EventType.OK
+        bot.meshcore.commands.set_flood_scope = MagicMock(return_value=_make_coro(result_event))
+
+        result = asyncio.run(bot.apply_startup_flood_scope())
+
+        assert result is True
+        bot.meshcore.commands.set_flood_scope.assert_called_once_with("#fr-idf")
+
+    def test_applies_global_marker_as_star(self, tmp_path):
+        from meshcore.events import EventType
+
+        bot = self._make_bot(tmp_path)
+        bot.config.set("Channels", "startup_flood_scope", "None")
+        bot.meshcore = MagicMock()
+        bot.meshcore.is_connected = True
+
+        result_event = MagicMock()
+        result_event.type = EventType.OK
+        bot.meshcore.commands.set_flood_scope = MagicMock(return_value=_make_coro(result_event))
+
+        result = asyncio.run(bot.apply_startup_flood_scope())
+
+        assert result is True
+        bot.meshcore.commands.set_flood_scope.assert_called_once_with("*")
+
+    def test_returns_true_when_scope_not_configured(self, tmp_path):
+        bot = self._make_bot(tmp_path)
+        bot.meshcore = MagicMock()
+        bot.meshcore.is_connected = True
+
+        result = asyncio.run(bot.apply_startup_flood_scope())
+
+        assert result is True
+
 # ---------------------------------------------------------------------------
 # _BotAdminServer — admin HTTP API
 # ---------------------------------------------------------------------------

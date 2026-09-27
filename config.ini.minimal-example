@@ -250,7 +250,10 @@ ping = "Pong!"
 # Channels to monitor (comma-separated)
 # Bot will only respond to messages on these channels
 # Use exact channel names as configured on your MeshCore node
+# Example: monitor_channels = Public,#bot,#fr,#fr-idf,#test
 monitor_channels = general,test,emergency
+# Optional startup region applied after the bot's clock sync
+# startup_flood_scope = #fr-idf
 
 # Enable DM responses
 # true: Bot will respond to direct messages

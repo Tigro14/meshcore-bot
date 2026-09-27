@@ -182,6 +182,7 @@ SECTIONS: dict[str, SectionMeta] = {
     }),
     "Channels": SectionMeta(keys={
         "monitor_channels": KeyMeta(required=True),
+        "startup_flood_scope": KeyMeta(),
         "respond_to_dms": KeyMeta(type="bool"),
         "max_response_hops": KeyMeta(type="int"),
         "channel_keywords": KeyMeta(),

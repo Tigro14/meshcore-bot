@@ -350,7 +350,15 @@ critical_voltage = 3.4
 # Bot will only respond to messages on these channels
 # Use exact channel names as configured on your MeshCore node
 # Use hashtags for hashtag channels (i.e. #mybotchannel, #weather, etc.)
+# If you intentionally include Public, also set the long [Bot] override key above.
+# Example: monitor_channels = Public,#bot,#fr,#fr-idf,#test
 monitor_channels = #mybotchannel
+
+# Optional persistent radio flood scope applied once at startup/reconnect,
+# right after the bot finishes its clock sync.
+# This sets the radio's default MeshCore region until another command changes it.
+# You can use "fr-idf" or "#fr-idf" (the # is added if missing).
+# startup_flood_scope = #fr-idf
 
 # Enable DM responses
 # true: Bot will respond to direct messages
