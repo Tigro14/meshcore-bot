@@ -72,6 +72,7 @@ CANONICAL_NON_COMMAND_SECTIONS = frozenset({
     "TelegramBridge",
     "DARC_MoWaS_Service",
     "Clock_Sync_Admin",
+    "Region_Warnings",
 })
 
 # Sections required for the bot to start (accessed without has_section guards)
