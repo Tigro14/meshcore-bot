@@ -1666,12 +1666,21 @@ class CommandManager:
             return f"Help {command_name}: {help_text}"
 
         # If still not found, return unknown command message with helpful suggestion
-        # Use the help command's method to get popular commands (only primary names, no aliases)
+        # Use the help command's method to get popular commands (only primary names,
+        # no aliases). Truncate to the message budget so the unknown-command reply
+        # never exceeds the LoRa frame size.
         available_str = ""
+        max_list = None
         if 'help' in self.commands:
             help_command = self.commands['help']
             if hasattr(help_command, 'get_available_commands_list'):
-                available_str = help_command.get_available_commands_list(message)
+                if message and hasattr(help_command, 'get_max_message_length'):
+                    max_total = help_command.get_max_message_length(message)
+                    # Reserve room for the "Unknown command: ..." prefix and the
+                    # "Available commands:" label so the list itself stays short.
+                    reserved = len("Commande inconnue: ''\n\nCommandes disponibles:\n")
+                    max_list = max(0, max_total - reserved)
+                available_str = help_command.get_available_commands_list(message, max_length=max_list)
 
         # Fallback if help command doesn't have the method
         if not available_str:

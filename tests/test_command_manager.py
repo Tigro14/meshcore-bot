@@ -382,6 +382,25 @@ class TestGetHelpForCommand:
         assert call_args[0][0] == "commands.help.unknown"
         assert call_args[1]["command"] == "nonexistent"
 
+    def test_unknown_command_list_is_truncated_to_message_budget(self, cm_bot):
+        """The 'available commands' list in an unknown-command reply must be
+        capped to the message budget so it never overflows the LoRa frame."""
+        # A realistic help command exposing the list builder and the budget.
+        mock_help = MagicMock()
+        mock_help.get_max_message_length = Mock(return_value=100)
+        mock_help.get_available_commands_list = Mock(return_value="a, b, c")
+        manager = make_manager(cm_bot, commands={"help": mock_help})
+
+        message = mock_message(content="help bogus", channel="general")
+        manager.get_help_for_command("bogus", message)
+
+        # The list builder was asked to respect a budget (a non-None max_length).
+        assert mock_help.get_available_commands_list.called
+        kwargs = mock_help.get_available_commands_list.call_args.kwargs
+        assert kwargs.get("max_length") is not None
+        assert kwargs["max_length"] >= 0
+        assert kwargs["max_length"] < 100
+
     def test_keyword_mapping_alias_resolves_command(self, cm_bot):
         mock_cmd = MagicMock()
         mock_cmd.keywords = ["schedule"]
