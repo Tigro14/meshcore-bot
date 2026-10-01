@@ -1196,6 +1196,42 @@ class BotDataViewer:
                     "error": "No valid hex values found"}
         return {"node_ids": node_ids, "repeaters": nodes, "valid": True}
 
+    _CATEGORY_NAMES: dict[str, str] = {
+        'basic': 'Basic Commands',
+        'weather': 'Weather Commands',
+        'solar': 'Solar & Astronomical',
+        'sports': 'Sports',
+        'games': 'Games & Entertainment',
+        'fun': 'Fun Commands',
+        'entertainment': 'Entertainment',
+        'meshcore_info': 'Mesh Network Info',
+        'analytics': 'Analytics',
+        'emergency': 'Emergency',
+        'general': 'General Commands',
+    }
+
+    # Categories never shown on the public /infos page
+    _EXCLUDED_CATEGORIES: frozenset[str] = frozenset({'hidden', 'admin', 'system', 'management', 'special'})
+
+    @staticmethod
+    def _is_command_enabled(cmd_instance: Any) -> bool:
+        """Return True if the command is currently enabled in configuration.
+
+        Checks the three attribute naming conventions used across command plugins:
+        1. ``{name}_enabled`` — most common (e.g. ``ping_enabled``, ``sports_enabled``)
+        2. ``_enabled``       — used by schedule_command
+        3. ``enabled``        — used by hacker/greeter/announcements commands
+        Defaults to True when no enabled-flag attribute is found.
+        """
+        name = getattr(cmd_instance, 'name', '')
+        if name:
+            named_attr = f"{name}_enabled"
+            if hasattr(cmd_instance, named_attr):
+                return bool(getattr(cmd_instance, named_attr))
+        if hasattr(cmd_instance, 'enabled'):
+            return bool(cmd_instance.enabled)
+        return True
+
     def _get_command_info(self) -> list[dict]:
         """Load and cache public command info using PluginLoader.
 
