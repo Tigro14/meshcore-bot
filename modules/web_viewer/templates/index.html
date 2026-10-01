@@ -314,6 +314,33 @@
         </div>
     </div>
 
+    <div class="col-md-3" id="regions-stats-card" style="display:none;">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-globe"></i> Regions</span>
+                <a href="/region-warnings" class="btn btn-sm btn-outline-secondary" title="Region Warnings">
+                    <i class="fas fa-external-link-alt"></i>
+                </a>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-4">
+                        <h4 id="regions-unscoped-24h" class="text-warning">0</h4>
+                        <small class="text-muted">Unscoped 24h</small>
+                    </div>
+                    <div class="col-4">
+                        <h4 id="regions-warnings-sent" class="text-success">0</h4>
+                        <small class="text-muted">Warnings sent</small>
+                    </div>
+                    <div class="col-4">
+                        <h4 id="regions-warnings-failed" class="text-danger">0</h4>
+                        <small class="text-muted">Failed</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="col-md-3" id="bbs-stats-card" style="display:none;">
         <div class="card h-100">
             <div class="card-header">
@@ -642,7 +669,10 @@ class ModernDashboard {
             this.loadTopCommands(commandsTimeWindow);
             this.loadLongestPaths(pathsTimeWindow);
             this.loadTopChannels(channelsTimeWindow);
-            
+
+            // Region warnings mini-stats (card hidden unless the feature has data)
+            this.loadRegionStats();
+
             // Update database status
             this.updateDatabaseStatus('Connected', 'success');
             
@@ -707,8 +737,41 @@ class ModernDashboard {
 
         this.updatePathEncodingPieChart(data);
         this.updateIncomingPacketsPieChart(data);
-        
+
         // Analytics are loaded separately with time window selectors
+    }
+
+    async loadRegionStats() {
+        const card = document.getElementById('regions-stats-card');
+        if (!card) return;
+        try {
+            const resp = await fetch('/api/region-warnings?days=1');
+            const data = await resp.json();
+            if (data.error) return;
+
+            const traffic = data.traffic || {};
+            const totals = traffic.totals || {};
+            const budget = data.budget || {};
+            const settings = data.settings || {};
+
+            // Only show the card when the monitor is tracking traffic or has sent
+            // at least one warning — otherwise it would be all zeros.
+            const unscoped = Number(totals.global) || 0;
+            const sent = Number(budget.delivered_today) || 0;
+            const previewed = Number(budget.previewed_today) || 0;
+            const failed = Number(budget.failed_today) || 0;
+            const tracking = settings.enabled || settings.track_traffic;
+
+            if (unscoped > 0 || sent > 0 || previewed > 0 || failed > 0 || tracking) {
+                card.style.display = '';
+                this.updateElement('regions-unscoped-24h', unscoped);
+                this.updateElement('regions-warnings-sent', sent + previewed);
+                this.updateElement('regions-warnings-failed', failed);
+            }
+        } catch (e) {
+            // Non-fatal: the card just stays hidden.
+            console.warn('Region stats unavailable:', e);
+        }
     }
 
     updatePathEncodingPieChart(data) {
