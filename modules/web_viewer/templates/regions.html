@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Régions — Résumé — MeshCore Bot{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h3 mb-0"><i class="fas fa-globe me-2"></i>Fonctionnalités Régions</h1>
+    <a class="btn btn-sm btn-outline-secondary" href="/region-warnings">
+      <i class="fas fa-chart-bar me-1"></i>Page complète
+    </a>
+  </div>
+
+  <div class="alert alert-info">
+    <strong>Contexte.</strong> Un client MeshCore sans région configurée diffuse chaque message
+    en <code>FLOOD</code> global, rebroadcasté par tous les répetiteurs du maillage.
+    Avec une région (<code>TC_FLOOD</code>), le message ne traverse que les répetiteurs
+    détenant la clé de région. Ces fonctionnalités aident à mesurer et corriger le trafic non-scopé.
+  </div>
+
+  <!-- Region Warnings -->
+  <div class="card mb-3">
+    <div class="card-header d-flex align-items-center">
+      <i class="fas fa-triangle-exclamation me-2 text-warning"></i>
+      <strong>Region Warnings</strong>
+      <span class="badge bg-secondary ms-2">Settings → Region Warnings</span>
+    </div>
+    <div class="card-body">
+      <p class="mb-2">
+        Surveille chaque message de canal et le classe en <strong>scoped</strong>,
+        <strong>global</strong> (sans région) ou <strong>unknown</strong>, par canal et par jour.
+      </p>
+      <ul class="mb-0">
+        <li><strong>Comptage</strong> (par défaut, gratuit) : tallies stockés dans <code>region_scope_daily</code>, rien n'est transmis.</li>
+        <li><strong>Alertes aux émetteurs</strong> (off par défaut, dry-run d'abord) : DM ou réponse en canal
+            aux émetteurs dont les messages sont confirmés sans région. Limites : cooldown par émetteur,
+            plafond journalier, délai mesh.</li>
+        <li>Un émetteur sans <code>Name:</code> ne peut jamais recevoir d'alerte ; la livraison DM exige un contact connu.</li>
+      </ul>
+      <p class="mt-2 mb-0">
+        Config : section <code>[Region_Warnings]</code> dans <code>config.ini</code> ou via la page web.
+        Sauvegarde = hot reload, pas de restart.
+      </p>
+    </div>
+  </div>
+
+  <!-- Flood scopes -->
+  <div class="card mb-3">
+    <div class="card-header d-flex align-items-center">
+      <i class="fas fa-filter me-2 text-primary"></i>
+      <strong>Flood Scopes (réponses scopées)</strong>
+      <span class="badge bg-secondary ms-2">Radio → Region Scopes</span>
+    </div>
+    <div class="card-body">
+      <p class="mb-2">
+        <code>[Channels] flood_scopes</code> définit les régions auxquelles le bot répond.
+        Un message non-scopé n'obtient pas de réponse command si l'allowlist ne contient pas <code>*</code>.
+      </p>
+      <ul class="mb-0">
+        <li>Les <code>flood_scope.&lt;region&gt;</code> par région et <code>outgoing_flood_scope_override</code> sont éditables depuis la page <strong>Radio</strong> (card Region Scopes).</li>
+        <li>Le <strong>Default Region Scope</strong> de la radio (réglage firmware <code>NodePrefs.default_scope_name</code>) peut aussi se définir depuis la même page.</li>
+        <li>Le bot ne répond qu'aux messages dont le scope correspond ; les messages globaux sont ignorés si <code>*</code> n'est pas listé.</li>
+      </ul>
+      <p class="mt-2 mb-0">
+        Lien avec Region Warnings : les warnings observent <em>avant</em> l'allowlist, donc ils voient
+        le trafic que <code>flood_scopes</code> filtre — c'est exactement le trafic non-scopé qu'ils doivent mesurer.
+      </p>
+    </div>
+  </div>
+
+  <!-- Regional flood scopes per channel -->
+  <div class="card mb-3">
+    <div class="card-header d-flex align-items-center">
+      <i class="fas fa-hashtag me-2 text-success"></i>
+      <strong>Scopes par canal</strong>
+      <span class="badge bg-secondary ms-2">config.ini</span>
+    </div>
+    <div class="card-body">
+      <p class="mb-0">
+        <code>flood_scope.&lt;canal&gt; = #région</code> dans <code>[Channels]</code> permet de restreindre
+        les réponses du bot à un scope par canal. Affiché en lecture seule sur la page Radio.
+      </p>
+    </div>
+  </div>
+
+  <!-- Data & retention -->
+  <div class="card mb-3">
+    <div class="card-header">
+      <i class="fas fa-database me-2 text-secondary"></i>
+      <strong>Stockage & rétention</strong>
+    </div>
+    <div class="card-body">
+      <ul class="mb-0">
+        <li><code>region_scope_daily</code> : une ligne par canal par jour (scoped / global / unknown).</li>
+        <li><code>region_warning_events</code> : une ligne par décision d'alerte qui a atteint l'étape d'envoi
+            (envoyée, échouée, ou retenue en dry-run).</li>
+        <li>Rétention pilotée par <code>[Data_Retention] region_warning_retention_days</code> (défaut 90 j).</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2 mt-3">
+    <a class="btn btn-primary" href="/region-warnings">
+      <i class="fas fa-chart-bar me-1"></i>Détails & graphiques
+    </a>
+    <a class="btn btn-outline-primary" href="/radio">
+      <i class="fas fa-sliders me-1"></i>Configurer les scopes
+    </a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('static', filename='docs/region-warnings.md') if False else '#docs' }}">
+      <i class="fas fa-book me-1"></i>Documentation
+    </a>
+  </div>
+</div>
+{% endblock %}

@@ -1580,6 +1580,11 @@ class BotDataViewer:
             """Regional flood scope monitoring and warning settings."""
             return render_template('region_warnings.html')
 
+        @self.app.route('/regions')
+        def regions_summary():
+            """Summary of region-related features (warnings, flood scopes)."""
+            return render_template('regions.html')
+
         @self.app.route('/feeds')
         def feeds():
             """Feed management page"""
