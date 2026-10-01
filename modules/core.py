@@ -794,12 +794,27 @@ class MeshCoreBot:
             for key, meta in section_meta.keys.items():
                 if not config.has_option(section, key):
                     continue
+                raw = config.get(section, key).strip()
                 if meta.type == "int":
-                    config.getint(section, key)
+                    try:
+                        config.getint(section, key)
+                    except ValueError:
+                        default = meta.default if meta.default is not None else ""
+                        raise ValueError(
+                            f"[{section}] {key} is not a valid integer: {raw!r} "
+                            f"(expected an integer{f'; default {default}' if default else ''}). "
+                            f"Remove any trailing comment or text after the number."
+                        )
                 elif meta.type == "bool":
-                    config.getboolean(section, key)
+                    try:
+                        config.getboolean(section, key)
+                    except ValueError:
+                        raise ValueError(
+                            f"[{section}] {key} is not a valid boolean: {raw!r} "
+                            f"(expected true/false, 1/0, yes/no, on/off)"
+                        )
                 elif meta.type == "enum" and meta.values:
-                    value = config.get(section, key).strip().lower()
+                    value = raw.lower()
                     if value not in meta.values:
                         raise ValueError(
                             f"[{section}] {key} must be one of "
