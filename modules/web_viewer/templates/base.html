@@ -380,7 +380,7 @@
     
     {% block extra_css %}{% endblock %}
 </head>
-<body>
+ <body data-is-admin="{{ 'true' if (not auth_enabled or is_admin) else 'false' }}">
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container-fluid">
@@ -696,6 +696,10 @@
 
     <!-- Base JavaScript -->
     <script nonce="{{ g.csp_nonce }}" data-ws-enabled="{{ websocket_enabled|lower }}">
+        // Display hint only — server enforces authenticated_admin. Read from a
+        // data attribute so the inline script stays plain JS for ESLint.
+        const IS_ADMIN = document.body.dataset.isAdmin === 'true';
+
         // Global connection management
         class ModernConnectionManager {
             constructor() {
@@ -703,9 +707,15 @@
                 this.connected = false;
                 this.lastActivity = null;
                 this.pingInterval = null;
-                
-                this.initializeSocket();
-                this.startPingInterval();
+
+                // Live Socket.IO stays admin-only when a password is configured
+                // (packet/message streams can include private mesh traffic).
+                if (IS_ADMIN) {
+                    this.initializeSocket();
+                    this.startPingInterval();
+                } else {
+                    this.updateConnectionStatus('Login for live updates', 'disconnected');
+                }
             }
             
             initializeSocket() {
