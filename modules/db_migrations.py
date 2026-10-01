@@ -800,7 +800,12 @@ def _m0023_observed_paths_zero_hop_signal(cursor: sqlite3.Cursor) -> None:
     _add_column(cursor, "observed_paths", "snr", "REAL")
     _add_column(cursor, "observed_paths", "rssi", "REAL")
 
-def _m0024_region_scope_tables(cursor: sqlite3.Cursor) -> None:
+def _m0024_noop(cursor: sqlite3.Cursor) -> None:
+    """No-op: version 24 was already applied in production DBs with different content."""
+    pass
+
+
+def _m0029_region_scope_tables(cursor: sqlite3.Cursor) -> None:
     """Storage for regional flood-scope observation and the warnings it drives.
 
     ``region_scope_daily`` is a per-day, per-channel tally of how each channel
@@ -947,11 +952,12 @@ MIGRATIONS: list[MigrationEntry] = [
     (21, "daily_rollup: per-payload-type multibyte split", _m0021_daily_rollup_packet_type_encoding),
     (22, "neighbor discovery tables", _m0022_neighbor_tables),
     (23, "observed_paths: snr/rssi for zero-hop adverts", _m0023_observed_paths_zero_hop_signal),
-    (24, "regional flood scope tallies and warning events", _m0024_region_scope_tables),
+    (24, "regional flood scope tallies and warning events", _m0024_noop),
     (25, "bbs_messages table", _m0025_bbs_messages_table),
     (26, "clock_sync_admin_log table", _m0026_clock_sync_admin_log),
     (27, "clock_sync_targets table", _m0027_clock_sync_targets),
     (28, "clock_sync_targets: auto_clkreboot_enabled, last_clkreboot_at", _m0028_clock_sync_targets_auto_clkreboot),
+    (29, "region_scope_daily table", _m0029_region_scope_tables),
 ]
 
 
