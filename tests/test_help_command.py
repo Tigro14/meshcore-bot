@@ -441,6 +441,46 @@ class TestGetAvailableCommandsList:
         result = cmd.get_available_commands_list()
         assert "ping" in result
 
+    def test_disabled_command_is_hidden(self):
+        """A command whose enabled flag is False must not appear in the list."""
+        bot = _make_bot()
+        mock_ping = MagicMock()
+        mock_ping.name = "ping"
+        mock_ping.ping_enabled = True  # enabled
+        mock_bbs = MagicMock()
+        mock_bbs.name = "bbs"
+        mock_bbs.bbs_enabled = False  # disabled
+        bot.command_manager.commands = {"ping": mock_ping, "bbs": mock_bbs}
+        cmd = HelpCommand(bot)
+        result = cmd.get_available_commands_list()
+        assert "ping" in result
+        assert "bbs" not in result
+
+    def test_generic_enabled_attribute_is_honored(self):
+        """Commands that store the flag under a bare ``enabled`` attr are honoured too."""
+        bot = _make_bot()
+        mock_ann = MagicMock()
+        mock_ann.name = "announcements"
+        mock_ann.enabled = False  # opt-in, disabled
+        mock_on = MagicMock()
+        mock_on.name = "hello"
+        mock_on.enabled = True
+        bot.command_manager.commands = {"announcements": mock_ann, "hello": mock_on}
+        cmd = HelpCommand(bot)
+        result = cmd.get_available_commands_list()
+        assert "hello" in result
+        assert "announcements" not in result
+
+    def test_command_without_enabled_attribute_is_shown(self):
+        """A command defining no enabled attribute is assumed always enabled."""
+        bot = _make_bot()
+        mock_ping = MagicMock(spec=["name"])  # no enabled attr at all
+        mock_ping.name = "ping"
+        bot.command_manager.commands = {"ping": mock_ping}
+        cmd = HelpCommand(bot)
+        result = cmd.get_available_commands_list()
+        assert "ping" in result
+
     def test_with_max_length(self):
         bot = _make_bot()
         mock_ping = MagicMock()
