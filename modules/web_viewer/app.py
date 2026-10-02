@@ -1280,6 +1280,9 @@ class BotDataViewer:
                     'traffic': region_warning.traffic_summary(
                         self.db_manager, self.config, days, self.logger
                     ),
+                    'series': region_warning.daily_series(
+                        self.db_manager, self.config, days, self.logger
+                    ),
                 })
             except Exception:
                 self.logger.exception("Error building public regions view")

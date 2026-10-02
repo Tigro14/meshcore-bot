@@ -80,12 +80,12 @@ class TestRegionsApi:
         _seed_tally(viewer)
         data = viewer.app.test_client().get("/api/regions").get_json()
         assert "traffic" in data
+        assert "series" in data
         assert "settings" not in data
         assert "default_message" not in data
         assert "message" not in data
         assert "events" not in data
         assert "budget" not in data
-        assert "series" not in data
 
     def test_empty_when_no_traffic(self, viewer):
         data = viewer.app.test_client().get("/api/regions").get_json()
