@@ -132,6 +132,10 @@
                 </div>
             </div>
 
+            <!-- Announcement (card + behaviour live in announcement_card.html /
+                 static/js/announcement.js — see that partial before editing) -->
+            {% include 'announcement_card.html' %}
+
             <!-- Node Settings -->
             <div class="card mb-4" id="node-settings-card">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -585,6 +589,7 @@ class RadioManager {
             this.channels = (data.channels || []).filter(c => !c.decode_only);
             this.renderChannels();
             this.updateChannelIndexDisplay();
+            window.radioAnnouncement.populateAnnouncementChannels();
         } catch (error) {
             console.error('Error loading channels:', error);
             this.showError('Failed to load channels: ' + error.message);
@@ -804,6 +809,8 @@ class RadioManager {
         if (connectToggleBtn) {
             connectToggleBtn.addEventListener('click', () => this.handleConnectToggle());
         }
+        // The announcement form's submit handler lives in
+        // static/js/announcement.js (loaded via announcement_card.html).
     }
 
     async loadRadioStatus() {
@@ -1287,6 +1294,73 @@ class RadioManager {
     setupRadioParamsHandlers() {
         document.getElementById('readRadioParamsBtn').addEventListener('click', () => this.readRadioParams());
         document.getElementById('writeRadioParamsBtn').addEventListener('click', () => this.writeRadioParams());
+    }
+
+    populateAnnouncementChannels() {
+        const select = document.getElementById('announcementChannel');
+        if (!select) return;
+
+        while (select.options.length > 1) select.remove(select.options.length - 1);
+        if (select.options.length === 0) {
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = 'Select a channel...';
+            select.appendChild(placeholder);
+        }
+        this.channels.forEach(channel => {
+            const channelName = channel.name || channel.channel_name || `Channel ${channel.channel_idx ?? channel.index}`;
+            const option = document.createElement('option');
+            option.value = channelName;
+            option.textContent = `${channelName} (${channel.channel_idx ?? channel.index})`;
+            select.appendChild(option);
+        });
+    }
+
+    async sendAnnouncement() {
+        const btn = document.getElementById('sendAnnouncementBtn');
+        const spinner = document.getElementById('announcementSpinner');
+        const icon = document.getElementById('announcementIcon');
+        const channel = document.getElementById('announcementChannel').value.trim();
+        const message = document.getElementById('announcementMessage').value.trim();
+
+        if (!channel || !message) {
+            this.setAnnouncementAlert('danger', 'Please select a channel and enter a message.');
+            return;
+        }
+
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        icon.style.display = 'none';
+        this.setAnnouncementAlert('', '');
+
+        try {
+            const result = await this.queueAndPoll('/api/radio/announcement', { channel, message });
+            if (result && result.status === 'completed') {
+                this.setAnnouncementAlert('success', 'Announcement sent successfully!');
+                document.getElementById('announcementMessage').value = '';
+            } else {
+                this.setAnnouncementAlert('danger', result?.error_message || 'Failed to send announcement.');
+            }
+        } catch (error) {
+            this.setAnnouncementAlert('danger', 'Error: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+            icon.style.display = 'inline';
+        }
+    }
+
+    setAnnouncementAlert(type, message) {
+        const alert = document.getElementById('announcementAlert');
+        if (!alert) return;
+        if (!message) {
+            alert.style.display = 'none';
+            alert.textContent = '';
+            return;
+        }
+        alert.className = `alert alert-${type}`;
+        alert.textContent = message;
+        alert.style.display = 'block';
     }
 
     async readRadioParams({ silent = false } = {}) {
@@ -1929,8 +2003,14 @@ class RadioManager {
     }
 }
 
-// Initialize radio manager when page loads
+// Initialize radio manager when page loads.
+// `radioAnnouncement` is the hook static/js/announcement.js (loaded via the
+// announcement_card.html partial) uses to call back into this class.
 let radioManager;
+window.radioAnnouncement = {
+    sendAnnouncement: () => radioManager && radioManager.sendAnnouncement(),
+    populateAnnouncementChannels: () => radioManager && radioManager.populateAnnouncementChannels(),
+};
 document.addEventListener('DOMContentLoaded', () => {
     radioManager = new RadioManager();
 });

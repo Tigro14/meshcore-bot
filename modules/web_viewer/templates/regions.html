@@ -112,7 +112,7 @@
             <div class="card-header"><i class="fas fa-circle-question"></i> Pourquoi recevez-vous un avertissement ?</div>
             <div class="card-body">
                 <p class="mb-3">
-                    Chaque message du mesh porte un <strong>code de région</strong> &mdash; une petite
+                    Chaque message en MeshCore porte un <strong>code de région</strong> &mdash; une petite
                     étiquette indiquant à quelle partie du mesh il appartient. Les nœuds
                     l'utilisent pour décider qui doit relayer un message et jusqu'où il doit
                     voyager.
@@ -130,7 +130,8 @@
                     émetteur &mdash; envoie à cet émetteur une brève alerte. L'objectif est de
                     garder le mesh calme, pas de surveiller qui que ce soit : définir un code de
                     région ne prend qu'un instant dans l'application MeshCore et résout le
-                    problème à la source.
+                    problème à la source. Avec une interconnexion de plus en plus forte entre 
+		    régions voire pays, cette contrainte s'impose à tous.
                 </p>
             </div>
         </div>
@@ -145,7 +146,7 @@
             <div class="card-body">
                 <ol class="rg-steps">
                     <li>
-                        <strong>Le bot n'écoute que.</strong> Il lit le trafic des canaux qui
+                        <strong>Le bot ne fait qu'écouter.</strong> Il lit le trafic des canaux qui
                         traverse le mesh et note, par jour et par canal, combien de messages
                         avaient un code de région et combien n'en avaient pas. Il ne lit pas le
                         contenu des messages.
@@ -160,8 +161,8 @@
                     <li>
                         <strong>Vous pouvez l'arrêter.</strong> Définissez un code de région dans
                         votre application MeshCore et les avertissements cessent d'eux-mêmes &mdash;
-                        c'est la solution, pas une plainte à déposer.
-                    </li>
+                        c'est la solution.                   
+		    </li>
                 </ol>
             </div>
         </div>
