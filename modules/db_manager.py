@@ -90,6 +90,8 @@ class DBManager:
         'neighbor_links',  # Zero-hop neighbor discovery - current adjacency
         'neighbor_observations',  # Zero-hop neighbor discovery - per-cycle history
         'battery_observations',  # Battery_Monitor - battery voltage history
+        'region_scope_daily',  # Region warnings - per-day per-channel scope tally
+        'region_warning_events',  # Region warnings - warning decision events
     }
 
     def __init__(self, bot: Any, db_path: str = "meshcore_bot.db"):

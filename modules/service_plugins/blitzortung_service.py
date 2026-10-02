@@ -55,6 +55,15 @@ class BlitzortungService(BaseServicePlugin):
     def __init__(self, bot: Any) -> None:
         super().__init__(bot)
 
+        # --- runtime state ---------------------------------------------------
+        # Initialized unconditionally so stop() never hits AttributeError when
+        # an early-return below disables the service.
+        self.blitz_buffer: list[dict[str, Any]] = []
+        self.seen_blitz_keys: set[str] = set()
+        self.mqtt_client: Optional[Any] = None
+        self._mqtt_task: Optional[asyncio.Task] = None
+        self._lightning_task: Optional[asyncio.Task] = None
+
         section = "Blitzortung_Service"
 
         # --- alert destination ------------------------------------------------
@@ -147,13 +156,6 @@ class BlitzortungService(BaseServicePlugin):
             )
             self.enabled = False
             return
-
-        # --- runtime state ---------------------------------------------------
-        self.blitz_buffer: list[dict[str, Any]] = []
-        self.seen_blitz_keys: set[str] = set()
-        self.mqtt_client: Optional[Any] = None
-        self._mqtt_task: Optional[asyncio.Task] = None
-        self._lightning_task: Optional[asyncio.Task] = None
 
         self.logger.info(
             "Blitzortung service initialized: channel=%s threshold=%d window=%ds "
