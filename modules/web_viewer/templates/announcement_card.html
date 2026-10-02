@@ -1,0 +1,43 @@
+{#
+Card "annonce radio sur un canal" (radio announcement).
+
+Kept in its own partial (recreated 2026-10-02 after the rebase that dropped
+the original PR #27 UI from radio.html) so a future rebase of radio.html can
+at worst lose a one-line include, not a whole card.
+
+The HTML card is included from radio.html. The behaviour lives in
+static/js/announcement.js (loaded by the block at the bottom of this file).
+The API endpoint is POST /api/radio/announcement and the worker is
+Scheduler._send_announcement_op in modules/scheduler.py.
+#}
+<div class="card mb-4" id="announcement-card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="fas fa-bullhorn me-2"></i>Announcement</h5>
+    </div>
+    <div class="card-body">
+        <div id="announcementAlert" style="display:none"></div>
+        <form id="announcementForm">
+            <div class="mb-3">
+                <label class="form-label" for="announcementChannel">Channel</label>
+                <select class="form-select" id="announcementChannel" name="channel" required>
+                    <option value="">Select a channel...</option>
+                </select>
+                <small class="form-text text-muted">The channel that will receive the announcement</small>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="announcementMessage">Message</label>
+                <textarea class="form-control" id="announcementMessage" name="message" rows="3"
+                    placeholder="Enter your announcement message..." required maxlength="200"></textarea>
+                <small class="form-text text-muted">Maximum 200 characters</small>
+            </div>
+            <button type="submit" class="btn btn-primary" id="sendAnnouncementBtn">
+                <span class="spinner-border spinner-border-sm me-1" id="announcementSpinner" style="display:none" role="status"></span>
+                <i class="fas fa-paper-plane me-1" id="announcementIcon"></i>Send announcement
+            </button>
+        </form>
+    </div>
+</div>
+
+{% block extra_js_announcement %}
+<script src="{{ url_for('static', filename='js/announcement.js') }}"></script>
+{% endblock %}
