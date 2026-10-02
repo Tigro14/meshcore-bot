@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+
+{% block title %}Region Warnings - MeshCore Bot Data Viewer{% endblock %}
+
+{% block extra_css %}
+<style>
+    :root {
+        --rg-global: #e8590c;
+        --rg-scoped: #198754;
+        --rg-unknown: #868e96;
+    }
+    [data-theme="dark"] {
+        --rg-global: #fd7e14;
+        --rg-scoped: #2fa36b;
+        --rg-unknown: #9ca3af;
+    }
+
+    .rg-figure {
+        font-size: 2rem;
+        line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+    }
+    .rg-figure-label {
+        font-size: .8rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--text-muted);
+    }
+
+    .rg-bar {
+        display: flex;
+        height: 10px;
+        border-radius: 5px;
+        overflow: hidden;
+        background-color: var(--bg-tertiary);
+    }
+    .rg-bar span { display: block; height: 100%; }
+    .rg-seg-global { background-color: var(--rg-global); }
+    .rg-seg-scoped { background-color: var(--rg-scoped); }
+
+    .rg-legend > span {
+        display: inline-block;
+        white-space: nowrap;
+        margin-right: 1rem;
+    }
+    .rg-legend-dot {
+        display: inline-block;
+        width: .65rem;
+        height: .65rem;
+        border-radius: 2px;
+        margin-right: .35rem;
+        vertical-align: baseline;
+    }
+
+    .rg-channel-name {
+        font-family: var(--bs-font-monospace, monospace);
+        white-space: nowrap;
+    }
+
+    .rg-steps {
+        counter-reset: rg-step;
+        list-style: none;
+        padding-left: 0;
+        margin: 0;
+    }
+    .rg-steps > li {
+        counter-increment: rg-step;
+        position: relative;
+        padding-left: 2.4rem;
+        margin-bottom: .9rem;
+    }
+    .rg-steps > li::before {
+        content: counter(rg-step);
+        position: absolute;
+        left: 0;
+        top: .1rem;
+        width: 1.6rem;
+        height: 1.6rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background-color: var(--rg-scoped);
+        color: #fff;
+        font-size: .85rem;
+        font-weight: 600;
+    }
+
+    .rg-empty {
+        color: var(--text-muted);
+        text-align: center;
+        padding: 1.75rem .5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-1"><i class="fas fa-globe"></i> Region warnings</h1>
+        <p class="text-muted mb-4">
+            Why this bot sometimes sends you a message about your region code &mdash;
+            and how much of the mesh traffic that is about.
+        </p>
+    </div>
+</div>
+
+<!-- Why -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><i class="fas fa-circle-question"></i> Why do you get a warning?</div>
+            <div class="card-body">
+                <p class="mb-3">
+                    Every message on the mesh carries a <strong>region code</strong> &mdash; a small
+                    label saying which part of the mesh it belongs to. Nodes use it to decide who
+                    should relay a message and how far it should travel.
+                </p>
+                <p class="mb-3">
+                    When a message is sent <em>without</em> a region code, the mesh cannot limit it:
+                    it is treated as <strong>global</strong> and is relayed to the <em>entire</em> mesh,
+                    not just your region. Every such message burns airtime and battery on nodes that
+                    have nothing to do with it.
+                </p>
+                <p class="mb-0">
+                    This bot listens to channel traffic, tallies how many messages have no region
+                    code, and &mdash; when that pattern is consistent from a single sender &mdash;
+                    sends that sender a short heads-up. The goal is to keep the mesh quiet, not to
+                    police anyone: setting a region code takes a moment in the MeshCore app and
+                    removes the problem at the source.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- How it works -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><i class="fas fa-gears"></i> How it works</div>
+            <div class="card-body">
+                <ol class="rg-steps">
+                    <li>
+                        <strong>The bot only listens.</strong> It reads the channel traffic passing
+                        through the mesh and records, per day and per channel, how many messages had
+                        a region code and how many did not. It does not read the message bodies.
+                    </li>
+                    <li>
+                        <strong>It warns, sparingly.</strong> A sender is only contacted after
+                        repeatedly sending messages without a region code, and only so often:
+                        there is a per-sender cooldown, a minimum gap between any two warnings, and a
+                        daily cap on the total number sent.
+                    </li>
+                    <li>
+                        <strong>You can stop it.</strong> Set a region code in your MeshCore app and
+                        the warnings stop on their own &mdash; that is the fix, not a complaint to
+                        file.
+                    </li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- The numbers -->
+<div class="row mb-4">
+    <div class="col-lg-8 mb-4 mb-lg-0">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><i class="fas fa-chart-simple"></i> Channel traffic by region code</span>
+                <div>
+                    <label class="visually-hidden" for="rg-window">Window</label>
+                    <select class="form-select form-select-sm" id="rg-window">
+                        <option value="7">Last 7 days</option>
+                        <option value="14" selected>Last 14 days</option>
+                        <option value="30">Last 30 days</option>
+                        <option value="90">Last 90 days</option>
+                    </select>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="mb-3 small rg-legend">
+                    <span><span class="rg-legend-dot rg-seg-global"></span>No region code</span>
+                    <span><span class="rg-legend-dot rg-seg-scoped"></span>Region code set</span>
+                </div>
+                <div id="rg-traffic"><div class="loading">Loading traffic&hellip;</div></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="fas fa-calendar-day"></i> Total volume</div>
+            <div class="card-body">
+                <div id="rg-totals"><div class="loading">Loading&hellip;</div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- What to do -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><i class="fas fa-check-circle"></i> If you got one</div>
+            <div class="card-body">
+                <p class="mb-0">
+                    Open the MeshCore app, add a <strong>region code</strong> to your node, and you
+                    are done &mdash; your messages will stop flooding the whole mesh and the bot will
+                    stop sending you the warning. If you believe the message is a mistake, the same
+                    page an admin uses to configure this is under <a href="/region-warnings">Region</a>
+                    in the admin area.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script nonce="{{ g.csp_nonce }}">
+(function () {
+    'use strict';
+
+    const el = (id) => document.getElementById(id);
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        }[c]));
+    }
+
+    function plural(n, word) {
+        return n + ' ' + word + (n === 1 ? '' : 's');
+    }
+
+    class Regions {
+        constructor() {
+            this.data = null;
+            this.windowDays = 14;
+            el('rg-window').addEventListener('change', (e) => {
+                this.windowDays = parseInt(e.target.value, 10) || 14;
+                this.load();
+            });
+            this.load();
+        }
+
+        async load() {
+            try {
+                const resp = await fetch('/api/regions?days=' + this.windowDays, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                if (!resp.ok) throw new Error('Request failed (' + resp.status + ')');
+                this.data = await resp.json();
+            } catch (err) {
+                el('rg-traffic').innerHTML = '<div class="rg-empty">'
+                    + escapeHtml(err.message) + '</div>';
+                el('rg-totals').innerHTML = '<div class="rg-empty">Could not load data.</div>';
+                return;
+            }
+            this.renderTraffic();
+            this.renderTotals();
+        }
+
+        renderTraffic() {
+            const channels = (this.data.traffic || {}).channels || [];
+            const host = el('rg-traffic');
+            if (!channels.length) {
+                host.innerHTML = '<div class="rg-empty">'
+                    + 'No channel traffic classified in this window yet. Numbers appear here '
+                    + 'as the bot hears traffic.'
+                    + '</div>';
+                return;
+            }
+            host.innerHTML = channels.map((c) => {
+                // The bar spans the classified messages only, so its orange width
+                // IS the percentage printed beside it.
+                const classified = c.scoped + c.global;
+                const pct = (n) => (classified ? (100 * n / classified) : 0).toFixed(2) + '%';
+                const share = c.unscoped_pct == null
+                    ? '<span class="text-muted">not enough data</span>'
+                    : '<strong>' + c.unscoped_pct + '%</strong> with no region code';
+                return ''
+                    + '<div class="mb-3">'
+                    + '  <div class="d-flex justify-content-between align-items-baseline gap-2">'
+                    + '    <span class="rg-channel-name">' + escapeHtml(c.channel) + '</span>'
+                    + '    <span class="small text-muted">' + share + '</span>'
+                    + '  </div>'
+                    + '  <div class="rg-bar my-1" role="img" aria-label="'
+                    +      escapeHtml(c.channel) + ': ' + c.global + ' without a region code of '
+                    +      classified + ' classified, ' + c.unknown + ' unclassified">'
+                    + '    <span class="rg-seg-global" style="width:' + pct(c.global) + '"></span>'
+                    + '    <span class="rg-seg-scoped" style="width:' + pct(c.scoped) + '"></span>'
+                    + '  </div>'
+                    + '  <div class="small text-muted">'
+                    +      plural(c.global, 'message') + ' without a region code'
+                    + ' &middot; ' + plural(c.scoped, 'message') + ' with one'
+                    + (c.unknown
+                            ? ' &middot; ' + plural(c.unknown, 'message') + ' the radio could not classify'
+                            : '')
+                    + '  </div>'
+                    + '</div>';
+            }).join('');
+        }
+
+        renderTotals() {
+            const totals = (this.data.traffic || {}).totals || {};
+            const classified = (totals.scoped || 0) + (totals.global || 0);
+            const num = (n) => Number(n || 0).toLocaleString();
+            const host = el('rg-totals');
+            if (!classified && !totals.unknown) {
+                host.innerHTML = '<div class="rg-empty">Nothing classified in this window yet.</div>';
+                return;
+            }
+            host.innerHTML = ''
+                + '<div class="rg-figure" style="color: var(--rg-global);">'
+                +   (totals.unscoped_pct == null ? '&mdash;' : totals.unscoped_pct + '%') + '</div>'
+                + '<div class="text-muted">of classified traffic had no region code</div>'
+                + '<div class="small text-muted mt-2">'
+                +   num(totals.global) + ' without a region code of '
+                +   num(classified) + ' classified'
+                + (totals.unknown
+                        ? ' &middot; ' + num(totals.unknown) + ' the radio could not classify'
+                        : '')
+                + '</div>';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => new Regions());
+})();
+</script>
+{% endblock %}

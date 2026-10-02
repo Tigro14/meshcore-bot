@@ -1121,6 +1121,7 @@ class BotDataViewer:
                 'plugins_page',
                 'greeter',
                 'region_warnings_page',
+                'regions_page',
                 'logs',
                 'multibyte_rollout',
                 'mesh',
@@ -1238,6 +1239,29 @@ class BotDataViewer:
             """Channel body budget for a global-scope send."""
             name = (self.config.get('Bot', 'bot_name', fallback='Bot') or 'Bot').strip()
             return channel_body_limit(name or 'Bot')
+
+        @self.app.route('/regions')
+        def regions_page():
+            """Public explainer: why the bot sends region warnings, with public stats."""
+            return render_template('regions.html')
+
+        @self.app.route('/api/regions')
+        def api_regions():
+            """Public aggregates only: no settings, no per-sender data."""
+            try:
+                self.config = self._load_merged_config()
+                try:
+                    days = max(1, min(int(request.args.get('days', 14)), 90))
+                except (TypeError, ValueError):
+                    days = 14
+                return jsonify({
+                    'traffic': region_warning.traffic_summary(
+                        self.db_manager, self.config, days, self.logger
+                    ),
+                })
+            except Exception:
+                self.logger.exception("Error building public regions view")
+                return jsonify({'error': 'Failed to build regions view'}), 500
 
         @self.app.route('/region-warnings')
         def region_warnings_page():
