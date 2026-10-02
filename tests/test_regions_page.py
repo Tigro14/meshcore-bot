@@ -58,13 +58,14 @@ class TestRegionsPage:
     def test_page_renders(self, viewer):
         resp = viewer.app.test_client().get("/regions")
         assert resp.status_code == 200
-        assert b"Region warnings" in resp.data
+        assert "Avertissements de région".encode() in resp.data
 
     def test_page_links_to_the_admin_page(self, viewer):
-        """The public page points the reader to the admin Region Settings page."""
+        """La page publique pointe vers la page d'admin Paramètres région."""
         resp = viewer.app.test_client().get("/regions")
         body = resp.data.decode()
         assert 'href="/region-warnings"' in body
+        assert "Paramètres région" in body
 
     def test_page_script_carries_a_csp_nonce(self, viewer):
         resp = viewer.app.test_client().get("/regions")
