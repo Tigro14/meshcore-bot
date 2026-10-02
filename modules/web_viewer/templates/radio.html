@@ -132,8 +132,7 @@
                 </div>
             </div>
 
-            <!-- Announcement (card + behaviour live in announcement_card.html /
-                 static/js/announcement.js — see that partial before editing) -->
+            <!-- Announcement (card in announcement_card.html, handler inline below) -->
             {% include 'announcement_card.html' %}
 
             <!-- Node Settings -->
@@ -809,8 +808,8 @@ class RadioManager {
         if (connectToggleBtn) {
             connectToggleBtn.addEventListener('click', () => this.handleConnectToggle());
         }
-        // The announcement form's submit handler lives in
-        // static/js/announcement.js (loaded via announcement_card.html).
+        // The announcement form's submit handler is attached inline at the
+        // bottom of this file (search for "attachAnnouncementHandler").
     }
 
     async loadRadioStatus() {
@@ -2004,13 +2003,34 @@ class RadioManager {
 }
 
 // Initialize radio manager when page loads.
-// `radioAnnouncement` is the hook static/js/announcement.js (loaded via the
-// announcement_card.html partial) uses to call back into this class.
+// `radioAnnouncement` is the hook used to call back into this class.
 let radioManager;
 window.radioAnnouncement = {
     sendAnnouncement: () => radioManager && radioManager.sendAnnouncement(),
     populateAnnouncementChannels: () => radioManager && radioManager.populateAnnouncementChannels(),
 };
+
+// Attach the announcement form submit handler directly here (inline, guaranteed to run).
+// The partial's inline script is a fallback; this is the primary path.
+(function () {
+    'use strict';
+    function attachAnnouncementHandler() {
+        const form = document.getElementById('announcementForm');
+        if (!form) return;
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (radioManager) {
+                radioManager.sendAnnouncement();
+            }
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', attachAnnouncementHandler);
+    } else {
+        attachAnnouncementHandler();
+    }
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
     radioManager = new RadioManager();
 });

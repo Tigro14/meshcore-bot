@@ -5,9 +5,9 @@ Kept in its own partial (recreated 2026-10-02 after the rebase that dropped
 the original PR #27 UI from radio.html) so a future rebase of radio.html can
 at worst lose a one-line include, not a whole card.
 
-The HTML card is included from radio.html. The behaviour lives in
-static/js/announcement.js (loaded by the block at the bottom of this file).
-The API endpoint is POST /api/radio/announcement and the worker is
+The submit handler lives inline in radio.html (search for
+"attachAnnouncementHandler"). The API endpoint is
+POST /api/radio/announcement and the worker is
 Scheduler._send_announcement_op in modules/scheduler.py.
 #}
 <div class="card mb-4" id="announcement-card">
@@ -38,7 +38,4 @@ Scheduler._send_announcement_op in modules/scheduler.py.
     </div>
 </div>
 
-{% block extra_js_announcement %}
-{# Cache-bust so a redeploy of this JS always wins over a stale browser copy. #}
-<script src="{{ url_for('static', filename='js/announcement.js') }}?v=3"></script>
-{% endblock %}
+
