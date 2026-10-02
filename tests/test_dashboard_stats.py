@@ -501,6 +501,7 @@ class TestRollupCorrectness:
                     today=local_date,
                     first_seen={},
                     multibyte_keys=None,
+                    singlebyte_keys=set(),
                 )
             assert computed["values"]["messages_total"] == 1
         finally:
@@ -736,6 +737,101 @@ class TestPacketEncodingTrend:
             "GRP_TXT": {"mb": 3, "total": 4},
             "TXT_MSG": {"mb": 1, "total": 1},
         }
+
+    def test_adverts_singlebyte_total_counts_repeater_adverts(self, viewer):
+        """Dashboard tile: 1-byte repeater advert volume over the last day.
+
+        Membership is the stored 1-byte encoding, not the path evidence, and
+        the count is advert volume, not node count.
+        """
+        with sqlite3.connect(viewer.db_path) as conn:
+            conn.execute(
+                "INSERT INTO complete_contact_tracking "
+                "(public_key, name, role, out_bytes_per_hop) VALUES (?, 'rpt-1b', 'repeater', 1)",
+                (_pk(1000),),
+            )
+            conn.execute(
+                "INSERT INTO complete_contact_tracking "
+                "(public_key, name, role, out_bytes_per_hop) VALUES (?, 'rpt-3b', 'repeater', 3)",
+                (_pk(1001),),
+            )
+            conn.execute(
+                "INSERT INTO complete_contact_tracking "
+                "(public_key, name, role) VALUES (?, 'companion-1b', 'companion')",
+                (_pk(1002),),
+            )
+            conn.execute("INSERT INTO daily_stats (date, public_key, advert_count) VALUES (?, ?, 7)",
+                        (local_date_str(), _pk(1000)))
+            conn.execute("INSERT INTO daily_stats (date, public_key, advert_count) VALUES (?, ?, 13)",
+                        (local_date_str(), _pk(1001)))
+            conn.execute("INSERT INTO daily_stats (date, public_key, advert_count) VALUES (?, ?, 4)",
+                        (local_date_str(), _pk(1002)))
+        _refresh(viewer)
+
+        row = _rollup(viewer, local_date_str())
+        assert row["adverts_singlebyte_total"] == 7
+
+    def test_adverts_singlebyte_total_null_without_contact_table(self, viewer):
+        """No complete_contact_tracking means the source is absent, not empty."""
+        with sqlite3.connect(viewer.db_path) as conn:
+            conn.execute("DROP TABLE complete_contact_tracking")
+            conn.execute("INSERT INTO daily_stats (date, public_key, advert_count) VALUES (?, ?, 5)",
+                        (local_date_str(), _pk(1000)))
+        _refresh(viewer)
+
+        row = _rollup(viewer, local_date_str())
+        assert row["adverts_singlebyte_total"] is None
+
+    def test_adverts_singlebyte_total_null_without_source_rows(self, viewer):
+        """A day with no daily_stats rows is "cannot say", not zero.
+
+        daily_stats survives 90 days while the dashboard shows 30, so a silent
+        day is rare — but when it happens, storing a zero would read as an
+        outage rather than a gap.
+        """
+        with sqlite3.connect(viewer.db_path) as conn:
+            conn.execute(
+                "INSERT INTO complete_contact_tracking "
+                "(public_key, name, role, out_bytes_per_hop) VALUES (?, 'rpt-1b', 'repeater', 1)",
+                (_pk(1000),),
+            )
+            conn.execute("INSERT INTO daily_stats (date, public_key, advert_count) VALUES (?, ?, 9)",
+                        (local_date_str(), _pk(1000)))
+        _refresh(viewer)
+        assert _rollup(viewer, local_date_str())["adverts_singlebyte_total"] == 9
+
+        # Tomorrow has no rows yet (and a new install starts with none): the
+        # column must stay NULL, which the UI renders as a gap.
+        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        with closing(viewer._dashboard_connection()) as conn:
+            computed = viewer.dashboard_stats.compute_day(
+                conn,
+                tomorrow,
+                sources=viewer.dashboard_stats.detect_sources(conn),
+                today=local_date_str(),
+                first_seen={},
+                multibyte_keys=set(),
+                singlebyte_keys={_pk(1000)},
+            )
+        assert computed["values"].get("adverts_singlebyte_total") is None
+
+    def test_adverts_singlebyte_total_series_metric(self, viewer):
+        with sqlite3.connect(viewer.db_path) as conn:
+            conn.execute(
+                "INSERT INTO complete_contact_tracking "
+                "(public_key, name, role, out_bytes_per_hop) VALUES (?, 'rpt-1b', 'repeater', 1)",
+                (_pk(1000),),
+            )
+            conn.execute("INSERT INTO daily_stats (date, public_key, advert_count) VALUES (?, ?, 11)",
+                        (local_date_str(), _pk(1000)))
+        _refresh(viewer)
+
+        with viewer.app.test_client() as client:
+            payload = client.get(
+                "/api/dashboard/series?metric=repeaters_singlebyte&days=30"
+            ).get_json()
+        assert payload["points"][-1]["value"] == 11
+        assert payload["current_period_total"] == 11
 
     def test_summary_omits_the_per_type_share_series(self, viewer):
         """Shipping both forms would send the same thirty days twice."""

@@ -117,6 +117,7 @@ SERIES_METRICS: dict[str, str] = {
     "adverts": "adverts_total",
     "nodes": "nodes_active",
     "new_nodes": "nodes_new",
+    "repeaters_singlebyte": "adverts_singlebyte_total",
     "packets": "packets_total",
     "multibyte_share": (
         "CASE WHEN COALESCE(adverts_from_multibyte, 0) + COALESCE(adverts_from_singlebyte, 0) > 0 "
@@ -725,6 +726,7 @@ class DashboardStatsService:
         date_str: str,
         first_seen: dict[str, str],
         multibyte_keys: set[str] | None,
+        singlebyte_keys: set[str] | None,
     ) -> dict[str, Any]:
         row = conn.execute(
             "SELECT SUM(advert_count), COUNT(DISTINCT public_key) FROM daily_stats WHERE date = ?",
@@ -736,6 +738,7 @@ class DashboardStatsService:
             "nodes_new": sum(1 for first in first_seen.values() if first == date_str),
             "adverts_from_multibyte": None,
             "adverts_from_singlebyte": None,
+            "adverts_singlebyte_total": None,
         }
         if multibyte_keys is None:
             return metrics
@@ -751,7 +754,47 @@ class DashboardStatsService:
                 single += count or 0
         metrics["adverts_from_multibyte"] = multibyte
         metrics["adverts_from_singlebyte"] = single
+        if singlebyte_keys is None:
+            return metrics
+        # The dashboard tile counts *repeater* advert volume (no region), not
+        # nodes: a 24-hour count of 14000 nodes would dwarf every other tile.
+        # Membership is the role, not the path evidence: a node storing
+        # 1-byte hops is a single-byte repeater regardless of which way its
+        # adverts reached this radio, and a node with no stored value at all
+        # cannot be classified either way.
+        rows = list(
+            conn.execute(
+                "SELECT public_key, advert_count FROM daily_stats WHERE date = ?", (date_str,)
+            )
+        )
+        if rows:
+            total = sum(count or 0 for key, count in rows if key in singlebyte_keys)
+            metrics["adverts_singlebyte_total"] = total
+        # An empty day is "cannot say", not "the count really was zero": the
+        # daily_stats rows survive far longer than the dashboard window, so a
+        # missing day is usually a prune, and a zero here would read as an
+        # outage at the retention boundary.
         return metrics
+
+    def _singlebyte_repeater_keys(self, conn: sqlite3.Connection) -> set[str] | None:
+        """Public keys whose stored encoding is 1 byte per hop: single-byte repeaters."""
+        if not _table_exists(conn, "complete_contact_tracking"):
+            return None
+        try:
+            return {
+                row[0]
+                for row in conn.execute(
+                    """
+                    SELECT public_key FROM complete_contact_tracking
+                    WHERE out_bytes_per_hop = 1
+                      AND role IN ('repeater', 'roomserver')
+                    """
+                )
+                if row[0]
+            }
+        except sqlite3.Error as exc:
+            self.logger.debug(f"Could not load single-byte repeater keys: {exc}")
+            return None
 
     def _multibyte_advert_keys(self, conn: sqlite3.Connection) -> set[str] | None:
         """Public keys currently classified as advertising over multibyte paths."""
@@ -783,6 +826,7 @@ class DashboardStatsService:
         first_seen: dict[str, str],
         multibyte_keys: set[str] | None,
         backfill: bool = False,
+        singlebyte_keys: set[str] | None = None,
     ) -> dict[str, Any]:
         """Recompute every rollup column for one local date.
 
@@ -823,7 +867,7 @@ class DashboardStatsService:
         if sources & SOURCE_DAILY_STATS:
             try:
                 values.update(
-                    self._advert_metrics(conn, date_str, first_seen, multibyte_keys)
+                    self._advert_metrics(conn, date_str, first_seen, multibyte_keys, singlebyte_keys)
                 )
                 present |= SOURCE_DAILY_STATS
             except sqlite3.Error as exc:
@@ -858,6 +902,7 @@ class DashboardStatsService:
         "packet_type_encoding",
         "adverts_total", "nodes_active", "nodes_new",
         "adverts_from_multibyte", "adverts_from_singlebyte",
+        "adverts_singlebyte_total",
         "contacts_known", "contacts_tracked",
     )
 
@@ -930,6 +975,7 @@ class DashboardStatsService:
             return []
         first_seen = self._first_advert_dates(conn)
         sources = self.detect_sources(conn) & SOURCE_DAILY_STATS
+        singlebyte_keys = self._singlebyte_repeater_keys(conn)
         return [
             self.compute_day(
                 conn,
@@ -939,6 +985,7 @@ class DashboardStatsService:
                 first_seen=first_seen,
                 multibyte_keys=None,
                 backfill=True,
+                singlebyte_keys=singlebyte_keys,
             )
             for date_str in dates
         ]
@@ -1515,6 +1562,7 @@ class DashboardStatsService:
         sources = self.detect_sources(conn)
         first_seen = self._first_advert_dates(conn)
         multibyte_keys = self._multibyte_advert_keys(conn)
+        singlebyte_keys = self._singlebyte_repeater_keys(conn)
 
         if backfill is None:
             backfill = not self.has_history(conn)
@@ -1528,6 +1576,7 @@ class DashboardStatsService:
                 today=today,
                 first_seen=first_seen,
                 multibyte_keys=multibyte_keys,
+                singlebyte_keys=singlebyte_keys,
             )
             for date_str in self._recompute_dates(today)
         ]

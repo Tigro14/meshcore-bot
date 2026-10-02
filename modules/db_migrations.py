@@ -847,6 +847,22 @@ def _m0029_region_scope_tables(cursor: sqlite3.Cursor) -> None:
         """
     )
 
+def _m0030_daily_rollup_singlebyte_advert_total(cursor: sqlite3.Cursor) -> None:
+    """Per-day total of adverts from single-byte repeaters, for the dashboard tile.
+
+    ``daily_stats`` carries per-day advert counts, but classifying which of them
+    came from a single-byte (1-byte-per-hop) repeater needs the node's stored
+    ``out_bytes_per_hop`` — a classification only knowable as of now, exactly
+    like the multibyte advert split.  The raw daily_stats rows survive 90 days,
+    far longer than the dashboard's 30-day trend window, so the value is written
+    per day and then frozen the moment the day leaves the recompute window;
+    NULL means "no source data for this day", which the UI renders as a gap.
+    """
+    if not _table_exists(cursor, "daily_rollup"):
+        return
+    _add_column(cursor, "daily_rollup", "adverts_singlebyte_total", "INTEGER")
+
+
 def _m0024_bbs_messages_table(cursor: sqlite3.Cursor) -> None:
     """Create bbs_messages table for per-user store-and-forward BBS service.
 
@@ -997,6 +1013,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (27, "clock_sync_targets: auto_clkreboot_enabled, last_clkreboot_at", _m0027_clock_sync_targets_auto_clkreboot),
     (28, "battery_observations table", _m0028_battery_observations),
     (29, "region_scope_daily table", _m0029_region_scope_tables),
+    (30, "daily_rollup: single-byte repeater advert total", _m0030_daily_rollup_singlebyte_advert_total),
 ]
 
 
