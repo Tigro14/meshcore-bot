@@ -8,17 +8,6 @@ semantic versioning.
 
 ### Added
 
-- Recreated the "Announcement" card on the Radio page, lost in the rebase that
-  dropped PR #27's UI. The page offers a channel selector and a message box
-  (max 200 characters) that queue a `send_announcement` operation through
-  `POST /api/radio/announcement` — the endpoint and the scheduler worker
-  (`Scheduler._send_announcement_op`) never left the tree, so only the HTML/JS
-  had to be rebuilt. The card now lives in its own partial
-  (`templates/announcement_card.html`) plus `static/js/announcement.js`, so a
-  future rebase of `radio.html` can at worst drop a one-line include. The
-  button reuses the page's `queueAndPoll` helper and reports the operation's
-  completed/failed status instead of only the queue acknowledgement.
-
 - `docs/develop-command-scripts.md` walks through writing a command plugin that
   integrates correctly with the bot framework, including developing against
   `[Bot] local_dir_path` (#259).
