@@ -121,77 +121,6 @@ def _build_create_gd_url(long_url: str, base: str, api_key: str) -> str:
     rebuilt = urlunparse((parsed.scheme or "https", netloc, path, "", query, ""))
     return rebuilt
 
-def _build_create_shlink_url(long_url: str, base: str, api_key: str) -> str:
-    from urllib.parse import urlparse, urlunparse
-
-    encoded = quote(long_url, safe="")
-    root = _normalize_base(base)
-    if "://" not in root:
-        root = f"https://{root}"
-    parsed = urlparse(root)
-    netloc = parsed.netloc
-    if not netloc and parsed.path:
-        netloc = parsed.path.split("/")[0]
-    path = (parsed.path or "").rstrip("/") + "/api/v3/short-urls"
-    if not path.startswith("/"):
-        path = "/" + path
-    query = ""
-    rebuilt = urlunparse(
-        (parsed.scheme or "https", netloc, path, "", query, "")
-    )
-    return rebuilt
-
-def _shorten_url_with_shlink(long_url: str, base: str, api_key: str, session: requests.Session | None = None, timeout: float = 5.0) -> str:
-    """Shorten a URL using Shlink API."""
-    import json
-
-    shortener_url = _build_create_shlink_url(long_url, base, api_key)
-    headers = {
-        "Content-Type": "application/json",
-        "X-Api-Key": api_key,
-    }
-    payload = json.dumps({"longUrl": long_url})
-    get = session.post if session is not None else requests.post
-    try:
-        response = get(shortener_url, headers=headers, data=payload, timeout=timeout)
-    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-        return ""
-    except Exception as e:
-        return ""
-
-    if not response.ok:
-        return ""
-
-    try:
-        data = response.json()
-        short_url = data.get("shortUrl") or data.get("shortUrlSlug")
-        if short_url:
-            return short_url
-    except Exception:
-        return ""
-
-    return ""
-
-def _shorten_url_with_gd(long_url: str, base: str, api_key: str, session: requests.Session | None = None, timeout: float = 5.0) -> str:
-    """Shorten a URL using v.gd / is.gd API."""
-    shortener_url = _build_create_gd_url(long_url, base, api_key)
-    get = session.get if session is not None else requests.get
-    try:
-        response = get(shortener_url, timeout=timeout)
-    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-        return ""
-    except Exception as e:
-        return ""
-
-    if not response.ok:
-        return ""
-
-    short = _parse_simple_response(response.text)
-    if short:
-        return short
-
-    return ""
-
 def _build_create_shlink_url(base: str) -> str:
     """Build the Shlink create endpoint from *base*.
 
@@ -367,15 +296,15 @@ def shorten_url_sync(
             logger=logger,
         )
 
-    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
         # Routine on a mesh node with an intermittent uplink. Logging these at ERROR
         # as "unexpected" floods the log and buries the errors that do need triage.
         if logger:
-            logger.debug("URL shortener unreachable: %s", e)
+            logger.debug("URL shortener unreachable: %s", exc)
         return ""
-    except Exception as e:
+    except Exception as exc:
         if logger:
-            logger.error("Unexpected error shortening URL: %s", e)
+            logger.error("Unexpected error shortening URL: %s", exc)
         return ""
 
 
@@ -402,7 +331,7 @@ async def shorten_url(
                 timeout=timeout,
             ),
         )
-    except Exception as e:
+    except Exception as exc:
         if logger:
-            logger.debug("Unexpected error shortening URL: %s", e)
+            logger.debug("Unexpected error shortening URL: %s", exc)
         return ""

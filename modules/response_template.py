@@ -17,7 +17,6 @@ from typing import Any, Callable
 
 from .url_shortener import shorten_url_sync
 from .utils import message_hop_count, message_path_bytes_per_hop
-from .url_shortener import shorten_url
 
 FilterFn = Callable[[str, dict[str, Any], str], str]
 
@@ -72,14 +71,6 @@ def _filter_prefix_if_nonempty(value: str, ctx: dict[str, Any], args: str) -> st
     if not value:
         return ''
     return args + value
-
-def _filter_shorten_url(value: str, ctx: dict[str, Any], args: str) -> str:
-    """Shorten *value* URL using configured URL shortener (v.gd / is.gd compatible)."""
-    config = ctx.get('config')
-    if config is None:
-        return value
-    return shorten_url(value, config)
-
 
 # The event-loop warning below is worth saying once, not once per reply.
 _warned_blocking_render = False
