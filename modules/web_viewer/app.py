@@ -269,7 +269,7 @@ class BotDataViewer:
         # Connection management using Flask-SocketIO built-ins
         self.connected_clients = {}  # Track client metadata
         self._clients_lock = threading.RLock()  # Reentrant: disconnect() re-enters from handle_connect
-        self.max_clients = 10
+        self.max_clients = 50
 
         # Database connection pooling with thread safety
         self._db_connection = None
