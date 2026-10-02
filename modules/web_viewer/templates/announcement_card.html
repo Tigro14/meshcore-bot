@@ -39,5 +39,6 @@ Scheduler._send_announcement_op in modules/scheduler.py.
 </div>
 
 {% block extra_js_announcement %}
-<script src="{{ url_for('static', filename='js/announcement.js') }}"></script>
+{# Cache-bust so a redeploy of this JS always wins over a stale browser copy. #}
+<script src="{{ url_for('static', filename='js/announcement.js') }}?v=3"></script>
 {% endblock %}
