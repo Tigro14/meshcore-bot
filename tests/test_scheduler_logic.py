@@ -702,8 +702,8 @@ class TestBatteryMonitorScheduler:
         assert stored == []
 
     def test_store_battery_observation_inserts_row(self, scheduler):
-        import sqlite3
         import contextlib
+        import sqlite3
 
         conn = sqlite3.connect(":memory:")
         conn.execute(

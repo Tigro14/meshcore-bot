@@ -45,6 +45,7 @@ from flask import (
 from flask_socketio import SocketIO, disconnect, emit
 
 from modules import flood_scope, region_warning
+from modules.maintenance import MaintenanceRunner
 from modules.security_utils import (
     SafeUrlPolicy,
     create_safe_requests_session,
@@ -54,7 +55,6 @@ from modules.security_utils import (
     validate_pubkey_format,
     validate_sql_identifier,
 )
-from modules.maintenance import MaintenanceRunner
 from modules.version_info import resolve_runtime_version
 
 
@@ -102,6 +102,7 @@ def _strip_ansi_codes(text: str) -> str:
 from modules.config_snapshot import config_to_redacted_sections
 from modules.feed_format import format_feed_message
 from modules.ini_writer import IniValueError, update_ini_values
+from modules.models import channel_body_limit
 from modules.multibyte_detection import (
     bucket_hop_chunks,
     chunks_from_multibyte_path_hex,
@@ -124,7 +125,6 @@ from modules.settings_schema import (
     validate_field,
 )
 from modules.settings_store import get_settings_store
-from modules.models import channel_body_limit
 from modules.utils import resolve_path
 from modules.web_viewer.config_panels import CONFIG_PANELS, PANEL_CATEGORIES
 from modules.web_viewer.dashboard_stats import (
@@ -312,6 +312,28 @@ class BotDataViewer:
             )
 
         self._init_dashboard_service()
+
+        # The multi-byte mesh endpoint derives lifetime edge identity from every
+        # retained multi-byte observed path.  Cache that expensive aggregate and
+        # ensure concurrent requests share one computation.  View-specific day
+        # and observation filters remain cheap and are applied to the cached
+        # lifetime result.
+        try:
+            mesh_cache_seconds = self.config.getint(
+                'Web_Viewer',
+                'mesh_graph_cache_seconds',
+                fallback=30,
+            )
+        except (configparser.Error, ValueError, TypeError):
+            mesh_cache_seconds = 30
+        self._mesh_graph_cache_seconds = max(5, min(mesh_cache_seconds, 300))
+        self._multibyte_graph_cache_condition = threading.Condition()
+        self._multibyte_graph_cache_edges: list[dict[str, Any]] | None = None
+        self._multibyte_graph_cache_created_at = 0.0
+        self._multibyte_graph_cache_computing = False
+        self._multibyte_graph_cache_failure_at = 0.0
+        self._multibyte_graph_cache_failure: tuple[str, str] | None = None
+        self._multibyte_graph_cache_retry_seconds = 5.0
 
         # Configure CORS for SocketIO — default to same-origin (no cross-origin)
         cors_raw = self.config.get('Web_Viewer', 'cors_allowed_origins', fallback='').strip()
@@ -3568,9 +3590,61 @@ class BotDataViewer:
                 days = request.args.get('days', type=int)
                 min_distance = request.args.get('min_distance', type=float)
                 max_distance = request.args.get('max_distance', type=float)
+                evidence = request.args.get('evidence', 'all')
+                force_refresh = request.args.get('refresh') == '1'
+
+                if evidence == 'multibyte':
+                    edges, prefix_hex_chars = self._derive_multibyte_evidence_graph(
+                        days=days,
+                        min_observations=min_observations,
+                        force_refresh=force_refresh,
+                    )
+                    return jsonify({
+                        'edges': edges,
+                        'prefix_hex_chars': prefix_hex_chars,
+                        'evidence': 'multibyte',
+                    })
+
+                if evidence == 'neighbors':
+                    edges, prefix_hex_chars = self._derive_neighbor_evidence_graph(
+                        days=days,
+                        min_observations=min_observations,
+                    )
+                    return jsonify({
+                        'edges': edges,
+                        'prefix_hex_chars': prefix_hex_chars,
+                        'evidence': 'neighbors',
+                    })
+
+                # Combined view: mesh_connections cannot record *why* an edge
+                # exists, so re-derive the strongest label from neighbor_links.
+                # Same window as the edges themselves, so stale evidence cannot
+                # claim a recent edge is a current direct neighbor.
+                neighbor_keys = self._neighbor_evidence_edge_keys(days=days)
 
                 conn = self._get_db_connection()
                 cursor = conn.cursor()
+
+                # Edge windows control visibility, but node identity must retain
+                # the lifetime graph's prefix resolution. Otherwise an older
+                # multi-byte edge disappearing from the window can collapse
+                # distinct nodes onto one shorter prefix in the browser.
+                cursor.execute(
+                    '''
+                    SELECT COALESCE(
+                        MAX(
+                            CASE
+                                WHEN LENGTH(from_prefix) > LENGTH(to_prefix)
+                                THEN LENGTH(from_prefix)
+                                ELSE LENGTH(to_prefix)
+                            END
+                        ),
+                        2
+                    ) AS prefix_hex_chars
+                    FROM mesh_connections
+                    '''
+                )
+                prefix_hex_chars = cursor.fetchone()['prefix_hex_chars']
 
                 query = '''
                     SELECT
@@ -3610,20 +3684,34 @@ class BotDataViewer:
                 rows = cursor.fetchall()
 
                 edges = []
-                prefix_hex_chars = 2  # default 1 byte
                 for row in rows:
                     fp, tp = row['from_prefix'], row['to_prefix']
-                    prefix_hex_chars = max(prefix_hex_chars, len(fp) if fp else 0, len(tp) if tp else 0)
+                    is_multibyte = bool(fp) and bool(tp) and len(fp) >= 4 and len(tp) >= 4
+                    from_lower = fp.lower() if fp else ''
+                    to_lower = tp.lower() if tp else ''
+                    from_key = (row['from_public_key'] or '').lower()
+                    to_key = (row['to_public_key'] or '').lower()
+                    if (
+                        (from_lower, to_lower) in neighbor_keys.prefixes
+                        or (from_key and to_key
+                            and (from_key, to_key) in neighbor_keys.public_keys)
+                    ):
+                        edge_evidence = 'neighbors'
+                    elif is_multibyte:
+                        edge_evidence = 'multibyte'
+                    else:
+                        edge_evidence = 'singlebyte'
                     edges.append({
-                        'from_prefix': fp.lower() if fp else '',
-                        'to_prefix': tp.lower() if tp else '',
+                        'from_prefix': from_lower,
+                        'to_prefix': to_lower,
                         'from_public_key': row['from_public_key'],
                         'to_public_key': row['to_public_key'],
                         'observation_count': row['observation_count'],
                         'first_seen': row['first_seen'],
                         'last_seen': row['last_seen'],
                         'avg_hop_position': row['avg_hop_position'],
-                        'geographic_distance': row['geographic_distance']
+                        'geographic_distance': row['geographic_distance'],
+                        'evidence': edge_evidence,
                     })
 
                 return jsonify({'edges': edges, 'prefix_hex_chars': prefix_hex_chars or 2})
@@ -3665,7 +3753,9 @@ class BotDataViewer:
                         MAX(geographic_distance) as max_distance,
                         COUNT(CASE WHEN from_public_key IS NOT NULL THEN 1 END) as edges_with_from_key,
                         COUNT(CASE WHEN to_public_key IS NOT NULL THEN 1 END) as edges_with_to_key,
-                        COUNT(CASE WHEN from_public_key IS NOT NULL AND to_public_key IS NOT NULL THEN 1 END) as edges_with_both_keys
+                        COUNT(CASE WHEN from_public_key IS NOT NULL AND to_public_key IS NOT NULL THEN 1 END) as edges_with_both_keys,
+                        COUNT(CASE WHEN LENGTH(from_prefix) >= 4 AND LENGTH(to_prefix) >= 4 THEN 1 END) as multibyte_edges,
+                        COUNT(CASE WHEN last_seen >= datetime("now", "-1 days") THEN 1 END) as recent_edges_24h
                     FROM mesh_connections
                 ''')
                 edge_stats = cursor.fetchone()
@@ -3692,14 +3782,6 @@ class BotDataViewer:
                 # Get top 10 most connected
                 top_connected = sorted(connection_counts.items(), key=lambda x: x[1], reverse=True)[:10]
 
-                # Get recent edges count (last 24 hours)
-                cursor.execute('''
-                    SELECT COUNT(*) as count
-                    FROM mesh_connections
-                    WHERE last_seen >= datetime("now", "-1 days")
-                ''')
-                recent_edges = cursor.fetchone()['count']
-
                 stats = {
                     'node_count': node_count,
                     'total_edges': edge_stats['total_edges'] or 0,
@@ -3711,8 +3793,9 @@ class BotDataViewer:
                     'edges_with_from_key': edge_stats['edges_with_from_key'] or 0,
                     'edges_with_to_key': edge_stats['edges_with_to_key'] or 0,
                     'edges_with_both_keys': edge_stats['edges_with_both_keys'] or 0,
+                    'multibyte_edges': edge_stats['multibyte_edges'] or 0,
                     'top_connected': [{'prefix': prefix, 'count': count} for prefix, count in top_connected],
-                    'recent_edges_24h': recent_edges
+                    'recent_edges_24h': edge_stats['recent_edges_24h'] or 0
                 }
 
                 return jsonify(stats)
@@ -5491,8 +5574,13 @@ class BotDataViewer:
             """Validate and persist one plugin's settings, then queue a reload."""
             try:
                 data = request.get_json(silent=True) or {}
-                self.config = self._load_config(self.config_path)
-                view = build_plugin_settings_view(self.config, logger=self.logger)
+                self.config = self._load_merged_config()
+                view = build_plugin_settings_view(
+                    self.config,
+                    logger=self.logger,
+                    local_commands_dir=str(self.local_dir / "commands"),
+                    local_services_dir=str(self.local_dir / "service_plugins"),
+                )
                 entry = next(
                     (e for e in view if e['kind'] == kind and e['name'] == name),
                     None,
@@ -5590,7 +5678,26 @@ class BotDataViewer:
                         if brx.match(k) and k.lower() not in written:
                             deletes.setdefault(section, []).append(k)
 
-                store = get_settings_store(self.config, self.config_path, self.db_manager)
+                if section in self._local_sections:
+                    target_path = self.local_config_path
+                elif section in self._base_sections:
+                    target_path = self.config_path
+                else:
+                    # Brand-new section: local commands default into the local
+                    # overlay, everything else into the base config.
+                    target_path = (
+                        self.local_config_path if entry.get('source') == 'local' else self.config_path
+                    )
+
+                if target_path == self.local_config_path and not os.path.exists(target_path):
+                    # update_ini_values() requires the target file to already
+                    # exist (it reads + backs up before writing) — local/config.ini
+                    # may not exist yet on a fresh install.
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    with open(target_path, 'w', encoding='utf-8') as f:
+                        f.write('')
+
+                store = get_settings_store(self.config, target_path, self.db_manager)
                 result = store.write_sections(updates, deletes)
                 backup_path = result.get('backup_path', '') if isinstance(result, dict) else ''
 
@@ -7098,6 +7205,47 @@ class BotDataViewer:
             self.logger.debug(f"packet_stream JSON scan for multibyte: {e}")
         return n
 
+    def _derive_multibyte_evidence_edges(
+        self,
+        days: int | None = None,
+        min_observations: int | None = None,
+        *,
+        force_refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return lifetime-derived multi-byte edges filtered for the API view."""
+        all_edges = self._aggregate_multibyte_evidence_edges(
+            force_refresh=force_refresh
+        )
+        return self._filter_multibyte_evidence_edges(
+            all_edges,
+            days=days,
+            min_observations=min_observations,
+        )
+
+    def _derive_multibyte_evidence_graph(
+        self,
+        days: int | None = None,
+        min_observations: int | None = None,
+        *,
+        force_refresh: bool = False,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Return filtered edges plus the lifetime graph's prefix resolution."""
+        all_edges = self._aggregate_multibyte_evidence_edges(
+            force_refresh=force_refresh
+        )
+        prefix_hex_chars = max(
+            (len(edge['from_prefix']) for edge in all_edges),
+            default=2,
+        )
+        return (
+            self._filter_multibyte_evidence_edges(
+                all_edges,
+                days=days,
+                min_observations=min_observations,
+            ),
+            max(2, prefix_hex_chars),
+        )
+
     @staticmethod
     def _filter_multibyte_evidence_edges(
         edges: list[dict[str, Any]],
@@ -7132,6 +7280,224 @@ class BotDataViewer:
             ):
                 continue
             result.append(edge)
+        return result
+
+    def _aggregate_multibyte_evidence_edges(
+        self, *, force_refresh: bool = False
+    ) -> list[dict[str, Any]]:
+        """Return a bounded-age, single-flight lifetime multi-byte aggregate."""
+        def previous_failure(message: str) -> RuntimeError:
+            failure = self._multibyte_graph_cache_failure
+            if failure is None:
+                return RuntimeError(message)
+            failure_type, failure_message = failure
+            return RuntimeError(
+                f"{message}: {failure_type}: {failure_message}"
+            )
+
+        now = time.monotonic()
+        with self._multibyte_graph_cache_condition:
+            cached = self._multibyte_graph_cache_edges
+            cache_age = now - self._multibyte_graph_cache_created_at
+            failure_age = now - self._multibyte_graph_cache_failure_at
+            retry_suppressed = (
+                self._multibyte_graph_cache_failure is not None
+                and failure_age < self._multibyte_graph_cache_retry_seconds
+            )
+            if retry_suppressed:
+                if cached is not None and not force_refresh:
+                    return cached
+                raise previous_failure(
+                    "Multi-byte mesh aggregation retry suppressed after failure"
+                )
+            if (
+                not force_refresh
+                and cached is not None
+                and cache_age < self._mesh_graph_cache_seconds
+            ):
+                return cached
+
+            if self._multibyte_graph_cache_computing:
+                # Prefer a slightly stale result to making concurrent clients
+                # duplicate the same expensive SQLite aggregation.
+                if cached is not None and not force_refresh:
+                    return cached
+                while self._multibyte_graph_cache_computing:
+                    self._multibyte_graph_cache_condition.wait()
+                cached = self._multibyte_graph_cache_edges
+                if self._multibyte_graph_cache_failure is not None:
+                    if cached is not None and not force_refresh:
+                        return cached
+                    raise previous_failure(
+                        "Concurrent multi-byte mesh aggregation failed"
+                    )
+                if cached is not None:
+                    return cached
+
+            self._multibyte_graph_cache_computing = True
+            stale = cached
+
+        started_at = time.monotonic()
+        try:
+            computed = self._compute_multibyte_evidence_edges()
+        except Exception as exc:
+            self.logger.warning(
+                "Multi-byte mesh aggregation failed%s",
+                "; serving cached data"
+                if stale is not None and not force_refresh
+                else "",
+                exc_info=True,
+            )
+            with self._multibyte_graph_cache_condition:
+                self._multibyte_graph_cache_failure = (
+                    type(exc).__name__,
+                    str(exc),
+                )
+                self._multibyte_graph_cache_failure_at = time.monotonic()
+                self._multibyte_graph_cache_computing = False
+                self._multibyte_graph_cache_condition.notify_all()
+            if stale is not None and not force_refresh:
+                return stale
+            raise
+
+        elapsed = time.monotonic() - started_at
+        with self._multibyte_graph_cache_condition:
+            self._multibyte_graph_cache_edges = computed
+            self._multibyte_graph_cache_created_at = time.monotonic()
+            self._multibyte_graph_cache_failure = None
+            self._multibyte_graph_cache_failure_at = 0.0
+            self._multibyte_graph_cache_computing = False
+            self._multibyte_graph_cache_condition.notify_all()
+
+        self.logger.debug(
+            "Computed %d multi-byte mesh edges in %.3fs",
+            len(computed),
+            elapsed,
+        )
+        return computed
+
+    def _compute_multibyte_evidence_edges(self) -> list[dict[str, Any]]:
+        """Derive mesh edges purely from multi-byte path evidence.
+
+        Splits each observed_paths row with bytes_per_hop >= 2 into consecutive
+        hop pairs and aggregates per directed pair. Unlike mesh_connections, this
+        never mixes in single-byte observations, so edge identity is unambiguous
+        (up to 2/3-byte prefix collisions, which are rare).
+
+        Edges observed at 2-byte resolution are coalesced into a 3-byte edge when
+        exactly one 3-byte edge prefix-matches both endpoints — the same
+        unique-match rule MeshGraph.add_edge applies at write time.
+
+        Returns edge dicts matching the /api/mesh/edges schema, plus:
+          path_count — number of distinct observed paths crossing the edge
+          evidence   — always 'multibyte'
+        """
+        # Split paths and aggregate directed hop pairs in SQLite. This preserves
+        # lifetime counts and cross-resolution coalescing while avoiding one
+        # Python row/dict/list per observed path (hundreds of thousands on busy
+        # meshes). The selected timeframe is applied only after coalescing,
+        # matching the historical client-side filter semantics.
+        query = '''
+            WITH RECURSIVE edge_parts(
+                path_hex, step, observation_count, first_seen, last_seen,
+                hop_position, from_prefix, to_prefix, next_offset
+            ) AS (
+                SELECT
+                    LOWER(path_hex),
+                    bytes_per_hop * 2,
+                    CASE
+                        WHEN observation_count IS NULL OR observation_count = 0 THEN 1
+                        ELSE observation_count
+                    END,
+                    first_seen,
+                    last_seen,
+                    1,
+                    SUBSTR(LOWER(path_hex), 1, bytes_per_hop * 2),
+                    SUBSTR(LOWER(path_hex), bytes_per_hop * 2 + 1, bytes_per_hop * 2),
+                    bytes_per_hop * 4 + 1
+                FROM observed_paths
+                WHERE bytes_per_hop >= 2
+                  AND path_hex IS NOT NULL
+                  AND LENGTH(path_hex) > 0
+                  AND LENGTH(path_hex) % (bytes_per_hop * 2) = 0
+                  AND LENGTH(path_hex) >= bytes_per_hop * 4
+
+                UNION ALL
+
+                SELECT
+                    path_hex,
+                    step,
+                    observation_count,
+                    first_seen,
+                    last_seen,
+                    hop_position + 1,
+                    to_prefix,
+                    SUBSTR(path_hex, next_offset, step),
+                    next_offset + step
+                FROM edge_parts
+                WHERE LENGTH(path_hex) >= next_offset + step - 1
+            )
+            SELECT
+                from_prefix,
+                to_prefix,
+                SUM(observation_count) AS observation_count,
+                COUNT(*) AS path_count,
+                MIN(first_seen) AS first_seen,
+                MAX(last_seen) AS last_seen,
+                SUM(hop_position * observation_count) AS hop_position_sum
+            FROM edge_parts
+            GROUP BY from_prefix, to_prefix
+        '''
+
+        with self._with_db_connection() as conn:
+            rows = conn.execute(query).fetchall()
+
+        edges: dict[tuple[str, str], dict[str, Any]] = {
+            (row['from_prefix'], row['to_prefix']): {
+                'observation_count': row['observation_count'],
+                'path_count': row['path_count'],
+                'first_seen': row['first_seen'],
+                'last_seen': row['last_seen'],
+                'hop_position_sum': row['hop_position_sum'],
+            }
+            for row in rows
+        }
+
+        # Coalesce 2-byte edges into a 3-byte edge when exactly one matches.
+        # (Hops within a path share one resolution, so keys are homogeneous.)
+        by_truncated_key: dict[tuple[str, str], list[tuple[str, str]]] = {}
+        for key in edges:
+            if len(key[0]) == 6:
+                by_truncated_key.setdefault((key[0][:4], key[1][:4]), []).append(key)
+        for key in [k for k in edges if len(k[0]) == 4]:
+            candidates = by_truncated_key.get(key, [])
+            if len(candidates) == 1:
+                target = edges[candidates[0]]
+                source = edges.pop(key)
+                target['observation_count'] += source['observation_count']
+                target['path_count'] += source['path_count']
+                target['hop_position_sum'] += source['hop_position_sum']
+                if source['first_seen'] and (target['first_seen'] is None or source['first_seen'] < target['first_seen']):
+                    target['first_seen'] = source['first_seen']
+                if source['last_seen'] and (target['last_seen'] is None or source['last_seen'] > target['last_seen']):
+                    target['last_seen'] = source['last_seen']
+
+        result = []
+        for (from_prefix, to_prefix), agg in edges.items():
+            result.append({
+                'from_prefix': from_prefix,
+                'to_prefix': to_prefix,
+                'from_public_key': None,
+                'to_public_key': None,
+                'observation_count': agg['observation_count'],
+                'path_count': agg['path_count'],
+                'first_seen': agg['first_seen'],
+                'last_seen': agg['last_seen'],
+                'avg_hop_position': agg['hop_position_sum'] / agg['observation_count'],
+                'geographic_distance': None,
+                'evidence': 'multibyte',
+            })
+        result.sort(key=lambda e: e['last_seen'] or '', reverse=True)
         return result
 
     # Nodes in the neighbor tables are stored as full 32-byte public keys, so the
