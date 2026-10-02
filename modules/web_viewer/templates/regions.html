@@ -221,6 +221,75 @@
         </div>
     </div>
 </div>
+
+<!-- English, for the visitors -->
+<div class="row">
+    <div class="col-12">
+        <hr>
+        <h2 class="h5 mb-2"><i class="fas fa-language"></i> In English</h2>
+        <p class="text-muted mb-3">
+            For visitors who do not read French: this page explains why you may have received a
+            warning message about your region code, and how much of the mesh traffic that is about.
+        </p>
+
+        <div class="card mb-4">
+            <div class="card-header"><i class="fas fa-circle-question"></i> Why do you get a warning?</div>
+            <div class="card-body">
+                <p class="mb-3">
+                    Every message on the mesh carries a <strong>region code</strong> &mdash; a small
+                    label saying which part of the mesh it belongs to. Nodes use it to decide who
+                    should relay a message and how far it should travel.
+                </p>
+                <p class="mb-0">
+                    When a message is sent <em>without</em> a region code, the mesh cannot limit it:
+                    it is treated as <strong>global</strong> and is relayed to the <em>entire</em> mesh,
+                    not just your region. This bot listens to channel traffic, tallies how many
+                    messages have no region code, and &mdash; when that pattern is consistent from a
+                    single sender &mdash; sends that sender a short heads-up. The goal is to keep the
+                    mesh quiet, not to police anyone: setting a region code takes a moment in the
+                    MeshCore app and removes the problem at the source.
+                </p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><i class="fas fa-gears"></i> How it works</div>
+            <div class="card-body">
+                <ol class="rg-steps">
+                    <li>
+                        <strong>The bot only listens.</strong> It reads the channel traffic passing
+                        through the mesh and records, per day and per channel, how many messages had
+                        a region code and how many did not. It does not read the message bodies.
+                    </li>
+                    <li>
+                        <strong>It warns, sparingly.</strong> A sender is only contacted after
+                        repeatedly sending messages without a region code, and only so often:
+                        there is a per-sender cooldown, a minimum gap between any two warnings, and a
+                        daily cap on the total number sent.
+                    </li>
+                    <li>
+                        <strong>You can stop it.</strong> Set a region code in your MeshCore app and
+                        the warnings stop on their own &mdash; that is the fix, not a complaint to
+                        file.
+                    </li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><i class="fas fa-check-circle"></i> If you got one</div>
+            <div class="card-body">
+                <p class="mb-0">
+                    Open the MeshCore app, add a <strong>region code</strong> to your node, and you
+                    are done &mdash; your messages will stop flooding the whole mesh and the bot will
+                    stop sending you the warning. If you believe the message is a mistake, the same
+                    page an admin uses to configure this is under <a href="/region-warnings">Region
+                    Settings</a> in the admin area.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
