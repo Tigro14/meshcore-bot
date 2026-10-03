@@ -39,8 +39,7 @@
     .rg-seg-scoped { background-color: var(--rg-scoped); }
     .rg-seg-unknown { background-color: var(--rg-unknown); }
 
-    /* Day columns. The track is transparent on purpose: a filled one would
-       read as another stacked segment next to the gray "couldn't tell" band. */
+    /* Daily volume columns. */
     .rg-days {
         display: flex;
         align-items: flex-end;
@@ -220,13 +219,18 @@
     </div>
     <div class="col-lg-4">
         <div class="card h-100">
-            <div class="card-header"><i class="fas fa-calendar-day"></i> Daily volume</div>
+            <div class="card-header"><i class="fas fa-calendar-day"></i> Volume quotidien</div>
             <div class="card-body">
+                <div class="mb-3 small rg-legend">
+                    <span><span class="rg-legend-dot rg-seg-global"></span>Sans région</span>
+                    <span><span class="rg-legend-dot rg-seg-scoped"></span>Avec région</span>
+                    <span><span class="rg-legend-dot rg-seg-unknown"></span>Non classifié</span>
+                </div>
                 <div id="rg-days-wrap">
                     <div class="rg-days" id="rg-days"></div>
                     <div class="d-flex justify-content-between small text-muted mt-2" id="rg-days-range"></div>
-                    <hr>
                 </div>
+                <hr>
                 <div id="rg-totals"><div class="loading">Chargement&hellip;</div></div>
             </div>
         </div>
@@ -383,7 +387,36 @@
                 return;
             }
             this.renderTraffic();
+            this.renderDays();
             this.renderTotals();
+        }
+
+        renderDays() {
+            const series = this.data.series || [];
+            const host = el('rg-days');
+            const peak = series.reduce(
+                (max, d) => Math.max(max, d.scoped + d.global + d.unknown), 0);
+            el('rg-days-wrap').hidden = peak === 0;
+            host.innerHTML = series.map((d) => {
+                const total = d.scoped + d.global + d.unknown;
+                const height = peak ? Math.max(2, Math.round(100 * total / peak)) : 0;
+                const seg = (n) => (total ? (100 * n / total) : 0).toFixed(2) + '%';
+                const label = d.date + ': ' + d.global + ' sans région, ' + d.scoped
+                    + ' avec région, ' + d.unknown + ' non classifiés';
+                return '<div class="rg-day" title="' + escapeHtml(label) + '">'
+                    + '<div style="height:' + height + '%" aria-hidden="true">'
+                    + '<span class="rg-seg-global" style="height:' + seg(d.global) + '"></span>'
+                    + '<span class="rg-seg-scoped" style="height:' + seg(d.scoped) + '"></span>'
+                    + '<span class="rg-seg-unknown" style="height:' + seg(d.unknown) + '"></span>'
+                    + '</div></div>';
+            }).join('');
+            if (series.length) {
+                el('rg-days-range').innerHTML =
+                    '<span>' + escapeHtml(series[0].date) + '</span>'
+                    + '<span>' + escapeHtml(series[series.length - 1].date) + '</span>';
+            } else {
+                el('rg-days-range').innerHTML = '';
+            }
         }
 
         renderTraffic() {

@@ -155,7 +155,7 @@ class TestAllowedTables:
             'greeted_users', 'feed_subscriptions', 'feed_activity', 'feed_errors',
             'path_stats', 'unique_advert_packets', 'schema_version',
             'channel_operations', 'channels', 'feed_message_queue',
-            'bbs_messages',
+            'bbs_messages', 'daily_rollup',
         }
         assert expected_tables == BotDataViewer.ALLOWED_TABLES
 
