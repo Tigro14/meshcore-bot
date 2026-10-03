@@ -387,6 +387,8 @@
             // Mesh tiles
             this.tile('nodes-24h', mesh.nodes_24h, deltas.nodes, series.nodes);
             this.tile('adverts-24h', mesh.adverts_24h, deltas.adverts, series.adverts);
+            this.tile('adverts-24h-singlebyte', mesh.adverts_24h_singlebyte,
+                deltas.repeaters_singlebyte, series.repeaters_singlebyte);
             this.tile('new-nodes', mesh.new_nodes_24h, deltas.new_nodes, series.new_nodes);
             setText('new-nodes-7d', formatNumber(mesh.new_nodes_7d) + ' in 7d');
             setText('gone-quiet', formatNumber(mesh.gone_quiet_7d));

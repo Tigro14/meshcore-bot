@@ -1037,6 +1037,13 @@ class DashboardStatsService:
             mesh["new_nodes_24h"] = row[0] or 0
             mesh["new_nodes_7d"] = row[1] or 0
 
+            row = conn.execute(
+                "SELECT adverts_singlebyte_total FROM daily_rollup WHERE date = ?",
+                (today,),
+            ).fetchone()
+            if row and row[0] is not None:
+                mesh["adverts_24h_singlebyte"] = row[0]
+
         if sources & SOURCE_CONTACT_TRACKING:
             row = conn.execute(
                 """

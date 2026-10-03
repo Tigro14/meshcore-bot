@@ -126,6 +126,9 @@
                             <small class="text-muted">Adverts 24h</small>
                         </div>
                     </div>
+                    <div class="text-center mt-2">
+                        <canvas id="adverts-24h-singlebyte-spark" width="120" height="32"></canvas>
+                    </div>
                 </div>
             </div>
             <div class="card flex-grow-1 d-flex flex-column">
@@ -645,6 +648,9 @@ class ModernDashboard {
             // Update all metrics
             this.updateMetrics(statsData);
             
+            // Load single-byte sparkline
+            this.loadSinglebyteSparkline();
+            
             // Load analytics with default time windows
             const usersTimeWindow = document.getElementById('top-users-time-window')?.value || 'all';
             const commandsTimeWindow = document.getElementById('top-commands-time-window')?.value || 'all';
@@ -993,6 +999,46 @@ class ModernDashboard {
             element.textContent = value || 0;
         } else {
             console.error(`Element ${elementId} not found!`);
+        }
+    }
+
+    async loadSinglebyteSparkline() {
+        try {
+            const resp = await fetch('/api/dashboard/series?metric=repeaters_singlebyte&days=7');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const points = data.points || [];
+            const canvas = document.getElementById('adverts-24h-singlebyte-spark');
+            if (!canvas || points.length === 0) return;
+            const values = points.map(p => p.value);
+            const labels = points.map(p => p.date.slice(5));
+            if (this.singlebyteSpark) this.singlebyteSpark.destroy();
+            this.singlebyteSpark = new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: values,
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245,158,11,0.15)',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        fill: true,
+                        tension: 0.3,
+                    }]
+                },
+                options: {
+                    responsive: false,
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    scales: {
+                        x: { display: false },
+                        y: { display: false, beginAtZero: true }
+                    },
+                    animation: false,
+                },
+            });
+        } catch (e) {
+            console.error('Singlebyte sparkline error:', e);
         }
     }
     
