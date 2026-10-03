@@ -4052,7 +4052,7 @@ class BotDataViewer:
                 self.logger.debug(f"Current location data - city: {current_city}, state: {current_state}, country: {current_country}")
 
                 try:
-                    location_info = self.repeater_manager._get_full_location_from_coordinates(lat, lon)
+                    location_info = self._get_repeater_manager()._get_full_location_from_coordinates(lat, lon)
                     self.logger.debug(f"Geocoding result for {name}: {location_info}")
                 except Exception as geocode_error:
                     self.logger.error(f"Exception during geocoding for {name} at {lat}, {lon}: {geocode_error}", exc_info=True)
