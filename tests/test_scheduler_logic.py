@@ -488,6 +488,7 @@ class TestClockSyncAdminScheduler:
         scheduler.bot.connected = True
         scheduler.bot.is_radio_zombie = False
         scheduler.bot.is_radio_offline = False
+        scheduler.bot.db_manager = None
         scheduler.bot.meshcore = Mock()
         scheduler.bot.meshcore.get_contact_by_name = Mock(side_effect=lambda value: None)
         scheduler.bot.meshcore.dispatcher = Mock()
@@ -501,6 +502,7 @@ class TestClockSyncAdminScheduler:
         scheduler.bot.meshcore.contacts = {
             "t": {"name": "TargetA", "public_key": "deadbeef00112233"},
         }
+        scheduler._get_clock_sync_target_row = Mock(return_value=None)
         scheduler.bot.meshcore.dispatcher.wait_for_event = AsyncMock(
             return_value=Event(
                 EventType.CONTACT_MSG_RECV,
