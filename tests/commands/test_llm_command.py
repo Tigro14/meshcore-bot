@@ -1,6 +1,7 @@
 """Tests for modules.commands.llm_command."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -102,11 +103,13 @@ class TestLlmCommand:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": "<think>chain</think><thinking>chain2</thinking>Mesh is a decentralized radio network."
+            "choices": [
+                {
+                    "message": {
+                        "content": "<think>chain</think><thinking>chain2</thinking>Mesh is a decentralized radio network."
+                    }
                 }
-            }]
+            ]
         }
 
         with patch("modules.commands.llm_command.requests.post", return_value=mock_response) as post_mock:
@@ -118,6 +121,37 @@ class TestLlmCommand:
         assert "Mesh is a decentralized radio network." in sent_text
         assert "<think>" not in sent_text
         assert "<thinking>" not in sent_text
+
+    @pytest.mark.asyncio
+    async def test_execute_refreshes_retrieves_isolates_and_repairs_wiki_answer(self, command_mock_bot):
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        section = SimpleNamespace(content="Use #centre and ABC-123.", path="manual/channels")
+        match = SimpleNamespace(section=section)
+        result = SimpleNamespace(
+            context="WIKI_REFERENCE_DATA_BEGIN\nUse #centre and ABC-123.\nWIKI_REFERENCE_DATA_END",
+            matches=(match,),
+            best_score=12.0,
+        )
+        cmd.wiki_rag = Mock()
+        cmd.wiki_rag.retrieve.return_value = result
+        cmd.llm_db_query_enabled = True
+        cmd._get_sender_position = Mock()
+        cmd._extract_sql = Mock()
+        response = Mock(status_code=200)
+        response.json.return_value = {"choices": [{"message": {"content": "Use centre and ABC-124."}}]}
+
+        with patch("modules.commands.llm_command.requests.post", return_value=response) as post_mock:
+            assert await cmd.execute(mock_message(content="llm show channel", is_dm=True)) is True
+
+        cmd._extract_sql.assert_not_called()
+        cmd.wiki_rag.ensure_fresh.assert_called_once_with()
+        cmd.wiki_rag.retrieve.assert_called_once_with("show channel")
+        payload = post_mock.call_args.kwargs["json"]
+        assert payload["temperature"] == 0.0
+        assert "WIKI_REFERENCE_DATA_BEGIN" in payload["messages"][0]["content"]
+        assert command_mock_bot.command_manager.send_response.call_args[0][1] == "Use #centre and ABC-124."
 
     @pytest.mark.asyncio
     async def test_execute_handles_connection_errors(self, command_mock_bot):
@@ -182,6 +216,7 @@ class TestLlmCommand:
     def test_context_pruned_after_expiry(self, command_mock_bot):
         """Entries older than context_window_seconds are pruned."""
         import time
+
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Llm_Command", "context_window_seconds", "60")
         cmd = LlmCommand(command_mock_bot)
@@ -196,6 +231,7 @@ class TestLlmCommand:
     def test_context_max_turns_limits_history(self, command_mock_bot):
         """Only the most recent context_max_turns turns are included."""
         import time
+
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Llm_Command", "context_max_turns", "2")
         cmd = LlmCommand(command_mock_bot)
@@ -224,9 +260,7 @@ class TestLlmCommand:
 
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "LoRa uses chirp spread spectrum."}}]
-        }
+        mock_response.json.return_value = {"choices": [{"message": {"content": "LoRa uses chirp spread spectrum."}}]}
 
         with patch("modules.commands.llm_command.requests.post", return_value=mock_response) as post_mock:
             await cmd.execute(msg)
@@ -351,11 +385,13 @@ class TestLlmCommand:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": "Mesh networking is a decentralized network topology where each node relays data for the network, creating a robust and self-healing infrastructure."
+            "choices": [
+                {
+                    "message": {
+                        "content": "Mesh networking is a decentralized network topology where each node relays data for the network, creating a robust and self-healing infrastructure."
+                    }
                 }
-            }]
+            ]
         }
 
         with patch("modules.commands.llm_command.requests.post", return_value=mock_response):
@@ -488,9 +524,14 @@ class TestLlmCommand:
         command_mock_bot.config.set("Llm_Command", "wiki_rag_index_path", str(index_file))
         cmd = LlmCommand(command_mock_bot)
 
-        payload = cmd._build_payload(prompt="comment activer debug radio")
+        history = [{"role": "assistant", "content": "unrelated history"}]
+        payload = cmd._build_payload(prompt="comment activer debug radio", history=history)
         system_messages = [m["content"] for m in payload["messages"] if m["role"] == "system"]
-        assert any("Wiki.js context" in msg for msg in system_messages)
+        assert len(system_messages) == 1
+        assert "WIKI_REFERENCE_DATA_BEGIN" in system_messages[0]
+        assert "using only the Wiki.js reference data" in system_messages[0]
+        assert all(message["content"] != "unrelated history" for message in payload["messages"])
+        assert payload["temperature"] == 0.0
 
     def test_build_payload_skips_wiki_rag_when_disabled(self, command_mock_bot, tmp_path):
         self._enable_llm(command_mock_bot)
@@ -512,4 +553,36 @@ class TestLlmCommand:
 
         payload = cmd._build_payload(prompt="comment activer debug radio")
         system_messages = [m["content"] for m in payload["messages"] if m["role"] == "system"]
-        assert all("Wiki.js context" not in msg for msg in system_messages)
+        assert all("WIKI_REFERENCE_DATA_BEGIN" not in msg for msg in system_messages)
+
+    def test_repair_wiki_literals_restores_hashes_case_and_technical_typos(self):
+        source = "Use #centre with Device_ID and ABC-123."
+        response = "Use centre with devic_id and ABC-123."
+
+        repaired = LlmCommand._repair_wiki_literals(response, source)
+
+        assert repaired == "Use #centre with Device_ID and ABC-123."
+
+    @pytest.mark.parametrize("response", ["ABC-124", "868.300", "SF8", "node42"])
+    def test_repair_wiki_literals_preserves_numeric_values(self, response):
+        source = "ABC-123 868.500 SF7 node43"
+        assert LlmCommand._repair_wiki_literals(response, source) == response
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("retrieval_fails", [False, True])
+    async def test_execute_without_wiki_match_preserves_normal_context(self, command_mock_bot, retrieval_fails):
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.wiki_rag = Mock()
+        cmd.wiki_rag.retrieve.return_value = None
+        if retrieval_fails:
+            cmd.wiki_rag.retrieve.side_effect = OSError("index unavailable")
+        cmd._inject_current_time_into_prompt = Mock(return_value="normal network context")
+        response = Mock(status_code=200)
+        response.json.return_value = {"choices": [{"message": {"content": "Network answer"}}]}
+        with patch("modules.commands.llm_command.requests.post", return_value=response) as post_mock:
+            assert await cmd.execute(mock_message(content="llm network status", is_dm=True)) is True
+        payload = post_mock.call_args.kwargs["json"]
+        assert payload["messages"][0]["content"] == "normal network context"
+        assert payload["temperature"] == cmd.temperature
