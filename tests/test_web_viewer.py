@@ -1055,6 +1055,29 @@ class TestDatabaseRoutes:
         data = resp.get_json()
         assert isinstance(data, dict)
 
+    def test_api_stats_singlebyte_repeater_volume(self, viewer, client):
+        """The tile reads the rollup the refresher writes, not a fresh aggregate."""
+        # Dates are written with SQLite's date('now'), the same source the
+        # endpoint reads with, so the test is timezone-independent.  The
+        # writes go through the viewer's own connection so they are committed
+        # before the request runs.
+        with closing(viewer._get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO complete_contact_tracking
+                   (public_key, name, role, out_bytes_per_hop)
+                   VALUES ('aa' * 32, 'rpt-1b', 'repeater', 1)"""
+            )
+            cursor.execute(
+                "INSERT INTO daily_stats (date, public_key, advert_count) VALUES (date('now'), 'aa' * 32, 17)"
+            )
+            cursor.execute(
+                "INSERT INTO daily_rollup (date, adverts_singlebyte_total) VALUES (date('now'), 17)"
+            )
+            conn.commit()
+        data = client.get("/api/stats").get_json()
+        assert data["advertisements_24h_singlebyte"] == 17
+
     def test_api_stats_with_window_params(self, client):
         resp = client.get("/api/stats?top_users_window=7d&top_commands_window=30d")
         assert resp.status_code == 200

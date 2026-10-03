@@ -229,6 +229,7 @@ class BotDataViewer:
         'schema_version',
         'greeter_rollout',
         'bbs_messages',
+        'daily_rollup',
     }
 
     def __init__(self, db_path="meshcore_bot.db", repeater_db_path=None, config_path="config.ini"):
@@ -6396,6 +6397,8 @@ class BotDataViewer:
                 'tables': tables
             }
 
+            self._set_singlebyte_advert_volume(cursor, stats, tables)
+
             # Contact and tracking statistics
             if 'complete_contact_tracking' in tables:
                 cursor.execute("SELECT COUNT(*) FROM complete_contact_tracking")
@@ -6981,6 +6984,15 @@ class BotDataViewer:
         finally:
             if conn:
                 conn.close()
+
+    def _set_singlebyte_advert_volume(self, cursor, stats, tables):
+        if 'daily_rollup' in tables:
+            cursor.execute(
+                "SELECT adverts_singlebyte_total FROM daily_rollup WHERE date = date('now')"
+            )
+            row = cursor.fetchone()
+            if row and row[0] is not None:
+                stats['advertisements_24h_singlebyte'] = row[0]
 
     def _get_database_info(self):
         """Get comprehensive database information for database page"""

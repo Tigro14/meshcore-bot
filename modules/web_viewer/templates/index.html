@@ -115,6 +115,19 @@
                     </div>
                 </div>
             </div>
+            <div class="card flex-shrink-0">
+                <div class="card-header">
+                    <i class="fas fa-broadcast-tower"></i> Single-byte repeaters (no region)
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-4">
+                            <h4 id="adverts-24h-singlebyte" class="text-warning">0</h4>
+                            <small class="text-muted">Adverts 24h</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="card flex-grow-1 d-flex flex-column">
                 <div class="card-header">
                     <i class="fas fa-microchip"></i> Devices &amp; cache
@@ -683,6 +696,7 @@ class ModernDashboard {
         
         this.updateElement('active-cache-entries', data.active_cache_entries);
         
+        this.updateElement('adverts-24h-singlebyte', data.advertisements_24h_singlebyte);
         this.updateElement('total-messages', data.total_messages);
         this.updateElement('messages-24h', data.messages_24h);
         this.updateElement('total-commands', data.total_commands);
