@@ -2345,13 +2345,17 @@ class ModernContactsManager {
         const modal = new bootstrap.Modal(document.getElementById('advertModal'));
         modal.show();
 
-        // Generate QR code for the public key
+        // Generate QR code with the meshcore://contact/add deep link
         const qrContainer = document.getElementById('qrCodeContainer');
         if (qrContainer && publicKey) {
+            const roleToType = { companion: 1, repeater: 2, roomserver: 3, sensor: 4 };
+            const contactType = roleToType[contact.role] || 1;
+            const qrName = contact.username || contact.adv_name || 'Unknown';
+            const qrUrl = `meshcore://contact/add?name=${encodeURIComponent(qrName)}&public_key=${publicKey.toLowerCase()}&type=${contactType}`;
             new QRCode(qrContainer, {
-                text: publicKey,
-                width: 160,
-                height: 160,
+                text: qrUrl,
+                width: 200,
+                height: 200,
                 colorDark: '#000000',
                 colorLight: '#ffffff',
                 correctLevel: QRCode.CorrectLevel.M
