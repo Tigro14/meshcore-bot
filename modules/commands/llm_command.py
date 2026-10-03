@@ -1215,6 +1215,7 @@ class LlmCommand(BaseCommand):
                 cleaned,
                 flags=re.IGNORECASE | re.DOTALL,
             )
+        cleaned = self._strip_markdown(cleaned)
         cleaned = " ".join(cleaned.split()).strip()
 
         if not cleaned:
@@ -1225,6 +1226,37 @@ class LlmCommand(BaseCommand):
             cleaned = (cleaned + "...") if cleaned else "..."
 
         return cleaned
+
+    @staticmethod
+    def _strip_markdown(text: str) -> str:
+        """Remove Markdown syntax for radio transmission (bandwidth-limited)."""
+        if not text:
+            return text
+        # Code blocks: ```lang\ncontent\n``` → content
+        text = re.sub(r"```(?:\w+)?\n?(.*?)```", r"\1", text, flags=re.DOTALL)
+        # Inline code: `code` → code
+        text = re.sub(r"`([^`]+)`", r"\1", text)
+        # Bold/italic: **text** or *text* → text
+        text = re.sub(r"\*{1,2}([^*\n]+?)\*{1,2}", r"\1", text)
+        # Remove any remaining standalone asterisks (unpaired)
+        text = re.sub(r"\*(?!\w)", "", text)
+        # Strikethrough: ~~text~~ → text
+        text = re.sub(r"~~([^~]+)~~", r"\1", text)
+        # Blockquotes: > text → text (handle multiple > on same line)
+        text = re.sub(r"^(?:>\s?)+", "", text, flags=re.MULTILINE)
+        # Headers: # text → text
+        text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+        # Horizontal rules: --- or *** → remove
+        text = re.sub(r"^\s*[-*_]{3,}\s*$", "", text, flags=re.MULTILINE)
+        # Links: [text](url) → text
+        text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+        # Images: ![alt](url) → alt
+        text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
+        # HTML tags (basic)
+        text = re.sub(r"<[^>]+>", "", text)
+        # Remove trailing whitespace on lines
+        text = re.sub(r"[ \t]+$", "", text, flags=re.MULTILINE)
+        return text
 
     def _split_response_into_pages(self, content: str) -> list[str]:
         """Split a long response into multiple pages based on pagination settings.
