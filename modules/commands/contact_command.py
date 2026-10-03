@@ -5,12 +5,24 @@ Adds the bot contact info to the current channel
 """
 
 import re
+import urllib.parse
 from typing import Any, Optional
 
 from modules.commands.base_command import BaseCommand
 from modules.models import MeshMessage
 
 PUBLIC_KEY_RE = re.compile(r'^[0-9a-fA-F]{64}$')
+
+# Maps AdvType (from self_info["adv_type"]) to MeshCore contact QR "type" param
+# AdvType: NONE=0, CHAT=1, REPEATER=2, ROOM=3, SENSOR=4
+# QR type: 1=Companion, 2=Repeater, 3=Room Server, 4=Sensor
+ADV_TYPE_TO_CONTACT_TYPE = {
+    1: 1,  # CHAT   -> Companion
+    2: 2,  # REPEATER -> Repeater
+    3: 3,  # ROOM   -> Room Server
+    4: 4,  # SENSOR -> Sensor
+}
+DEFAULT_CONTACT_TYPE = 1  # Companion
 
 
 class ContactCommand(BaseCommand):
@@ -74,8 +86,25 @@ class ContactCommand(BaseCommand):
 
         return self._cleaned_content_matches(message, _matches)
 
+    def _self_info_raw(self, key: str):
+        """Read a raw field from the radio's self_info, which may be a dict or an object.
+
+        Args:
+            key: The self_info field name.
+
+        Returns:
+            The field value, or None if unavailable.
+        """
+        meshcore: Any = getattr(self.bot, 'meshcore', None)
+        self_info = getattr(meshcore, 'self_info', None) if meshcore else None
+        if not self_info:
+            return None
+        if isinstance(self_info, dict):
+            return self_info.get(key)
+        return getattr(self_info, key, None)
+
     def _self_info_value(self, key: str) -> Optional[str]:
-        """Read a field from the radio's self_info, which may be a dict or an object.
+        """Read a string field from the radio's self_info.
 
         Args:
             key: The self_info field name.
@@ -83,15 +112,22 @@ class ContactCommand(BaseCommand):
         Returns:
             str: The field value, or None if unavailable.
         """
-        meshcore: Any = getattr(self.bot, 'meshcore', None)
-        self_info = getattr(meshcore, 'self_info', None) if meshcore else None
-        if not self_info:
-            return None
-        if isinstance(self_info, dict):
-            value = self_info.get(key)
-        else:
-            value = getattr(self_info, key, None)
+        value = self._self_info_raw(key)
         return str(value).strip() if value else None
+
+    def _contact_type(self) -> int:
+        """Determine the MeshCore contact type from the radio's adv_type.
+
+        Returns:
+            int: The contact type (1=Companion, 2=Repeater, 3=Room Server, 4=Sensor).
+        """
+        adv_type = self._self_info_raw('adv_type')
+        if adv_type is not None:
+            try:
+                return ADV_TYPE_TO_CONTACT_TYPE.get(int(adv_type), DEFAULT_CONTACT_TYPE)
+            except (ValueError, TypeError):
+                pass
+        return DEFAULT_CONTACT_TYPE
 
     async def execute(self, message: MeshMessage) -> bool:
         """Execute the contact command.
@@ -113,4 +149,9 @@ class ContactCommand(BaseCommand):
             self.logger.warning("Contact command: no device name in self_info")
             return await self.send_response(message, self.translate('commands.contact.unavailable'))
 
-        return await self.send_response(message, f"<{public_key.lower()}:1:{name}>")
+        encoded_name = urllib.parse.quote(name, safe='')
+        contact_type = self._contact_type()
+        return await self.send_response(
+            message,
+            f"meshcore://contact/add?name={encoded_name}&public_key={public_key.lower()}&type={contact_type}"
+        )

@@ -64,19 +64,37 @@ class TestMatching:
 
 
 class TestExecute:
-    def test_sends_contact_card(self):
+    def test_sends_contact_card_default_companion(self):
         cmd = _make_command({"public_key": PUBKEY, "name": "TestBot"})
         assert asyncio.run(cmd.execute(mock_message("contact"))) is True
         cmd.send_response.assert_awaited_once()
-        assert cmd.send_response.await_args[0][1] == f"<{PUBKEY}:1:TestBot>"
+        expected = (
+            f"meshcore://contact/add?name=TestBot"
+            f"&public_key={PUBKEY}&type=1"
+        )
+        assert cmd.send_response.await_args[0][1] == expected
 
     def test_reads_self_info_object(self):
-        self_info = MagicMock(spec=["public_key", "name"])
+        self_info = MagicMock(spec=["public_key", "name", "adv_type"])
         self_info.public_key = PUBKEY.upper()
         self_info.name = "TestBot"
+        self_info.adv_type = 1
         cmd = _make_command(self_info)
         assert asyncio.run(cmd.execute(mock_message("contact"))) is True
-        assert cmd.send_response.await_args[0][1] == f"<{PUBKEY}:1:TestBot>"
+        expected = (
+            f"meshcore://contact/add?name=TestBot"
+            f"&public_key={PUBKEY}&type=1"
+        )
+        assert cmd.send_response.await_args[0][1] == expected
+
+    def test_url_encodes_name_with_spaces(self):
+        cmd = _make_command({"public_key": PUBKEY, "name": "My Bot"})
+        asyncio.run(cmd.execute(mock_message("contact")))
+        expected = (
+            f"meshcore://contact/add?name=My%20Bot"
+            f"&public_key={PUBKEY}&type=1"
+        )
+        assert cmd.send_response.await_args[0][1] == expected
 
     def test_missing_self_info_reports_unavailable(self):
         cmd = _make_command(None)
@@ -92,6 +110,45 @@ class TestExecute:
         cmd = _make_command({"public_key": PUBKEY})
         asyncio.run(cmd.execute(mock_message("contact")))
         assert cmd.send_response.await_args[0][1] == "commands.contact.unavailable"
+
+
+class TestContactType:
+    """Tests for the adv_type -> contact type mapping."""
+
+    def test_chat_maps_to_companion(self):
+        cmd = _make_command({"public_key": PUBKEY, "name": "TestBot", "adv_type": 1})
+        asyncio.run(cmd.execute(mock_message("contact")))
+        assert cmd.send_response.await_args[0][1].endswith("type=1")
+
+    def test_repeater_maps_to_repeater(self):
+        cmd = _make_command({"public_key": PUBKEY, "name": "TestBot", "adv_type": 2})
+        asyncio.run(cmd.execute(mock_message("contact")))
+        assert cmd.send_response.await_args[0][1].endswith("type=2")
+
+    def test_room_maps_to_room_server(self):
+        cmd = _make_command({"public_key": PUBKEY, "name": "TestBot", "adv_type": 3})
+        asyncio.run(cmd.execute(mock_message("contact")))
+        assert cmd.send_response.await_args[0][1].endswith("type=3")
+
+    def test_sensor_maps_to_sensor(self):
+        cmd = _make_command({"public_key": PUBKEY, "name": "TestBot", "adv_type": 4})
+        asyncio.run(cmd.execute(mock_message("contact")))
+        assert cmd.send_response.await_args[0][1].endswith("type=4")
+
+    def test_none_adv_type_defaults_to_companion(self):
+        cmd = _make_command({"public_key": PUBKEY, "name": "TestBot", "adv_type": 0})
+        asyncio.run(cmd.execute(mock_message("contact")))
+        assert cmd.send_response.await_args[0][1].endswith("type=1")
+
+    def test_missing_adv_type_defaults_to_companion(self):
+        cmd = _make_command({"public_key": PUBKEY, "name": "TestBot"})
+        asyncio.run(cmd.execute(mock_message("contact")))
+        assert cmd.send_response.await_args[0][1].endswith("type=1")
+
+    def test_invalid_adv_type_defaults_to_companion(self):
+        cmd = _make_command({"public_key": PUBKEY, "name": "TestBot", "adv_type": 99})
+        asyncio.run(cmd.execute(mock_message("contact")))
+        assert cmd.send_response.await_args[0][1].endswith("type=1")
 
 
 class TestEnabledFlag:
