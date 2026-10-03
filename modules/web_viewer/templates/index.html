@@ -117,17 +117,20 @@
             </div>
             <div class="card flex-shrink-0">
                 <div class="card-header">
-                    <i class="fas fa-broadcast-tower"></i> Single-byte repeaters (no region)
+                    <i class="fas fa-broadcast-tower"></i> Daily advert volume (no region)
                 </div>
                 <div class="card-body">
                     <div class="row text-center">
-                        <div class="col-4">
-                            <h4 id="adverts-24h-singlebyte" class="text-warning">0</h4>
-                            <small class="text-muted">Adverts 24h</small>
+                        <div class="col-6">
+                            <h4 id="adverts-24h" class="text-primary">0</h4>
+                            <small class="text-muted">Daily total</small>
+                            <div class="mt-1"><canvas id="adverts-24h-spark" width="100" height="28"></canvas></div>
                         </div>
-                    </div>
-                    <div class="text-center mt-2">
-                        <canvas id="adverts-24h-singlebyte-spark" width="120" height="32"></canvas>
+                        <div class="col-6">
+                            <h4 id="adverts-24h-singlebyte" class="text-warning">0</h4>
+                            <small class="text-muted">1-byte repeaters</small>
+                            <div class="mt-1"><canvas id="adverts-24h-singlebyte-spark" width="100" height="28"></canvas></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -648,8 +651,8 @@ class ModernDashboard {
             // Update all metrics
             this.updateMetrics(statsData);
             
-            // Load single-byte sparkline
-            this.loadSinglebyteSparkline();
+            // Load advert sparklines (total + single-byte)
+            this.loadAdvertSparklines();
             
             // Load analytics with default time windows
             const usersTimeWindow = document.getElementById('top-users-time-window')?.value || 'all';
@@ -702,6 +705,7 @@ class ModernDashboard {
         
         this.updateElement('active-cache-entries', data.active_cache_entries);
         
+        this.updateElement('adverts-24h', data.advertisements_24h);
         this.updateElement('adverts-24h-singlebyte', data.advertisements_24h_singlebyte);
         this.updateElement('total-messages', data.total_messages);
         this.updateElement('messages-24h', data.messages_24h);
@@ -1002,43 +1006,51 @@ class ModernDashboard {
         }
     }
 
-    async loadSinglebyteSparkline() {
+    _renderSpark(canvasId, values, labels, color, storeKey) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || values.length === 0) return;
+        if (this[storeKey]) this[storeKey].destroy();
+        this[storeKey] = new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    data: values,
+                    borderColor: color,
+                    backgroundColor: color + '22',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    fill: true,
+                    tension: 0.3,
+                }]
+            },
+            options: {
+                responsive: false,
+                plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                scales: { x: { display: false }, y: { display: false, beginAtZero: true } },
+                animation: false,
+            },
+        });
+    }
+
+    async loadAdvertSparklines() {
         try {
-            const resp = await fetch('/api/dashboard/series?metric=repeaters_singlebyte&days=7');
-            if (!resp.ok) return;
-            const data = await resp.json();
-            const points = data.points || [];
-            const canvas = document.getElementById('adverts-24h-singlebyte-spark');
-            if (!canvas || points.length === 0) return;
-            const values = points.map(p => p.value);
-            const labels = points.map(p => p.date.slice(5));
-            if (this.singlebyteSpark) this.singlebyteSpark.destroy();
-            this.singlebyteSpark = new Chart(canvas.getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels,
-                    datasets: [{
-                        data: values,
-                        borderColor: '#f59e0b',
-                        backgroundColor: 'rgba(245,158,11,0.15)',
-                        borderWidth: 1.5,
-                        pointRadius: 0,
-                        fill: true,
-                        tension: 0.3,
-                    }]
-                },
-                options: {
-                    responsive: false,
-                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
-                    scales: {
-                        x: { display: false },
-                        y: { display: false, beginAtZero: true }
-                    },
-                    animation: false,
-                },
-            });
+            const [totalResp, singleResp] = await Promise.all([
+                fetch('/api/dashboard/series?metric=adverts&days=7'),
+                fetch('/api/dashboard/series?metric=repeaters_singlebyte&days=7'),
+            ]);
+            if (totalResp.ok) {
+                const d = await totalResp.json();
+                const pts = d.points || [];
+                this._renderSpark('adverts-24h-spark', pts.map(p => p.value), pts.map(p => p.date.slice(5)), '#0d6efd', 'advertsSpark');
+            }
+            if (singleResp.ok) {
+                const d = await singleResp.json();
+                const pts = d.points || [];
+                this._renderSpark('adverts-24h-singlebyte-spark', pts.map(p => p.value), pts.map(p => p.date.slice(5)), '#f59e0b', 'singlebyteSpark');
+            }
         } catch (e) {
-            console.error('Singlebyte sparkline error:', e);
+            console.error('Advert sparkline error:', e);
         }
     }
     
