@@ -173,8 +173,8 @@ class StatsCommand(BaseCommand):
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO message_stats
-                    (timestamp, sender_id, channel, content, is_dm, hops, snr, rssi, path)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (timestamp, sender_id, channel, content, is_dm, hops, snr, rssi, path, scope_verdict)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     message.timestamp or int(time.time()),
                     sender_id,
@@ -184,7 +184,8 @@ class StatsCommand(BaseCommand):
                     message.hops,
                     message.snr,
                     message.rssi,
-                    message.path
+                    message.path,
+                    getattr(message, "scope_verdict", None),
                 ))
                 conn.commit()
         except Exception as e:

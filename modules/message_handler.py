@@ -11,7 +11,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Iterable
 from hashlib import sha256
-from typing import Any, TypedDict
+from typing import Any, Optional, TypedDict
 
 from .enums import AdvertFlags, DeviceRole, PayloadType, PayloadVersion, RouteType
 from .graph_trace_helper import update_mesh_graph_from_trace_data
@@ -396,8 +396,13 @@ class MessageHandler:
         packet_info: dict[str, Any] | None,
         scope_rf_data: dict[str, Any] | None,
         scope_packet_info: dict[str, Any] | None,
-    ) -> None:
-        """Hand this channel message's scope verdict to the region-warning monitor.
+    ) -> Optional[str]:
+        """Classify this channel message's flood scope and hand the verdict to the
+        region-warning monitor.
+
+        Returns the verdict ("scoped" / "global" / "unknown") so the caller can
+        record it on the message for stats; returns None when the verdict could
+        not be determined (no monitor, or a classification failure).
 
         Messages the radio cached from before this connection are skipped: on a
         reconnect they arrive as a burst of old traffic, and counting them would
@@ -405,9 +410,9 @@ class MessageHandler:
         """
         monitor = getattr(self.bot, "region_warning_monitor", None)
         if monitor is None:
-            return
+            return None
         if self._is_old_cached_message(sender_timestamp):
-            return
+            return None
         try:
             verdict = self._classify_channel_flood_scope(
                 reply_scope=reply_scope,
@@ -416,6 +421,10 @@ class MessageHandler:
                 scope_rf_data=scope_rf_data,
                 scope_packet_info=scope_packet_info,
             )
+        except Exception:
+            self.logger.exception("Flood scope classification failed")
+            return None
+        try:
             await monitor.observe(
                 verdict=verdict,
                 sender_id=sender_id,
@@ -424,6 +433,7 @@ class MessageHandler:
             )
         except Exception:
             self.logger.exception("Flood scope observation failed")
+        return verdict
 
     def _is_old_cached_message(self, timestamp: Any) -> bool:
         """Check if a message timestamp indicates it's from before bot connection.
@@ -2857,7 +2867,10 @@ class MessageHandler:
             # allowlist below, because an unscoped message is exactly what that
             # allowlist drops — running it after the gate would blind the
             # monitor to the traffic it exists to measure.
-            await self._observe_flood_scope(
+            # The verdict is computed here and attached to the message (below) so
+            # message_stats can record whether this node sent a region-scoped or
+            # unscoped ("no region code") channel message.
+            scope_verdict = await self._observe_flood_scope(
                 # A message with no "Name: " prefix has no attributable sender,
                 # so it is counted but can never earn anyone a warning.
                 sender_id=None if sender_id == CHANNEL_SENDER_FALLBACK else sender_id,
@@ -2943,6 +2956,7 @@ class MessageHandler:
                 elapsed=_elapsed,
                 is_dm=False,
                 reply_scope=reply_scope,
+                scope_verdict=scope_verdict,
             )
             # Only a correlated packet's routing_info belongs to this message. The path
             # command reads message.routing_info directly, so an uncorrelated fallback

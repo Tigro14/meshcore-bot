@@ -63,6 +63,10 @@ class MeshMessage:
     routing_info: Optional[dict[str, Any]] = None
     # Matched flood scope for the reply (e.g. "#west"), None means global flood
     reply_scope: Optional[str] = None
+    # Flood-scope verdict for this channel message: "scoped" (carried a region
+    # code), "global" (confirmed unscoped FLOOD, i.e. no region code) or
+    # "unknown" (no positive evidence). Only set for channel messages.
+    scope_verdict: Optional[str] = None
     # Lowercased content set by base_command.cleanup_message_for_matching
     content_lower: str = ""
     # Transient flag: True once CommandManager.check_keywords has stripped the

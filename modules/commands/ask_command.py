@@ -17,7 +17,7 @@ from .base_command import BaseCommand
 DB_SCHEMA = """\
 Tables and columns:
 - complete_contact_tracking: public_key, name, role(repeater/companion/roomserver/sensor), device_type, first_heard, last_heard, advert_count, latitude, longitude, city, state, country, signal_strength, snr, hop_count, is_currently_tracked, last_advert_timestamp, location_accuracy, contact_source, out_path, out_path_len, is_starred, out_bytes_per_hop
-- message_stats: timestamp, sender_id, channel, content, is_dm, hops, snr, rssi, path, created_at
+- message_stats: timestamp, sender_id, channel, content, is_dm, hops, snr, rssi, path, scope_verdict(scoped/global/unknown), created_at
 - path_stats: timestamp, sender_id, channel, path_length, path_string, hops, created_at
 - observed_paths: public_key, packet_hash, from_prefix, to_prefix, path_hex, path_length, bytes_per_hop, packet_type, first_seen, last_seen, observation_count, snr, rssi
 - mesh_connections: from_prefix, to_prefix, from_public_key, to_public_key, observation_count, first_seen, last_seen, avg_hop_position, geographic_distance
@@ -32,6 +32,7 @@ Notes:
 - Use LIMIT 20 max. Read-only: SELECT only.
 - Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0
 - For "how far from me" use the provided Haversine formula (km) against complete_contact_tracking.latitude/longitude. Do NOT use mesh_connections.geographic_distance for a sender-relative distance; it is the fixed node-to-node distance in km.
+- "Node without a region" / "sans region" / "no region code" means a node whose channel messages were sent as an unscoped FLOOD, i.e. message_stats.scope_verdict = 'global'. Count DISTINCT senders: SELECT COUNT(DISTINCT sender_id) FROM message_stats WHERE scope_verdict = 'global' AND is_dm = 0 [AND timestamp > <epoch>]. Only 'global' counts (positive evidence of no region); 'unknown' (no evidence) and 'scoped' (has a region) must be excluded. Rows have NULL scope_verdict only for very old / DM messages — treat NULL as unknown, not region-less.
 - No firmware version or hardware/model info is stored in this database. If asked about version or hardware, reply: 'not tracked in DB'
 - Only query the tables listed above. Do NOT query: bbs_messages, bot_metadata, channels, clock_sync_*, command_stats, daily_rollup, dashboard_snapshot, feed_*, generic_cache, geocoding_cache, greeted_users, greeter_rollout, neighbor_observations, packet_stream, purging_log, schema_version
 - ALWAYS resolve public_key to name: JOIN complete_contact_tracking c ON c.public_key = <table>.public_key and SELECT c.name. Truncate names to 15 chars: SUBSTR(c.name, 1, 15) AS name. Never SELECT a raw public_key or prefix as the primary identifier.
