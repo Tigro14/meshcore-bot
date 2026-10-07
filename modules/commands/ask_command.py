@@ -15,20 +15,23 @@ from ..models import MeshMessage
 from .base_command import BaseCommand
 
 DB_SCHEMA = """\
-Tables:
-- complete_contact_tracking: name, public_key, role(repeater/companion/roomserver/sensor), city, country, last_heard, hop_count, snr, signal_strength, is_currently_tracked, latitude, longitude
-- message_stats: timestamp, sender_id, channel, content, is_dm, hops, snr, rssi
-- observed_paths: public_key, path_hex, path_length, bytes_per_hop, observation_count, last_seen, snr, rssi
-- mesh_connections: from_prefix, to_prefix, from_public_key, to_public_key, observation_count, last_seen, geographic_distance
-- neighbor_links: self_public_key, neighbor_public_key, last_snr, best_snr, last_status, last_seen
-- daily_stats: date, public_key, advert_count
+Tables and columns:
+- complete_contact_tracking: public_key, name, role(repeater/companion/roomserver/sensor), device_type, first_heard, last_heard, advert_count, latitude, longitude, city, state, country, signal_strength, snr, hop_count, is_currently_tracked, last_advert_timestamp, location_accuracy, contact_source, out_path, out_path_len, is_starred, out_bytes_per_hop
+- message_stats: timestamp, sender_id, channel, content, is_dm, hops, snr, rssi, path, created_at
+- path_stats: timestamp, sender_id, channel, path_length, path_string, hops, created_at
+- observed_paths: public_key, packet_hash, from_prefix, to_prefix, path_hex, path_length, bytes_per_hop, packet_type, first_seen, last_seen, observation_count, snr, rssi
+- mesh_connections: from_prefix, to_prefix, from_public_key, to_public_key, observation_count, first_seen, last_seen, avg_hop_position, geographic_distance
+- neighbor_links: self_public_key, neighbor_public_key, first_seen, last_seen, observation_count, best_snr, last_snr, last_status, scopes
+- daily_stats: date, public_key, advert_count, first_advert_time, last_advert_time
+- repeater_contacts: public_key, name, device_type, first_seen, last_seen, contact_data, latitude, longitude, city, state, country, is_active, purge_count
+- unique_advert_packets: date, public_key, packet_hash, first_seen
 
 Notes:
-- last_heard is a datetime string (ISO format)
-- timestamp in message_stats is Unix epoch (integer)
-- Use LIMIT 20 max
-- Read-only: SELECT only
+- UNITS: geographic_distance is in km. snr is in dB. rssi is in dBm. hops / path_length / path_bytes_per_hop / out_bytes_per_hop are unitless counts (hops, bytes/hop). bytes_per_hop is bytes per hop. advert_count is a packet count.
+- Time columns: last_heard, first_heard, last_seen, first_seen, last_advert_timestamp are ISO datetime strings. date / first_advert_time / last_advert_time in daily_stats are dates/times. timestamp in message_stats and path_stats is Unix epoch (integer seconds).
+- Use LIMIT 20 max. Read-only: SELECT only.
 - Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0
+- For "how far from me" use the provided Haversine formula (km) against complete_contact_tracking.latitude/longitude. Do NOT use mesh_connections.geographic_distance for a sender-relative distance; it is the fixed node-to-node distance in km.
 - No firmware version or hardware/model info is stored in this database. If asked about version or hardware, reply: 'not tracked in DB'
 - Only query the tables listed above. Do NOT query: bbs_messages, bot_metadata, channels, clock_sync_*, command_stats, daily_rollup, dashboard_snapshot, feed_*, generic_cache, geocoding_cache, greeted_users, greeter_rollout, neighbor_observations, packet_stream, purging_log, schema_version
 - ALWAYS resolve public_key to name: JOIN complete_contact_tracking c ON c.public_key = <table>.public_key and SELECT c.name. Truncate names to 15 chars: SUBSTR(c.name, 1, 15) AS name. Never SELECT a raw public_key or prefix as the primary identifier.
