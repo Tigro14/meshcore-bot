@@ -285,7 +285,11 @@ class AskCommand(BaseCommand):
             f"Answer the question: {question}\n\n"
             "FORMAT RULES (mesh network, max 150 chars per message):\n"
             "- One item per line: 'name: value unit'\n"
-            "- ALWAYS attach a unit to every number: km for distance, hops for path length, messages for counts, days/hours/minutes for time, % for percentages, dBm for signal strength, bytes for data\n"
+            "- ALWAYS attach the CORRECT unit to every number, derived from what is actually being counted:\n"
+            "  * number of nodes / repeaters / contacts / users / senders -> 'nodes' (or 'repeaters' when the question is about repeaters)\n"
+            "  * number of messages / packets / TX / RX -> 'messages' (only for actual message counts)\n"
+            "  * distance -> km ; path length -> hops ; time -> days/hours/minutes ; percentage -> % ; signal -> dBm ; data -> bytes\n"
+            "- NEVER use 'messages' as the unit for a node/repeater/contact count. The unit must match the quantity the question asks about.\n"
             "- Use node NAMES, never hex public keys or short prefixes\n"
             "- NEVER show raw coordinates (lat/lon) or raw hex keys\n"
             "- Max 10 items, no tables, no pipes\n"
@@ -421,7 +425,10 @@ class AskCommand(BaseCommand):
 
         # Step 3: Format with LLM followup
         formatted = await asyncio.to_thread(self._format_followup, question, sql_results)
-        if not formatted:
+        if formatted:
+            self.logger.debug(f"Ask command formatted response: {formatted}")
+        else:
+            self.logger.warning(f"Ask command followup returned empty; falling back to raw SQL results")
             formatted = sql_results
 
         # Truncate for mesh message limits
