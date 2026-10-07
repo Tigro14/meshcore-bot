@@ -428,7 +428,7 @@ class AskCommand(BaseCommand):
         if formatted:
             self.logger.debug(f"Ask command formatted response: {formatted}")
         else:
-            self.logger.warning(f"Ask command followup returned empty; falling back to raw SQL results")
+            self.logger.warning("Ask command followup returned empty; falling back to raw SQL results")
             formatted = sql_results
 
         # Truncate for mesh message limits
