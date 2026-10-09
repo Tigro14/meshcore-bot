@@ -8,6 +8,14 @@ semantic versioning.
 
 ### Added
 
+- `[Llm_Command] primary_endpoint` sends `llm` requests to a remote
+  OpenAI-compatible endpoint (strata, `https://llm.tigro.fr`) with `api_key`.
+  Its health path is probed at most once per `ping_cache_seconds` (default 60);
+  when the ping does not answer within `ping_timeout_seconds` (default 2s), or
+  when a request to the primary fails, the bot falls back to the local llama.cpp
+  endpoint (`endpoint` / `fallback_endpoint`). Blank `primary_endpoint` keeps the
+  previous local-only behaviour.
+
 - `docs/develop-command-scripts.md` walks through writing a command plugin that
   integrates correctly with the bot framework, including developing against
   `[Bot] local_dir_path` (#259).

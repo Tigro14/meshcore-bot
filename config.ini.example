@@ -1763,6 +1763,18 @@ enabled = true
 # Connects to a local llama.cpp OpenAI-compatible endpoint for short mesh replies.
 enabled = false
 
+# Primary OpenAI-compatible endpoint (blank = local llama.cpp only). When set, a
+# health ping is probed at most once per ping_cache_seconds; if it does not answer
+# within ping_timeout_seconds, requests go to the fallback endpoint below.
+primary_endpoint =
+api_key =
+health_path = /health
+ping_timeout_seconds = 2.0
+ping_cache_seconds = 60
+
+# Fallback endpoint (default: the endpoint below, i.e. local llama.cpp)
+fallback_endpoint = http://127.0.0.1:8080/v1/chat/completions
+
 # Local llama.cpp OpenAI-compatible endpoint
 endpoint = http://127.0.0.1:8080/v1/chat/completions
 

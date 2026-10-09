@@ -167,6 +167,118 @@ class TestLlmCommand:
         sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
         assert "LLM unavailable" in sent_text
 
+    # ── Primary endpoint and fallback tests ───────────────────────────────────
+
+    PRIMARY = "https://llm.tigro.fr/v1/chat/completions"
+    FALLBACK = "http://127.0.0.1:8080/v1/chat/completions"
+
+    def _enable_primary(self, bot):
+        self._enable_llm(bot)
+        bot.config.set("Llm_Command", "primary_endpoint", self.PRIMARY)
+        bot.config.set("Llm_Command", "api_key", "secret-token")
+
+    def _llm_response(self, content="Hello"):
+        response = Mock(status_code=200)
+        response.json.return_value = {"choices": [{"message": {"content": content}}]}
+        return response
+
+    @pytest.mark.asyncio
+    async def test_execute_uses_primary_endpoint_when_ping_answers(self, command_mock_bot):
+        self._enable_primary(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        ping = Mock(status_code=200)
+        response = self._llm_response()
+
+        with patch("modules.commands.llm_command.requests.get", return_value=ping) as get_mock, patch(
+            "modules.commands.llm_command.requests.post", return_value=response
+        ) as post_mock:
+            assert await cmd.execute(msg) is True
+
+        expected_headers = {"Authorization": "Bearer secret-token"}
+        get_mock.assert_called_once_with("https://llm.tigro.fr/health", timeout=2.0, headers=expected_headers)
+        assert post_mock.call_args.args[0] == self.PRIMARY
+        assert post_mock.call_args.kwargs["headers"] == expected_headers
+
+    @pytest.mark.asyncio
+    async def test_execute_falls_back_to_local_llama_when_ping_times_out(self, command_mock_bot):
+        self._enable_primary(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        response = self._llm_response()
+
+        with patch("modules.commands.llm_command.requests.get", side_effect=requests.ReadTimeout("ping timeout")), patch(
+            "modules.commands.llm_command.requests.post", return_value=response
+        ) as post_mock:
+            assert await cmd.execute(msg) is True
+
+        assert post_mock.call_args.args[0] == self.FALLBACK
+        assert post_mock.call_args.kwargs["headers"] == {}
+
+    @pytest.mark.asyncio
+    async def test_health_ping_is_cached_between_requests(self, command_mock_bot):
+        self._enable_primary(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        ping = Mock(status_code=200)
+        response = self._llm_response()
+
+        with patch("modules.commands.llm_command.requests.get", return_value=ping) as get_mock, patch(
+            "modules.commands.llm_command.requests.post", return_value=response
+        ) as post_mock:
+            assert await cmd.execute(msg) is True
+            assert await cmd.execute(msg) is True
+
+        get_mock.assert_called_once()
+        assert post_mock.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_execute_retries_on_fallback_when_primary_request_fails(self, command_mock_bot):
+        self._enable_primary(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        ping = Mock(status_code=200)
+        response = self._llm_response()
+
+        with patch("modules.commands.llm_command.requests.get", return_value=ping), patch(
+            "modules.commands.llm_command.requests.post", side_effect=[requests.ConnectionError("primary down"), response]
+        ) as post_mock:
+            assert await cmd.execute(msg) is True
+
+        urls = [call.args[0] for call in post_mock.call_args_list]
+        assert urls == [self.PRIMARY, self.FALLBACK]
+        assert cmd._ping_ok is False
+
+    @pytest.mark.asyncio
+    async def test_execute_reports_unavailable_when_both_endpoints_fail(self, command_mock_bot):
+        self._enable_primary(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        ping = Mock(status_code=200)
+
+        with patch("modules.commands.llm_command.requests.get", return_value=ping), patch(
+            "modules.commands.llm_command.requests.post", side_effect=requests.ConnectionError("down")
+        ):
+            assert await cmd.execute(msg) is True
+
+        sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
+        assert "LLM unavailable" in sent_text
+
     def test_get_help_text_uses_configured_prefix(self, command_mock_bot):
         """get_help_text() must reflect the configured command prefix, not a hardcoded one."""
         self._enable_llm(command_mock_bot)
