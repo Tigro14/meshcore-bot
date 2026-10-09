@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 LLM command for the MeshCore Bot.
-Sends a short prompt to a local llama.cpp OpenAI-compatible endpoint.
+Sends a short prompt to an OpenAI-compatible endpoint: the configured primary
+(strata) endpoint while its health ping answers, otherwise the local llama.cpp
+fallback.
 """
 
 import asyncio
@@ -47,6 +49,26 @@ class LlmCommand(BaseCommand):
             value_type="str",
         )
         self.model = self.get_config_value("Llm_Command", "model", fallback="", value_type="str")
+        self.primary_endpoint = self.get_config_value("Llm_Command", "primary_endpoint", fallback="", value_type="str").strip()
+        self.api_key = self.get_config_value("Llm_Command", "api_key", fallback="", value_type="str").strip()
+        self.fallback_endpoint = self.get_config_value("Llm_Command", "fallback_endpoint", fallback=self.endpoint, value_type="str").strip()
+        self.health_path = self.get_config_value("Llm_Command", "health_path", fallback="/health", value_type="str").strip() or "/health"
+        self.ping_timeout_seconds = max(
+            1.0,
+            min(
+                10.0,
+                self.get_config_value("Llm_Command", "ping_timeout_seconds", fallback=2.0, value_type="float"),
+            ),
+        )
+        self.ping_cache_seconds = max(
+            0,
+            min(
+                3600,
+                self.get_config_value("Llm_Command", "ping_cache_seconds", fallback=60, value_type="int"),
+            ),
+        )
+        self._ping_ok = False
+        self._ping_checked_at = 0.0
         self.system_prompt = self.get_config_value(
             "Llm_Command",
             "system_prompt",
@@ -796,6 +818,79 @@ class LlmCommand(BaseCommand):
             )
         return breakdown
 
+    def _auth_headers(self, endpoint: str) -> dict[str, str]:
+        """Bearer header for the primary endpoint; the local fallback needs none."""
+        if self.api_key and endpoint == self.primary_endpoint:
+            return {"Authorization": f"Bearer {self.api_key}"}
+        return {}
+
+    def _invalidate_ping_cache(self) -> None:
+        self._ping_ok = False
+        self._ping_checked_at = 0.0
+
+    def _primary_ping_ok(self) -> bool:
+        """Health probe of the primary endpoint, cached for ``ping_cache_seconds``.
+
+        The probe is not run on every request, so a healthy primary does not pay
+        the ping latency per message.
+        """
+        now = time.monotonic()
+        if self.ping_cache_seconds > 0 and (now - self._ping_checked_at) < self.ping_cache_seconds:
+            return self._ping_ok
+
+        parsed = urlparse(self.primary_endpoint)
+        health_url = urljoin(f"{parsed.scheme}://{parsed.netloc}/", self.health_path.lstrip("/"))
+        try:
+            response = requests.get(
+                health_url,
+                timeout=self.ping_timeout_seconds,
+                headers=self._auth_headers(self.primary_endpoint),
+            )
+            ok = response.status_code == 200
+        except requests.RequestException as e:
+            self.logger.warning(f"LLM primary endpoint ping failed: {e}")
+            ok = False
+
+        self._ping_ok = ok
+        self._ping_checked_at = now
+        return ok
+
+    def _resolve_endpoint(self) -> str:
+        """Primary endpoint while its cached ping is healthy, otherwise local llama.cpp."""
+        if self.primary_endpoint and self._primary_ping_ok():
+            return self.primary_endpoint
+        return self.fallback_endpoint
+
+    async def _post_chat(self, payload: dict[str, Any]) -> tuple[requests.Response | None, str]:
+        """Send a chat request to the resolved endpoint, retrying on the local fallback."""
+        candidates = [self._resolve_endpoint()]
+        if self.fallback_endpoint and self.fallback_endpoint != candidates[0]:
+            candidates.append(self.fallback_endpoint)
+
+        for candidate in candidates:
+            try:
+                response = await asyncio.to_thread(
+                    requests.post,
+                    candidate,
+                    json=payload,
+                    timeout=self.timeout_seconds,
+                    headers=self._auth_headers(candidate),
+                )
+            except requests.RequestException as e:
+                self.logger.warning(f"LLM request failed on {candidate}: {e}")
+                if candidate == self.primary_endpoint:
+                    self._invalidate_ping_cache()
+                continue
+
+            if response.status_code == 200:
+                return response, candidate
+
+            self.logger.warning(f"LLM request status {response.status_code} on {candidate}, body: {response.text[:500]}")
+            if candidate == self.primary_endpoint:
+                self._invalidate_ping_cache()
+
+        return None, candidates[-1]
+
     def _get_llama_model_info(self) -> str:
         """Get information about the running llama.cpp model.
 
@@ -805,7 +900,7 @@ class LlmCommand(BaseCommand):
         try:
             # Try to get model info from llama.cpp endpoint
             # Parse the endpoint URL and construct the models endpoint
-            parsed = urlparse(self.endpoint)
+            parsed = urlparse(self._resolve_endpoint())
             base_url = f"{parsed.scheme}://{parsed.netloc}"
             models_url = urljoin(base_url, "/v1/models")
 
@@ -1361,20 +1456,9 @@ class LlmCommand(BaseCommand):
         )
         self.logger.debug(f"LLM prompt: {repr(prompt[:500])}")
 
-        try:
-            response = await asyncio.to_thread(
-                requests.post,
-                self.endpoint,
-                json=payload,
-                timeout=self.timeout_seconds,
-            )
-        except requests.RequestException as e:
-            self.logger.warning(f"LLM command connection error: {e}")
-            return await self.send_response(message, "LLM unavailable: local llama.cpp is unreachable.")
-
-        if response.status_code != 200:
-            self.logger.warning(f"LLM command error status: {response.status_code}, body: {response.text[:500]}")
-            return await self.send_response(message, "LLM error: llama.cpp returned an invalid response.")
+        response, endpoint = await self._post_chat(payload)
+        if response is None:
+            return await self.send_response(message, "LLM unavailable: no LLM endpoint responded.")
 
         try:
             data = response.json()
@@ -1384,8 +1468,11 @@ class LlmCommand(BaseCommand):
 
             choice = choices[0]
             assistant_message = choice.get("message", {})
-            content = assistant_message.get("content", "")
+            content = assistant_message.get("content") or ""
             self.logger.debug(f"LLM raw response ({len(content)} chars): {repr(content)}")
+
+            if not content:
+                return await self.send_response(message, "LLM error: empty response from model.")
 
         except (ValueError, TypeError, IndexError, AttributeError, KeyError) as e:
             self.logger.warning(f"LLM command parse error: {e}")
@@ -1409,17 +1496,12 @@ class LlmCommand(BaseCommand):
                     "- Total response under 400 chars"
                 )
                 followup_payload = self._build_payload(prompt=followup_prompt, include_rag=False)
-                try:
-                    resp2 = await asyncio.to_thread(
-                        requests.post, self.endpoint, json=followup_payload, timeout=self.timeout_seconds
-                    )
-                    if resp2.status_code == 200:
-                        data2 = resp2.json()
-                        content = data2["choices"][0]["message"]["content"].strip()
-                        self.logger.debug(f"LLM followup response: {content[:200]}")
-                    else:
-                        content = sql_results
-                except requests.RequestException:
+                resp2, _ = await self._post_chat(followup_payload)
+                if resp2 is not None:
+                    data2 = resp2.json()
+                    content = data2["choices"][0]["message"]["content"].strip()
+                    self.logger.debug(f"LLM followup response: {content[:200]}")
+                else:
                     content = sql_results
 
         if wiki_result:

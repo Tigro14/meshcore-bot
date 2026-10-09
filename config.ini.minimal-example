@@ -466,6 +466,12 @@ enabled = false
 [Llm_Command]
 # Enable or disable the AI chat command (primary keyword: llm; aliases: ia, ai, chat)
 enabled = false
+# Primary OpenAI-compatible endpoint (blank = local llama.cpp only). Health ping
+# cached for ping_cache_seconds; falls back to endpoint when it does not answer.
+primary_endpoint =
+api_key =
+ping_timeout_seconds = 2.0
+ping_cache_seconds = 60
 # Local llama.cpp OpenAI-compatible endpoint
 endpoint = http://127.0.0.1:8080/v1/chat/completions
 # Optional model name (blank = server default model)
