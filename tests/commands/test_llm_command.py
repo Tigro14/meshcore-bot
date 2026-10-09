@@ -279,6 +279,24 @@ class TestLlmCommand:
         sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
         assert "LLM unavailable" in sent_text
 
+    @pytest.mark.asyncio
+    async def test_execute_handles_null_content_from_thinking_model(self, command_mock_bot):
+        """A thinking model can return content: null with only reasoning_content."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        response = Mock(status_code=200)
+        response.json.return_value = {"choices": [{"message": {"content": None, "reasoning_content": "thinking"}}]}
+
+        with patch("modules.commands.llm_command.requests.post", return_value=response):
+            assert await cmd.execute(msg) is True
+
+        sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
+        assert "empty response" in sent_text
+
     def test_get_help_text_uses_configured_prefix(self, command_mock_bot):
         """get_help_text() must reflect the configured command prefix, not a hardcoded one."""
         self._enable_llm(command_mock_bot)

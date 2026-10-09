@@ -1468,8 +1468,11 @@ class LlmCommand(BaseCommand):
 
             choice = choices[0]
             assistant_message = choice.get("message", {})
-            content = assistant_message.get("content", "")
+            content = assistant_message.get("content") or ""
             self.logger.debug(f"LLM raw response ({len(content)} chars): {repr(content)}")
+
+            if not content:
+                return await self.send_response(message, "LLM error: empty response from model.")
 
         except (ValueError, TypeError, IndexError, AttributeError, KeyError) as e:
             self.logger.warning(f"LLM command parse error: {e}")
