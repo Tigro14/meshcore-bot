@@ -886,11 +886,19 @@ class MeshGraph:
         if recalculate_distance and (
             edge.get('from_public_key') or edge.get('to_public_key')
         ):
+            # Always recompute from the stored full public keys. The distance
+            # passed in from callers (e.g. trace helper) is computed via prefix
+            # resolution, which can resolve to a different node than the one
+            # stored in from/to_public_key (prefix collisions, non-repeater
+            # roles), producing wildly wrong distances. The full-key haversine
+            # is the source of truth, so overwrite even a previously stored value.
             recalculated_distance = self._recalculate_distance_if_needed(
                 edge, conn=conn, location_cache=location_cache
             )
             if recalculated_distance is not None:
                 edge['geographic_distance'] = recalculated_distance
+            # If we cannot recompute (location missing), keep the previously
+            # stored distance rather than dropping it to NULL.
         first_seen = edge['first_seen']
         if isinstance(first_seen, datetime):
             first_seen = first_seen.isoformat()

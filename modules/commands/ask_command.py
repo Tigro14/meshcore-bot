@@ -15,20 +15,29 @@ from ..models import MeshMessage
 from .base_command import BaseCommand
 
 DB_SCHEMA = """\
-Tables:
-- complete_contact_tracking: name, public_key, role(repeater/companion/roomserver/sensor), city, country, last_heard, hop_count, snr, signal_strength, is_currently_tracked, latitude, longitude
-- message_stats: timestamp, sender_id, channel, content, is_dm, hops, snr, rssi
-- observed_paths: public_key, path_hex, path_length, bytes_per_hop, observation_count, last_seen, snr, rssi
-- mesh_connections: from_prefix, to_prefix, from_public_key, to_public_key, observation_count, last_seen, geographic_distance
-- neighbor_links: self_public_key, neighbor_public_key, last_snr, best_snr, last_status, last_seen
-- daily_stats: date, public_key, advert_count
+Tables and columns:
+- complete_contact_tracking: public_key, name, role(repeater/companion/roomserver/sensor), device_type, first_heard, last_heard, advert_count, latitude, longitude, city, state, country, signal_strength, snr, hop_count, is_currently_tracked, last_advert_timestamp, location_accuracy, contact_source, out_path, out_path_len, is_starred, out_bytes_per_hop
+- message_stats: timestamp, sender_id, channel, content, is_dm, hops, snr, rssi, path, scope_verdict(scoped/global/unknown), created_at
+- path_stats: timestamp, sender_id, channel, path_length, path_string, hops, created_at
+- observed_paths: public_key, packet_hash, from_prefix, to_prefix, path_hex, path_length, bytes_per_hop, packet_type, first_seen, last_seen, observation_count, snr, rssi
+- mesh_connections: from_prefix, to_prefix, from_public_key, to_public_key, observation_count, first_seen, last_seen, avg_hop_position, geographic_distance
+- neighbor_links: self_public_key, neighbor_public_key, first_seen, last_seen, observation_count, best_snr, last_snr, last_status, scopes
+- daily_stats: date, public_key, advert_count, first_advert_time, last_advert_time
+- repeater_contacts: public_key, name, device_type, first_seen, last_seen, contact_data, latitude, longitude, city, state, country, is_active, purge_count
+- unique_advert_packets: date, public_key, packet_hash, first_seen
 
 Notes:
-- last_heard is a datetime string (ISO format)
-- timestamp in message_stats is Unix epoch (integer)
-- Use LIMIT 20 max
-- Read-only: SELECT only
-- Many rows have NULL latitude/longitude. For distance queries ALWAYS add: WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0
+- UNITS: geographic_distance is in km. snr is in dB. signal_strength is RSSI in dBm (NOT snr). hops / path_length / bytes_per_hop / out_bytes_per_hop are unitless counts. advert_count is a packet count.
+- snr and signal_strength are DIFFERENT columns: snr (dB) is the signal-to-noise ratio; signal_strength (dBm) is the received power (RSSI). A question about "dB" / "SNR" / "signal strength in dB" means the `snr` column — never report signal_strength for an snr question, and never label snr as dBm.
+- Time columns: last_heard, first_heard, last_seen, first_seen, last_advert_timestamp are ISO datetime strings. date / first_advert_time / last_advert_time in daily_stats are dates/times. timestamp in message_stats and path_stats is Unix epoch (integer seconds).
+- SQLite ONLY. For the current time as an integer epoch, use strftime('%s','now') — e.g. "timestamp >= (CAST(strftime('%s','now') AS INTEGER) - 86400)". NEVER use EXTRACT(EPOCH FROM ...), NOW(), or any PostgreSQL/Oracle function; they are not valid SQLite and will cause a syntax error.
+- sender_id in message_stats/path_stats/command_stats is the node NAME (e.g. "Tigro"), not a public key. public_key is a hex string in complete_contact_tracking / observed_paths / repeater_contacts. To compare a message sender with a contact, join on NAME (m.sender_id = c.name), not on public_key.
+- Use LIMIT 20 max. Read-only: SELECT only.
+- Many rows have NULL latitude/longitude. Add WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 ONLY when the question actually needs a position (distance, radius, "farthest", coordinates). For questions that do NOT need a position (count, "heard", "active", "how many", snr/rssi thresholds, advert counts), do NOT filter on latitude — otherwise you silently drop every node without a known position and undercount.
+- For "how far from me" use the provided Haversine formula (km) against complete_contact_tracking.latitude/longitude. Do NOT use mesh_connections.geographic_distance for a sender-relative distance; it is the fixed node-to-node distance in km.
+- "Longest link" / "plus longue liaison" / "farthest link": use path_stats.path_length (hops) for the longest observed route, or mesh_connections.geographic_distance (km) for the longest node-to-node link. Do NOT build it as "max hops joined to a located contact" — the sender of the longest route often has no known position, so a JOIN to latitude/longitude returns nothing.
+- "Direct neighbors of <node>" / "voisins directs": use mesh_connections (edges where from_public_key or to_public_key = the node's public key, or the 2-char prefix matches). neighbor_links is generally empty and must not be the source for a neighbor count.
+- "Node without a region" / "sans region" / "no region code" means a node whose channel messages were sent as an unscoped FLOOD, i.e. message_stats.scope_verdict = 'global'. Only 'global' counts (positive evidence of no region); 'unknown' (no evidence) and 'scoped' (has a region) must be excluded. Rows have NULL scope_verdict only for very old / DM messages — treat NULL as unknown, not region-less. Example: SELECT COUNT(DISTINCT m.sender_id) FROM message_stats m WHERE m.scope_verdict='global' AND m.is_dm=0 AND m.timestamp >= (CAST(strftime('%s','now') AS INTEGER) - 86400). To also restrict to a radius or role, JOIN complete_contact_tracking c ON c.name = m.sender_id and filter on c.latitude/longitude/role.
 - No firmware version or hardware/model info is stored in this database. If asked about version or hardware, reply: 'not tracked in DB'
 - Only query the tables listed above. Do NOT query: bbs_messages, bot_metadata, channels, clock_sync_*, command_stats, daily_rollup, dashboard_snapshot, feed_*, generic_cache, geocoding_cache, greeted_users, greeter_rollout, neighbor_observations, packet_stream, purging_log, schema_version
 - ALWAYS resolve public_key to name: JOIN complete_contact_tracking c ON c.public_key = <table>.public_key and SELECT c.name. Truncate names to 15 chars: SUBSTR(c.name, 1, 15) AS name. Never SELECT a raw public_key or prefix as the primary identifier.
@@ -282,7 +291,11 @@ class AskCommand(BaseCommand):
             f"Answer the question: {question}\n\n"
             "FORMAT RULES (mesh network, max 150 chars per message):\n"
             "- One item per line: 'name: value unit'\n"
-            "- ALWAYS attach a unit to every number: km for distance, hops for path length, messages for counts, days/hours/minutes for time, % for percentages, dBm for signal strength, bytes for data\n"
+            "- ALWAYS attach the CORRECT unit to every number, derived from what is actually being counted:\n"
+            "  * number of nodes / repeaters / contacts / users / senders -> 'nodes' (or 'repeaters' when the question is about repeaters)\n"
+            "  * number of messages / packets / TX / RX -> 'messages' (only for actual message counts)\n"
+            "  * distance -> km ; path length -> hops ; time -> days/hours/minutes ; percentage -> % ; signal -> dBm ; data -> bytes\n"
+            "- NEVER use 'messages' as the unit for a node/repeater/contact count. The unit must match the quantity the question asks about.\n"
             "- Use node NAMES, never hex public keys or short prefixes\n"
             "- NEVER show raw coordinates (lat/lon) or raw hex keys\n"
             "- Max 10 items, no tables, no pipes\n"
@@ -418,7 +431,10 @@ class AskCommand(BaseCommand):
 
         # Step 3: Format with LLM followup
         formatted = await asyncio.to_thread(self._format_followup, question, sql_results)
-        if not formatted:
+        if formatted:
+            self.logger.debug(f"Ask command formatted response: {formatted}")
+        else:
+            self.logger.warning("Ask command followup returned empty; falling back to raw SQL results")
             formatted = sql_results
 
         # Truncate for mesh message limits

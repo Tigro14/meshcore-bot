@@ -175,6 +175,33 @@ test = ack
             for r in warnings
         )
 
+    def test_legacy_enabled_key_warns_but_real_setting_does_not(self, tmp_path):
+        """A genuine *_enabled setting (pagination_enabled) is not a legacy alias of enabled."""
+        config = tmp_path / "config.ini"
+        config.write_text("""[Connection]
+connection_type = serial
+serial_port = /dev/ttyUSB0
+
+[Bot]
+bot_name = TestBot
+db_path = {db_path}
+
+[Channels]
+monitor_channels = general
+
+[Joke_Command]
+enabled = true
+joke_enabled = true
+
+[Llm_Command]
+enabled = true
+pagination_enabled = true
+""".format(db_path=str(tmp_path / "meshcore_bot.db")))
+        results = validate_config(str(config))
+        warnings = [r[1] for r in results if r[0] == SEVERITY_WARNING]
+        assert any("legacy key 'joke_enabled'" in w for w in warnings)
+        assert not any("pagination_enabled" in w for w in warnings)
+
 
 class TestExampleConfigsHaveNoUnknownSections:
     """Regression test for #215: shipped example configs must not trigger

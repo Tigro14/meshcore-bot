@@ -1763,6 +1763,18 @@ enabled = true
 # Connects to a local llama.cpp OpenAI-compatible endpoint for short mesh replies.
 enabled = false
 
+# Primary OpenAI-compatible endpoint (blank = local llama.cpp only). When set, a
+# health ping is probed at most once per ping_cache_seconds; if it does not answer
+# within ping_timeout_seconds, requests go to the fallback endpoint below.
+primary_endpoint =
+api_key =
+health_path = /health
+ping_timeout_seconds = 2.0
+ping_cache_seconds = 60
+
+# Fallback endpoint (default: the endpoint below, i.e. local llama.cpp)
+fallback_endpoint = http://127.0.0.1:8080/v1/chat/completions
+
 # Local llama.cpp OpenAI-compatible endpoint
 endpoint = http://127.0.0.1:8080/v1/chat/completions
 
@@ -1786,6 +1798,15 @@ timeout_seconds = 20
 
 # Strip <think>...</think> tags from model output (default true)
 strip_thinking_tags = true
+
+# Split a long answer into several messages (default false)
+pagination_enabled = false
+# Pages and characters per page when pagination is on (1-10, 50-500)
+page_count = 2
+chars_per_page = 160
+
+# Refuse the command when the CPU reaches this temperature in °C (0 disables)
+cpu_temp_threshold = 60.0
 
 # --- Context settings ---
 # Inject local data (weather, repeaters, network status) into prompts
