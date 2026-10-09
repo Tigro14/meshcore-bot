@@ -43,6 +43,10 @@ DEPRECATED_SECTIONS = frozenset({"Jokes"})
 # Legacy key suffixes (e.g. alert_enabled instead of enabled in *_Command sections).
 LEGACY_ENABLED_KEY_RE = re.compile(r"^[a-z]+_enabled$")
 
+# Keys that end in _enabled but are real settings rather than a legacy alias of the
+# plugin's canonical enabled key, so the legacy check must not flag them.
+NON_LEGACY_ENABLED_KEYS = frozenset({"pagination_enabled"})
+
 # Legacy aliases for a plugin's canonical `[Section] enabled` key, tried in
 # order when the canonical key is absent. Single source of truth shared by
 # BaseCommand.get_config_value (runtime reads) and the web settings view
@@ -646,7 +650,7 @@ def validate_config_keys(config: configparser.ConfigParser) -> list[tuple[str, s
         if is_command:
             # Per-command legacy enabled keys
             for key in options:
-                if LEGACY_ENABLED_KEY_RE.match(key) and key != "enabled":
+                if LEGACY_ENABLED_KEY_RE.match(key) and key != "enabled" and key not in NON_LEGACY_ENABLED_KEYS:
                     if config.has_option(section, "enabled"):
                         results.append((
                             SEVERITY_WARNING,

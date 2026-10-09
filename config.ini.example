@@ -1799,6 +1799,15 @@ timeout_seconds = 20
 # Strip <think>...</think> tags from model output (default true)
 strip_thinking_tags = true
 
+# Split a long answer into several messages (default false)
+pagination_enabled = false
+# Pages and characters per page when pagination is on (1-10, 50-500)
+page_count = 2
+chars_per_page = 160
+
+# Refuse the command when the CPU reaches this temperature in °C (0 disables)
+cpu_temp_threshold = 60.0
+
 # --- Context settings ---
 # Inject local data (weather, repeaters, network status) into prompts
 include_local_context = true
