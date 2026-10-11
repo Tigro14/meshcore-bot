@@ -1034,11 +1034,10 @@ class BotDataViewer:
                 self.is_radio_offline = False
 
         bot = _TestBot(self)
-        plugin_loader = PluginLoader(bot)
-        commands = plugin_loader.load_all_plugins()
-
         manager = CommandManager(bot)
-        manager.commands = commands
+        bot.command_manager = manager
+        plugin_loader = PluginLoader(bot)
+        manager.commands = plugin_loader.load_all_plugins()
         self._test_cmd_manager = manager
         return manager
 
