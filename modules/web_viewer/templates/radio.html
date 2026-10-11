@@ -135,36 +135,8 @@
             <!-- Announcement (card in announcement_card.html, handler inline below) -->
             {% include 'announcement_card.html' %}
 
-            <!-- Local test DM: runs commands without spending airtime -->
-            <div class="card mb-4" id="test-dm-card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="fas fa-comment-dots me-2"></i>Test DM</h5>
-                    <span class="small text-muted">Local command execution, no AirTime</span>
-                </div>
-                <div class="card-body">
-                    <form id="testDmForm">
-                        <div class="mb-2">
-                            <label class="form-label" for="testDmMessage">Message</label>
-                            <input
-                                type="text"
-                                class="form-control"
-                                id="testDmMessage"
-                                maxlength="200"
-                                placeholder="llm hello"
-                            >
-                        </div>
-                        <button type="submit" class="btn btn-primary" id="testDmSendBtn">
-                            <span class="spinner-border spinner-border-sm me-1" id="testDmSpinner" style="display:none" role="status"></span>
-                            Send
-                        </button>
-                    </form>
-
-                    <div class="mt-3">
-                        <div class="small text-muted mb-1">Responses</div>
-                        <div id="testDmLog" class="small"></div>
-                    </div>
-                </div>
-            </div>
+            <!-- Local test DM (card in test_dm_card.html, self-contained handler) -->
+            {% include 'test_dm_card.html' %}
 
             <!-- Node Settings -->
             <div class="card mb-4" id="node-settings-card">
@@ -1391,61 +1363,6 @@ class RadioManager {
         alert.style.display = 'block';
     }
 
-    appendTestDmLine(text, className = 'text-muted') {
-        const log = document.getElementById('testDmLog');
-        if (!log) return;
-        const line = document.createElement('div');
-        line.className = className;
-        line.textContent = text;
-        log.appendChild(line);
-    }
-
-    async sendTestDm() {
-        const btn = document.getElementById('testDmSendBtn');
-        const spinner = document.getElementById('testDmSpinner');
-        const input = document.getElementById('testDmMessage');
-        const message = input.value.trim();
-
-        if (!message) {
-            this.appendTestDmLine('Please enter a message.', 'text-danger');
-            return;
-        }
-
-        btn.disabled = true;
-        spinner.style.display = 'inline-block';
-        this.appendTestDmLine(`You: ${message}`, 'fw-semibold');
-
-        try {
-            const resp = await fetch('/api/radio/test-dm', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                },
-                body: JSON.stringify({ message }),
-            });
-            const data = await resp.json();
-
-            if (!resp.ok) {
-                this.appendTestDmLine(data.error || 'Test DM failed.', 'text-danger');
-                return;
-            }
-
-            const replies = Array.isArray(data.replies) ? data.replies : [];
-            if (!replies.length) {
-                this.appendTestDmLine('Bot: no response', 'text-muted');
-            } else {
-                replies.forEach((reply) => this.appendTestDmLine(`Bot: ${reply}`, 'text-success'));
-            }
-            input.value = '';
-        } catch (error) {
-            this.appendTestDmLine('Error: ' + error.message, 'text-danger');
-        } finally {
-            btn.disabled = false;
-            spinner.style.display = 'none';
-        }
-    }
-
     async readRadioParams({ silent = false } = {}) {
         const btn = document.getElementById('readRadioParamsBtn');
         const spinner = document.getElementById('readParamsSpinner');
@@ -2112,25 +2029,6 @@ window.radioAnnouncement = {
         document.addEventListener('DOMContentLoaded', attachAnnouncementHandler);
     } else {
         attachAnnouncementHandler();
-    }
-})();
-
-(function () {
-    'use strict';
-    function attachTestDmHandler() {
-        const form = document.getElementById('testDmForm');
-        if (!form) return;
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            if (radioManager) {
-                radioManager.sendTestDm();
-            }
-        });
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', attachTestDmHandler);
-    } else {
-        attachTestDmHandler();
     }
 })();
 

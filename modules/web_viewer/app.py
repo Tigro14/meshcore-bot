@@ -1042,6 +1042,19 @@ class BotDataViewer:
         self._test_cmd_manager = manager
         return manager
 
+    def _run_test_dm(self, message: str, sender: str = 'web-test') -> list[str]:
+        """Run a Web Viewer test DM without queueing anything for the radio."""
+        manager = self._test_command_manager()
+        return asyncio.run(
+            manager.execute_capture(
+                message,
+                sender_id=sender,
+                is_dm=True,
+                timeout=30.0,
+                skip_cooldown=True,
+            )
+        )
+
     def _setup_routes(self):
         """Setup all Flask routes - complete feature parity"""
         # Log full traceback for 500 errors so service logs show the real cause
@@ -5616,16 +5629,7 @@ class BotDataViewer:
                 if len(message) > 200:
                     return jsonify({'error': 'Message must be 200 characters or less'}), 400
 
-                manager = self._test_command_manager()
-                replies = asyncio.run(
-                    manager.execute_capture(
-                        message,
-                        sender_id=sender,
-                        is_dm=True,
-                        timeout=30.0,
-                        skip_cooldown=True,
-                    )
-                )
+                replies = self._run_test_dm(message, sender)
 
                 self.logger.info(f"Web Viewer test DM: {message!r} -> {replies}")
                 return jsonify({'success': True, 'replies': replies})
