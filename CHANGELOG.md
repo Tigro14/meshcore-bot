@@ -29,6 +29,10 @@ semantic versioning.
   derived budget so a very large remote model does not make every prompt
   unnecessarily expensive.
 
+- `llm` reports the active LLM model in the injected context, so a remote
+  endpoint no longer answers as if it were the configured local `llama.cpp`
+  model.
+
 - `llm` Wiki.js retrieval now requires multiple matching terms for multi-term
   queries, so generic conversational questions no longer trigger wiki context
   from a single accidental title match. Single-term queries still work.

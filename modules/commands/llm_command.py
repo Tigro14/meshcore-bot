@@ -306,6 +306,7 @@ class LlmCommand(BaseCommand):
         self._cached_context_str = ""
         self._cached_context_time = 0.0
         self._cached_context_budget = 0
+        self._cached_context_endpoint = ""
         self._cached_context_breakdown: list[dict[str, Any]] = []
         self._cached_commands_list = None
         self._sender_position: tuple[float, float] | None = None
@@ -495,12 +496,13 @@ class LlmCommand(BaseCommand):
             return bool(cmd_instance.enabled)
         return True
 
-    def _build_local_context(self, token_budget: int = 0) -> str:
+    def _build_local_context(self, token_budget: int = 0, endpoint: str | None = None) -> str:
         """Build a local context string with contacts, moon, sun, and weather info.
 
         Args:
             token_budget: Optional token budget for the local context. When set,
                 context parts are trimmed so the context fits the active model.
+            endpoint: Active LLM endpoint used for model metadata.
 
         Returns:
             String containing formatted local context, or empty string if disabled or cached.
@@ -508,9 +510,15 @@ class LlmCommand(BaseCommand):
         if not self.include_local_context:
             return ""
 
+        active_endpoint = endpoint or self._resolve_endpoint()
         # Check cache
         now = time.time()
-        if self._cached_context_str and self._cached_context_budget == token_budget and (now - self._cached_context_time) < self.context_cache_seconds:
+        if (
+            self._cached_context_str
+            and self._cached_context_budget == token_budget
+            and self._cached_context_endpoint == active_endpoint
+            and (now - self._cached_context_time) < self.context_cache_seconds
+        ):
             return self._cached_context_str
 
         context_parts = []
@@ -800,8 +808,8 @@ class LlmCommand(BaseCommand):
                     used_pct, available_gb = ram_info
                     system_info.append(f"RAM: {used_pct:.0f}% used")
 
-                # llama.cpp model info
-                model_info = self._get_llama_model_info()
+                # Active LLM model info
+                model_info = self._get_llama_model_info(active_endpoint)
                 if model_info:
                     system_info.append(f"Model: {model_info}")
 
@@ -817,6 +825,7 @@ class LlmCommand(BaseCommand):
             if context_parts:
                 self._cached_context_str = "\n".join(context_parts)
                 self._cached_context_budget = token_budget
+                self._cached_context_endpoint = active_endpoint
                 self._cached_context_time = now
                 self._cached_context_breakdown = self._compute_context_breakdown(context_parts)
                 return self._cached_context_str
@@ -1007,38 +1016,19 @@ class LlmCommand(BaseCommand):
 
         return None, candidates[-1]
 
-    def _get_llama_model_info(self) -> str:
-        """Get information about the running llama.cpp model.
+    def _get_llama_model_info(self, endpoint: str | None = None) -> str:
+        """Get information about the active LLM model.
 
         Returns:
             String with model information, or empty string if unavailable.
         """
-        try:
-            # Try to get model info from llama.cpp endpoint
-            # Parse the endpoint URL and construct the models endpoint
-            parsed = urlparse(self._resolve_endpoint())
-            base_url = f"{parsed.scheme}://{parsed.netloc}"
-            models_url = urljoin(base_url, "/v1/models")
-
-            response = requests.get(models_url, timeout=2.0)
-            if response.status_code == 200:
-                data = response.json()
-                if "data" in data and len(data["data"]) > 0:
-                    # Try to get model from API first, then fall back to config
-                    model = data["data"][0]
-                    model_name = model.get("id", "")
-                    if model_name:
-                        return model_name
-
-            # Fallback to configured model name
-            if self.model:
-                return self.model
-            return ""
-        except Exception:
-            # Fallback to configured model name
-            if self.model:
-                return self.model
-            return ""
+        active_endpoint = endpoint or self._resolve_endpoint()
+        info = self._model_info(active_endpoint)
+        model_name = info.get("model") or self.model
+        n_ctx = info.get("n_ctx")
+        if model_name and isinstance(n_ctx, int) and n_ctx > 0:
+            return f"{model_name} (n_ctx={n_ctx})"
+        return str(model_name or "")
 
     def _get_weather_for_location(self, location: str) -> str:
         """Get weather information for a specific location.
@@ -1103,7 +1093,7 @@ class LlmCommand(BaseCommand):
         else:
             return "Variable"
 
-    def _inject_current_time_into_prompt(self, prompt: str, token_budget: int = 0) -> str:
+    def _inject_current_time_into_prompt(self, prompt: str, token_budget: int = 0, endpoint: str | None = None) -> str:
         """Inject the current system time and local context into a system prompt.
 
         Uses the server's local time zone without explicit timezone conversion,
@@ -1114,7 +1104,7 @@ class LlmCommand(BaseCommand):
             result = f"{prompt}\n[Current time: {current_time}]"
 
             # Add local context if enabled
-            local_context = self._build_local_context(token_budget)
+            local_context = self._build_local_context(token_budget, endpoint)
             if local_context:
                 result += f"\n[Local Context:\n{local_context}]"
 
@@ -1293,7 +1283,7 @@ class LlmCommand(BaseCommand):
                     used = self._estimate_tokens(self.system_prompt) + self._estimate_tokens(prompt)
                     used += sum(self._estimate_tokens(entry.get("content", "")) for entry in history or [])
                     local_budget = max(0, token_budget - used)
-                system_prompt = self._inject_current_time_into_prompt(self.system_prompt, local_budget)
+                system_prompt = self._inject_current_time_into_prompt(self.system_prompt, local_budget, endpoint)
                 messages = [{"role": "system", "content": system_prompt}]
                 if history:
                     messages.extend(history)

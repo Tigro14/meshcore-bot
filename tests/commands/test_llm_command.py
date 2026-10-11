@@ -746,3 +746,40 @@ class TestLlmCommand:
         payload = post_mock.call_args.kwargs["json"]
         assert payload["messages"][0]["content"] == "normal network context"
         assert payload["temperature"] == cmd.temperature
+
+    def test_get_llama_model_info_uses_active_endpoint(self, command_mock_bot):
+        self._enable_llm(command_mock_bot)
+        cmd = LlmCommand(command_mock_bot)
+        endpoint = "https://llm.tigro.fr/v1/chat/completions"
+        cmd._model_info_cache[endpoint] = {
+            "model": "remote-model",
+            "n_ctx": 231072,
+            "checked_at": time.monotonic(),
+        }
+
+        assert cmd._get_llama_model_info(endpoint) == "remote-model (n_ctx=231072)"
+
+    def test_system_prompt_includes_active_model(self, command_mock_bot):
+        self._enable_llm(command_mock_bot)
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = True
+        cmd.context_include_system_metrics = True
+        cmd.context_include_contacts = False
+        cmd.context_include_repeaters = False
+        cmd.context_include_mesh_topology = False
+        cmd.context_include_network_status = False
+        cmd.context_include_channel_messages = False
+        cmd.context_include_moon = False
+        cmd.context_include_sun = False
+        cmd.context_include_weather = False
+        cmd.context_include_commands = False
+        endpoint = "https://llm.tigro.fr/v1/chat/completions"
+        cmd._model_info_cache[endpoint] = {
+            "model": "remote-model",
+            "n_ctx": 231072,
+            "checked_at": time.monotonic(),
+        }
+
+        prompt = cmd._inject_current_time_into_prompt("base prompt", 100, endpoint)
+
+        assert "remote-model (n_ctx=231072)" in prompt
