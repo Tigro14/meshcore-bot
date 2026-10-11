@@ -51,6 +51,7 @@ CANONICAL_NON_COMMAND_SECTIONS = frozenset({
     "RandomLine",
     "Scheduled_Messages",
     "Logging",
+    "IO_Health",
     "Custom_Syntax",
     "External_Data",
     "Weather",

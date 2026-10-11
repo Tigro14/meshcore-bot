@@ -16,6 +16,12 @@ semantic versioning.
   endpoint (`endpoint` / `fallback_endpoint`). Blank `primary_endpoint` keeps the
   previous local-only behaviour.
 
+- `[IO_Health]` counts read-only filesystem (`EROFS`) write failures on paths the
+  bot is allowed to write to and, once `failure_threshold` is reached, raises the
+  shared-memory reboot semaphore so an external watcher can run a safe SysRq
+  reboot. Paths outside `writable_prefixes` are ignored, so a read-only mount
+  created by systemd sandboxing cannot trigger a reboot loop.
+
 - `docs/develop-command-scripts.md` walks through writing a command plugin that
   integrates correctly with the bot framework, including developing against
   `[Bot] local_dir_path` (#259).
@@ -94,6 +100,10 @@ semantic versioning.
   it.
 
 ### Fixed
+
+- `llm` now uses `reasoning_content` when the model returns `content: null`,
+  instead of reporting an empty response. A response with neither field still
+  reports the empty-response error.
 
 - `[Joke_Command] joke_enabled` and `[DadJoke_Command] dadjoke_enabled` are now
   listed in the shared legacy-alias table. Both commands accepted that spelling

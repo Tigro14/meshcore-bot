@@ -842,6 +842,19 @@ json_logging = false
 log_max_bytes = 5242880
 # log_backup_count: number of rotated backup files to keep (e.g. meshcore_bot.log.1 … .3)
 log_backup_count = 3
+[IO_Health]
+# Read-only filesystem detection. A storage fault that remounts a filesystem
+# read-only surfaces as EROFS on writes; the bot counts those failures and, once
+# the threshold is reached, raises the shared-memory reboot semaphore so an
+# external watcher runs the SysRq sequence.
+# Only paths the bot is allowed to write to are counted: a read-only mount
+# created by systemd sandboxing (ProtectSystem) is a configuration fact, not a
+# storage fault, and must never trigger a reboot.
+enabled = true
+reboot_on_erofs = true
+failure_threshold = 3
+cooldown_seconds = 900
+writable_prefixes = /var/lib/meshcore-bot,/var/log/meshcore-bot,/dev/shm
 [External_Data]
 # URL shortener service: gd (v.gd / is.gd-compatible) or shlink. Default: gd
 short_url_website_service = gd

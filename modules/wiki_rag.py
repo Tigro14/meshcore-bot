@@ -382,6 +382,7 @@ class WikiJsSource:
         max_section_chars: int = 4000,
         logger: Any | None = None,
         http_client: Any = requests,
+        io_monitor: Any | None = None,
     ) -> None:
         parsed = urlparse((site_url or "").strip())
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -402,6 +403,7 @@ class WikiJsSource:
         self.max_section_chars = max(500, int(max_section_chars))
         self.logger = logger or logging.getLogger(__name__)
         self.http_client = http_client
+        self.io_monitor = io_monitor
         self._refresh_lock = threading.Lock()
         self._last_attempt_monotonic: float | None = None
 
@@ -483,8 +485,16 @@ class WikiJsSource:
             return self._api_page_source(page)
         return self._guest_page_source(page)
 
+    def _atomic_write(self, path: Path, text: str) -> None:
+        try:
+            self._write_atomically(path, text)
+        except OSError as exc:
+            if self.io_monitor is not None:
+                self.io_monitor.report_write_failure(exc, path)
+            raise
+
     @staticmethod
-    def _atomic_write(path: Path, text: str) -> None:
+    def _write_atomically(path: Path, text: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary_name = ""
         try:
