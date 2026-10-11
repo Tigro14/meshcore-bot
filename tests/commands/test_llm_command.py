@@ -292,8 +292,8 @@ class TestLlmCommand:
         assert "LLM unavailable" in sent_text
 
     @pytest.mark.asyncio
-    async def test_execute_handles_null_content_from_thinking_model(self, command_mock_bot):
-        """A thinking model can return content: null with only reasoning_content."""
+    async def test_execute_does_not_send_reasoning_content_as_answer(self, command_mock_bot):
+        """Thinking-only responses must not be sent to the mesh network."""
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Bot", "command_prefix", "")
         cmd = LlmCommand(command_mock_bot)
@@ -307,7 +307,7 @@ class TestLlmCommand:
             assert await cmd.execute(msg) is True
 
         sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
-        assert sent_text == "thinking"
+        assert "empty response" in sent_text
 
     @pytest.mark.asyncio
     async def test_execute_reports_empty_response_when_no_content_or_reasoning(self, command_mock_bot):
@@ -326,6 +326,13 @@ class TestLlmCommand:
 
         sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
         assert "empty response" in sent_text
+
+    def test_clean_ai_response_strips_thinking_tags(self, command_mock_bot):
+        self._enable_llm(command_mock_bot)
+        cmd = LlmCommand(command_mock_bot)
+        cmd.strip_thinking_tags = True
+
+        assert cmd._clean_ai_response("<Thinking>secret</Thinking> answer", 100) == "answer"
 
     def test_get_help_text_uses_configured_prefix(self, command_mock_bot):
         """get_help_text() must reflect the configured command prefix, not a hardcoded one."""

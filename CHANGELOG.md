@@ -116,9 +116,9 @@ semantic versioning.
 
 ### Fixed
 
-- `llm` now uses `reasoning_content` when the model returns `content: null`,
-  instead of reporting an empty response. A response with neither field still
-  reports the empty-response error.
+- `llm` no longer sends `reasoning_content` as the answer. Thinking-only
+  responses are filtered, and only the visible `content` field is sent to the
+  mesh network.
 
 - `[Joke_Command] joke_enabled` and `[DadJoke_Command] dadjoke_enabled` are now
   listed in the shared legacy-alias table. Both commands accepted that spelling

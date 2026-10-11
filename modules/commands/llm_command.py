@@ -1595,10 +1595,6 @@ class LlmCommand(BaseCommand):
             choice = choices[0]
             assistant_message = choice.get("message", {})
             content = assistant_message.get("content") or ""
-            if not content:
-                content = assistant_message.get("reasoning_content") or ""
-                if content:
-                    self.logger.debug("LLM returned only reasoning_content, using it as the answer")
             self.logger.debug(f"LLM raw response ({len(content)} chars): {repr(content)}")
 
             if not content:
