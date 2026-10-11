@@ -29,6 +29,10 @@ semantic versioning.
   derived budget so a very large remote model does not make every prompt
   unnecessarily expensive.
 
+- `llm` Wiki.js retrieval now requires multiple matching terms for multi-term
+  queries, so generic conversational questions no longer trigger wiki context
+  from a single accidental title match. Single-term queries still work.
+
 - `docs/develop-command-scripts.md` walks through writing a command plugin that
   integrates correctly with the bot framework, including developing against
   `[Bot] local_dir_path` (#259).

@@ -299,6 +299,21 @@ def test_corrupt_update_keeps_the_previously_loaded_index(tmp_path):
     assert "manual/radio" in rag.build_context("radio")
 
 
+def test_multi_term_query_requires_multiple_matching_terms(tmp_path):
+    index_file = tmp_path / "wiki.jsonl"
+    row = {
+        "path": "home",
+        "page_title": "Accueil",
+        "section_title": "Un réseau maillé, c’est quoi ?",
+        "content": "Le réseau est simple.",
+    }
+    index_file.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    rag = LocalWikiRag(str(index_file), min_score=6, min_matching_terms=2)
+
+    assert rag.retrieve("tu tournes sur quoi ?") is None
+    assert rag.retrieve("réseau quoi") is not None
+
+
 def test_aliases_are_applied_to_query_and_index(tmp_path):
     index_file = tmp_path / "wiki.jsonl"
     row = {"path": "manual/identity", "page_title": "Identity", "content": "Configure the callsign here."}

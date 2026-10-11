@@ -259,6 +259,10 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "wiki_rag_relative_score", fallback=0.55, value_type="float"),
             ),
         )
+        self.wiki_rag_min_matching_terms = max(
+            1,
+            min(8, self.get_config_value("Llm_Command", "wiki_rag_min_matching_terms", fallback=2, value_type="int")),
+        )
         self.wiki_site_url = self.get_config_value(
             "Llm_Command", "wiki_site_url", fallback="", value_type="str"
         ).strip()
@@ -336,6 +340,7 @@ class LlmCommand(BaseCommand):
                 min_term_len=self.wiki_rag_min_term_len,
                 min_score=self.wiki_rag_min_score,
                 relative_score=self.wiki_rag_relative_score,
+                min_matching_terms=self.wiki_rag_min_matching_terms,
                 stopwords=wiki_stopwords,
                 aliases=wiki_aliases,
                 source=wiki_source,

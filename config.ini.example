@@ -1875,6 +1875,7 @@ wiki_rag_min_term_len = 3
 # Absolute and relative relevance thresholds
 wiki_rag_min_score = 6
 wiki_rag_relative_score = 0.55
+wiki_rag_min_matching_terms = 2
 # Optional comma-separated search stopwords and aliases (alias=canonical)
 wiki_rag_stopwords =
 wiki_rag_aliases =
