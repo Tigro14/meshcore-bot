@@ -796,7 +796,7 @@ class CommandManager:
             budget -= CHANNEL_REGIONAL_FLOOD_SCOPE_BODY_OVERHEAD
         return budget
 
-    def check_keywords(self, message: MeshMessage) -> list[tuple]:
+    def check_keywords(self, message: MeshMessage, allow_queue: bool = True) -> list[tuple]:
         """Check message content for keywords and return matching responses.
 
         Evaluates the message against configured keywords, custom syntax patterns,
@@ -804,6 +804,8 @@ class CommandManager:
 
         Args:
             message: The incoming message to check.
+            allow_queue: When False, never queue a matched command for later
+                transmission (render-only invocations, e.g. a Web Viewer test DM).
 
         Returns:
             List[tuple]: List of (trigger, response) tuples for matched keywords.
@@ -883,7 +885,7 @@ class CommandManager:
             if command.should_execute(message):
                 # Check if we should queue instead of skip (for global cooldowns near expiring)
                 should_queue, remaining = self._should_queue_command(command, message)
-                if should_queue and self._queue_command(command, message, remaining):
+                if allow_queue and should_queue and self._queue_command(command, message, remaining):
                     continue  # Silently queue, don't add to matches
                     # Queue failed, fall through to normal check
 
@@ -2210,12 +2212,37 @@ class CommandManager:
         execution path as a real message, but `send_response` and
         `send_response_chunked` append their output to `capture_sink` instead of
         spending airtime.
+
+        Keyword-matched replies (help, plain keywords, response-format commands) are
+        produced by `check_keywords()` rather than by `command.execute()`, so that
+        path runs first; only commands with no response format fall through to
+        `execute()`.
         """
         spec = (spec or "").strip()
         if not spec:
             return []
 
-        trigger = spec.split()[0]
+        sink: list[str] = []
+        synthetic = MeshMessage(
+            content=spec,
+            sender_id=sender_id,
+            channel=channel,
+            is_dm=is_dm,
+            timestamp=int(time.time()),
+            capture_sink=sink,
+        )
+
+        try:
+            for _, response in self.check_keywords(synthetic, allow_queue=False):
+                if response:
+                    sink.append(response)
+        except Exception as e:
+            self.logger.warning("Test keyword match failed: %s: %s", type(e).__name__, e)
+
+        if sink:
+            return [part for part in sink if part]
+
+        trigger = synthetic.content.split()[0]
         command = self.resolve_command_by_trigger(trigger)
         if command is None:
             return ["Unknown command"]
@@ -2233,16 +2260,6 @@ class CommandManager:
             if not allowed:
                 return [f"Command on cooldown for another {remaining:.0f}s"]
         command.record_execution()
-
-        sink: list[str] = []
-        synthetic = MeshMessage(
-            content=spec,
-            sender_id=sender_id,
-            channel=channel,
-            is_dm=is_dm,
-            timestamp=int(time.time()),
-            capture_sink=sink,
-        )
 
         try:
             await asyncio.wait_for(command.execute(synthetic), timeout=timeout)

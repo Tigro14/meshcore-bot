@@ -1632,6 +1632,8 @@ class TestExecuteCapture:
         command.requires_admin_access = Mock(return_value=False)
         command.check_cooldown = Mock(return_value=(True, 0.0))
         command.record_execution = Mock()
+        command.should_execute = Mock(return_value=False)
+        command.get_response_format = Mock(return_value=None)
 
         async def execute(message):
             message.capture_sink.append("captured")
@@ -1644,3 +1646,28 @@ class TestExecuteCapture:
 
         assert replies == ["captured"]
         command.record_execution.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_execute_capture_captures_keyword_only_reply(self, cm_bot):
+        cm = make_manager(cm_bot)
+
+        replies = await cm.execute_capture("ping")
+
+        assert replies == ["Pong!"]
+
+    @pytest.mark.asyncio
+    async def test_execute_capture_captures_help(self, cm_bot):
+        cm = make_manager(cm_bot)
+
+        replies = await cm.execute_capture("help")
+
+        assert replies and "help" in replies[0].lower()
+
+    @pytest.mark.asyncio
+    async def test_execute_capture_does_not_queue_keyword_match(self, cm_bot):
+        cm = make_manager(cm_bot)
+        cm._queue_command = Mock(return_value=True)
+
+        await cm.execute_capture("ping")
+
+        cm._queue_command.assert_not_called()

@@ -72,10 +72,13 @@ POST /api/radio/test-dm, which runs commands locally without spending AirTime.
                 },
                 body: JSON.stringify({ message }),
             });
-            const data = await resp.json();
+            const data = await resp.json().catch(() => ({}));
 
             if (!resp.ok) {
-                appendLine(data.error || 'Test DM failed.', 'text-danger');
+                appendLine(
+                    data.error || ('Test DM failed (' + resp.status + ')'),
+                    'text-danger'
+                );
                 return;
             }
 

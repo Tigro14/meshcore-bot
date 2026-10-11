@@ -120,6 +120,15 @@ semantic versioning.
 
 ### Fixed
 
+- The Web Viewer Test DM panel now answers keyword-matched triggers. It called
+  `command.execute()` only, so `help` and plain keyword replies produced an empty
+  response; the keyword path runs first, and commands that handle their own reply
+  still fall through to `execute()`. A test DM no longer queues its command for
+  transmission.
+
+- The Test DM panel reports the HTTP status when the reply is not JSON, instead of
+  failing with a JSON parse error.
+
 - `llm` no longer sends `reasoning_content` as the answer. Thinking-only
   responses are filtered, and only the visible `content` field is sent to the
   mesh network.
