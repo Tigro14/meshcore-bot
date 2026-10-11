@@ -291,9 +291,69 @@ class TestLlmCommand:
         sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
         assert "LLM unavailable" in sent_text
 
+    def test_build_payload_disables_thinking_for_local_thinking_model(self, command_mock_bot):
+        """A local thinking model is asked to answer in content instead of a thinking block."""
+        self._enable_llm(command_mock_bot)
+        cmd = LlmCommand(command_mock_bot)
+        endpoint = cmd.endpoint
+        cmd._model_info_cache[endpoint] = {
+            "endpoint": endpoint,
+            "model": "test-model",
+            "n_ctx": 4096,
+            "thinking": True,
+            "checked_at": time.monotonic(),
+        }
+
+        payload = cmd._build_payload("hello", [])
+        assert payload["chat_template_kwargs"] == {"thinking": False}
+
+    def test_build_payload_keeps_thinking_for_remote_endpoint(self, command_mock_bot):
+        """A remote gateway is not sent llama.cpp chat_template_kwargs."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Llm_Command", "primary_endpoint", "http://remote.example/v1/chat/completions")
+        cmd = LlmCommand(command_mock_bot)
+        cmd._model_info_cache[cmd.primary_endpoint] = {
+            "endpoint": cmd.primary_endpoint,
+            "model": "test-model",
+            "n_ctx": 4096,
+            "thinking": True,
+            "checked_at": time.monotonic(),
+        }
+
+        payload = cmd._build_payload("hello", [], endpoint=cmd.primary_endpoint)
+        assert "chat_template_kwargs" not in payload
+
+    def test_detect_thinking_model_from_metadata(self, command_mock_bot):
+        self._enable_llm(command_mock_bot)
+        cmd = LlmCommand(command_mock_bot)
+
+        assert cmd._detect_thinking_model({"chat_template": "…<|thinking|>…"}, {}) is True
+        assert cmd._detect_thinking_model({}, {"capabilities": ["thinking"]}) is True
+        assert cmd._detect_thinking_model({"capabilities": ["reasoning"]}, {}) is False
+
     @pytest.mark.asyncio
-    async def test_execute_does_not_send_reasoning_content_as_answer(self, command_mock_bot):
-        """Thinking-only responses must not be sent to the mesh network."""
+    async def test_execute_does_not_send_chain_of_thought_when_truncated(self, command_mock_bot):
+        """A stop by max_tokens with no visible content is reported as truncation."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "choices": [{"message": {"content": None, "reasoning_content": "thinking"}, "finish_reason": "length"}]
+        }
+
+        with patch("modules.commands.llm_command.requests.post", return_value=response):
+            assert await cmd.execute(msg) is True
+
+        sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
+        assert "truncated" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_execute_does_not_send_chain_of_thought_without_stop(self, command_mock_bot):
+        """Chain-of-thought is not an answer unless the model finished its turn there."""
         self._enable_llm(command_mock_bot)
         command_mock_bot.config.set("Bot", "command_prefix", "")
         cmd = LlmCommand(command_mock_bot)
@@ -307,7 +367,27 @@ class TestLlmCommand:
             assert await cmd.execute(msg) is True
 
         sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
-        assert "empty response" in sent_text
+        assert "only reasoning" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_execute_uses_reasoning_content_when_model_finished_there(self, command_mock_bot):
+        """A thinking model that ends its turn in the thinking block answered there."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "choices": [{"message": {"content": None, "reasoning_content": "thinking"}, "finish_reason": "stop"}]
+        }
+
+        with patch("modules.commands.llm_command.requests.post", return_value=response):
+            assert await cmd.execute(msg) is True
+
+        sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
+        assert sent_text == "thinking"
 
     @pytest.mark.asyncio
     async def test_execute_reports_empty_response_when_no_content_or_reasoning(self, command_mock_bot):

@@ -1785,6 +1785,11 @@ health_path = /health
 ping_timeout_seconds = 2.0
 ping_cache_seconds = 60
 
+# When a reply has no visible content, the finish_reason decides what happened:
+# "stop" means the model answered inside its thinking block, so reasoning_content is
+# sent; "length" means the answer was cut by max_tokens and is reported as truncated;
+# anything else keeps the chain-of-thought off the air.
+
 # Fallback endpoint (default: the endpoint below, i.e. local llama.cpp)
 fallback_endpoint = http://127.0.0.1:8080/v1/chat/completions
 
@@ -1821,6 +1826,11 @@ timeout_seconds = 20
 
 # Strip <think>...</think> tags from model output (default true)
 strip_thinking_tags = true
+
+# Ask a local thinking model to answer in the visible content field instead of a
+# thinking block (llama.cpp chat_template_kwargs, default true). Only sent to the
+# local endpoint, since a remote gateway may reject unknown fields.
+disable_thinking = true
 
 # Split a long answer into several messages (default false)
 pagination_enabled = false

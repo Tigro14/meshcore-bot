@@ -109,6 +109,12 @@ class LlmCommand(BaseCommand):
             fallback=True,
             value_type="bool",
         )
+        self.disable_thinking = self.get_config_value(
+            "Llm_Command",
+            "disable_thinking",
+            fallback=True,
+            value_type="bool",
+        )
         self.context_window_seconds = max(
             0,
             self.get_config_value("Llm_Command", "context_window_seconds", fallback=0, value_type="int"),
@@ -898,6 +904,27 @@ class LlmCommand(BaseCommand):
             return text
         return text[: budget * 4].rstrip()
 
+    @staticmethod
+    def _detect_thinking_model(meta: dict[str, Any], details: dict[str, Any]) -> bool:
+        """Whether an endpoint reports a model that writes inside a thinking block.
+
+        llama.cpp exposes this through ``meta.thinking`` or a chat template with
+        thinking tags; OpenAI-compatible gateways report it as a capability.
+        """
+        for source in (meta, details):
+            if source.get("thinking") is True:
+                return True
+            capabilities = source.get("capabilities")
+            values = [capabilities] if isinstance(capabilities, str) else capabilities
+            if isinstance(values, (list, tuple)) and any(
+                str(value).lower() in ("thinking", "thinking_mode") for value in values
+            ):
+                return True
+            template = source.get("chat_template")
+            if isinstance(template, str) and re.search(r"<\|?(thinking|think)\|?>", template, re.IGNORECASE):
+                return True
+        return False
+
     def _model_info(self, endpoint: str) -> dict[str, Any]:
         """Cached model metadata for an endpoint, including its context size."""
         now = time.monotonic()
@@ -931,6 +958,7 @@ class LlmCommand(BaseCommand):
                 n_ctx = meta.get("n_ctx") or details.get("n_ctx") or 0
                 if isinstance(n_ctx, int) and n_ctx > 0:
                     info["n_ctx"] = n_ctx
+                info["thinking"] = self._detect_thinking_model(meta, details)
         except Exception as e:
             self.logger.warning(f"LLM model info unavailable for {endpoint}: {e}")
 
@@ -1297,9 +1325,15 @@ class LlmCommand(BaseCommand):
             "top_p": self.top_p,
         }
         active_endpoint = endpoint or self._resolve_endpoint()
-        model_name = self.model or self._model_info(active_endpoint).get("model", "")
+        info = self._model_info(active_endpoint)
+        model_name = self.model or info.get("model", "")
         if model_name:
             payload["model"] = model_name
+        # Only the local llama.cpp server understands chat_template_kwargs; a remote
+        # gateway may reject unknown fields. Disabling thinking keeps the answer in
+        # the visible content field instead of a thinking block.
+        if self.disable_thinking and info.get("thinking") and active_endpoint != self.primary_endpoint:
+            payload["chat_template_kwargs"] = {"thinking": False}
 
         return payload
 
@@ -1595,7 +1629,25 @@ class LlmCommand(BaseCommand):
             choice = choices[0]
             assistant_message = choice.get("message", {})
             content = assistant_message.get("content") or ""
+            finish_reason = choice.get("finish_reason") or ""
             self.logger.debug(f"LLM raw response ({len(content)} chars): {repr(content)}")
+
+            if not content:
+                reasoning = assistant_message.get("reasoning_content") or ""
+                if finish_reason == "length":
+                    return await self.send_response(message, "LLM error: answer truncated by max_tokens.")
+                if reasoning and finish_reason == "stop":
+                    # The model ended its turn inside the thinking block, so that
+                    # block is the answer rather than hidden chain-of-thought.
+                    content = reasoning
+                    self.logger.debug("LLM answered only in reasoning_content (finish_reason=stop)")
+                elif reasoning:
+                    self.logger.debug(
+                        f"LLM returned chain-of-thought only (finish_reason={finish_reason or 'none'}); not sent"
+                    )
+                    return await self.send_response(message, "LLM error: model returned only reasoning.")
+                elif finish_reason == "length":
+                    return await self.send_response(message, "LLM error: answer truncated by max_tokens.")
 
             if not content:
                 return await self.send_response(message, "LLM error: empty response from model.")

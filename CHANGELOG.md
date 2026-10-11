@@ -133,6 +133,14 @@ semantic versioning.
   responses are filtered, and only the visible `content` field is sent to the
   mesh network.
 
+- `llm` decides what an empty `content` means from `finish_reason` instead of from
+  the endpoint: `stop` means the model answered inside its thinking block, so
+  `reasoning_content` is the reply; `length` reports the answer as truncated by
+  `max_tokens`; anything else keeps the chain-of-thought off the air. Thinking is now
+  also disabled for a local thinking model (`[Llm_Command] disable_thinking`, default
+  true, detected from the endpoint model metadata), so the answer lands in the visible
+  content field in the first place.
+
 - `[Joke_Command] joke_enabled` and `[DadJoke_Command] dadjoke_enabled` are now
   listed in the shared legacy-alias table. Both commands accepted that spelling
   at runtime through their own fallback, but the settings UI read only the
