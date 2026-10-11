@@ -295,6 +295,24 @@ class TestLlmCommand:
             assert await cmd.execute(msg) is True
 
         sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
+        assert sent_text == "thinking"
+
+    @pytest.mark.asyncio
+    async def test_execute_reports_empty_response_when_no_content_or_reasoning(self, command_mock_bot):
+        """A response with neither content nor reasoning_content is still an error."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        response = Mock(status_code=200)
+        response.json.return_value = {"choices": [{"message": {"content": None, "reasoning_content": None}}]}
+
+        with patch("modules.commands.llm_command.requests.post", return_value=response):
+            assert await cmd.execute(msg) is True
+
+        sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
         assert "empty response" in sent_text
 
     def test_get_help_text_uses_configured_prefix(self, command_mock_bot):

@@ -298,6 +298,7 @@ class LlmCommand(BaseCommand):
                         timeout=self.timeout_seconds,
                         verify_ssl=self.wiki_verify_ssl,
                         logger=self.logger,
+                        io_monitor=getattr(self.bot, "io_health", None),
                     )
                 except ValueError as exc:
                     self.logger.warning("Wiki.js RAG source configuration is invalid: %s", exc)
@@ -1469,6 +1470,10 @@ class LlmCommand(BaseCommand):
             choice = choices[0]
             assistant_message = choice.get("message", {})
             content = assistant_message.get("content") or ""
+            if not content:
+                content = assistant_message.get("reasoning_content") or ""
+                if content:
+                    self.logger.debug("LLM returned only reasoning_content, using it as the answer")
             self.logger.debug(f"LLM raw response ({len(content)} chars): {repr(content)}")
 
             if not content:
