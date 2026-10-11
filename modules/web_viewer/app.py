@@ -4,6 +4,7 @@ MeshCore Bot Data Viewer
 Bot montoring web interface using Flask-SocketIO 5.x
 """
 
+import asyncio
 import configparser
 import hmac
 import json
@@ -1002,6 +1003,44 @@ class BotDataViewer:
             self._command_info_cache = []
 
         return self._command_info_cache
+
+    def _test_command_manager(self):
+        """Return a local CommandManager used for Web Viewer test DMs."""
+        cached = getattr(self, '_test_cmd_manager', None)
+        if cached is not None:
+            return cached
+
+        from modules.command_manager import CommandManager  # noqa: PLC0415
+        from modules.plugin_loader import PluginLoader  # noqa: PLC0415
+
+        class _DummyTranslator:
+            def translate(self, key: str, **kwargs: Any) -> str:
+                return key
+
+            def get_value(self, key: str) -> Any:
+                return None
+
+        class _TestBot:
+            def __init__(self, app: Any) -> None:
+                self.config = app.config
+                self.logger = app.logger
+                self.db_manager = getattr(app, 'db_manager', None)
+                self.bot_root = app.bot_root
+                self._local_root = Path(app.bot_root) / 'local'
+                self.translator = _DummyTranslator()
+                self.command_manager = None
+                self.meshcore = None
+                self.is_radio_zombie = False
+                self.is_radio_offline = False
+
+        bot = _TestBot(self)
+        plugin_loader = PluginLoader(bot)
+        commands = plugin_loader.load_all_plugins()
+
+        manager = CommandManager(bot)
+        manager.commands = commands
+        self._test_cmd_manager = manager
+        return manager
 
     def _setup_routes(self):
         """Setup all Flask routes - complete feature parity"""
@@ -5559,6 +5598,40 @@ class BotDataViewer:
             except Exception as e:
                 self.logger.error(f"Error queuing radio advert: {e}")
                 return jsonify({'error': 'Failed to queue advert'}), 500
+
+        @self.app.route('/api/radio/test-dm', methods=['POST'])
+        def api_radio_test_dm():
+            """Run a command locally as a test DM and return captured replies.
+
+            Body: {message: str, sender: str}
+            This does not queue anything for the radio and does not spend airtime.
+            """
+            try:
+                data = request.get_json(silent=True) or {}
+                message = data.get('message', '').strip()
+                sender = data.get('sender', 'web-test').strip() or 'web-test'
+
+                if not message:
+                    return jsonify({'error': 'Message is required'}), 400
+                if len(message) > 200:
+                    return jsonify({'error': 'Message must be 200 characters or less'}), 400
+
+                manager = self._test_command_manager()
+                replies = asyncio.run(
+                    manager.execute_capture(
+                        message,
+                        sender_id=sender,
+                        is_dm=True,
+                        timeout=30.0,
+                        skip_cooldown=True,
+                    )
+                )
+
+                self.logger.info(f"Web Viewer test DM: {message!r} -> {replies}")
+                return jsonify({'success': True, 'replies': replies})
+            except Exception as e:
+                self.logger.error(f"Error running Web Viewer test DM: {e}")
+                return jsonify({'error': 'Failed to run test command'}), 500
 
         # ── Plugins settings panel ───────────────────────────────────────────
 

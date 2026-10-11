@@ -1619,3 +1619,28 @@ class TestLinkSpanStraddling:
         span = CommandManager._link_span_straddling(text, 30)
         assert span == (24, len(text))
         assert text[span[0]:span[1]] == "https://b.example/22"
+
+
+class TestExecuteCapture:
+    @pytest.mark.asyncio
+    async def test_execute_capture_returns_captured_reply(self, cm_bot):
+        command = Mock()
+        command.name = "test"
+        command.keywords = ["test"]
+        command._derive_config_section_name = Mock(return_value="Test_Command")
+        command.get_config_value = Mock(return_value=True)
+        command.requires_admin_access = Mock(return_value=False)
+        command.check_cooldown = Mock(return_value=(True, 0.0))
+        command.record_execution = Mock()
+
+        async def execute(message):
+            message.capture_sink.append("captured")
+            return True
+
+        command.execute = execute
+        cm = make_manager(cm_bot, {"test": command})
+
+        replies = await cm.execute_capture("test hello")
+
+        assert replies == ["captured"]
+        command.record_execution.assert_called_once()

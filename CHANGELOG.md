@@ -37,6 +37,10 @@ semantic versioning.
   queries, so generic conversational questions no longer trigger wiki context
   from a single accidental title match. Single-term queries still work.
 
+- Web Viewer Radio page has a local Test DM panel. It runs a command through the
+  command manager and shows captured replies without queueing anything for the
+  radio, so local tests do not spend AirTime.
+
 - `docs/develop-command-scripts.md` walks through writing a command plugin that
   integrates correctly with the bot framework, including developing against
   `[Bot] local_dir_path` (#259).

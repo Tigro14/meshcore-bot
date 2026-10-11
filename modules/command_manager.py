@@ -2193,6 +2193,67 @@ class CommandManager:
             return None
         return "\n".join(part for part in sink if part)
 
+    async def execute_capture(
+        self,
+        spec: str,
+        *,
+        sender_id: str = "web-test",
+        is_dm: bool = True,
+        channel: str | None = None,
+        timeout: float = 30.0,
+        allow_admin: bool = False,
+        skip_cooldown: bool = False,
+    ) -> list[str]:
+        """Run a command locally and return captured replies without transmitting.
+
+        This is intended for local Web Viewer test DMs. It uses the same command
+        execution path as a real message, but `send_response` and
+        `send_response_chunked` append their output to `capture_sink` instead of
+        spending airtime.
+        """
+        spec = (spec or "").strip()
+        if not spec:
+            return []
+
+        trigger = spec.split()[0]
+        command = self.resolve_command_by_trigger(trigger)
+        if command is None:
+            return ["Unknown command"]
+
+        command_name = getattr(command, 'name', trigger)
+        section = command._derive_config_section_name()
+        if not command.get_config_value(section, 'enabled', fallback=True, value_type='bool'):
+            return [f"{command_name} is disabled"]
+
+        if command.requires_admin_access() and not allow_admin:
+            return ["Admin commands are not allowed in test DM"]
+
+        if not skip_cooldown:
+            allowed, remaining = command.check_cooldown()
+            if not allowed:
+                return [f"Command on cooldown for another {remaining:.0f}s"]
+        command.record_execution()
+
+        sink: list[str] = []
+        synthetic = MeshMessage(
+            content=spec,
+            sender_id=sender_id,
+            channel=channel,
+            is_dm=is_dm,
+            timestamp=int(time.time()),
+            capture_sink=sink,
+        )
+
+        try:
+            await asyncio.wait_for(command.execute(synthetic), timeout=timeout)
+        except asyncio.TimeoutError:
+            return ["Test command timed out"]
+        except Exception as e:
+            self.logger.warning("Test command %r failed: %s: %s", command_name, type(e).__name__, e)
+            return [f"Test command failed: {e}"]
+
+        return [part for part in sink if part]
+
     async def execute_commands(self, message):
         """Execute command objects that handle their own responses.
 
