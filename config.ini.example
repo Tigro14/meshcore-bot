@@ -1800,6 +1800,16 @@ system_prompt = You are a helpful assistant on a low-bandwidth mesh network. Rep
 # Maximum tokens in response (8-512, default 80)
 max_tokens = 80
 
+# Context budget for the active model. 0 means derive it from the model's
+# context size reported by /v1/models, minus max_tokens and context_reserve_tokens.
+# context_max_tokens caps the derived budget so a very large remote model does not
+# make every prompt unnecessarily expensive.
+context_budget_tokens = 0
+context_max_tokens = 8192
+context_reserve_tokens = 256
+model_context_tokens = 4096
+model_info_cache_seconds = 300
+
 # Sampling temperature (0.0-2.0, default 0.4)
 temperature = 0.4
 

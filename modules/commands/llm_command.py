@@ -194,6 +194,27 @@ class LlmCommand(BaseCommand):
         self.context_cache_seconds = self.get_config_value(
             "Llm_Command", "context_cache_seconds", fallback=60, value_type="int"
         )
+        self.context_budget_tokens = max(
+            0,
+            self.get_config_value("Llm_Command", "context_budget_tokens", fallback=0, value_type="int"),
+        )
+        self.context_max_tokens = max(
+            0,
+            self.get_config_value("Llm_Command", "context_max_tokens", fallback=8192, value_type="int"),
+        )
+        self.context_reserve_tokens = max(
+            0,
+            self.get_config_value("Llm_Command", "context_reserve_tokens", fallback=256, value_type="int"),
+        )
+        self.model_context_tokens = max(
+            0,
+            self.get_config_value("Llm_Command", "model_context_tokens", fallback=4096, value_type="int"),
+        )
+        self.model_info_cache_seconds = max(
+            0,
+            self.get_config_value("Llm_Command", "model_info_cache_seconds", fallback=300, value_type="int"),
+        )
+        self._model_info_cache: dict[str, dict[str, Any]] = {}
         self.wiki_rag_enabled = self.get_config_value(
             "Llm_Command", "wiki_rag_enabled", fallback=False, value_type="bool"
         )
@@ -280,6 +301,7 @@ class LlmCommand(BaseCommand):
         self.bot_longitude = self.get_config_value("Llm_Command", "bot_longitude", fallback=None, value_type="float")
         self._cached_context_str = ""
         self._cached_context_time = 0.0
+        self._cached_context_budget = 0
         self._cached_context_breakdown: list[dict[str, Any]] = []
         self._cached_commands_list = None
         self._sender_position: tuple[float, float] | None = None
@@ -468,8 +490,12 @@ class LlmCommand(BaseCommand):
             return bool(cmd_instance.enabled)
         return True
 
-    def _build_local_context(self) -> str:
+    def _build_local_context(self, token_budget: int = 0) -> str:
         """Build a local context string with contacts, moon, sun, and weather info.
+
+        Args:
+            token_budget: Optional token budget for the local context. When set,
+                context parts are trimmed so the context fits the active model.
 
         Returns:
             String containing formatted local context, or empty string if disabled or cached.
@@ -479,7 +505,7 @@ class LlmCommand(BaseCommand):
 
         # Check cache
         now = time.time()
-        if self._cached_context_str and (now - self._cached_context_time) < self.context_cache_seconds:
+        if self._cached_context_str and self._cached_context_budget == token_budget and (now - self._cached_context_time) < self.context_cache_seconds:
             return self._cached_context_str
 
         context_parts = []
@@ -781,12 +807,33 @@ class LlmCommand(BaseCommand):
 
         # Build final context string
         if context_parts:
-            self._cached_context_str = "\n".join(context_parts)
-            self._cached_context_time = now
-            self._cached_context_breakdown = self._compute_context_breakdown(context_parts)
-            return self._cached_context_str
+            if token_budget > 0:
+                context_parts = self._fit_context_parts(context_parts, token_budget)
+            if context_parts:
+                self._cached_context_str = "\n".join(context_parts)
+                self._cached_context_budget = token_budget
+                self._cached_context_time = now
+                self._cached_context_breakdown = self._compute_context_breakdown(context_parts)
+                return self._cached_context_str
 
         return ""
+
+    def _fit_context_parts(self, parts: list[str], budget: int) -> list[str]:
+        if budget <= 0:
+            return parts
+        fitted: list[str] = []
+        used = 0
+        for part in parts:
+            estimated = self._estimate_tokens(part)
+            if used + estimated <= budget:
+                fitted.append(part)
+                used += estimated
+                continue
+            remaining = budget - used
+            if remaining > 0:
+                fitted.append(self._fit_text_to_tokens(part, remaining))
+            break
+        return fitted
 
     def _compute_context_breakdown(self, context_parts: list[str]) -> list[dict[str, Any]]:
         """Compute per-section character count and estimated token count."""
@@ -825,6 +872,69 @@ class LlmCommand(BaseCommand):
             return {"Authorization": f"Bearer {self.api_key}"}
         return {}
 
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """Cheap token estimate used for context budgeting."""
+        return max(1, len(text) // 4)
+
+    def _fit_text_to_tokens(self, text: str, budget: int) -> str:
+        if budget <= 0 or not text:
+            return ""
+        if self._estimate_tokens(text) <= budget:
+            return text
+        return text[: budget * 4].rstrip()
+
+    def _model_info(self, endpoint: str) -> dict[str, Any]:
+        """Cached model metadata for an endpoint, including its context size."""
+        now = time.monotonic()
+        cached = self._model_info_cache.get(endpoint)
+        if cached and self.model_info_cache_seconds > 0 and (now - cached.get("checked_at", 0.0)) < self.model_info_cache_seconds:
+            return cached
+
+        parsed = urlparse(endpoint)
+        models_url = urljoin(f"{parsed.scheme}://{parsed.netloc}/", "v1/models")
+        info: dict[str, Any] = {
+            "endpoint": endpoint,
+            "model": self.model or "",
+            "n_ctx": self.model_context_tokens,
+            "checked_at": now,
+        }
+        try:
+            response = requests.get(
+                models_url,
+                timeout=self.ping_timeout_seconds,
+                headers=self._auth_headers(endpoint),
+            )
+            if response.status_code == 200:
+                data = response.json()
+                entries = data.get("data")
+                entry = entries[0] if isinstance(entries, list) and entries else {}
+                info["model"] = entry.get("id") or entry.get("name") or info["model"]
+                meta_value = entry.get("meta")
+                details_value = entry.get("details")
+                meta = meta_value if isinstance(meta_value, dict) else {}
+                details = details_value if isinstance(details_value, dict) else {}
+                n_ctx = meta.get("n_ctx") or details.get("n_ctx") or 0
+                if isinstance(n_ctx, int) and n_ctx > 0:
+                    info["n_ctx"] = n_ctx
+        except Exception as e:
+            self.logger.warning(f"LLM model info unavailable for {endpoint}: {e}")
+
+        self._model_info_cache[endpoint] = info
+        return info
+
+    def _context_token_budget(self, endpoint: str) -> int:
+        """Context budget for the active model, leaving room for the answer."""
+        if self.context_budget_tokens > 0:
+            budget = self.context_budget_tokens
+        else:
+            info = self._model_info(endpoint)
+            budget = int(info.get("n_ctx", self.model_context_tokens)) - self.max_tokens - self.context_reserve_tokens
+
+        if self.context_max_tokens > 0:
+            budget = min(budget, self.context_max_tokens)
+        return max(0, budget)
+
     def _invalidate_ping_cache(self) -> None:
         self._ping_ok = False
         self._ping_checked_at = 0.0
@@ -862,9 +972,9 @@ class LlmCommand(BaseCommand):
             return self.primary_endpoint
         return self.fallback_endpoint
 
-    async def _post_chat(self, payload: dict[str, Any]) -> tuple[requests.Response | None, str]:
+    async def _post_chat(self, payload: dict[str, Any], endpoint: str | None = None) -> tuple[requests.Response | None, str]:
         """Send a chat request to the resolved endpoint, retrying on the local fallback."""
-        candidates = [self._resolve_endpoint()]
+        candidates = [endpoint or self._resolve_endpoint()]
         if self.fallback_endpoint and self.fallback_endpoint != candidates[0]:
             candidates.append(self.fallback_endpoint)
 
@@ -988,7 +1098,7 @@ class LlmCommand(BaseCommand):
         else:
             return "Variable"
 
-    def _inject_current_time_into_prompt(self, prompt: str) -> str:
+    def _inject_current_time_into_prompt(self, prompt: str, token_budget: int = 0) -> str:
         """Inject the current system time and local context into a system prompt.
 
         Uses the server's local time zone without explicit timezone conversion,
@@ -999,7 +1109,7 @@ class LlmCommand(BaseCommand):
             result = f"{prompt}\n[Current time: {current_time}]"
 
             # Add local context if enabled
-            local_context = self._build_local_context()
+            local_context = self._build_local_context(token_budget)
             if local_context:
                 result += f"\n[Local Context:\n{local_context}]"
 
@@ -1112,6 +1222,8 @@ class LlmCommand(BaseCommand):
         messages: list[dict[str, Any]] | None = None,
         include_rag: bool = True,
         rag_context: str | None = None,
+        token_budget: int | None = None,
+        endpoint: str | None = None,
     ) -> dict[str, Any]:
         """Build the API payload for the LLM request.
 
@@ -1136,6 +1248,9 @@ class LlmCommand(BaseCommand):
                 "_build_payload: messages parameter provided with prompt/history; ignoring prompt/history"
             )
 
+        if token_budget is None:
+            token_budget = self._context_token_budget(self._resolve_endpoint())
+
         rag_active = False
         if messages is None:
             if include_rag and rag_context is None and prompt and self.wiki_rag:
@@ -1144,6 +1259,10 @@ class LlmCommand(BaseCommand):
                 except Exception as e:
                     self.logger.warning(f"Failed to build Wiki.js RAG context: {e}")
                     rag_context = ""
+
+            if token_budget > 0 and rag_context:
+                rag_budget = max(0, token_budget - self._estimate_tokens(prompt))
+                rag_context = self._fit_text_to_tokens(rag_context, rag_budget)
 
             if include_rag and rag_context:
                 # Wiki answers deliberately use an isolated prompt: unrelated
@@ -1164,7 +1283,12 @@ class LlmCommand(BaseCommand):
                 ]
                 rag_active = True
             else:
-                system_prompt = self._inject_current_time_into_prompt(self.system_prompt)
+                local_budget = token_budget
+                if token_budget > 0:
+                    used = self._estimate_tokens(self.system_prompt) + self._estimate_tokens(prompt)
+                    used += sum(self._estimate_tokens(entry.get("content", "")) for entry in history or [])
+                    local_budget = max(0, token_budget - used)
+                system_prompt = self._inject_current_time_into_prompt(self.system_prompt, local_budget)
                 messages = [{"role": "system", "content": system_prompt}]
                 if history:
                     messages.extend(history)
@@ -1177,8 +1301,10 @@ class LlmCommand(BaseCommand):
             "temperature": 0.0 if rag_active else self.temperature,
             "top_p": self.top_p,
         }
-        if self.model:
-            payload["model"] = self.model
+        active_endpoint = endpoint or self._resolve_endpoint()
+        model_name = self.model or self._model_info(active_endpoint).get("model", "")
+        if model_name:
+            payload["model"] = model_name
 
         return payload
 
@@ -1450,14 +1576,18 @@ class LlmCommand(BaseCommand):
             self._get_sender_position(message)
 
         # Build the payload with current time and context injected in system prompt
+        endpoint = self._resolve_endpoint()
+        token_budget = self._context_token_budget(endpoint)
         payload = self._build_payload(
             prompt=prompt,
             history=history,
             rag_context=wiki_result.context if wiki_result else "",
+            token_budget=token_budget,
+            endpoint=endpoint,
         )
         self.logger.debug(f"LLM prompt: {repr(prompt[:500])}")
 
-        response, endpoint = await self._post_chat(payload)
+        response, endpoint = await self._post_chat(payload, endpoint)
         if response is None:
             return await self.send_response(message, "LLM unavailable: no LLM endpoint responded.")
 
@@ -1500,8 +1630,8 @@ class LlmCommand(BaseCommand):
                     "- Max 5 items, no tables, no pipes\n"
                     "- Total response under 400 chars"
                 )
-                followup_payload = self._build_payload(prompt=followup_prompt, include_rag=False)
-                resp2, _ = await self._post_chat(followup_payload)
+                followup_payload = self._build_payload(prompt=followup_prompt, include_rag=False, token_budget=token_budget, endpoint=endpoint)
+                resp2, _ = await self._post_chat(followup_payload, endpoint)
                 if resp2 is not None:
                     data2 = resp2.json()
                     content = data2["choices"][0]["message"]["content"].strip()

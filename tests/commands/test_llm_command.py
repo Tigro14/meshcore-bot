@@ -1,6 +1,7 @@
 """Tests for modules.commands.llm_command."""
 
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -9,6 +10,15 @@ import requests
 
 from modules.commands.llm_command import LlmCommand
 from tests.conftest import mock_message
+
+
+@pytest.fixture(autouse=True)
+def mock_model_info():
+    """Keep model-info lookups local so tests do not depend on network state."""
+    response = Mock(status_code=200)
+    response.json.return_value = {"data": [{"id": "test-model", "meta": {"n_ctx": 4096}}]}
+    with patch("modules.commands.llm_command.requests.get", return_value=response):
+        yield
 
 
 class TestLlmCommand:
@@ -188,6 +198,7 @@ class TestLlmCommand:
         command_mock_bot.config.set("Bot", "command_prefix", "")
         cmd = LlmCommand(command_mock_bot)
         cmd.include_local_context = False
+        cmd._model_info_cache[self.PRIMARY] = {"model": "test-model", "n_ctx": 4096, "checked_at": time.monotonic()}
         msg = mock_message(content="llm hello", is_dm=True)
 
         ping = Mock(status_code=200)
@@ -227,6 +238,7 @@ class TestLlmCommand:
         command_mock_bot.config.set("Bot", "command_prefix", "")
         cmd = LlmCommand(command_mock_bot)
         cmd.include_local_context = False
+        cmd._model_info_cache[self.PRIMARY] = {"model": "test-model", "n_ctx": 4096, "checked_at": time.monotonic()}
         msg = mock_message(content="llm hello", is_dm=True)
 
         ping = Mock(status_code=200)

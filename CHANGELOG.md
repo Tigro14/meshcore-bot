@@ -22,6 +22,13 @@ semantic versioning.
   reboot. Paths outside `writable_prefixes` are ignored, so a read-only mount
   created by systemd sandboxing cannot trigger a reboot loop.
 
+- `llm` now sizes its context from the active model. The model name and `n_ctx`
+  are read from `/v1/models` for the endpoint actually used, cached for
+  `model_info_cache_seconds`, and the context is trimmed to the remaining budget
+  after `max_tokens` and `context_reserve_tokens`. `context_max_tokens` caps the
+  derived budget so a very large remote model does not make every prompt
+  unnecessarily expensive.
+
 - `docs/develop-command-scripts.md` walks through writing a command plugin that
   integrates correctly with the bot framework, including developing against
   `[Bot] local_dir_path` (#259).
