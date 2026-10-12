@@ -9,7 +9,7 @@ import time
 from configparser import ConfigParser
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -2850,3 +2850,31 @@ class TestClockSyncTargetsAdminBatteryEnrichment:
             data = json.loads(response.data)
             target = next(t for t in data['targets'] if t['target'] == pubkey)
             assert 'battery_voltage' not in target
+
+
+class TestWebViewerTestDmRoute:
+    def test_test_dm_route_returns_captured_replies(self, mock_viewer):
+        manager = Mock()
+        manager.execute_capture = AsyncMock(return_value=["captured"])
+        mock_viewer._test_command_manager = Mock(return_value=manager)
+
+        with mock_viewer.app.test_client() as client:
+            response = client.post('/api/radio/test-dm', json={'message': 'test hello'})
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data == {'success': True, 'replies': ['captured']}
+        manager.execute_capture.assert_called_once_with(
+            'test hello',
+            sender_id='web-test',
+            is_dm=True,
+            timeout=30.0,
+            skip_cooldown=True,
+        )
+
+    def test_test_dm_route_rejects_empty_message(self, mock_viewer):
+        with mock_viewer.app.test_client() as client:
+            response = client.post('/api/radio/test-dm', json={'message': ''})
+
+        assert response.status_code == 400
+        assert response.get_json() == {'error': 'Message is required'}

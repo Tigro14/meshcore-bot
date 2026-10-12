@@ -16,6 +16,31 @@ semantic versioning.
   endpoint (`endpoint` / `fallback_endpoint`). Blank `primary_endpoint` keeps the
   previous local-only behaviour.
 
+- `[IO_Health]` counts read-only filesystem (`EROFS`) write failures on paths the
+  bot is allowed to write to and, once `failure_threshold` is reached, raises the
+  shared-memory reboot semaphore so an external watcher can run a safe SysRq
+  reboot. Paths outside `writable_prefixes` are ignored, so a read-only mount
+  created by systemd sandboxing cannot trigger a reboot loop.
+
+- `llm` now sizes its context from the active model. The model name and `n_ctx`
+  are read from `/v1/models` for the endpoint actually used, cached for
+  `model_info_cache_seconds`, and the context is trimmed to the remaining budget
+  after `max_tokens` and `context_reserve_tokens`. `context_max_tokens` caps the
+  derived budget so a very large remote model does not make every prompt
+  unnecessarily expensive.
+
+- `llm` reports the active LLM model in the injected context, so a remote
+  endpoint no longer answers as if it were the configured local `llama.cpp`
+  model.
+
+- `llm` Wiki.js retrieval now requires multiple matching terms for multi-term
+  queries, so generic conversational questions no longer trigger wiki context
+  from a single accidental title match. Single-term queries still work.
+
+- Web Viewer Radio page has a local Test DM panel. It runs a command through the
+  command manager and shows captured replies without queueing anything for the
+  radio, so local tests do not spend AirTime.
+
 - `docs/develop-command-scripts.md` walks through writing a command plugin that
   integrates correctly with the bot framework, including developing against
   `[Bot] local_dir_path` (#259).
@@ -94,6 +119,27 @@ semantic versioning.
   it.
 
 ### Fixed
+
+- The Web Viewer Test DM panel now answers keyword-matched triggers. It called
+  `command.execute()` only, so `help` and plain keyword replies produced an empty
+  response; the keyword path runs first, and commands that handle their own reply
+  still fall through to `execute()`. A test DM no longer queues its command for
+  transmission.
+
+- The Test DM panel reports the HTTP status when the reply is not JSON, instead of
+  failing with a JSON parse error.
+
+- `llm` no longer sends `reasoning_content` as the answer. Thinking-only
+  responses are filtered, and only the visible `content` field is sent to the
+  mesh network.
+
+- `llm` decides what an empty `content` means from `finish_reason` instead of from
+  the endpoint: `stop` means the model answered inside its thinking block, so
+  `reasoning_content` is the reply; `length` reports the answer as truncated by
+  `max_tokens`; anything else keeps the chain-of-thought off the air. Thinking is now
+  also disabled for a local thinking model (`[Llm_Command] disable_thinking`, default
+  true, detected from the endpoint model metadata), so the answer lands in the visible
+  content field in the first place.
 
 - `[Joke_Command] joke_enabled` and `[DadJoke_Command] dadjoke_enabled` are now
   listed in the shared legacy-alias table. Both commands accepted that spelling

@@ -842,6 +842,19 @@ json_logging = false
 log_max_bytes = 5242880
 # log_backup_count: number of rotated backup files to keep (e.g. meshcore_bot.log.1 … .3)
 log_backup_count = 3
+[IO_Health]
+# Read-only filesystem detection. A storage fault that remounts a filesystem
+# read-only surfaces as EROFS on writes; the bot counts those failures and, once
+# the threshold is reached, raises the shared-memory reboot semaphore so an
+# external watcher runs the SysRq sequence.
+# Only paths the bot is allowed to write to are counted: a read-only mount
+# created by systemd sandboxing (ProtectSystem) is a configuration fact, not a
+# storage fault, and must never trigger a reboot.
+enabled = true
+reboot_on_erofs = true
+failure_threshold = 3
+cooldown_seconds = 900
+writable_prefixes = /var/lib/meshcore-bot,/var/log/meshcore-bot,/dev/shm
 [External_Data]
 # URL shortener service: gd (v.gd / is.gd-compatible) or shlink. Default: gd
 short_url_website_service = gd
@@ -1772,6 +1785,11 @@ health_path = /health
 ping_timeout_seconds = 2.0
 ping_cache_seconds = 60
 
+# When a reply has no visible content, the finish_reason decides what happened:
+# "stop" means the model answered inside its thinking block, so reasoning_content is
+# sent; "length" means the answer was cut by max_tokens and is reported as truncated;
+# anything else keeps the chain-of-thought off the air.
+
 # Fallback endpoint (default: the endpoint below, i.e. local llama.cpp)
 fallback_endpoint = http://127.0.0.1:8080/v1/chat/completions
 
@@ -1787,6 +1805,16 @@ system_prompt = You are a helpful assistant on a low-bandwidth mesh network. Rep
 # Maximum tokens in response (8-512, default 80)
 max_tokens = 80
 
+# Context budget for the active model. 0 means derive it from the model's
+# context size reported by /v1/models, minus max_tokens and context_reserve_tokens.
+# context_max_tokens caps the derived budget so a very large remote model does not
+# make every prompt unnecessarily expensive.
+context_budget_tokens = 0
+context_max_tokens = 8192
+context_reserve_tokens = 256
+model_context_tokens = 4096
+model_info_cache_seconds = 300
+
 # Sampling temperature (0.0-2.0, default 0.4)
 temperature = 0.4
 
@@ -1798,6 +1826,11 @@ timeout_seconds = 20
 
 # Strip <think>...</think> tags from model output (default true)
 strip_thinking_tags = true
+
+# Ask a local thinking model to answer in the visible content field instead of a
+# thinking block (llama.cpp chat_template_kwargs, default true). Only sent to the
+# local endpoint, since a remote gateway may reject unknown fields.
+disable_thinking = true
 
 # Split a long answer into several messages (default false)
 pagination_enabled = false
@@ -1852,6 +1885,7 @@ wiki_rag_min_term_len = 3
 # Absolute and relative relevance thresholds
 wiki_rag_min_score = 6
 wiki_rag_relative_score = 0.55
+wiki_rag_min_matching_terms = 2
 # Optional comma-separated search stopwords and aliases (alias=canonical)
 wiki_rag_stopwords =
 wiki_rag_aliases =
