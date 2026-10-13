@@ -35,6 +35,7 @@ from .command_manager import CommandManager
 from .db_manager import AsyncDBManager, DBManager
 from .feed_manager import FeedManager
 from .i18n import Translator
+from .io_health import IOHealthMonitor
 from .message_handler import MessageHandler
 
 # Import our modules
@@ -188,6 +189,8 @@ class MeshCoreBot:
         # Setup logging
         self.setup_logging()
 
+        self.io_health = IOHealthMonitor(self.config, self.logger)
+
         # Connection
         self.meshcore = None
         self.connected = False
@@ -212,6 +215,8 @@ class MeshCoreBot:
             self.logger.info("Database manager initialized successfully")
         except (OSError, ValueError, sqlite3.Error) as e:
             self.logger.error(f"Failed to initialize database manager: {e}")
+            if isinstance(e, OSError):
+                self.io_health.report_write_failure(e, db_path)
             raise
 
         # Set length of prefix

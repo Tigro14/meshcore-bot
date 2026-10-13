@@ -1619,3 +1619,55 @@ class TestLinkSpanStraddling:
         span = CommandManager._link_span_straddling(text, 30)
         assert span == (24, len(text))
         assert text[span[0]:span[1]] == "https://b.example/22"
+
+
+class TestExecuteCapture:
+    @pytest.mark.asyncio
+    async def test_execute_capture_returns_captured_reply(self, cm_bot):
+        command = Mock()
+        command.name = "test"
+        command.keywords = ["test"]
+        command._derive_config_section_name = Mock(return_value="Test_Command")
+        command.get_config_value = Mock(return_value=True)
+        command.requires_admin_access = Mock(return_value=False)
+        command.check_cooldown = Mock(return_value=(True, 0.0))
+        command.record_execution = Mock()
+        command.should_execute = Mock(return_value=False)
+        command.get_response_format = Mock(return_value=None)
+
+        async def execute(message):
+            message.capture_sink.append("captured")
+            return True
+
+        command.execute = execute
+        cm = make_manager(cm_bot, {"test": command})
+
+        replies = await cm.execute_capture("test hello")
+
+        assert replies == ["captured"]
+        command.record_execution.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_execute_capture_captures_keyword_only_reply(self, cm_bot):
+        cm = make_manager(cm_bot)
+
+        replies = await cm.execute_capture("ping")
+
+        assert replies == ["Pong!"]
+
+    @pytest.mark.asyncio
+    async def test_execute_capture_captures_help(self, cm_bot):
+        cm = make_manager(cm_bot)
+
+        replies = await cm.execute_capture("help")
+
+        assert replies and "help" in replies[0].lower()
+
+    @pytest.mark.asyncio
+    async def test_execute_capture_does_not_queue_keyword_match(self, cm_bot):
+        cm = make_manager(cm_bot)
+        cm._queue_command = Mock(return_value=True)
+
+        await cm.execute_capture("ping")
+
+        cm._queue_command.assert_not_called()

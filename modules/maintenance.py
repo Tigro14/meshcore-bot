@@ -653,6 +653,9 @@ class MaintenanceRunner:
             backup_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             self.logger.error(f"DB backup: cannot create backup directory {backup_dir}: {e}")
+            io_health = getattr(self.bot, "io_health", None)
+            if io_health is not None:
+                io_health.report_write_failure(e, backup_dir)
             wk = _iso_week_key_from_ran_at(ran_at)
             self._last_db_backup_stats = {'ran_at': ran_at, 'error': str(e), **({'week_key': wk} if wk else {})}
             try:
