@@ -2609,6 +2609,45 @@ maxlongitude = -114.0
 # When true: notification message then link-only message. When false: no link sent.
 # Default: true
 send_link = true
+
+[Vigilance_Service]
+# Météo-France weather vigilance alert monitor (France only)
+# Polls vigilance.meteofrance.fr and posts to a channel when Orange or Rouge
+# vigilance is active for the configured department.
+# Requires: requests, beautifulsoup4
+enabled = false
+
+# French department number to monitor (e.g. 75 for Paris, 25 for Doubs)
+department = 75
+
+# Channel to post vigilance alerts to
+channel = #general
+
+# Optional regional TC_FLOOD scope for mesh channel posts from this service.
+# flood_scope = #west
+
+# How often to check Météo-France (milliseconds). Default: 28800000 (8 hours)
+poll_interval = 28800000
+
+# Minimum seconds between successive alerts for the same event (throttle).
+# Default: 3600 (1 hour)
+alert_throttle = 3600
+
+# Comma-separated vigilance levels that trigger an alert.
+# Levels: Vert, Jaune, Orange, Rouge
+# Default: Orange,Rouge (only alert on elevated vigilance)
+alert_levels = Orange,Rouge
+
+# When true, alerts go only to Discord/Telegram webhooks, not the mesh channel.
+# Default: false
+silence_mesh_output = false
+
+# Optional Discord webhook URLs (comma-separated) for external notifications
+# discord_webhook_urls = https://discord.com/api/webhooks/...
+
+# Optional Telegram chat IDs (comma-separated) for external notifications
+# telegram_chat_ids = -1001234567890
+
 [Worldcup_Service]
 # Live FIFA World Cup score updates posted to a channel (true/false).
 # Posts proactive messages as matches progress, e.g.:
