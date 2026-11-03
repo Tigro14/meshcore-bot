@@ -168,6 +168,7 @@ Examples of sections that configure specific commands or features:
 - **`[Sports_Command]`** – Sports scores (teams, leagues).
 - **`[Joke_Command]`**, **`[DadJoke_Command]`** – Joke sources and options.
 - **`[RandomLine]`** – Trigger-based random-line responses via `triggers.<key>`, `file.<key>`, optional `prefix.<key>`, optional channel restriction (`channel.<key>`/`channels.<key>`), and optional website category override (`category.<key>`). Website command reference groups RandomLine entries under **Fun Commands** by default unless `category.<key>` is set.
+- **`[IO_Health]`** – Read-only filesystem detection, and the power-cycle hook run by the Web Viewer monitoring route. See [Storage monitoring and power cycle](io-health-monitoring.md).
 
 Common per-command options (when supported by that command):
 

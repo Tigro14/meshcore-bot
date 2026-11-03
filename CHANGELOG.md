@@ -22,6 +22,17 @@ semantic versioning.
   reboot. Paths outside `writable_prefixes` are ignored, so a read-only mount
   created by systemd sandboxing cannot trigger a reboot loop.
 
+- Web Viewer storage monitoring routes: `GET /api/health/storage` reports what the
+  kernel mount table says for each monitored prefix, the probe result, the counters and
+  the semaphore state, as JSON or as `key=value` lines with `?format=text`. It is on the
+  public allowlist because an external agent polls it, the payload is aggregate only (no
+  mount paths), and its probe write is not counted, so a prober cannot push the bot over
+  `failure_threshold`. `POST /api/health/storage/powercycle` (admin) runs the new
+  `[IO_Health] powercycle_command` hook and answers 502 when the hook fails; with no hook
+  configured it raises the shared-memory semaphore instead. The counters are read through
+  the shared database, because the viewer is a separate process. See
+  `docs/io-health-monitoring.md`.
+
 - `llm` now sizes its context from the active model. The model name and `n_ctx`
   are read from `/v1/models` for the endpoint actually used, cached for
   `model_info_cache_seconds`, and the context is trimmed to the remaining budget
