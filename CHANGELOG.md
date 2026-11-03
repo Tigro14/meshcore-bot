@@ -375,6 +375,11 @@ semantic versioning.
 
 ### Fixed
 
+- Channel reads validate the returned slot before updating the channel cache and
+  retry one transient timeout or delayed reply. A late response could otherwise
+  place Public under another slot and hide its messages from the live feed.
+  Cache refreshes publish a complete snapshot after scanning.
+
 - A repeater heard twice in a row no longer posts two "new repeater" messages to Discord and Telegram. The prefix-collision service decided to announce a key and only recorded that key after the posts returned, so a second NEW_CONTACT while the first post was still in flight sent again (and the same gap double-posted a prefix-collision alert onto the mesh, which the bridges delivered twice). It now records the key before it sends.
 - The greeter's warmup (`rollout_days`) runs once, the first time the greeter starts. A restart more than a day after the previous warmup ended used to open another one, and anyone who spoke during it was marked greeted and never welcomed. Ending a warmup, or it expiring, no longer starts a new one on the next boot.
 - A greeting that is not actually sent no longer leaves the person marked greeted. That covers a send that fails, and a dead-air wait that ends while channel replies are paused. The next message tries again. A wait cancelled because someone else mentioned them still counts as greeted. Name fuzziness now catches a typo of the new user's name during that wait; previously it only ran when the exact name was already in the message, and could then reject that exact mention.

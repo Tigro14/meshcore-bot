@@ -14,7 +14,9 @@ publication setting, not an encryption-at-rest or local retention setting.
 Consent is persisted separately from the radio channel list and bound to both
 the channel name and key. Synchronizing slots preserves consent; replacing a key
 or reusing a slot does not grant access to a different channel. Ambiguous channel
-names fail closed. Legacy history without a verifiable channel identity is not
+names fail closed. Radio channel reads verify the returned slot and retry a
+transient timeout or late reply before publishing a refreshed cache snapshot.
+Legacy history without a verifiable channel identity is not
 replayed.
 
 Visibility is checked on the server before live delivery, history replay and
