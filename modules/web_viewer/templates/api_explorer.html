@@ -92,7 +92,10 @@
     ("GET",  "/api/export/paths",     "Export observed mesh paths as CSV"),
   ]),
   ("Channels", "fa-layer-group", [
-    ("GET",  "/api/channels",                         "List configured channels"),
+    ("GET",  "/api/channels",                         "List web-visible channels (no private keys)"),
+    ("GET",  "/radio/api/channels",                   "List all configured channels (Radio management)"),
+    ("PUT",  "/radio/api/channels/live-visibility",   "Set per-channel web message visibility"),
+    ("POST", "/radio/api/channels",                  "Create channel with optional web visibility"),
     ("POST", "/api/channels",                         "Add a new channel"),
     ("PUT",  "/api/channels/{channel_idx}",            "Update channel settings"),
     ("DELETE","/api/channels/{channel_idx}",           "Remove a channel"),

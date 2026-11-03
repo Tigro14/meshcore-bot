@@ -19,7 +19,7 @@
     }
 
     function postChannel(payload) {
-        return fetch('/api/channels', {
+        return fetch('/radio/api/channels', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

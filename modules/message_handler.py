@@ -271,14 +271,13 @@ class MessageHandler(MeshGraphRecorderMixin, ContactEventsMixin, RfCorrelationMi
                 self.logger.warning("Contact message event has no payload")
                 return
 
-            # Debug: Log the full payload structure
-            self.logger.debug(f"Contact message payload: {payload}")
+            # Never duplicate decrypted message bodies in technical logs
+            self.logger.debug("Contact message payload received (body omitted)")
             self.logger.debug(f"Payload keys: {list(payload.keys())}")
-            self.logger.debug(f"Event metadata: {event.metadata if hasattr(event, 'metadata') else 'None'}")
+            self.logger.debug("Contact message metadata received")
 
-            self.logger.info(
-                f"Received DM from {sanitize_name(payload.get('pubkey_prefix', 'unknown'))}: {sanitize_name(payload.get('text', ''))}"
-            )
+            body_bytes = len(str(payload.get("text", "")).encode("utf-8"))
+            self.logger.info("📡 PRIVATE MESSAGE: UNKNOWN | Type: TXT_MSG | Bytes: %d", body_bytes)
 
             # Correlation keys for this DM's RF data (packet prefix, else sender pubkey).
             message_raw_hex = payload.get("raw_hex", "")
@@ -754,8 +753,8 @@ class MessageHandler(MeshGraphRecorderMixin, ContactEventsMixin, RfCorrelationMi
 
             channel_idx = payload.get("channel_idx", 0)
 
-            # Debug: Log the full payload structure
-            self.logger.debug(f"Channel message payload: {payload}")
+            # Never duplicate decrypted message bodies in technical logs
+            self.logger.debug("Channel message payload received (body omitted)")
             self.logger.debug(f"Payload keys: {list(payload.keys())}")
 
             text = payload.get("text", "")
@@ -764,7 +763,7 @@ class MessageHandler(MeshGraphRecorderMixin, ContactEventsMixin, RfCorrelationMi
             # Get channel name from channel number
             channel_name = self.bot.channel_manager.get_channel_name(channel_idx)
 
-            self.logger.info(f"Received channel message ({channel_name}) from {sender_id}: {text}")
+            self.logger.info("📡 CHANNEL MESSAGE: UNKNOWN | Type: GRP_TXT | Bytes: %d", len(text.encode("utf-8")))
 
             # Get SNR and RSSI using the same logic as contact messages
             snr, rssi = self._message_signal(payload, metadata, ("SNR", "snr"))
@@ -1079,9 +1078,8 @@ class MessageHandler(MeshGraphRecorderMixin, ContactEventsMixin, RfCorrelationMi
                 if _has_mention:
                     message.content = re.sub(re.escape(_mention), "", message.content, flags=re.IGNORECASE).strip()
 
-        self.logger.info(
-            f"Processing message: '{message.content}' from {message.sender_id} in {'DM' if message.is_dm else message.channel}"
-        )
+        from .log_privacy import message_metadata
+        self.logger.info(message_metadata(message))
 
         # Check for advert command (DM only)
         if message.is_dm and message.content.strip().lower() == "advert":

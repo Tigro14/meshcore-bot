@@ -10,6 +10,7 @@ import time  # noqa: F401  importable from this module on dev
 from typing import Any, Callable, Optional
 
 from ..location import latest_contact_position_rows
+from ..log_privacy import message_metadata
 from ..models import MeshMessage
 from ..path_inference import (
     PathInferenceConfig,
@@ -476,7 +477,7 @@ class PathCommand(BaseCommand):
 
     async def execute(self, message: MeshMessage) -> bool:
         """Execute path decode command"""
-        self.logger.info(f"Path command executed with content: {message.content}")
+        self.logger.info("Path command executed | %s", message_metadata(message))
 
         if not await self.enforce_path_byte_requirement(message, 'Path_Command'):
             return True

@@ -501,6 +501,7 @@
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
+                        <p class="small text-muted">Choose which channels may publish decrypted messages on the web. Unchecked channels are still monitored by the bot.</p>
                         <table class="table table-striped table-hover" id="channelsTable">
                             <thead class="table-dark">
                                 <tr>
@@ -509,12 +510,13 @@
                                     <th>Type</th>
                                     <th>Feed Count</th>
                                     <th>Status</th>
+                                    <th>Live Channel Messages</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="channelsTableBody">
                                 <tr>
-                                    <td colspan="6" class="text-center">Loading...</td>
+                                    <td colspan="7" class="text-center">Loading...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -535,6 +537,11 @@
             </div>
             <div class="modal-body">
                 <form id="createChannelForm">
+                    <div class="form-check mb-3">
+                        <input type="checkbox" class="form-check-input" id="channelLiveMessagesVisible">
+                        <label class="form-check-label" for="channelLiveMessagesVisible">Publish messages on the web</label>
+                        <div class="form-text">Show decrypted messages in Live Channel Messages. Off by default.</div>
+                    </div>
                     <div class="mb-3">
                         <label class="form-label" for="channelName">Channel Name</label>
                         <input type="text" class="form-control" id="channelName" name="channel_name" required placeholder="#channelname or channelname">
@@ -614,7 +621,7 @@ class RadioManager {
     
     async loadChannels() {
         try {
-            const response = await fetch('/api/channels');
+            const response = await fetch('/radio/api/channels');
             const data = await response.json();
             // Filter out decode-only channels (they're for packet decoding, not radio management)
             this.channels = (data.channels || []).filter(c => !c.decode_only);
@@ -724,7 +731,7 @@ class RadioManager {
         if (this.channels.length === 0) {
             const row = document.createElement('tr');
             const cell = document.createElement('td');
-            cell.colSpan = 6;
+            cell.colSpan = 7;
             cell.className = 'text-center';
             cell.textContent = 'No channels configured';
             row.appendChild(cell);
@@ -768,6 +775,17 @@ class RadioManager {
                 statusCell.appendChild(this.makeBadge('Active', 'bg-success'));
                 row.appendChild(statusCell);
 
+                const visibilityCell = document.createElement('td');
+                const visibility = document.createElement('input');
+                visibility.type = 'checkbox';
+                visibility.className = 'form-check-input';
+                visibility.checked = channel.live_messages_visible === true;
+                visibility.setAttribute('aria-label', `Publish messages from ${channelName} on the web`);
+                visibility.title = 'Show decrypted messages from this channel in Realtime';
+                visibility.addEventListener('change', () => this.setChannelVisibility(channel, visibility));
+                visibilityCell.appendChild(visibility);
+                row.appendChild(visibilityCell);
+
                 const actionCell = document.createElement('td');
                 const viewButton = this.makeIconButton('btn-info', 'fa-eye', 'View Details');
                 viewButton.addEventListener('click', () => this.viewChannel(channelIdx));
@@ -782,6 +800,28 @@ class RadioManager {
                 tbody.appendChild(row);
             });
         });
+    }
+
+    async setChannelVisibility(channel, checkbox) {
+        const visible = checkbox.checked;
+        checkbox.disabled = true;
+        try {
+            const response = await fetch('/radio/api/channels/live-visibility', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+                body: JSON.stringify({channel_idx: channel.channel_idx, channel_name: channel.name,
+                    live_messages_visible: visible})
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.error || 'Could not save visibility setting');
+            channel.live_messages_visible = visible;
+            this.showSuccess(visible ? 'Channel messages are visible in Realtime.' : 'Channel messages are hidden in Realtime.');
+        } catch (error) {
+            checkbox.checked = !visible;
+            this.showError(error.message);
+        } finally {
+            checkbox.disabled = false;
+        }
     }
 
     makeTextCell(value) {
@@ -820,13 +860,14 @@ class RadioManager {
     }
     
     setupEventHandlers() {
+        document.getElementById('createChannelModal').addEventListener('show.bs.modal', () => {
+            document.getElementById('channelLiveMessagesVisible').checked = false;
+        });
         // Channel name input - update key preview and toggle key input
         const channelNameInput = document.getElementById('channelName');
         if (channelNameInput) {
             channelNameInput.addEventListener('input', (e) => {
-                this.handleChannelNameChange(e.target.value).catch(err => {
-                    console.error('Error in handleChannelNameChange:', err);
-                });
+                this.handleChannelNameChange(e.target.value);
             });
         }
         
@@ -1026,7 +1067,8 @@ class RadioManager {
         
         const data = {
             name: channelName,
-            channel_idx: channelIdx
+            channel_idx: channelIdx,
+            live_messages_visible: document.getElementById("channelLiveMessagesVisible").checked
         };
         
         // Add key only for custom channels

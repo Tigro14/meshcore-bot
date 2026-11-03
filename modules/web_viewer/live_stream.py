@@ -10,7 +10,9 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+from modules.log_privacy import web_log_line
 from modules.utils import resolve_path
+from modules.web_viewer.channel_visibility import can_publish, encrypted_packet_view
 
 # colorlog and other handlers write ANSI SGR sequences; strip for web /logs display
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -26,6 +28,7 @@ class LiveStreamMixin:
 
     _clients_lock: Any
     _config_base: Any
+    _get_db_connection: Any
     config: Any
     connected_clients: Any
     db_path: Any
@@ -40,8 +43,23 @@ class LiveStreamMixin:
                 if client_info.get(flag, False)
             ]
 
+    def _can_publish_channel_data(self, data, *, command=False):
+        """Whether this row may leave the server to a browser.
+
+        Consent is per channel and stored by name plus key; anything without a
+        stored identity (legacy history, DMs) stays on the server.
+        """
+        try:
+            with closing(self._get_db_connection()) as conn:
+                return can_publish(conn, data, command=command)
+        except Exception:
+            self.logger.warning('Channel visibility unavailable; withholding web message')
+            return False
+
     def _handle_command_data(self, command_data):
         """Handle incoming command data from bot"""
+        if not self._can_publish_channel_data(command_data, command=True):
+            return
         try:
             # Broadcast to subscribed clients
             subscribed_clients = self._subscribed_clients('subscribed_commands')
@@ -54,6 +72,7 @@ class LiveStreamMixin:
 
     def _handle_packet_data(self, packet_data):
         """Handle incoming packet data from bot"""
+        packet_data = encrypted_packet_view(packet_data)
         try:
             # Broadcast to subscribed clients
             subscribed_clients = self._subscribed_clients('subscribed_packets')
@@ -89,21 +108,24 @@ class LiveStreamMixin:
 
     def _handle_message_data(self, msg_data):
         """Broadcast a captured channel message to subscribed clients."""
+        if not self._can_publish_channel_data(msg_data, command=False):
+            return
         try:
             subscribed_clients = self._subscribed_clients('subscribed_messages')
-            if subscribed_clients:
-                self.socketio.emit('message_data', msg_data, room=None)
+            for client_id in subscribed_clients:
+                self.socketio.emit('message_data', msg_data, to=client_id)
         except Exception as e:
             self.logger.error(f"Error handling message data: {e}")
 
     def _handle_log_line(self, line: str) -> None:
         """Broadcast a log line to clients subscribed to the log stream."""
         try:
+            safe_line = web_log_line(line)
+            if safe_line is None:
+                return
             subscribed = self._subscribed_clients('subscribed_logs')
-            if subscribed:
-                self.socketio.emit(
-                    'log_line', {'line': _strip_ansi_codes(line.rstrip())}, room=None
-                )
+            for client_id in subscribed:
+                self.socketio.emit('log_line', {'line': safe_line}, to=client_id)
         except Exception as e:
             self.logger.error(f"Error broadcasting log line: {e}")
 

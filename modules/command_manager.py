@@ -1543,7 +1543,7 @@ class CommandManager:
                 self.logger.error(f"Channel '{channel}' not found. Cannot send message.")
                 return False
 
-            self.logger.info(f"Sending channel message to {channel} (channel {channel_num}): {content}")
+            self.logger.info("Sending channel message | Channel index: %s | Bytes: %d", channel_num, len(content.encode("utf-8")))
 
             command_id = self._record_transmission(content, channel, 'channel', command_id, channel_idx=channel_num)
 

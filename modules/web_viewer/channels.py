@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from modules.web_viewer.channel_visibility import channel_identity, permitted_ids
+
 
 class ChannelAdminMixin:
     """Mixed into BotDataViewer."""
@@ -64,6 +66,16 @@ class ChannelAdminMixin:
                         })
                         existing_names.add(normalized)
 
+                # Publication consent is stored by name plus key, so the answer
+                # does not depend on which slot the channel currently occupies. A
+                # viewer database that has not been migrated yet publishes nothing.
+                try:
+                    allowed = permitted_ids(conn)
+                except sqlite3.Error:
+                    self.logger.warning("Channel visibility table unavailable; publishing nothing")
+                    allowed = set()
+                for channel in channels:
+                    channel['live_messages_visible'] = channel_identity(channel['name'], channel.get('key_hex')) in allowed
                 return channels
         except Exception as e:
             self.logger.error(f"Error getting channels: {e}")

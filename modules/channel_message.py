@@ -67,8 +67,8 @@ class ChannelMessageMixin:
             if len(parts) == 2 and parts[0].strip():
                 sender_id = parts[0].strip()
                 message_content = parts[1].strip()  # Use the part after the colon for keyword processing
-                self.logger.debug(f"Extracted sender from text: {sender_id}")
-                self.logger.debug(f"Message content for processing: {message_content}")
+                self.logger.debug("Extracted sender from channel message")
+                self.logger.debug("Channel message body ready for local processing")
 
         # Always strip trailing whitespace/newlines from message content to handle cases like "Wx 98104\n"
         message_content = message_content.strip()

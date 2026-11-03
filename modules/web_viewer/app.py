@@ -903,7 +903,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         @self.app.errorhandler(500)
         def internal_error(e):
             self.logger.exception("Unhandled exception (500): %s", e)
-            if request.path.startswith('/api/') or request.accept_mimetypes.best == 'application/json':
+            if request.path.startswith(('/api/', '/radio/api/')) or request.accept_mimetypes.best == 'application/json':
                 return make_response(jsonify({'error': 'An internal error occurred — see server logs'}), 500)
             return make_response(render_template('error.html',
                 error_code=500,
@@ -936,6 +936,10 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             # Storage monitoring probe. Read by an external agent, so it is public; the
             # payload carries aggregate counters only, never mount paths.
             '/api/health/storage',
+            # Opt-in publication surface: only channels the operator marked visible,
+            # and only their names — never the channel keys the admin route serves.
+            '/api/channels',
+            '/api/channels/live',
             '/api/banner-status',
             '/api/stats',
             '/api/dashboard/summary',
@@ -998,7 +1002,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 return
             if request.method in ('POST', 'OPTIONS') and path in _PUBLIC_API_POST_PATHS:
                 return
-            if path.startswith('/api/'):
+            if path.startswith(('/api/', '/radio/api/')):
                 return make_response(jsonify({'error': 'Admin authentication required'}), 401)
             return redirect(url_for('login', next=path))
 
@@ -1020,7 +1024,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 return  # Login form uses traditional POST
             if request.headers.get('X-Requested-With'):
                 return  # Custom header present — same-origin or CORS-approved
-            if request.path.startswith('/api/'):
+            if request.path.startswith(('/api/', '/radio/api/')):
                 return make_response(
                     jsonify({'error': 'Missing X-Requested-With header'}), 403
                 )
@@ -3186,7 +3190,8 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 for (data_json,) in rows:
                     try:
                         command_data = json.loads(data_json)
-                        commands.append(command_data)
+                        if self._can_publish_channel_data(command_data, command=True):
+                            commands.append(command_data)
                     except Exception as e:
                         self.logger.debug(f"Error parsing command data: {e}")
 
@@ -4663,13 +4668,54 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             return jsonify({'success': True, 'message': 'Feed refresh queued'})
 
         # Channel management API endpoints
-        @self.app.route('/api/channels')
+        @self.app.route('/radio/api/channels')
         @self._api_errors('Error getting channels')
         def api_channels():
-            """Get all configured channels"""
+            """Get all configured channels. Carries channel keys, so it stays admin-only."""
             channels = self._get_channels()
             return jsonify({'channels': channels})
 
+        @self.app.route('/api/channels')
+        @self.app.route('/api/channels/live')
+        @self._api_errors('Error getting published channels')
+        def api_published_channels():
+            """Only the channels the operator agreed to publish, and only their names."""
+            channels = self._get_channels()
+            return jsonify({'channels': [
+                {key: channel[key] for key in ('name', 'type', 'decode_only') if key in channel}
+                for channel in channels if channel.get('live_messages_visible')
+            ]})
+
+        @self.app.route('/radio/api/channels/live-visibility', methods=['PUT'])
+        @self._api_errors('Could not save channel visibility')
+        def api_channel_live_visibility():
+            """Switch one channel's web publication on or off.
+
+            Consent is bound to the name and the channel key, not to the slot, so a
+            later channel in the same slot does not inherit it.
+            """
+            data = request.get_json(silent=True) or {}
+            visible = data.get('live_messages_visible')
+            if type(visible) is not bool:
+                return jsonify({'error': 'live_messages_visible must be a boolean'}), 400
+            channel = next((c for c in self._get_channels()
+                            if c['channel_idx'] == data.get('channel_idx')
+                            and c['name'] == data.get('channel_name')), None)
+            if channel is None:
+                return jsonify({'error': 'Channel not found'}), 404
+            from modules.web_viewer.channel_visibility import channel_identity, set_visibility
+            identity = channel_identity(channel['name'], channel.get('key_hex'))
+            try:
+                with closing(self._get_db_connection()) as conn:
+                    set_visibility(conn, identity, visible)
+                    conn.commit()
+                self.socketio.emit('channel_visibility_changed', {})
+                return jsonify({'success': True, 'live_messages_visible': visible})
+            except (ValueError, sqlite3.Error):
+                self.logger.exception('Could not update channel web visibility')
+                return jsonify({'error': 'Could not save channel visibility'}), 500
+
+        @self.app.route('/radio/api/channels', methods=['POST'])
         @self.app.route('/api/channels', methods=['POST'])
         @self._api_errors('Error creating channel')
         def api_create_channel():
@@ -4677,6 +4723,14 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             data = request.get_json()
             if not data or 'name' not in data:
                 return jsonify({'error': 'Channel name is required'}), 400
+
+            visible = data.get('live_messages_visible', False)
+            if type(visible) is not bool:
+                return jsonify({'error': 'live_messages_visible must be a boolean'}), 400
+            if visible and not request.path.startswith('/radio/'):
+                # The legacy API is what automation and old bookmarks use; publishing
+                # has to be an explicit, authenticated choice from Radio management.
+                return jsonify({'error': 'Use protected Radio management to publish channel messages'}), 403
 
             channel_name = data.get('name', '').strip()
             channel_idx = data.get('channel_idx')
@@ -4710,6 +4764,13 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             result = self._add_channel_for_web(channel_idx, channel_name, channel_key if not is_hashtag else None)
 
             if result.get('success'):
+                from modules.web_viewer.channel_visibility import channel_identity, set_visibility
+                identity = channel_identity(channel_name, None if is_hashtag else channel_key)
+                # Consent is stored before the pending radio operation confirms: the
+                # name and key identify the channel, not the slot it occupies.
+                with closing(self._get_db_connection()) as conn:
+                    set_visibility(conn, identity, visible)
+                    conn.commit()
                 if result.get('pending'):
                     # Operation is queued, return operation_id for polling
                     return jsonify({
