@@ -136,10 +136,12 @@ semantic versioning.
   `llm` plugin never loaded and every Web Viewer `/infos` request returned 500. The
   follow-up SQL answer also built and posted its payload twice.
 
-- An unset time reference (`0.0`) is no longer read as a cooldown still running.
-  `IO_Health` skipped its first read-only-filesystem signal, and
-  `[Vigilance_Service]` skipped the first alert of a run, whenever `time.monotonic()`
-  starts near zero, which is the case on a freshly booted host (container, CI runner).
+- An unset time reference (`0.0`) is no longer read as a cooldown or a cache hit still
+  in effect. `IO_Health` skipped its first read-only-filesystem signal,
+  `[Vigilance_Service]` skipped the first alert of a run, and `llm` sent its first
+  request to the fallback endpoint because the primary health probe trusted the empty
+  cache, whenever `time.monotonic()` starts near zero, which is the case on a freshly
+  booted host (container, CI runner).
 
 - The Web Viewer Test DM panel now answers keyword-matched triggers. It called
   `command.execute()` only, so `help` and plain keyword replies produced an empty

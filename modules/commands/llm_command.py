@@ -988,7 +988,15 @@ class LlmCommand(BaseCommand):
         the ping latency per message.
         """
         now = time.monotonic()
-        if self.ping_cache_seconds > 0 and (now - self._ping_checked_at) < self.ping_cache_seconds:
+        # 0.0 means "no probe yet" (the value _invalidate_ping_cache and __init__ leave).
+        # time.monotonic() starts near zero on a freshly booted host, so an unset
+        # reference looked like a cache hit and the first request used the cached
+        # (always False) status instead of probing the primary endpoint.
+        if (
+            self.ping_cache_seconds > 0
+            and self._ping_checked_at
+            and (now - self._ping_checked_at) < self.ping_cache_seconds
+        ):
             return self._ping_ok
 
         parsed = urlparse(self.primary_endpoint)

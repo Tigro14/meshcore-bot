@@ -254,6 +254,33 @@ class TestLlmCommand:
         assert post_mock.call_count == 2
 
     @pytest.mark.asyncio
+    async def test_first_ping_is_not_skipped_when_monotonic_is_small(self, command_mock_bot):
+        """0.0 means no probe yet, not a cache hit still in effect.
+
+        time.monotonic() starts near zero on a freshly booted host, which is what CI
+        runners are, so the first request read the empty cache, reported the primary as
+        unhealthy, and went to the fallback endpoint instead of probing it.
+        """
+        self._enable_primary(command_mock_bot)
+        command_mock_bot.config.set("Bot", "command_prefix", "")
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        cmd._model_info_cache[self.PRIMARY] = {"model": "test-model", "n_ctx": 4096, "checked_at": time.monotonic()}
+        msg = mock_message(content="llm hello", is_dm=True)
+
+        ping = Mock(status_code=200)
+        response = self._llm_response()
+
+        with patch("modules.commands.llm_command.time.monotonic", return_value=1.0), patch(
+            "modules.commands.llm_command.requests.get", return_value=ping
+        ) as get_mock, patch("modules.commands.llm_command.requests.post", return_value=response) as post_mock:
+            assert await cmd.execute(msg) is True
+
+        assert cmd._primary_ping_ok() is True
+        assert post_mock.call_args.args[0] == self.PRIMARY
+        assert get_mock.call_args_list[0].args[0] == "https://llm.tigro.fr/health"
+
+    @pytest.mark.asyncio
     async def test_execute_retries_on_fallback_when_primary_request_fails(self, command_mock_bot):
         self._enable_primary(command_mock_bot)
         command_mock_bot.config.set("Bot", "command_prefix", "")
