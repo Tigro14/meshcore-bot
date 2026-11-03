@@ -58,6 +58,8 @@
     ("GET",  "/api/health",           "Bot health: radio state, uptime, client count"),
     ("GET",  "/api/banner-status",    "Banner state: zombie, offline, initializing flags"),
     ("GET",  "/api/system-health",    "Extended system health: DB size, queue depths, scheduler"),
+    ("GET",  "/api/health/storage",   "Filesystem state for monitoring: mounts, probe, semaphore (?format=text)"),
+    ("POST", "/api/health/storage/powercycle", "Trigger the power-cycle hook, or raise the reboot semaphore"),
     ("GET",  "/api/stats",            "DEPRECATED — whole-database statistics; use /api/dashboard/*"),
     ("GET",  "/api/stats/rate_limiters", "Per-sender rate limiter stats"),
     ("GET",  "/api/connected_clients","SocketIO connected client count"),

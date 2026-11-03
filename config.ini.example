@@ -855,6 +855,19 @@ reboot_on_erofs = true
 failure_threshold = 3
 cooldown_seconds = 900
 writable_prefixes = /var/lib/meshcore-bot,/var/log/meshcore-bot,/dev/shm
+
+# Command run by the Web Viewer route POST /api/health/storage/powercycle. When the
+# storage itself is dead nothing on this host can survive long enough to reboot it, so
+# recovery has to come from outside: a switched outlet, an IPMI/Redfish call, or a
+# board on another machine. Empty (default) means the route raises the shared-memory
+# semaphore instead, which is what an external watcher consumes.
+# The command comes from this file, so it runs with the privileges of the bot user.
+# Example for a switched outlet (off then on again):
+# powercycle_command = curl -fsS --max-time 8 'http://plug.local/?cmd=PowerOff' && sleep 12 && curl -fsS --max-time 8 'http://plug.local/?cmd=PowerOn'
+powercycle_command =
+
+# How long the hook may run before the route reports a failure. Default: 10
+powercycle_timeout_seconds = 10
 [External_Data]
 # URL shortener service: gd (v.gd / is.gd-compatible) or shlink. Default: gd
 short_url_website_service = gd
