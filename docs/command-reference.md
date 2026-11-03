@@ -293,6 +293,43 @@ When no location is given, uses the sender's companion location if known, then t
 
 ---
 
+### `vigi` or `vigilance`
+
+Current Météo-France weather vigilance for a French department (France only). Scrapes
+[vigilance.meteofrance.fr](https://vigilance.meteofrance.fr) directly — no API key.
+
+**Usage:**
+```
+vigi
+vigi [department_number]
+```
+
+**Examples:**
+```
+vigi
+vigi 75
+vigi 25
+```
+
+**Response:** the active level with an emoji, plus the first phenomenon line when the page
+provides one, for example:
+```
+🟠 Vigilance Dept 25: Orange
+Orages
+```
+Levels: ✅ Vert, ⚠️ Jaune, 🟠 Orange, 🔴 Rouge. The answer is capped at 180 characters so a
+single mesh transmission carries it.
+
+**Configuration:** the department comes from `[Vigilance_Service]` (`department`, default
+`75`), the same section used by the [Vigilance Météo-France Service](vigilance-service.md)
+that posts proactive Orange/Rouge alerts. The command has no own section, so the two cannot
+disagree.
+
+**Note:** `alert` and `alerte` are not keywords of this command — they belong to
+[`alert <location>`](command-reference.md#alert-location-all).
+
+---
+
 ### `airplanes [location] [options]` / `overhead [lat,lon]`
 
 Get aircraft tracking information using ADS-B data from adsb.lol or any compatible readsb/ADSBExchange v2 API.
