@@ -6,6 +6,7 @@ import configparser
 import errno
 import logging
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -57,6 +58,18 @@ class TestThresholdAndSemaphore:
         assert monitor.report_write_failure(erofs("/var/lib/meshcore-bot/x"), "/var/lib/meshcore-bot/x")
         info = Path(tmp_path) / "meshbot_reboot.info"
         assert "IOHealthWatchdog" in info.read_text(encoding="utf-8")
+
+    def test_first_signal_is_not_blocked_by_the_cooldown(self, monitor, tmp_path):
+        """The 0.0 reference is 'no signal yet', not a cooldown still running.
+
+        time.monotonic() starts near zero on a freshly booted host, which is what CI
+        runners are, so the first signal used to be swallowed by the cooldown check.
+        """
+        with patch("modules.io_health.time.monotonic", return_value=1.0):
+            for _ in range(monitor.failure_threshold - 1):
+                assert not monitor.report_write_failure(erofs("/var/lib/meshcore-bot/x"), "/var/lib/meshcore-bot/x")
+            assert monitor.report_write_failure(erofs("/var/lib/meshcore-bot/x"), "/var/lib/meshcore-bot/x")
+        assert "IOHealthWatchdog" in (Path(tmp_path) / "meshbot_reboot.info").read_text(encoding="utf-8")
 
     def test_cooldown_blocks_second_signal(self, monitor, tmp_path):
         for _ in range(monitor.failure_threshold):

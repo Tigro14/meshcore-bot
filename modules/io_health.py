@@ -114,7 +114,14 @@ class IOHealthMonitor:
         if self._lock_fd is not None:
             return True
         now = time.monotonic()
-        if self.cooldown_seconds and (now - self._last_signal_monotonic) < self.cooldown_seconds:
+        # 0.0 means "no signal yet". time.monotonic() starts near zero on a freshly
+        # booted host (containers, CI runners), so comparing now against an unset
+        # reference made the very first signal look like it was inside the cooldown.
+        if (
+            self.cooldown_seconds
+            and self._last_signal_monotonic
+            and (now - self._last_signal_monotonic) < self.cooldown_seconds
+        ):
             self.logger.warning(
                 "Reboot not signalled: %d s cooldown still running (last signal %.0f s ago)",
                 self.cooldown_seconds,

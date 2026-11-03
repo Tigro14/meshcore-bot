@@ -214,6 +214,12 @@ class TestAlertPolicy:
         svc._last_alert_time = time.monotonic()
         assert svc._should_alert(_info("Rouge")) is False
 
+    def test_first_alert_of_a_run_is_not_throttled_when_monotonic_is_small(self):
+        """0.0 means no alert sent yet, even when time.monotonic() starts near zero."""
+        svc = _svc()
+        with patch("modules.service_plugins.vigilance_service.time.monotonic", return_value=1.0):
+            assert svc._should_alert(_info("Rouge")) is True
+
     def test_throttle_zero_alerts_every_time(self):
         svc = _svc(alert_throttle="0")
         svc._last_alert_time = time.monotonic()

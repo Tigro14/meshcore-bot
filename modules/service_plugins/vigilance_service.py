@@ -443,12 +443,16 @@ class VigilanceService(BaseServicePlugin):
         color = info['color']
         if color not in self.alert_levels:
             return False
-        elapsed = time.monotonic() - self._last_alert_time
-        if elapsed < self.alert_throttle:
-            self.logger.debug(
-                "Vigilance alert throttled (%.0fs remaining)", self.alert_throttle - elapsed
-            )
-            return False
+        # 0.0 means "no alert sent yet in this run". time.monotonic() starts close to zero
+        # on a freshly booted host (containers, CI runners), so an unset reference looked
+        # like a throttle still running and the first alert of a run was skipped.
+        if self._last_alert_time:
+            elapsed = time.monotonic() - self._last_alert_time
+            if elapsed < self.alert_throttle:
+                self.logger.debug(
+                    "Vigilance alert throttled (%.0fs remaining)", self.alert_throttle - elapsed
+                )
+                return False
         return True
 
     def _format_message(self, info: dict[str, Any]) -> str:
