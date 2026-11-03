@@ -1,5 +1,6 @@
 """Delayed radio channel replies must not mislabel or publish another channel."""
 
+import asyncio
 import configparser
 import json
 from types import SimpleNamespace
@@ -45,7 +46,7 @@ def manager():
 
 @pytest.mark.asyncio
 async def test_public_read_is_retried_after_transient_timeout(manager):
-    manager.bot.meshcore.commands.get_channel.side_effect = [TimeoutError(), event(0, "Public")]
+    manager.bot.meshcore.commands.get_channel.side_effect = [asyncio.TimeoutError(), event(0, "Public")]
     result = await manager._fetch_single_channel(0)
     assert result and result["channel_idx"] == 0 and result["channel_name"] == "Public"
     assert manager.bot.meshcore.commands.get_channel.await_count == 2
@@ -96,7 +97,7 @@ async def test_valid_public_scan_preserves_visibility_without_unhiding_private_c
     async def read(index):
         attempts[index] = attempts.get(index, 0) + 1
         if index == 0 and attempts[index] == 1:
-            raise TimeoutError()
+            raise asyncio.TimeoutError()
         if index == 0:
             return event(0, "Public")
         if index == 2:
@@ -132,3 +133,22 @@ async def test_valid_public_scan_preserves_visibility_without_unhiding_private_c
         data = json.loads(capture._insert_packet_stream_row.call_args.args[0])
         assert data["channel_visibility_id"] is not None
         assert viewer._can_publish_channel_data(data) is visible
+
+
+@pytest.mark.asyncio
+async def test_public_read_retries_a_real_wait_for_deadline(manager):
+    # Exercise asyncio's own timeout type on every supported Python version.
+    manager._fetch_timeout = 0.05
+    calls = 0
+
+    async def read(index):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.Event().wait()
+        return event(index, "Public")
+
+    manager.bot.meshcore.commands.get_channel.side_effect = read
+    result = await manager._fetch_single_channel(0)
+    assert result and result["channel_idx"] == 0 and result["channel_name"] == "Public"
+    assert calls == 2
