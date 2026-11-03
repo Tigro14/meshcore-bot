@@ -924,6 +924,7 @@ class LlmCommand(BaseCommand):
             if isinstance(template, str) and re.search(r"<\|?(thinking|think)\|?>", template, re.IGNORECASE):
                 return True
         return False
+
     def _model_info(self, endpoint: str) -> dict[str, Any]:
         """Cached model metadata for an endpoint, including its context size."""
         now = time.monotonic()
@@ -976,7 +977,6 @@ class LlmCommand(BaseCommand):
             budget = min(budget, self.context_max_tokens)
         return max(0, budget)
 
->>>>>>> origin/feat/llm-strata-primary-fallback
     def _invalidate_ping_cache(self) -> None:
         self._ping_ok = False
         self._ping_checked_at = 0.0
@@ -1017,9 +1017,6 @@ class LlmCommand(BaseCommand):
     async def _post_chat(self, payload: dict[str, Any], endpoint: str | None = None) -> tuple[requests.Response | None, str]:
         """Send a chat request to the resolved endpoint, retrying on the local fallback."""
         candidates = [endpoint or self._resolve_endpoint()]
-    async def _post_chat(self, payload: dict[str, Any], endpoint: str | None = None) -> tuple[requests.Response | None, str]:
-        """Send a chat request to the resolved endpoint, retrying on the local fallback."""
-        candidates = [endpoint or self._resolve_endpoint()]
         if self.fallback_endpoint and self.fallback_endpoint != candidates[0]:
             candidates.append(self.fallback_endpoint)
 
@@ -1047,40 +1044,12 @@ class LlmCommand(BaseCommand):
 
         return None, candidates[-1]
 
-    def _get_llama_model_info(self) -> str:
-        """Get information about the running llama.cpp model.
     def _get_llama_model_info(self, endpoint: str | None = None) -> str:
         """Get information about the active LLM model.
 
         Returns:
             String with model information, or empty string if unavailable.
         """
-        try:
-            # Try to get model info from llama.cpp endpoint
-            # Parse the endpoint URL and construct the models endpoint
-            parsed = urlparse(self._resolve_endpoint())
-            base_url = f"{parsed.scheme}://{parsed.netloc}"
-            models_url = urljoin(base_url, "/v1/models")
-
-            response = requests.get(models_url, timeout=2.0)
-            if response.status_code == 200:
-                data = response.json()
-                if "data" in data and len(data["data"]) > 0:
-                    # Try to get model from API first, then fall back to config
-                    model = data["data"][0]
-                    model_name = model.get("id", "")
-                    if model_name:
-                        return model_name
-
-            # Fallback to configured model name
-            if self.model:
-                return self.model
-            return ""
-        except Exception:
-            # Fallback to configured model name
-            if self.model:
-                return self.model
-            return ""
         active_endpoint = endpoint or self._resolve_endpoint()
         info = self._model_info(active_endpoint)
         model_name = info.get("model") or self.model
@@ -1647,7 +1616,6 @@ class LlmCommand(BaseCommand):
         )
         self.logger.debug(f"LLM prompt: {repr(prompt[:500])}")
 
-        response, endpoint = await self._post_chat(payload)
         response, endpoint = await self._post_chat(payload, endpoint)
         if response is None:
             return await self.send_response(message, "LLM unavailable: no LLM endpoint responded.")
@@ -1661,9 +1629,6 @@ class LlmCommand(BaseCommand):
             choice = choices[0]
             assistant_message = choice.get("message", {})
             content = assistant_message.get("content") or ""
-            self.logger.debug(f"LLM raw response ({len(content)} chars): {repr(content)}")
-
-            if not content:
             finish_reason = choice.get("finish_reason") or ""
             self.logger.debug(f"LLM raw response ({len(content)} chars): {repr(content)}")
 
@@ -1708,8 +1673,6 @@ class LlmCommand(BaseCommand):
                     "- Max 5 items, no tables, no pipes\n"
                     "- Total response under 400 chars"
                 )
-                followup_payload = self._build_payload(prompt=followup_prompt, include_rag=False)
-                resp2, _ = await self._post_chat(followup_payload)
                 followup_payload = self._build_payload(prompt=followup_prompt, include_rag=False, token_budget=token_budget, endpoint=endpoint)
                 resp2, _ = await self._post_chat(followup_payload, endpoint)
                 if resp2 is not None:

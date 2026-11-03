@@ -291,9 +291,6 @@ class TestLlmCommand:
         sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
         assert "LLM unavailable" in sent_text
 
-    @pytest.mark.asyncio
-    async def test_execute_handles_null_content_from_thinking_model(self, command_mock_bot):
-        """A thinking model can return content: null with only reasoning_content."""
     def test_build_payload_disables_thinking_for_local_thinking_model(self, command_mock_bot):
         """A local thinking model is asked to answer in content instead of a thinking block."""
         self._enable_llm(command_mock_bot)
@@ -370,8 +367,6 @@ class TestLlmCommand:
             assert await cmd.execute(msg) is True
 
         sent_text = command_mock_bot.command_manager.send_response.call_args[0][1]
-        assert "empty response" in sent_text
-
         assert "only reasoning" in sent_text
 
     @pytest.mark.asyncio
