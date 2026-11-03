@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from .base_service import BaseServicePlugin
 
@@ -61,21 +61,33 @@ def _normalize_color(color: str) -> str:
     return 'Vert'
 
 
+def _attr(el: Tag, name: str) -> str:
+    """Read an attribute as a plain string.
+
+    bs4 returns a list for class attributes (and can return None), so joining
+    through ``str`` here keeps the callers from having to narrow the type.
+    """
+    value = el.get(name)
+    if isinstance(value, (list, tuple)):
+        return ' '.join(str(part) for part in value)
+    return str(value or '')
+
+
 def _extract_color(soup: BeautifulSoup) -> str:
     """Extract the current vigilance color level from a Météo-France page."""
     # 1. data-color / data-level attributes (most reliable)
-    for el in soup.find_all(attrs={'data-color': True}):
-        c = el.get('data-color', '').lower()
+    for el in soup.find_all(lambda tag: tag.has_attr('data-color')):
+        c = _attr(el, 'data-color').lower()
         if c:
             return _normalize_color(c)
-    for el in soup.find_all(attrs={'data-level': True}):
-        c = el.get('data-level', '').lower()
+    for el in soup.find_all(lambda tag: tag.has_attr('data-level')):
+        c = _attr(el, 'data-level').lower()
         if c:
             return _normalize_color(c)
 
     # 2. Alert-indicator CSS classes
     for el in soup.find_all(class_=True):
-        classes = ' '.join(el.get('class', [])).lower()
+        classes = _attr(el, 'class').lower()
         if any(skip in classes for skip in _SKIP_PATTERNS):
             continue
         if any(ind in classes for ind in _ALERT_INDICATORS):
@@ -85,10 +97,10 @@ def _extract_color(soup: BeautifulSoup) -> str:
 
     # 3. Compound class prefixes like "vigilance-rouge" or "alerte-orange"
     for el in soup.find_all(class_=True):
-        classes = ' '.join(el.get('class', [])).lower()
+        classes = _attr(el, 'class').lower()
         parent = el.find_parent()
         if parent:
-            pcls = ' '.join(parent.get('class', [])).lower() if parent.get('class') else ''
+            pcls = _attr(parent, 'class').lower() if parent.get('class') else ''
             if any(skip in pcls for skip in _SKIP_PATTERNS):
                 continue
         for prefix in ('vigilance-', 'alerte-', 'niveau-', 'alert-', 'status-'):
@@ -98,7 +110,7 @@ def _extract_color(soup: BeautifulSoup) -> str:
 
     # 4. Meta tags
     for meta in soup.find_all('meta', attrs={'name': re.compile(r'vigilance|couleur|niveau', re.I)}):
-        content = meta.get('content', '').lower()
+        content = _attr(meta, 'content').lower()
         for color in ('rouge', 'orange', 'jaune', 'vert'):
             if color in content:
                 return _normalize_color(color)
@@ -182,12 +194,12 @@ def _extract_bulletin_date(soup: BeautifulSoup) -> datetime:
                 return d
 
     for tel in soup.find_all('time'):
-        d = _try_parse(tel.get('datetime', '')) or _try_parse(tel.get_text(strip=True))
+        d = _try_parse(_attr(tel, 'datetime')) or _try_parse(tel.get_text(strip=True))
         if d:
             return d
 
     for meta in soup.find_all('meta', attrs={'property': re.compile(r'date|time', re.I)}):
-        d = _try_parse(meta.get('content', ''))
+        d = _try_parse(_attr(meta, 'content'))
         if d:
             return d
 
@@ -450,7 +462,10 @@ class VigilanceService(BaseServicePlugin):
                 stripped = part.strip()
                 if stripped.startswith('-'):
                     lines.append(stripped[2:])
-        return '\n'.join(lines)
+        result = '\n'.join(lines)
+        if len(result) > 180:
+            result = result[:177] + '...'
+        return result
 
     async def _send_alert(self, message: str, info: dict[str, Any]) -> None:
         """Post the alert to the mesh channel and/or external webhooks."""
@@ -467,3 +482,4 @@ class VigilanceService(BaseServicePlugin):
             await self.send_external_notifications(f"{message}\n{url}")
         else:
             await self.send_external_notifications(message)
+

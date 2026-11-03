@@ -5,7 +5,6 @@ Provides current weather vigilance status for a French department
 """
 
 import asyncio
-from typing import Optional
 
 from ..models import MeshMessage
 from ..service_plugins.vigilance_service import fetch_vigilance
@@ -18,7 +17,9 @@ class VigilanceCommand(BaseCommand):
     # Plugin metadata
     render_safe = True
     name = "vigi"
-    keywords = ['vigi', 'vigilance', 'alert', 'alerte']
+    # 'alert' and 'alerte' are not used here: they belong to alert_command, and two
+    # plugins claiming the same keyword resolve in load order.
+    keywords = ['vigi', 'vigilance']
     description = "Get Météo-France vigilance status for a French department"
     category = "weather"
     cooldown_seconds = 10
@@ -35,16 +36,8 @@ class VigilanceCommand(BaseCommand):
         }
     ]
 
-    # Web-viewer settings schema
-    settings_schema = [
-        {
-            "key": "default_department",
-            "label": "Default department",
-            "type": "str",
-            "default": "75",
-            "help": "Default French department number for vigi command (e.g. 75 for Paris).",
-        },
-    ]
+    # No settings_schema: the department is owned by [Vigilance_Service], so the
+    # command and the monitor cannot end up configured with two different values.
 
     async def execute(self, message: MeshMessage) -> bool:
         """Execute the vigilance command.
@@ -59,7 +52,8 @@ class VigilanceCommand(BaseCommand):
         """
         try:
             # Parse department from arguments, fall back to config or default
-            dept = self._parse_department(message.text)
+            _trigger, args = self.split_trigger_and_args(message.content)
+            dept = self._parse_department(args)
 
             # Fetch vigilance data in executor to avoid blocking
             loop = asyncio.get_event_loop()
@@ -76,28 +70,23 @@ class VigilanceCommand(BaseCommand):
             await self.send_response(message, error_msg)
             return False
 
-    def _parse_department(self, text: str) -> str:
-        """Parse department number from command text.
+    def _parse_department(self, args: str) -> str:
+        """Parse department number from the arguments after the trigger keyword.
 
-        Falls back to configured default, then '75'.
+        Falls back to the configured department, then '75'.
 
         Args:
-            text: The command text (e.g. "vigi 25")
+            args: Argument text (e.g. "25" for "vigi 25")
 
         Returns:
             str: The department number
         """
-        parts = text.strip().split()
-        if len(parts) > 1:
-            dept = parts[1].strip()
-            if dept.isdigit() and 1 <= len(dept) <= 3:
-                return dept.zfill(2)  # Pad to 2 digits (01, 02, etc.)
+        dept = args.strip()
+        if dept.isdigit() and 1 <= len(dept) <= 3:
+            return dept.zfill(2)  # Pad to 2 digits (01, 02, etc.)
 
-        # Fall back to configured default
-        default = self.bot.config.get(
-            "Vigilance_Service", "department", fallback="75"
-        ).strip()
-        return default
+        # Fall back to the configured department
+        return str(self.get_config_value("Vigilance_Service", "department", fallback="75")).strip()
 
     def _format_response(self, dept: str, data: dict) -> str:
         """Format a compact vigilance alert message.
@@ -148,3 +137,4 @@ class VigilanceCommand(BaseCommand):
             "  vigi 25     — Doubs\n"
             "Levels: Vert (✅) = no alert, Jaune (⚠️) = yellow, Orange (🟠) = orange, Rouge (🔴) = red"
         )
+
