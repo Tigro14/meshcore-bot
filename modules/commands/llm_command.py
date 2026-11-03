@@ -976,7 +976,6 @@ class LlmCommand(BaseCommand):
             budget = min(budget, self.context_max_tokens)
         return max(0, budget)
 
->>>>>>> origin/feat/llm-strata-primary-fallback
     def _invalidate_ping_cache(self) -> None:
         self._ping_ok = False
         self._ping_checked_at = 0.0
@@ -1049,6 +1048,9 @@ class LlmCommand(BaseCommand):
 
     def _get_llama_model_info(self) -> str:
         """Get information about the running llama.cpp model.
+        """
+        pass
+
     def _get_llama_model_info(self, endpoint: str | None = None) -> str:
         """Get information about the active LLM model.
 
@@ -1663,7 +1665,6 @@ class LlmCommand(BaseCommand):
             content = assistant_message.get("content") or ""
             self.logger.debug(f"LLM raw response ({len(content)} chars): {repr(content)}")
 
-            if not content:
             finish_reason = choice.get("finish_reason") or ""
             self.logger.debug(f"LLM raw response ({len(content)} chars): {repr(content)}")
 
