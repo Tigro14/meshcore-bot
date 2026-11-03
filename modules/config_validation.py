@@ -66,6 +66,7 @@ CANONICAL_NON_COMMAND_SECTIONS = frozenset({
     "MqttWeather",
     "Earthquake_Service",
     "Worldcup_Service",
+    "Vigilance_Service",
     "Rate_Limits",
     "Webhook",
     "RepeaterPrefixCollision_Service",
