@@ -77,6 +77,7 @@ nav:
     - Map Uploader: map-uploader.md
     - Weather Service: weather-service.md
     - Earthquake Service: earthquake-service.md
+    - Vigilance Météo-France: vigilance-service.md
     - Repeater Prefix Collision: repeater-prefix-collision-service.md
     - World Cup: worldcup.md
     - Feed Management: FEEDS.md

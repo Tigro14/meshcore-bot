@@ -72,6 +72,16 @@ semantic versioning.
   own helpers, so `[Jokes] joke_enabled = false` is honored rather than silently
   ignored.
 
+- Add the `[Vigilance_Service]` monitor and the `vigi` command for Météo-France
+  weather vigilance (France only, no API key). The service polls
+  `vigilance.meteofrance.fr` for `department` every `poll_interval` (default 8 h) and
+  posts to `channel` when the active level is in `alert_levels` (default `Orange,Rouge`),
+  with `alert_throttle` spacing successive alerts. `vigi [department]` answers on demand
+  from the same section, which owns the department so the command and the monitor cannot
+  disagree. Keywords are `vigi` and `vigilance` only: `alert` and `alerte` belong to the
+  existing `alert` command. Replies are capped at 180 characters for the mesh. Requires
+  `beautifulsoup4`, already in the dependencies. See `docs/vigilance-service.md`.
+
 ### Changed
 
 - `meshcore` now requires 2.3.14 or newer. Before 2.3.13, `send_msg_with_retry`
@@ -119,6 +129,19 @@ semantic versioning.
   it.
 
 ### Fixed
+
+- `llm_command.py` kept unresolved merge-conflict content from PR #73: a stray
+  conflict marker, duplicated `_post_chat` and `_get_llama_model_info` definitions,
+  and an empty `if not content:` block. The module could not be imported, so the
+  `llm` plugin never loaded and every Web Viewer `/infos` request returned 500. The
+  follow-up SQL answer also built and posted its payload twice.
+
+- An unset time reference (`0.0`) is no longer read as a cooldown or a cache hit still
+  in effect. `IO_Health` skipped its first read-only-filesystem signal,
+  `[Vigilance_Service]` skipped the first alert of a run, and `llm` sent its first
+  request to the fallback endpoint because the primary health probe trusted the empty
+  cache, whenever `time.monotonic()` starts near zero, which is the case on a freshly
+  booted host (container, CI runner).
 
 - The Web Viewer Test DM panel now answers keyword-matched triggers. It called
   `command.execute()` only, so `help` and plain keyword replies produced an empty
