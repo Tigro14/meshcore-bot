@@ -1864,7 +1864,9 @@ context_include_contacts = false
 context_include_moon = false
 context_include_sun = false
 context_include_commands = false
-context_include_system_metrics = false
+# The model name in this part is the only identity the prompt carries when `model`
+# is blank, so keep it on: the system prompt also states the identity as a sentence.
+context_include_system_metrics = true
 
 # Cache TTL for injected context (seconds)
 context_cache_seconds = 60

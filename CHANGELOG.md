@@ -139,6 +139,16 @@ semantic versioning.
   read-only beside the default, since they are the reason a channel can ignore
   it.
 
+- The `llm` system prompt opens with the model identity as a sentence, because the
+  `Model:` value was only a data field at the end of the `[Local Context:]` block and
+  the model reads that block as telemetry: asked which model it is, it answered with
+  the identity from its own training. Measured on the same prompt, 10 of 10 answers
+  named the model when the line was present, 1 of 6 when it was absent. Nothing is
+  stated when the model name is unknown, so no identity is invented, and the `model`
+  example value stays blank. `config.ini.example` shows
+  `context_include_system_metrics = true`, which is the code default the identity
+  depends on.
+
 ### Fixed
 
 - `llm_command.py` kept unresolved merge-conflict content from PR #73: a stray
@@ -153,6 +163,10 @@ semantic versioning.
   alone used the whole budget nothing was left to answer and `llm` reported
   `answer truncated by max_tokens`. Measured on the same prompt: 2 answers out of 5
   had empty content at 512, none out of 8 at 1024. The ceiling is now 1024.
+
+- `_model_info` recorded nothing when `/v1/models` answered with a non-200 status, so
+  an empty model identity reached the prompt without a trace whenever `model` was
+  blank. The status code is now logged.
 
 - An unset time reference (`0.0`) is no longer read as a cooldown or a cache hit still
   in effect. `IO_Health` skipped its first read-only-filesystem signal,
