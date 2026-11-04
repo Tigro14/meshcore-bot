@@ -24,6 +24,7 @@
         --rt-type-mix: black;
         --rt-lens-all: #0d6efd;
         --rt-lens-message: #2a78d6;
+        --rt-lens-packet: #5f666d;
         --rt-lens-on: #ffffff;
     }
 
@@ -41,6 +42,7 @@
         --rt-type-mix: white;
         --rt-lens-all: #6ea8fe;
         --rt-lens-message: #3987e5;
+        --rt-lens-packet: #adb5bd;
         --rt-lens-on: #1a1a1a;
     }
 
@@ -554,6 +556,48 @@
         color: var(--text-danger);
     }
 
+    /* Row state is a pill, like the dashboard's delta chips: the lamp hue as a
+       tint, the state carried by its status-text token (Fill-Is-Not-Text), so it
+       holds contrast in both themes. */
+    .rt-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.05rem 0.4rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--text-success);
+        background-color: color-mix(in srgb, var(--text-success) 12%, transparent);
+    }
+
+    [data-theme="dark"] .rt-badge {
+        background-color: color-mix(in srgb, var(--text-success) 22%, transparent);
+    }
+
+    .rt-badge.is-failed {
+        color: var(--text-danger);
+        background-color: color-mix(in srgb, var(--text-danger) 12%, transparent);
+    }
+
+    [data-theme="dark"] .rt-badge.is-failed {
+        background-color: color-mix(in srgb, var(--text-danger) 22%, transparent);
+    }
+
+    /* When the reply landed, at the right edge of the head line. */
+    .rt-reply-when {
+        margin-left: auto;
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* A row part that says more on hover than it shows: the repeat count, the
+       reply's repeater breakdown. The title is the no-Bootstrap fallback, the
+       tooltip is the one that wraps to several lines. */
+    .rt-row [data-bs-toggle="tooltip"] {
+        cursor: help;
+    }
+
     /* Expanded detail */
     .rt-detail {
         margin: 0 0.75rem 0.75rem calc(0.75rem + 5.25rem + 1.5rem + 1.2rem);
@@ -659,6 +703,10 @@
 
     .rt-lens--message { --lens: var(--rt-lens-message); }
     .rt-lens--command { --lens: var(--rt-bot); }
+    /* Packets have no color of their own: each packet type keeps its chart slot,
+       so the packet lens takes the desk neutral rather than inventing a meaning.
+       Lenses stack, so packets can be read without commands. */
+    .rt-lens--packet { --lens: var(--rt-lens-packet); }
 
     .rt-lens:hover {
         color: color-mix(in oklch, var(--lens) 82%, var(--rt-type-mix));
@@ -1128,24 +1176,35 @@
     <span class="rt-strip__spacer"></span>
     <span class="rt-strip__item rt-strip__controls">
         <button type="button" class="btn btn-sm btn-outline-primary rt-pending" id="rt-pending" hidden></button>
+        <!-- The tape is newest first, so these are its two ends: the live end and
+            the end where what came before sits. -->
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="rt-newest" aria-label="Jump to the newest row" title="Jump to the newest row">
+            <i class="fas fa-arrow-up" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="rt-oldest" aria-label="Jump to the oldest row" title="Jump to the oldest row">
+            <i class="fas fa-arrow-down" aria-hidden="true"></i>
+        </button>
         <button type="button" class="btn btn-sm btn-outline-secondary" id="rt-pause" aria-pressed="false" aria-label="Pause the tape" title="Pause the tape (P)">
             <i class="fas fa-pause" aria-hidden="true"></i> <span class="rt-pause-label">Pause</span>
         </button>
     </span>
 </section>
 
-<!-- Filters: lenses on the same rows, never a split into more rows -->
+<!-- Filters: lenses on the same rows, never a split into more rows. Lenses
+     stack, so a row shows when its reading matches any lens that is on. -->
 <div class="rt-filters" id="rt-filters" role="search" aria-label="Filter the tape">
     <button type="button" class="btn btn-sm btn-outline-secondary rt-filters-toggle" id="rt-filters-toggle" aria-expanded="false" aria-controls="rt-filters">
         <i class="fas fa-filter" aria-hidden="true"></i> Filters <span id="rt-filters-active"></span>
     </button>
     <div class="btn-group btn-group-sm" role="group" aria-label="Show">
-        <input type="radio" class="btn-check" name="rt-kind" id="rt-kind-all" value="all" checked>
+        <input type="checkbox" class="btn-check" name="rt-kind" id="rt-kind-all" value="all" checked>
         <label class="btn rt-lens rt-lens--all" for="rt-kind-all"><i class="fas fa-layer-group" aria-hidden="true"></i> Everything</label>
-        <input type="radio" class="btn-check" name="rt-kind" id="rt-kind-message" value="message">
+        <input type="checkbox" class="btn-check" name="rt-kind" id="rt-kind-message" value="message">
         <label class="btn rt-lens rt-lens--message" for="rt-kind-message"><i class="fas fa-comment" aria-hidden="true"></i> Messages</label>
-        <input type="radio" class="btn-check" name="rt-kind" id="rt-kind-command" value="command">
+        <input type="checkbox" class="btn-check" name="rt-kind" id="rt-kind-command" value="command">
         <label class="btn rt-lens rt-lens--command" for="rt-kind-command"><i class="fas fa-robot" aria-hidden="true"></i> Commands</label>
+        <input type="checkbox" class="btn-check" name="rt-kind" id="rt-kind-packet" value="packet">
+        <label class="btn rt-lens rt-lens--packet" for="rt-kind-packet"><i class="fas fa-route" aria-hidden="true"></i> Packets</label>
     </div>
     <select class="form-select form-select-sm" id="rt-type" aria-label="Packet type">
         <option value="">All packet types</option>
@@ -1522,7 +1581,7 @@
     const seenTypes = new Set();
     const seenChannels = new Set();
     const pending = [];
-    const view = { kind: 'all', type: '', channel: '', q: '' };
+    const view = { kinds: new Set(), type: '', channel: '', q: '' };
     const hold = { paused: false, scrolled: false, pointer: false };
     const link = { socket: socket ? 'connecting' : 'none', offline: false, offlineSince: null, zombie: false, verdict: null };
 
@@ -1576,6 +1635,15 @@
     function setButtonIconAndLabel(button, iconClass, label) {
         const icon = makeIcon(iconClass);
         button.replaceChildren(icon, document.createTextNode(` ${String(label)}`));
+    }
+
+    // A row part that says more than its own text fits: the title is the fallback
+    // for a browser without Bootstrap, the tooltip is the one that wraps.
+    function tipify(element, text) {
+        if (!text) return element;
+        element.title = String(text);
+        element.dataset.bsToggle = 'tooltip';
+        return element;
     }
 
     // ── Time ──
@@ -2088,7 +2156,13 @@
             const best = bestReception(tx);
             appendFact(line, snrText(best ? best.snr : p.snr));
             appendFact(line, hopsText(p.hops ?? p.path_len));
-            if (tx.receptions.length > 1) appendFact(line, makeElement('span', 'rt-heard', `heard ×${tx.receptions.length}`));
+            if (tx.receptions.length > 1) {
+                // The count is the short version on the line; the hover carries the
+                // per-reception detail that only fits once the row is open.
+                const heard = makeElement('span', 'rt-heard', `heard ×${tx.receptions.length}`);
+                appendFact(line, tipify(heard, tx.receptions.map(r =>
+                    `${clockText(r.t)} · ${r.path.length ? r.path.join(' › ') : 'no path recorded'}`).join('\n')));
+            }
             const path = pathList(p.path);
             if (path.length) appendFact(line, makeElement('span', 'rt-path', path.join(' › ')));
             if (tx.decoded && !tx.message) appendFact(line, 'decoded in this browser');
@@ -2121,20 +2195,44 @@
         return 'Sent · not heard back yet';
     }
 
+    // The reply's state is its own, not the row's: a command can be read fine and
+    // still fail to send. The pill says which, the tooltip carries the per-prefix
+    // counts that don't fit on the line.
+    function repeatTooltip(cmd, echoes) {
+        const count = Number(cmd.repeat_count) || 0;
+        if (count <= 0) return echoes.length ? `Heard back ${echoes.length} time${echoes.length === 1 ? '' : 's'}` : '';
+        const prefixes = Array.isArray(cmd.repeater_prefixes) ? cmd.repeater_prefixes.map(String) : [];
+        if (!prefixes.length) return 'Heard by the radio; no repeater prefix identified';
+        const counts = cmd.repeater_counts || {};
+        const detail = prefixes.map(prefix => {
+            const n = Number(counts[prefix]) || 1;
+            return n > 1 ? `${prefix} ×${n}` : prefix;
+        }).join(', ');
+        const total = count > prefixes.length
+            ? `\n\nTotal: ${count} repeats from ${prefixes.length} unique repeater${prefixes.length === 1 ? '' : 's'}`
+            : '';
+        return `Repeater prefixes: ${detail}${total}`;
+    }
+
     function buildReply(tx) {
         const cmd = tx.command;
         const reply = makeElement('div', 'rt-reply');
+        const failed = cmd.success === false;
         const head = makeElement('div', 'rt-reply-head');
         head.append(makeIcon('fas fa-robot'), makeElement('span', '', 'Bot reply'));
         if (cmd.command) head.appendChild(makeElement('span', 'rt-mono', cmd.command));
+        head.appendChild(makeElement('span', `rt-badge${failed ? ' is-failed' : ''}`, failed ? 'Failed' : 'Sent'));
+        head.appendChild(makeElement('span', 'rt-reply-when', clockText(cmd.timestamp || tx.t)));
         reply.appendChild(head);
         reply.appendChild(makeElement('p', 'rt-reply-text', cmd.response || 'No response'));
-        const failed = cmd.success === false;
         const status = makeElement('div', `rt-reply-status${failed ? ' is-failed' : ''}`);
         if (failed) {
             status.append(makeIcon('fas fa-circle-exclamation'), document.createTextNode(' Didn\'t send'));
         } else {
-            status.textContent = repeatSummary(cmd, tx.echoes);
+            status.appendChild(tipify(
+                makeElement('span', '', repeatSummary(cmd, tx.echoes)),
+                repeatTooltip(cmd, tx.echoes)
+            ));
         }
         reply.appendChild(status);
         return reply;
@@ -2292,6 +2390,18 @@
         return cell;
     }
 
+    // Bootstrap only knows about elements it was handed, so a row that arrives
+    // later has to be handed over too. Rows re-render on every echo, so the
+    // instance from the previous render is disposed before a new one is made.
+    function initializeEntryTooltips(entry) {
+        if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
+        entry.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(element => {
+            const existingTooltip = bootstrap.Tooltip.getInstance(element);
+            if (existingTooltip) existingTooltip.dispose();
+            new bootstrap.Tooltip(element);
+        });
+    }
+
     function renderTx(tx, change = 'update') {
         let li = tx.el;
         let refocus = null;
@@ -2330,6 +2440,7 @@
         li.replaceChildren(line);
         if (tx.command) li.appendChild(buildReply(tx));
         li.appendChild(detail);
+        initializeEntryTooltips(li);
 
         if (!li.isConnected) {
             if (tx.kept) keptList.prepend(li);
@@ -2463,8 +2574,9 @@
     }
 
     function matches(tx) {
-        if (view.kind === 'message' && readingOf(tx) === 'packet') return false;
-        if (view.kind === 'command' && !tx.command) return false;
+        // Lenses stack: a row shows when its reading is one of the lenses that
+        // are on. With none on, the tape is everything.
+        if (view.kinds.size && !view.kinds.has(readingOf(tx))) return false;
         if (view.type && (!tx.packet || tx.packet.payload_type_name !== view.type)) return false;
         if (view.channel && channelOf(tx) !== view.channel) return false;
         if (view.q && !searchText(tx).includes(view.q)) return false;
@@ -2472,7 +2584,7 @@
     }
 
     function filtersActive() {
-        return view.kind !== 'all' || !!view.type || !!view.channel || !!view.q;
+        return view.kinds.size > 0 || !!view.type || !!view.channel || !!view.q;
     }
 
     function applyFilters() {
@@ -2482,17 +2594,19 @@
         });
         const active = filtersActive();
         document.getElementById('rt-clear-filters').hidden = !active;
-        const n = [view.kind !== 'all', view.type, view.channel, view.q].filter(Boolean).length;
+        const n = [view.kinds.size, view.type, view.channel, view.q].filter(Boolean).length;
         document.getElementById('rt-filters-active').textContent = n ? `(${n})` : '';
         updateCounts();
     }
 
     function clearFilters() {
-        view.kind = 'all';
+        view.kinds.clear();
         view.type = '';
         view.channel = '';
         view.q = '';
-        document.getElementById('rt-kind-all').checked = true;
+        document.querySelectorAll('input[name="rt-kind"]').forEach(lens => {
+            lens.checked = lens.id === 'rt-kind-all';
+        });
         document.getElementById('rt-type').value = '';
         document.getElementById('rt-channel').value = '';
         document.getElementById('rt-search').value = '';
@@ -2840,16 +2954,31 @@
     });
     readBannerState(window.lastBannerStatus || null);
 
+    // The tape reads newest first, so its two ends are the live end and the
+    // history end. Jumping is a scroll, and the scroll handler then decides
+    // whether the tape keeps following: at the newest end it does, at the oldest
+    // end it holds, which is what reading what came before wants.
+    function jumpTape(edge) {
+        const rows = Array.from(tape.querySelectorAll('.rt-row')).filter(li => !li.hidden);
+        const target = rows.length ? (edge === 'newest' ? rows[0] : rows[rows.length - 1]) : tape;
+        const top = Math.max(0, target.getBoundingClientRect().top + window.scrollY - strip.offsetHeight - 16);
+        window.scrollTo({ top, behavior: 'smooth' });
+        if (edge === 'newest') {
+            // Wanting the newest rows means wanting the live ones, so follow stays
+            // on while the page is still moving.
+            hold.scrolled = false;
+            flush(true);
+        }
+    }
+
     document.getElementById('rt-pause').addEventListener('click', () => setPaused(!hold.paused));
     document.getElementById('rt-pending').addEventListener('click', () => {
-        if (hold.scrolled) {
-            const top = tape.getBoundingClientRect().top + window.scrollY - strip.offsetHeight - 16;
-            window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-            hold.scrolled = false;
-        }
+        if (hold.scrolled) jumpTape('newest');
         if (hold.paused) setPaused(false);
         flush(true);
     });
+    document.getElementById('rt-newest').addEventListener('click', () => jumpTape('newest'));
+    document.getElementById('rt-oldest').addEventListener('click', () => jumpTape('oldest'));
     document.getElementById('rt-clear').addEventListener('click', clearTape);
     document.getElementById('rt-clear-filters').addEventListener('click', clearFilters);
     document.getElementById('rt-filters-toggle').addEventListener('click', function() {
@@ -2858,9 +2987,22 @@
         bar.classList.toggle('is-open', open);
         this.setAttribute('aria-expanded', open ? 'true' : 'false');
     });
-    document.querySelectorAll('input[name="rt-kind"]').forEach(radio => {
-        radio.addEventListener('change', () => {
-            view.kind = radio.value;
+    const lensInputs = Array.from(document.querySelectorAll('input[name="rt-kind"]'));
+    const lensAll = document.getElementById('rt-kind-all');
+    lensInputs.forEach(lens => {
+        lens.addEventListener('change', () => {
+            if (lens === lensAll) {
+                // "Everything" means no lens is on, so picking it clears the ones
+                // that were: the lenses stack, they never split the tape.
+                view.kinds.clear();
+                lensInputs.forEach(other => { if (other !== lensAll) other.checked = false; });
+            } else if (lens.checked) {
+                view.kinds.add(lens.value);
+                lensAll.checked = false;
+            } else {
+                view.kinds.delete(lens.value);
+                if (!view.kinds.size) lensAll.checked = true;
+            }
             applyFilters();
         });
     });

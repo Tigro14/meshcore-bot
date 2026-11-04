@@ -230,6 +230,21 @@ class TestPageRoutes:
                        'stripLeadingChannelBracketTag', 'function pathByteLength('):
             assert helper in html, helper
 
+    def test_realtime_lenses_stack_and_rows_carry_hover_detail(self, client):
+        """One tape replaces the three panels, so the lenses have to stack: packets
+        can be read without commands, both tape ends are reachable, and the
+        multi-line detail the panels showed as entry tooltips is still on the row,
+        along with the reply's own state."""
+        html = client.get("/realtime").data.decode()
+        for marker in ('id="rt-kind-packet"', 'value="packet"',
+                       'view.kinds.has(readingOf(tx))', 'function jumpTape(',
+                       'id="rt-newest"', 'id="rt-oldest"',
+                       'function initializeEntryTooltips(', "dataset.bsToggle = 'tooltip'",
+                       'function repeatTooltip(', 'rt-badge'):
+            assert marker in html, marker
+        # Stacking needs checkboxes; a radio group would force a single lens.
+        assert '<input type="radio" class="btn-check" name="rt-kind"' not in html
+
     def test_realtime_loads_no_cdn_script_of_its_own(self, client):
         html = client.get("/realtime").data.decode()
         assert "vendor/js-sha256/sha256.min.js" in html
