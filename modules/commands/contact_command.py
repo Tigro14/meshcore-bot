@@ -30,6 +30,7 @@ class ContactCommand(BaseCommand):
 
     # Plugin metadata
     name = "contact"
+    enabled_attr = "enabled"
     keywords = ['contact']
     description = "Display the bot's contact information"
     category = "basic"
@@ -64,7 +65,7 @@ class ContactCommand(BaseCommand):
             return False
         return super().can_execute(message, skip_channel_check=skip_channel_check)
 
-    def get_help_text(self) -> str:
+    def get_help_text(self, message: MeshMessage | None = None) -> str:
         """Get help text for the contact command.
 
         Returns:

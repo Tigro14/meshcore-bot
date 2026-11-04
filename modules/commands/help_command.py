@@ -5,10 +5,13 @@ Provides help information for commands and general usage
 """
 
 from collections import defaultdict
-from typing import Any, Optional
+from typing import (
+    Any,  # noqa: F401  importable from this module on dev
+    Optional,
+)
 
 from ..models import MeshMessage
-from .base_command import BaseCommand
+from .base_command import BaseCommand, help_text_for
 
 
 class HelpCommand(BaseCommand):
@@ -21,6 +24,8 @@ class HelpCommand(BaseCommand):
 
     # Plugin metadata
     name = "help"
+    honors_skip_channel_check = False
+    enabled_attr = "help_enabled"
     keywords = ['help']
     description = "Shows commands. Use 'help <command>' for details."
     category = "basic"
@@ -42,20 +47,7 @@ class HelpCommand(BaseCommand):
         super().__init__(bot)
         self.help_enabled = self.get_config_value('Help_Command', 'enabled', fallback=True, value_type='bool')
 
-    def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
-        """Check if this command can be executed with the given message.
-
-        Args:
-            message: The message triggering the command.
-
-        Returns:
-            bool: True if command is enabled and checks pass, False otherwise.
-        """
-        if not self.help_enabled:
-            return False
-        return super().can_execute(message)
-
-    def get_help_text(self) -> str:
+    def get_help_text(self, message: MeshMessage | None = None) -> str:
         """Get help text for the help command.
 
         Returns:
@@ -128,11 +120,8 @@ class HelpCommand(BaseCommand):
         if command:
             # Pass message context to get_help_text if the method supports it
             if hasattr(command, 'get_help_text') and callable(command.get_help_text):
-                try:
-                    help_text = command.get_help_text(message)
-                except TypeError:
-                    # Fallback for commands that don't accept message parameter
-                    help_text = command.get_help_text()
+                # Commands that don't accept the message get the no-argument call
+                help_text = help_text_for(command, message)
             else:
                 help_text = self.translate('commands.help.no_help')
             return self.translate('commands.help.specific', command=command_name, help_text=help_text)

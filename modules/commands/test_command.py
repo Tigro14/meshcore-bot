@@ -9,8 +9,10 @@ import re
 from datetime import datetime
 from typing import Any, Optional
 
+from ..location import latest_contact_position_rows
 from ..models import MeshMessage
 from ..response_template import format_piped_template
+from ..template_reference import MESSAGE_PLACEHOLDERS, template_spec
 from ..utils import (
     calculate_distance,
     decode_escape_sequences,
@@ -28,6 +30,8 @@ class TestCommand(BaseCommand):
 
     # Plugin metadata
     name = "test"
+    honors_skip_channel_check = False
+    enabled_attr = "test_enabled"
     keywords = ['test', 't']
     description = "Responds to 'test' or 't' with connection info"
     category = "basic"
@@ -40,7 +44,20 @@ class TestCommand(BaseCommand):
     # Web-viewer settings schema (see modules/settings_schema.py)
     settings_schema = [
         {"key": "response_format", "label": "Response format", "type": "str", "default": "",
-         "help": "Template for the test reply. Empty uses the default format."},
+         "help": "Template for the test reply. Empty uses the default format.",
+         "template": template_spec(
+             "piped",
+             MESSAGE_PLACEHOLDERS + ("phrase", "phrase_part", "elapsed", "path_distance", "firstlast_distance"),
+             notes=[
+                 "Blank uses [Keywords] test if set, else the default the preview shows.",
+                 "{path_distance} and {firstlast_distance} are N/A on a direct message, which "
+                 "counts as not empty: put hops_min:1 before prefix_if_nonempty to drop them there.",
+                 "\\n starts a new line.",
+             ],
+             samples={"path_distance": {"direct": "N/A"}, "firstlast_distance": {"direct": "N/A"}},
+             blank_default="ack @[{sender}]{phrase_part} | {connection_info} | Received at: {timestamp}",
+             blank_config=("Keywords", "test"),
+         )},
         {"key": "distance_unit", "label": "Distance unit", "type": "enum",
          "options": [
              {"value": "auto", "label": "Auto (follow reply language)"},
@@ -49,6 +66,12 @@ class TestCommand(BaseCommand):
          ],
          "default": "auto",
          "help": "Unit for {path_distance} and {firstlast_distance}."},
+        {"key": "require_path_bytes_greater_or_equal_to", "label": "Require path bytes ≥", "type": "int",
+         "min": 0, "max": 3, "default": 0,
+         "help": "Only respond when the path's total size is at least 2 bytes (2) or exactly 3 bytes (3), counting every hop. 0/1 = allow all."},
+        {"key": "require_path_bytes_failure_response", "label": "Path-byte reject reply", "type": "str",
+         "default": "",
+         "help": "Reply when rejected by the path-byte requirement. Empty = silent reject."},
     ]
 
     def __init__(self, bot):
@@ -83,20 +106,7 @@ class TestCommand(BaseCommand):
         except Exception as e:
             self.logger.warning(f"Error reading bot location from config: {e}")
 
-    def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
-        """Check if this command can be executed with the given message.
-
-        Args:
-            message: The message triggering the command.
-
-        Returns:
-            bool: True if command is enabled and checks pass, False otherwise.
-        """
-        if not self.test_enabled:
-            return False
-        return super().can_execute(message)
-
-    def get_help_text(self) -> str:
+    def get_help_text(self, message: MeshMessage | None = None) -> str:
         """Get help text for the command.
 
         Returns:
@@ -259,17 +269,7 @@ class TestCommand(BaseCommand):
                 return None
 
             # Look up sender location from database (any role, not just repeaters)
-            query = '''
-                SELECT latitude, longitude
-                FROM complete_contact_tracking
-                WHERE public_key = ?
-                AND latitude IS NOT NULL AND longitude IS NOT NULL
-                AND latitude != 0 AND longitude != 0
-                ORDER BY COALESCE(last_advert_timestamp, last_heard) DESC
-                LIMIT 1
-            '''
-
-            results = self.bot.db_manager.execute_query(query, (sender_pubkey,))
+            results = latest_contact_position_rows(self.bot, sender_pubkey, zero_rule="either")
 
             if results:
                 row = results[0]

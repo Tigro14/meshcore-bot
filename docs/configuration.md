@@ -83,6 +83,8 @@ translation catalog is absent.
 
 ### outgoing_flood_scope_override vs flood_scopes
 
+[Region scopes](region-scopes.md) explains how regions work on the air and why the bot has to be told region names before it can answer inside one.
+
 These two options are independent and serve different purposes:
 
 | Option | Controls |
@@ -326,7 +328,7 @@ Every firing is a transmission on a shared medium, and a command placeholder mak
 
 Other limits worth knowing:
 
-- **Only commands marked `render_safe` can be rendered.** Capture intercepts `send_response` and `send_response_chunked`, so a command that transmits by other means (`advert`), posts its own messages (`announcements`), or is DM-only (`schedule`, which would broadcast configuration) is refused. This is opt-in rather than a denylist, so a new command is never renderable by accident. The read-only informational commands (`wx`, `aqi`, `sun`, `moon`, `solar`, `hfcond`, `satpass`, `rain`, `stats`, and similar) are marked safe.
+- **Only commands marked `render_safe` can be rendered.** Capture intercepts `send_response` and `send_response_chunked`, so a command that transmits by other means (`advert`), posts its own messages (`announcements`), or is DM-only (`schedule`, which would broadcast configuration) is refused. This is opt-in rather than a denylist, so a new command is never renderable by accident. The read-only informational commands (`wx`, `gwx`, `aqi`, `sun`, `moon`, `solar`, `hfcond`, `satpass`, `rain`, `stats`, and similar) are marked safe.
 - `[Bot] scheduled_command_timeout_seconds` (default `30`) bounds each render. Network-backed commands like `wx` need the headroom.
 
 A rendered reply longer than one message is split to the RF body budget and sent as several messages rather than failing at the device.

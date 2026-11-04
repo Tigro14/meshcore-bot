@@ -76,6 +76,7 @@ CANONICAL_NON_COMMAND_SECTIONS = frozenset({
     "Clock_Sync_Admin",
     "Battery_Monitor",
     "Region_Warnings",
+    "Channel_Occupancy",
 })
 
 # Sections required for the bot to start (accessed without has_section guards)

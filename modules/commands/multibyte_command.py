@@ -131,7 +131,7 @@ class MultibyteCommand(BaseCommand):
         await self.send_response(message, self._format_response(results, total, top, max_len))
         return True
 
-    def get_help_text(self) -> str:
+    def get_help_text(self, message: MeshMessage | None = None) -> str:
         """Get help text for the multibyte command."""
         return (
             f"multibyte [N] — 1-byte local repeaters, most recent first (N max, default {self.DEFAULT_TOP}). "

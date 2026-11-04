@@ -122,7 +122,7 @@ class VigilanceCommand(BaseCommand):
 
         return result
 
-    def get_help_text(self) -> str:
+    def get_help_text(self, message: MeshMessage | None = None) -> str:
         """Get help text for this command.
 
         Returns:

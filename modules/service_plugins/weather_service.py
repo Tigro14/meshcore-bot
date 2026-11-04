@@ -5,7 +5,7 @@ Provides scheduled weather forecasts and alert monitoring
 """
 
 import asyncio
-import contextlib
+import contextlib  # noqa: F401  importable from this module on dev
 import json
 import math
 import re
@@ -22,8 +22,6 @@ from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from .. import alert_format
 from ..commands.rain_command import (
@@ -38,8 +36,12 @@ from ..commands.rain_command import (
     precip_descriptor,
     reverse_geocode_region,
 )
+from ..http_retry import make_retry_session
+from ..nws_alerts import SERVICE_SPECIAL_RULES, entry_nws_headline, entry_summary, entry_title, parse_alert_fields
+from ..nws_coverage import NWSNoCoverageCache
 from ..url_shortener import shorten_url_sync
 from ..utils import format_temperature_high_low, get_config_timezone
+from ..weather_common import load_open_meteo_model, load_open_meteo_units
 from .base_service import BaseServicePlugin
 
 # Try to import MQTT client (use paho-mqtt like packet capture service)
@@ -108,6 +110,30 @@ class WeatherService(BaseServicePlugin):
          "min": 1000, "default": 600000, "unit": "ms", "help": "How often thunder/storm data is aggregated."},
         {"key": "flood_scope", "label": "Flood scope", "type": "str", "default": "",
          "help": "Optional regional TC_FLOOD scope for mesh posts (e.g. #west)."},
+        {"key": "rain_nowcast_threshold_mm", "label": "Rain threshold", "type": "float",
+         "min": 0, "default": 0.1, "unit": "mm",
+         "help": "Precipitation per 15-minute bucket that counts as raining."},
+        {"key": "rain_nowcast_min_probability", "label": "Rain min probability", "type": "int",
+         "min": 0, "max": 100, "default": 50, "unit": "%",
+         "help": "Skip a 'rain incoming' heads-up below this precipitation probability."},
+        {"key": "rain_nowcast_announce_ending", "label": "Announce rain ending", "type": "bool", "default": True,
+         "help": "Also post when rain is about to stop."},
+        {"key": "rain_nowcast_show_amount", "label": "Show rain amount", "type": "bool", "default": True,
+         "help": "Append an estimated precipitation amount."},
+        {"key": "rain_nowcast_amount_unit", "label": "Rain amount unit", "type": "enum",
+         "options": [{"value": "in", "label": "Inches"}, {"value": "mm", "label": "Millimeters"}],
+         "default": "in", "help": "Unit for the estimated amount."},
+        {"key": "rain_nowcast_cache_seconds", "label": "Rain cache time", "type": "int",
+         "min": 0, "default": 300, "unit": "s",
+         "help": "Reuse a fetched forecast this long (shared with the rain command). 0 disables."},
+        {"key": "blitz_area_min_lat", "label": "Lightning area min lat", "type": "float", "min": -90, "max": 90,
+         "default": "", "help": "Lightning (Blitzortung) watch box. Set all four corners to enable it; blank = off."},
+        {"key": "blitz_area_max_lat", "label": "Lightning area max lat", "type": "float", "min": -90, "max": 90,
+         "default": "", "help": "Northern edge of the lightning watch box."},
+        {"key": "blitz_area_min_lon", "label": "Lightning area min lon", "type": "float", "min": -180, "max": 180,
+         "default": "", "help": "Western edge of the lightning watch box."},
+        {"key": "blitz_area_max_lon", "label": "Lightning area max lon", "type": "float", "min": -180, "max": 180,
+         "default": "", "help": "Eastern edge of the lightning watch box."},
     ]
 
     def __init__(self, bot: Any):
@@ -134,15 +160,22 @@ class WeatherService(BaseServicePlugin):
         self.blitz_collection_interval = self.bot.config.getint('Weather_Service', 'blitz_collection_interval', fallback=600000) / 1000.0
         self.poll_weather_alerts_interval = self.bot.config.getint('Weather_Service', 'poll_weather_alerts_interval', fallback=600000) / 1000.0
 
-        # Storm detection area (optional)
+        # Storm detection area (optional). All four corners or none: the web
+        # viewer lets someone fill in one corner at a time.
         self.blitz_area = None
-        if self.bot.config.has_option('Weather_Service', 'blitz_area_min_lat'):
-            self.blitz_area = {
-                'min_lat': self.bot.config.getfloat('Weather_Service', 'blitz_area_min_lat'),
-                'min_lon': self.bot.config.getfloat('Weather_Service', 'blitz_area_min_lon'),
-                'max_lat': self.bot.config.getfloat('Weather_Service', 'blitz_area_max_lat'),
-                'max_lon': self.bot.config.getfloat('Weather_Service', 'blitz_area_max_lon'),
-            }
+        corners = ('min_lat', 'min_lon', 'max_lat', 'max_lon')
+        raw_corners = {
+            c: self.bot.config.get('Weather_Service', f'blitz_area_{c}', fallback='').strip()
+            for c in corners
+        }
+        if any(raw_corners.values()):
+            try:
+                self.blitz_area = {c: float(raw_corners[c]) for c in corners}
+            except ValueError:
+                self.logger.warning(
+                    "Lightning detection off: blitz_area_min_lat, blitz_area_min_lon, "
+                    "blitz_area_max_lat and blitz_area_max_lon must all be numbers"
+                )
 
         # Validate position
         if self.my_position_lat is None or self.my_position_lon is None:
@@ -160,18 +193,9 @@ class WeatherService(BaseServicePlugin):
         # Get temperature/wind units from config (for Open-Meteo). Normalized and
         # validated the same way GlobalWxCommand does, so the unit also works as
         # a translation key for its display label.
-        self.temperature_unit = self.bot.config.get('Weather', 'temperature_unit', fallback='fahrenheit').lower()
-        self.wind_speed_unit = self.bot.config.get('Weather', 'wind_speed_unit', fallback='mph').lower()
-        self.precipitation_unit = self.bot.config.get('Weather', 'precipitation_unit', fallback='inch').lower()
-        if self.temperature_unit not in ('fahrenheit', 'celsius'):
-            self.logger.warning(f"Invalid temperature_unit '{self.temperature_unit}', using 'fahrenheit'")
-            self.temperature_unit = 'fahrenheit'
-        if self.wind_speed_unit not in ('mph', 'kmh', 'ms', 'kn'):
-            self.logger.warning(f"Invalid wind_speed_unit '{self.wind_speed_unit}', using 'mph'")
-            self.wind_speed_unit = 'mph'
-        if self.precipitation_unit not in ('inch', 'mm'):
-            self.logger.warning(f"Invalid precipitation_unit '{self.precipitation_unit}', using 'inch'")
-            self.precipitation_unit = 'inch'
+        self.temperature_unit, self.wind_speed_unit, self.precipitation_unit = load_open_meteo_units(
+            self.bot.config, self.logger
+        )
 
         # Proactive rain nowcast ("rain incoming" push). Reuses the rain command's
         # Open-Meteo 15-minutely logic for the bot's own position.
@@ -197,8 +221,7 @@ class WeatherService(BaseServicePlugin):
         # Track last alert check time to only send new alerts
         self.last_alert_check_time: Optional[float] = None
 
-        # Lazy: None = unknown, False = NOAA alerts unavailable (non-US / no coverage)
-        self._nws_alerts_available: Optional[bool] = None
+        self._nws_no_coverage = NWSNoCoverageCache()
 
         # Background tasks
         self._alerts_task: Optional[asyncio.Task] = None
@@ -259,43 +282,11 @@ class WeatherService(BaseServicePlugin):
         Returns:
             Optional[str]: Model string, or None to omit the models parameter.
         """
-        if self.bot.config.has_option('Weather', 'weather_model'):
-            model = self.bot.config.get('Weather', 'weather_model', fallback='').strip().lower()
-            if not model:
-                # Explicitly blank means "let Open-Meteo auto-select".
-                return None
-        else:
-            # Unset falls back to Open-Meteo's best_match model.
-            model = 'best_match'
-
-        if not re.fullmatch(r'[a-z0-9_,.-]+', model):
-            self.logger.warning(f"Invalid weather_model '{model}', using 'best_match'")
-            return 'best_match'
-
-        return model
+        return load_open_meteo_model(self.bot.config, self.logger)
 
     def _create_retry_session(self) -> requests.Session:
-        """Create a requests session with retry logic for API calls.
-
-        Returns:
-            requests.Session: Configured session with retry adapter.
-        """
-        session = requests.Session()
-        retry_strategy = Retry(
-            total=2,
-            backoff_factor=0.3,
-            status_forcelist=[500, 502, 503, 504],
-            allowed_methods=["GET"],
-            raise_on_status=False
-        )
-        adapter = HTTPAdapter(
-            max_retries=retry_strategy,
-            pool_connections=10,
-            pool_maxsize=20
-        )
-        session.mount("https://", adapter)
-        session.mount("http://", adapter)
-        return session
+        """Create a requests session with retry logic for API calls."""
+        return make_retry_session()
 
     def _run_api_session_call(self, callback: Any, *args: Any, **kwargs: Any) -> Any:
         """Run one complete synchronous session operation under the session lock."""
@@ -412,30 +403,9 @@ class WeatherService(BaseServicePlugin):
         self.logger.info("Stopping weather service")
 
         # Cancel background tasks
-        if self._alerts_task:
-            self._alerts_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._alerts_task
-
-        if self._forecast_task:
-            self._forecast_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._forecast_task
-
-        if self._lightning_task:
-            self._lightning_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._lightning_task
-
-        if self._rain_task:
-            self._rain_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._rain_task
-
-        if self.mqtt_task:
-            self.mqtt_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.mqtt_task
+        await self._cancel_tasks(
+            self._alerts_task, self._forecast_task, self._lightning_task, self._rain_task, self.mqtt_task
+        )
 
         if self.mqtt_client:
             try:
@@ -813,37 +783,7 @@ class WeatherService(BaseServicePlugin):
             temp_symbol = "°F" if self.temperature_unit == 'fahrenheit' else "°C"
 
             # Get location name (cached to avoid repeated API calls)
-            if self._cached_location_name is None:
-                try:
-                    from ..utils import format_location_for_display, rate_limited_nominatim_reverse
-                    coordinates_str = f"{self.my_position_lat}, {self.my_position_lon}"
-                    location = await rate_limited_nominatim_reverse(self.bot, coordinates_str, timeout=5)
-
-                    if location and hasattr(location, 'raw'):
-                        address = location.raw.get('address', {})
-                        city = (address.get('city') or
-                               address.get('town') or
-                               address.get('village') or
-                               address.get('municipality') or
-                               address.get('suburb') or
-                               None)
-                        state = (address.get('state') or
-                                address.get('province') or
-                                address.get('region') or
-                                None)
-                        country = address.get('country')
-                        location_name = format_location_for_display(city, state, country)
-                        if not location_name:
-                            location_name = f"{self.my_position_lat:.2f},{self.my_position_lon:.2f}"
-                    else:
-                        location_name = f"{self.my_position_lat:.2f},{self.my_position_lon:.2f}"
-                    self._cached_location_name = location_name
-                except Exception as e:
-                    self.logger.debug(f"Error reverse geocoding location: {e}")
-                    location_name = f"{self.my_position_lat:.2f},{self.my_position_lon:.2f}"
-                    self._cached_location_name = location_name
-            else:
-                location_name = self._cached_location_name
+            location_name = await self._forecast_location_name()
 
             # Format current forecast
             forecast_text = f"{location_name}: {weather_emoji}{weather_desc} {temp}{temp_symbol}"
@@ -866,40 +806,7 @@ class WeatherService(BaseServicePlugin):
             )
 
             # Add tomorrow's forecast
-            daily_times = daily.get('time', [])
-            daily_codes = daily.get('weather_code', [])
-            daily_max = daily.get('temperature_2m_max', [])
-            daily_min = daily.get('temperature_2m_min', [])
-
-            if len(daily_times) > 1 and len(daily_codes) > 1:
-                tomorrow_code = daily_codes[1]
-                tomorrow_max = int(daily_max[1]) if len(daily_max) > 1 else None
-                tomorrow_min = int(daily_min[1]) if len(daily_min) > 1 else None
-                tomorrow_desc = self._get_weather_description(tomorrow_code)
-                tomorrow_emoji = self._get_weather_emoji(tomorrow_code)
-
-                if tomorrow_max is not None:
-                    tomorrow_label = self._translate('services.weather_service.tomorrow')
-                    if tomorrow_min is not None and tomorrow_min != tomorrow_max:
-                        hl = format_temperature_high_low(
-                            self.bot.config,
-                            tomorrow_max,
-                            tomorrow_min,
-                            temp_symbol,
-                            self.logger,
-                            translator=getattr(self.bot, 'translator', None),
-                        )
-                        forecast_text += f" | {tomorrow_label}: {tomorrow_emoji}{tomorrow_desc} {hl}"
-                    else:
-                        hl = format_temperature_high_low(
-                            self.bot.config,
-                            tomorrow_max,
-                            None,
-                            temp_symbol,
-                            self.logger,
-                            translator=getattr(self.bot, 'translator', None),
-                        )
-                        forecast_text += f" | {tomorrow_label}: {tomorrow_emoji}{tomorrow_desc} {hl}"
+            forecast_text = self._append_tomorrow_forecast(forecast_text, daily, temp_symbol)
 
             return ForecastFetchResult(forecast_text)
 
@@ -908,6 +815,79 @@ class WeatherService(BaseServicePlugin):
             import traceback
             self.logger.debug(traceback.format_exc())
             return ForecastFetchResult(self._translate('services.weather_service.error_fetching'))
+
+    async def _forecast_location_name(self) -> str:
+        """The bot position's place name, reverse geocoded once and cached; coordinates as a fallback."""
+        if self._cached_location_name is None:
+            try:
+                from ..utils import format_location_for_display, rate_limited_nominatim_reverse
+                coordinates_str = f"{self.my_position_lat}, {self.my_position_lon}"
+                location = await rate_limited_nominatim_reverse(self.bot, coordinates_str, timeout=5)
+
+                if location and hasattr(location, 'raw'):
+                    address = location.raw.get('address', {})
+                    city = (address.get('city') or
+                           address.get('town') or
+                           address.get('village') or
+                           address.get('municipality') or
+                           address.get('suburb') or
+                           None)
+                    state = (address.get('state') or
+                            address.get('province') or
+                            address.get('region') or
+                            None)
+                    country = address.get('country')
+                    location_name = format_location_for_display(city, state, country)
+                    if not location_name:
+                        location_name = f"{self.my_position_lat:.2f},{self.my_position_lon:.2f}"
+                else:
+                    location_name = f"{self.my_position_lat:.2f},{self.my_position_lon:.2f}"
+                self._cached_location_name = location_name
+            except Exception as e:
+                self.logger.debug(f"Error reverse geocoding location: {e}")
+                location_name = f"{self.my_position_lat:.2f},{self.my_position_lon:.2f}"
+                self._cached_location_name = location_name
+        else:
+            location_name = self._cached_location_name
+        return location_name
+
+    def _append_tomorrow_forecast(self, forecast_text: str, daily: dict, temp_symbol: str) -> str:
+        """``forecast_text`` with tomorrow's sky and high/low appended when the daily arrays reach day 2."""
+        daily_times = daily.get('time', [])
+        daily_codes = daily.get('weather_code', [])
+        daily_max = daily.get('temperature_2m_max', [])
+        daily_min = daily.get('temperature_2m_min', [])
+
+        if len(daily_times) > 1 and len(daily_codes) > 1:
+            tomorrow_code = daily_codes[1]
+            tomorrow_max = int(daily_max[1]) if len(daily_max) > 1 else None
+            tomorrow_min = int(daily_min[1]) if len(daily_min) > 1 else None
+            tomorrow_desc = self._get_weather_description(tomorrow_code)
+            tomorrow_emoji = self._get_weather_emoji(tomorrow_code)
+
+            if tomorrow_max is not None:
+                tomorrow_label = self._translate('services.weather_service.tomorrow')
+                if tomorrow_min is not None and tomorrow_min != tomorrow_max:
+                    hl = format_temperature_high_low(
+                        self.bot.config,
+                        tomorrow_max,
+                        tomorrow_min,
+                        temp_symbol,
+                        self.logger,
+                        translator=getattr(self.bot, 'translator', None),
+                    )
+                    forecast_text += f" | {tomorrow_label}: {tomorrow_emoji}{tomorrow_desc} {hl}"
+                else:
+                    hl = format_temperature_high_low(
+                        self.bot.config,
+                        tomorrow_max,
+                        None,
+                        temp_symbol,
+                        self.logger,
+                        translator=getattr(self.bot, 'translator', None),
+                    )
+                    forecast_text += f" | {tomorrow_label}: {tomorrow_emoji}{tomorrow_desc} {hl}"
+        return forecast_text
 
     def _degrees_to_direction(self, degrees: float) -> str:
         """Convert wind direction in degrees to compass direction.
@@ -966,7 +946,7 @@ class WeatherService(BaseServicePlugin):
             return "🌧️"
         elif code in [71, 73, 75, 77, 85, 86]:
             return "❄️"
-        elif code in [95, 96, 99]:
+        elif code in [95, 96, 97, 99]:
             return "⛈️"
         else:
             return "🌤️"
@@ -978,15 +958,11 @@ class WeatherService(BaseServicePlugin):
         """
         self.logger.info(f"Starting weather alerts polling (interval: {self.poll_weather_alerts_interval}s)")
 
-        while self._running:
-            try:
-                await self._check_weather_alerts()
-                await asyncio.sleep(self.poll_weather_alerts_interval)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error(f"Error in weather alerts polling loop: {e}")
-                await asyncio.sleep(60)  # Wait 1 minute on error before retrying
+        await self.run_periodic(
+            self._check_weather_alerts,
+            lambda: self.poll_weather_alerts_interval,
+            "Error in weather alerts polling loop",
+        )
 
     async def _check_weather_alerts(self) -> None:
         """Check for new weather alerts (US-only via NOAA API).
@@ -1007,12 +983,14 @@ class WeatherService(BaseServicePlugin):
                 # Subsequent checks: only get alerts since last check
                 time_window_start = self.last_alert_check_time
 
-            if self._nws_alerts_available is False:
+            lat, lon = self.my_position_lat, self.my_position_lon
+            if self._nws_no_coverage.is_unavailable(lat, lon):
+                self.logger.debug("Skipping NWS weather alerts for cached point %s,%s outside NWS coverage", round(lat, 2), round(lon, 2))
                 return
 
             # Round coordinates
-            lat_rounded = round(self.my_position_lat, 4)
-            lon_rounded = round(self.my_position_lon, 4)
+            lat_rounded = round(lat, 4)
+            lon_rounded = round(lon, 4)
 
             # NOAA alerts API (US-only)
             alert_url = f"https://api.weather.gov/alerts/active.atom?point={lat_rounded},{lon_rounded}"
@@ -1025,12 +1003,12 @@ class WeatherService(BaseServicePlugin):
                 )
                 if not alert_data.ok:
                     if nws_http_means_no_coverage(alert_data.status_code):
-                        self._nws_alerts_available = False
-                        self.logger.warning(
-                            "NWS weather alerts unavailable (HTTP %s); NOAA alerts are US-only — "
-                            "skipping future alert polls",
-                            alert_data.status_code,
-                        )
+                        if self._nws_no_coverage.mark_unavailable(lat, lon):
+                            self.logger.warning(
+                                "NWS weather alerts unavailable (HTTP %s); NOAA alerts are US-only; "
+                                "point %s,%s is outside NWS coverage",
+                                alert_data.status_code, round(lat, 2), round(lon, 2),
+                            )
                     else:
                         self.logger.debug(f"Error fetching alerts: HTTP {alert_data.status_code}")
                     return
@@ -1038,7 +1016,7 @@ class WeatherService(BaseServicePlugin):
                 self.logger.debug(f"Timeout/connection error fetching alerts: {e}")
                 return
 
-            self._nws_alerts_available = True
+            self._nws_no_coverage.mark_available(lat, lon)
 
             # Parse ATOM feed with full metadata extraction (same as wx_command)
             alerts = []
@@ -1046,75 +1024,13 @@ class WeatherService(BaseServicePlugin):
 
             for entry in alertxml.getElementsByTagName("entry"):
                 try:
-                    # Get alert ID
-                    alert_id_elem = entry.getElementsByTagName("id")
-                    if not alert_id_elem or not alert_id_elem[0].childNodes:
-                        continue
-                    alert_id_value = alert_id_elem[0].childNodes[0].nodeValue
-                    if not alert_id_value:
-                        continue
-                    alert_id: str = alert_id_value
-
-                    # Skip if we've already seen this alert
-                    if alert_id in self.seen_alert_ids:
-                        continue
-
-                    # Get entry updated timestamp (most reliable - when alert was last updated/issued)
-                    entry_updated_time = None
-                    updated_elem = entry.getElementsByTagName("updated")
-                    if updated_elem and updated_elem[0].childNodes:
-                        updated_str = updated_elem[0].childNodes[0].nodeValue
-                        if updated_str is not None:
-                            entry_updated_time = self._parse_iso_time(updated_str)
-
-                    # Extract full alert metadata (same logic as wx_command)
-                    alert_dict = self._parse_alert_entry(entry, alert_id)
-                    if not alert_dict:
-                        continue
-
-                    # Determine alert issued time (prefer entry updated time, then effective time)
-                    alert_issued_time = entry_updated_time
-                    if alert_issued_time is None:
-                        alert_issued_time = self._parse_alert_time(alert_dict.get('effective', ''))
-
-                    if alert_issued_time is None:
-                        # If we can't parse any time, use current time as fallback
-                        # This means we'll send it, but it's better than missing new alerts
-                        alert_issued_time = current_check_time
-                        self.logger.debug(f"Could not parse time for alert {alert_id}, using current time")
-
-                    # Only include alerts issued since last check
-                    if alert_issued_time >= time_window_start:
-                        alerts.append(alert_dict)
-                        self.seen_alert_ids.add(alert_id)
-                        self.logger.debug(f"New alert {alert_id} issued at {datetime.fromtimestamp(alert_issued_time)}")
-                    else:
-                        # Alert is older than our window, mark as seen but don't send
-                        self.seen_alert_ids.add(alert_id)
-                        self.logger.debug(f"Skipping old alert {alert_id} (issued {datetime.fromtimestamp(alert_issued_time)} before time window start {datetime.fromtimestamp(time_window_start)})")
-
+                    self._collect_alert_entry(entry, alerts, time_window_start, current_check_time)
                 except Exception as e:
                     self.logger.debug(f"Error parsing alert entry: {e}")
                     continue
 
             # Send new alerts with compact formatting
-            for alert in alerts:
-                try:
-                    # Format alert using compact formatter (same as wx_command)
-                    alert_text = await self._format_alert_compact(alert, include_details=True)
-
-                    await self.bot.command_manager.send_channel_message(
-                        self.alerts_channel,
-                        alert_text,
-                        scope=self.get_mesh_flood_scope(),
-                    )
-                    self.logger.info(f"Weather alert sent: {alert.get('title', 'Unknown')}")
-
-                    # Small delay between alerts
-                    await asyncio.sleep(2)
-
-                except Exception as e:
-                    self.logger.error(f"Error sending weather alert: {e}")
+            await self._send_new_alerts(alerts)
 
             # Update last check time
             self.last_alert_check_time = current_check_time
@@ -1126,21 +1042,86 @@ class WeatherService(BaseServicePlugin):
         except Exception as e:
             self.logger.error(f"Error checking weather alerts: {e}")
 
+    def _collect_alert_entry(self, entry: Any, alerts: list, time_window_start: float, current_check_time: float) -> None:
+        """Parse one ATOM alert entry and append it to ``alerts`` when it is unseen and issued inside the window."""
+        # Get alert ID
+        alert_id_elem = entry.getElementsByTagName("id")
+        if not alert_id_elem or not alert_id_elem[0].childNodes:
+            return
+        alert_id_value = alert_id_elem[0].childNodes[0].nodeValue
+        if not alert_id_value:
+            return
+        alert_id: str = alert_id_value
+
+        # Skip if we've already seen this alert
+        if alert_id in self.seen_alert_ids:
+            return
+
+        # Get entry updated timestamp (most reliable - when alert was last updated/issued)
+        entry_updated_time = None
+        updated_elem = entry.getElementsByTagName("updated")
+        if updated_elem and updated_elem[0].childNodes:
+            updated_str = updated_elem[0].childNodes[0].nodeValue
+            if updated_str is not None:
+                entry_updated_time = self._parse_iso_time(updated_str)
+
+        # Extract full alert metadata (same logic as wx_command)
+        alert_dict = self._parse_alert_entry(entry, alert_id)
+        if not alert_dict:
+            return
+
+        # Determine alert issued time (prefer entry updated time, then effective time)
+        alert_issued_time = entry_updated_time
+        if alert_issued_time is None:
+            alert_issued_time = self._parse_alert_time(alert_dict.get('effective', ''))
+
+        if alert_issued_time is None:
+            # If we can't parse any time, use current time as fallback
+            # This means we'll send it, but it's better than missing new alerts
+            alert_issued_time = current_check_time
+            self.logger.debug(f"Could not parse time for alert {alert_id}, using current time")
+
+        # Only include alerts issued since last check
+        if alert_issued_time >= time_window_start:
+            alerts.append(alert_dict)
+            self.seen_alert_ids.add(alert_id)
+            self.logger.debug(f"New alert {alert_id} issued at {datetime.fromtimestamp(alert_issued_time)}")
+        else:
+            # Alert is older than our window, mark as seen but don't send
+            self.seen_alert_ids.add(alert_id)
+            self.logger.debug(f"Skipping old alert {alert_id} (issued {datetime.fromtimestamp(alert_issued_time)} before time window start {datetime.fromtimestamp(time_window_start)})")
+
+    async def _send_new_alerts(self, alerts: list) -> None:
+        """Send each new alert to the alerts channel, two seconds apart."""
+        for alert in alerts:
+            try:
+                # Format alert using compact formatter (same as wx_command)
+                alert_text = await self._format_alert_compact(alert, include_details=True)
+
+                await self.bot.command_manager.send_channel_message(
+                    self.alerts_channel,
+                    alert_text,
+                    scope=self.get_mesh_flood_scope(),
+                )
+                self.logger.info(f"Weather alert sent: {alert.get('title', 'Unknown')}")
+
+                # Small delay between alerts
+                await asyncio.sleep(2)
+
+            except Exception as e:
+                self.logger.error(f"Error sending weather alert: {e}")
+
     async def _poll_rain_nowcast_loop(self) -> None:
         """Background task: poll for incoming rain and push a heads-up once per episode."""
         self.logger.info(
             f"Starting rain nowcast polling (interval: {self.poll_rain_nowcast_interval}s, "
             f"lead: {self.rain_nowcast_lead_minutes}min)"
         )
-        while self._running:
-            try:
-                await self._check_rain_nowcast()
-                await asyncio.sleep(self.poll_rain_nowcast_interval)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error(f"Error in rain nowcast polling loop: {e}")
-                await asyncio.sleep(60)  # Wait 1 minute on error before retrying
+        await self.run_periodic(
+            self._check_rain_nowcast,
+            lambda: self.poll_rain_nowcast_interval,
+            "Error in rain nowcast polling loop",
+        )
 
     async def _check_rain_nowcast(self) -> None:
         """Fetch the precip nowcast for the bot's position and push if rain is incoming."""
@@ -1237,7 +1218,7 @@ class WeatherService(BaseServicePlugin):
         # City + state/country (same labeling as the !rain command), reverse-
         # geocoded once and cached. Kept separate from the daily-forecast cache.
         if self._cached_rain_location is None:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             city, suffix = await loop.run_in_executor(
                 None,
                 lambda: reverse_geocode_region(
@@ -1321,7 +1302,7 @@ class WeatherService(BaseServicePlugin):
                 client.on_message = on_message
 
                 # Connect and subscribe (non-blocking to avoid blocking event loop)
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 try:
                     await loop.run_in_executor(None, client.connect, broker_host, broker_port, 60)
                 except Exception as connect_error:
@@ -1431,15 +1412,11 @@ class WeatherService(BaseServicePlugin):
         """
         self.logger.info(f"Starting lightning aggregation (interval: {self.blitz_collection_interval}s)")
 
-        while self._running:
-            try:
-                await self._process_lightning_buffer()
-                await asyncio.sleep(self.blitz_collection_interval)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error(f"Error in lightning aggregation loop: {e}")
-                await asyncio.sleep(60)  # Wait 1 minute on error before retrying
+        await self.run_periodic(
+            self._process_lightning_buffer,
+            lambda: self.blitz_collection_interval,
+            "Error in lightning aggregation loop",
+        )
 
     async def _process_lightning_buffer(self) -> None:
         """Process buffered lightning strikes and send alerts if threshold met.
@@ -1555,9 +1532,7 @@ class WeatherService(BaseServicePlugin):
             Optional[Dict[str, Any]]: Alert dict with event, event_type, severity, expires, office, etc., or None on error.
         """
         try:
-            # Extract title
-            title_elem = entry.getElementsByTagName("title")
-            title = title_elem[0].childNodes[0].nodeValue if title_elem and title_elem[0].childNodes else ""
+            title = entry_title(entry)
 
             if not title:
                 return None
@@ -1612,210 +1587,12 @@ class WeatherService(BaseServicePlugin):
                     else:
                         link_url = href
 
-            # Extract summary/content
-            summary = ""
-            summary_elem = entry.getElementsByTagName("summary")
-            if summary_elem and summary_elem[0].childNodes:
-                summary = summary_elem[0].childNodes[0].nodeValue if summary_elem[0].childNodes[0].nodeValue else ""
-            if not summary:
-                content_elem = entry.getElementsByTagName("content")
-                if content_elem and content_elem[0].childNodes:
-                    summary = content_elem[0].childNodes[0].nodeValue if content_elem[0].childNodes[0].nodeValue else ""
-
-            # Extract NWS headline parameter
-            nws_headline = ""
-            params = entry.getElementsByTagName("cap:parameter")
-            if not params:
-                params = entry.getElementsByTagName("parameter")
-
-            for param in params:
-                value_name_elem = param.getElementsByTagName("valueName")
-                value_elem = param.getElementsByTagName("value")
-                if value_name_elem and value_elem and value_name_elem[0].childNodes and value_elem[0].childNodes:
-                    value_name = value_name_elem[0].childNodes[0].nodeValue if value_name_elem[0].childNodes[0].nodeValue else ""
-                    if value_name == "NWSheadline":
-                        nws_headline = value_elem[0].childNodes[0].nodeValue if value_elem[0].childNodes[0].nodeValue else ""
-                        break
-
-            # Extract CAP metadata
-            event = ""
-            severity = "Unknown"
-            urgency = "Unknown"
-            certainty = "Unknown"
-            effective = ""
-            expires = ""
-            area_desc = ""
-            office = ""
-
-            # Parse title to extract key info
-            title_lower = title.lower()
-
-            # Extract event type from title
-            if "warning" in title_lower:
-                event_type = "Warning"
-                event_match = re.search(r'^([^W]+?)\s+Warning', title, re.IGNORECASE)
-                if event_match:
-                    event = event_match.group(1).strip()
-            elif "watch" in title_lower:
-                event_type = "Watch"
-                event_match = re.search(r'^([^W]+?)\s+Watch', title, re.IGNORECASE)
-                if event_match:
-                    event = event_match.group(1).strip()
-            elif "advisory" in title_lower:
-                event_type = "Advisory"
-                event_match = re.search(r'^([^A]+?)\s+Advisory', title, re.IGNORECASE)
-                if event_match:
-                    event = event_match.group(1).strip()
-            elif "statement" in title_lower:
-                event_type = "Statement"
-                event_match = re.search(r'^([^S]+?)\s+Statement', title, re.IGNORECASE)
-                event = event_match.group(1).strip() if event_match else "Special"
-
-                # For Special Statements, extract meaningful description from NWS headline
-                if event.lower() in ["special", "special weather"] and nws_headline:
-                    headline_lower = nws_headline.lower()
-                    if any(phrase in headline_lower for phrase in ['debris flow', 'mudslide']):
-                        event = "Debris Flow"
-                    elif 'landslide' in headline_lower:
-                        event = "Landslide (Burn)" if ('burn' in headline_lower or 'burned area' in headline_lower) else "Landslide"
-                    elif any(phrase in headline_lower for phrase in ['flash flood', 'river flood', 'flood', 'flooding']):
-                        event = "Flood"
-                    elif any(phrase in headline_lower for phrase in ['high wind', 'strong wind', 'damaging wind', 'wind', 'gust']):
-                        event = "Wind"
-                    elif any(phrase in headline_lower for phrase in ['heavy rain', 'excessive rain', 'rain', 'rainfall', 'precipitation']):
-                        if not any(word in headline_lower for word in ['landslide', 'flood', 'wind', 'snow']):
-                            event = "Rainfall"
-                    elif any(phrase in headline_lower for phrase in ['heavy snow', 'blizzard', 'winter storm', 'snow', 'winter']):
-                        event = "Snow"
-                    elif any(phrase in headline_lower for phrase in ['dense fog', 'low visibility', 'fog', 'visibility']):
-                        event = "Fog" if 'fog' in headline_lower else "Visibility"
-                    elif any(phrase in headline_lower for phrase in ['extreme heat', 'excessive heat', 'heat', 'temperature']):
-                        event = "Heat" if 'heat' in headline_lower else "Temperature"
-                    elif any(phrase in headline_lower for phrase in ['storm surge', 'coastal flood', 'marine', 'coastal']):
-                        event = "Marine"
-                    else:
-                        # Extract first meaningful word
-                        headline_words = headline_lower.split()
-                        skip_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'will', 'lead', 'increased', 'threat', 'remains', 'effect', 'until', 'during', 'last', 'week', 'including', 'today'}
-                        meaningful_words = [w for w in headline_words if w not in skip_words and len(w) > 3]
-                        if meaningful_words:
-                            event = meaningful_words[0].capitalize()
-
-                # Fallback to summary if still generic
-                if event.lower() in ["special", "special weather"] and summary:
-                    summary_lower = summary.lower()
-                    if any(word in summary_lower for word in ['landslide', 'debris flow', 'mudslide']):
-                        event = "Landslide"
-                    elif any(word in summary_lower for word in ['hydrologic', 'river', 'flood', 'stream']):
-                        event = "Hydrologic"
-                    elif any(word in summary_lower for word in ['marine', 'coastal', 'beach', 'surf']):
-                        event = "Marine"
-                    elif any(word in summary_lower for word in ['wind', 'gust']):
-                        event = "Wind"
-                    elif any(word in summary_lower for word in ['rain', 'precipitation', 'shower', 'rainfall']):
-                        event = "Rainfall"
-
-                if event.lower() in ["special", "special weather"]:
-                    event = "Weather" if "weather" in title_lower else "Special"
-            else:
-                event_type = "Unknown"
-                event = title.split()[0] if title else ""
-
-            # Extract times from title
-            issued_match = re.search(r'issued\s+([^u]+?)\s+until\s+(.+?)\s+by', title, re.IGNORECASE)
-            if issued_match:
-                effective = issued_match.group(1).strip()
-                expires = issued_match.group(2).strip()
-            else:
-                until_match = re.search(r'until\s+(.+?)\s+by', title, re.IGNORECASE)
-                if until_match:
-                    expires = until_match.group(1).strip()
-
-            # Extract office from title
-            office_match = re.search(r'by\s+(.+?)$', title, re.IGNORECASE)
-            if office_match:
-                office = office_match.group(1).strip()
-
-            # Try to extract CAP elements
-            def get_node_value(node):
-                if not node or not node.childNodes:
-                    return ""
-                text_parts = []
-                for child in node.childNodes:
-                    if child.nodeType == child.TEXT_NODE or hasattr(child, 'nodeValue') and child.nodeValue:
-                        text_parts.append(child.nodeValue)
-                return " ".join(text_parts).strip()
-
-            for child in entry.childNodes:
-                if hasattr(child, 'tagName'):
-                    tag_name = child.tagName
-                    tag_lower = tag_name.lower()
-
-                    if ('event' in tag_lower or tag_name.endswith(':event')) and not event:
-                        event_val = get_node_value(child)
-                        if event_val:
-                            event = event_val
-                    elif 'severity' in tag_lower or tag_name.endswith(':severity'):
-                        severity_val = get_node_value(child)
-                        if severity_val:
-                            severity = severity_val
-                    elif 'urgency' in tag_lower or tag_name.endswith(':urgency'):
-                        urgency_val = get_node_value(child)
-                        if urgency_val:
-                            urgency = urgency_val
-                    elif 'certainty' in tag_lower or tag_name.endswith(':certainty'):
-                        certainty_val = get_node_value(child)
-                        if certainty_val:
-                            certainty = certainty_val
-                    elif 'effective' in tag_lower or tag_name.endswith(':effective'):
-                        effective_val = get_node_value(child)
-                        if effective_val:
-                            effective = effective_val
-                    elif 'expires' in tag_lower or tag_name.endswith(':expires'):
-                        expires_val = get_node_value(child)
-                        if expires_val:
-                            expires = expires_val
-                    elif ('areadesc' in tag_lower or 'area' in tag_lower or
-                          tag_name.endswith(':areadesc') or tag_name.endswith(':area')):
-                        area_val = get_node_value(child)
-                        if area_val:
-                            area_desc = area_val
-
-            # Infer severity if not found
-            if severity == "Unknown":
-                if any(word in event.lower() for word in ['extreme', 'tornado', 'hurricane', 'blizzard']):
-                    severity = "Extreme"
-                elif any(word in event.lower() for word in ['severe', 'warning']):
-                    severity = "Severe"
-                elif any(word in event.lower() for word in ['advisory', 'moderate']):
-                    severity = "Moderate"
-                else:
-                    severity = "Minor"
-
-            # Infer urgency if not found
-            if urgency == "Unknown":
-                if event_type == "Warning":
-                    urgency = "Immediate"
-                elif event_type == "Watch":
-                    urgency = "Expected"
-                else:
-                    urgency = "Future"
-
+            summary = entry_summary(entry)
+            nws_headline = entry_nws_headline(entry)
             return {
                 'id': alert_id,
-                'title': title,
-                'summary': summary,
-                'nws_headline': nws_headline,
-                'event': event,
-                'event_type': event_type,
-                'severity': severity,
-                'urgency': urgency,
-                'certainty': certainty,
-                'effective': effective,
-                'expires': expires,
-                'area_desc': area_desc,
-                'office': office,
-                'link': link_url
+                **parse_alert_fields(entry, title, summary, nws_headline, SERVICE_SPECIAL_RULES),
+                'link': link_url,
             }
 
         except Exception as e:

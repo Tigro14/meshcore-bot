@@ -24,35 +24,35 @@
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body">
-                            <h5 class="card-title">Total Channels</h5>
-                            <h2 id="total-channels">-</h2>
+                            <h2 class="card-title h5">Total Channels</h2>
+                            <p id="total-channels" class="h2 mb-2 readout-blue">-</p>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body">
-                            <h5 class="card-title">
+                            <h2 class="card-title h5">
                                 Available Slots
                                 <i class="fas fa-info-circle text-muted ms-1" id="available-slots-info" style="font-size: 0.8em; cursor: help; display: none;" data-bs-toggle="tooltip"></i>
-                            </h5>
-                            <h2 id="available-slots">-</h2>
+                            </h2>
+                            <p id="available-slots" class="h2 mb-2 readout-teal">-</p>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body">
-                            <h5 class="card-title">Channels with Feeds</h5>
-                            <h2 id="channels-with-feeds">-</h2>
+                            <h2 class="card-title h5">Channels with Feeds</h2>
+                            <p id="channels-with-feeds" class="h2 mb-2 readout-violet">-</p>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body">
-                            <h5 class="card-title">Empty Channels</h5>
-                            <h2 id="empty-channels">-</h2>
+                            <h2 class="card-title h5">Empty Channels</h2>
+                            <p id="empty-channels" class="h2 mb-2 readout-orange">-</p>
                         </div>
                     </div>
                 </div>
@@ -61,7 +61,7 @@
             <!-- Radio Parameters -->
             <div class="card mb-4" id="radio-params-card">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="fas fa-sliders-h me-2"></i>Radio Parameters</h5>
+                    <h2 class="h5 mb-0"><i class="fas fa-sliders-h me-2"></i>Radio Parameters</h2>
                     <button class="btn btn-sm btn-outline-secondary" id="readRadioParamsBtn">
                         <span class="spinner-border spinner-border-sm me-1" id="readParamsSpinner" style="display:none" role="status"></span>
                         <i class="fas fa-sync me-1" id="readParamsIcon"></i>Read from Device
@@ -132,16 +132,10 @@
                 </div>
             </div>
 
-            <!-- Announcement (card in announcement_card.html, handler inline below) -->
-            {% include 'announcement_card.html' %}
-
-            <!-- Local test DM (card in test_dm_card.html, self-contained handler) -->
-            {% include 'test_dm_card.html' %}
-
             <!-- Node Settings -->
             <div class="card mb-4" id="node-settings-card">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="fas fa-microchip me-2"></i>Node Settings</h5>
+                    <h2 class="h5 mb-0"><i class="fas fa-microchip me-2"></i>Node Settings</h2>
                     <button class="btn btn-sm btn-outline-secondary" id="readNodeSettingsBtn">
                         <span class="spinner-border spinner-border-sm me-1" id="readNodeSpinner" style="display:none" role="status"></span>
                         <i class="fas fa-sync me-1" id="readNodeIcon"></i>Read from Device
@@ -151,9 +145,9 @@
                     <div id="nodeSettingsAlert" style="display:none"></div>
 
                     <!-- Response Path Hashing -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
+                    <h3 class="h6 text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
                         Response Path Hashing
-                    </h6>
+                    </h3>
                     <div class="row g-3 align-items-end">
                         <div class="col-md-3">
                             <label class="form-label" for="nodePathHashMode">Path Hash Size</label>
@@ -165,7 +159,7 @@
                             </select>
                         </div>
                         <div class="col-md-auto">
-                            <button type="button" class="btn btn-warning" id="savePathHashBtn">
+                            <button type="button" class="btn btn-primary" id="savePathHashBtn">
                                 <span class="spinner-border spinner-border-sm me-1" id="savePathHashSpinner" style="display:none" role="status"></span>
                                 <i class="fas fa-upload me-1"></i>Write Path Settings
                             </button>
@@ -180,9 +174,9 @@
                     <hr class="my-4">
 
                     <!-- Default Region Scope (device) -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
+                    <h3 class="h6 text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
                         Default Region Scope
-                    </h6>
+                    </h3>
                     <div class="row g-3 align-items-end">
                         <div class="col-md-4">
                             <label class="form-label" for="nodeDefaultScope">Region</label>
@@ -191,7 +185,7 @@
                             <small class="form-text text-muted" id="nodeDefaultScopeKey"></small>
                         </div>
                         <div class="col-md-auto">
-                            <button type="button" class="btn btn-warning" id="saveDefaultScopeBtn">
+                            <button type="button" class="btn btn-primary" id="saveDefaultScopeBtn">
                                 <span class="spinner-border spinner-border-sm me-1" id="saveDefaultScopeSpinner"
                                       style="display:none" role="status"></span>
                                 <i class="fas fa-upload me-1"></i>Write Default Scope
@@ -218,9 +212,9 @@
                     <hr class="my-4">
 
                     <!-- Identity & Adverts -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
+                    <h3 class="h6 text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
                         Identity &amp; Adverts
-                    </h6>
+                    </h3>
                     <div class="row g-3">
                         <div class="col-md-3">
                             <label class="form-label" for="nodeName">Node Name</label>
@@ -253,7 +247,7 @@
                         </div>
                     </div>
                     <div class="mt-3 d-flex gap-2 flex-wrap">
-                        <button type="button" class="btn btn-warning" id="saveIdentityBtn">
+                        <button type="button" class="btn btn-primary" id="saveIdentityBtn">
                             <span class="spinner-border spinner-border-sm me-1" id="saveIdentitySpinner" style="display:none" role="status"></span>
                             <i class="fas fa-upload me-1"></i>Write Identity
                         </button>
@@ -270,9 +264,9 @@
                     <hr class="my-4">
 
                     <!-- Mesh Behavior -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
+                    <h3 class="h6 text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
                         Mesh Behavior
-                    </h6>
+                    </h3>
                     <div class="row g-3">
                         <div class="col-md-3">
                             <label class="form-label" for="nodeNewContactsMode">New Contacts</label>
@@ -323,7 +317,7 @@
                         Telemetry permissions control who may request each reading type.
                     </small>
                     <div class="mt-3">
-                        <button type="button" class="btn btn-warning" id="saveMeshBtn">
+                        <button type="button" class="btn btn-primary" id="saveMeshBtn">
                             <span class="spinner-border spinner-border-sm me-1" id="saveMeshSpinner" style="display:none" role="status"></span>
                             <i class="fas fa-upload me-1"></i>Write Mesh Behavior
                         </button>
@@ -364,7 +358,7 @@
             <!-- Region Scopes -->
             <div class="card mb-4" id="region-scopes-card">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="fas fa-map-marked-alt me-2"></i>Region Scopes</h5>
+                    <h2 class="h5 mb-0"><i class="fas fa-map-marked-alt me-2"></i>Region Scopes</h2>
                     <small class="text-muted" id="regionScopeTarget"></small>
                 </div>
                 <div class="card-body">
@@ -385,9 +379,9 @@
                          style="display:none"></div>
 
                     <!-- Incoming allowlist -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
+                    <h3 class="h6 text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
                         Which scopes the bot replies to
-                    </h6>
+                    </h3>
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="radio" name="regionScopeMode"
                                id="regionScopeModeAll" value="all">
@@ -432,9 +426,9 @@
                     <hr class="my-4">
 
                     <!-- Outgoing default -->
-                    <h6 class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
+                    <h3 class="h6 text-uppercase text-muted fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em;">
                         Default outgoing scope
-                    </h6>
+                    </h3>
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label" for="regionScopeOutgoing">Scope</label>
@@ -453,7 +447,7 @@
                     </div>
 
                     <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
-                        <button type="button" class="btn btn-warning" id="saveRegionScopesBtn">
+                        <button type="button" class="btn btn-primary" id="saveRegionScopesBtn">
                             <span class="spinner-border spinner-border-sm me-1" id="saveRegionScopesSpinner"
                                   style="display:none" role="status"></span>
                             <i class="fas fa-save me-1"></i>Save Region Scopes
@@ -466,7 +460,7 @@
             <!-- Channel Management -->
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Channel Management</h5>
+                    <h2 class="h5 mb-0">Channel Management</h2>
                     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChannelModal">
                         <i class="fas fa-plus"></i> Create Channel
                     </button>
@@ -498,17 +492,17 @@
 </div>
 
 <!-- Create Channel Modal -->
-<div class="modal fade" id="createChannelModal" tabindex="-1">
+<div class="modal fade" id="createChannelModal" tabindex="-1" aria-labelledby="createChannelModalTitle">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Create Channel</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <h5 class="modal-title" id="createChannelModalTitle">Create Channel</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <form id="createChannelForm">
                     <div class="mb-3">
-                        <label class="form-label">Channel Name</label>
+                        <label class="form-label" for="channelName">Channel Name</label>
                         <input type="text" class="form-control" id="channelName" name="channel_name" required placeholder="#channelname or channelname">
                         <small class="form-text text-muted">
                             <strong>Hashtag channel:</strong> Start with # (e.g., #emergency) - key auto-generated<br>
@@ -516,7 +510,7 @@
                         </small>
                     </div>
                     <div class="mb-3" id="channelKeyGroup" style="display: none;">
-                        <label class="form-label">Channel Key (32 hex characters) <span class="text-danger">*</span></label>
+                        <label class="form-label" for="channelKey">Channel Key (32 hex characters) <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="channelKey" name="channel_key" placeholder="00000000000000000000000000000000" pattern="[0-9a-fA-F]{32}" maxlength="32">
                         <small class="form-text text-muted">Required for custom channels. Must be exactly 32 hexadecimal characters (16 bytes).</small>
                     </div>
@@ -537,12 +531,12 @@
 </div>
 
 <!-- Channel Details Modal -->
-<div class="modal fade" id="channelDetailsModal" tabindex="-1">
+<div class="modal fade" id="channelDetailsModal" tabindex="-1" aria-labelledby="channelDetailsModalTitle">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Channel Details</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <h5 class="modal-title" id="channelDetailsModalTitle">Channel Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body" id="channelDetailsContent">
                 Loading...
@@ -591,7 +585,6 @@ class RadioManager {
             this.channels = (data.channels || []).filter(c => !c.decode_only);
             this.renderChannels();
             this.updateChannelIndexDisplay();
-            window.radioAnnouncement.populateAnnouncementChannels();
         } catch (error) {
             console.error('Error loading channels:', error);
             this.showError('Failed to load channels: ' + error.message);
@@ -774,8 +767,10 @@ class RadioManager {
         button.type = 'button';
         button.className = `btn btn-sm ${colorClass}`;
         button.title = title;
+        button.setAttribute('aria-label', title);
         const icon = document.createElement('i');
         icon.className = `fas ${iconClass}`;
+        icon.setAttribute('aria-hidden', 'true');
         button.appendChild(icon);
         return button;
     }
@@ -1294,73 +1289,6 @@ class RadioManager {
     setupRadioParamsHandlers() {
         document.getElementById('readRadioParamsBtn').addEventListener('click', () => this.readRadioParams());
         document.getElementById('writeRadioParamsBtn').addEventListener('click', () => this.writeRadioParams());
-    }
-
-    populateAnnouncementChannels() {
-        const select = document.getElementById('announcementChannel');
-        if (!select) return;
-
-        while (select.options.length > 1) select.remove(select.options.length - 1);
-        if (select.options.length === 0) {
-            const placeholder = document.createElement('option');
-            placeholder.value = '';
-            placeholder.textContent = 'Select a channel...';
-            select.appendChild(placeholder);
-        }
-        this.channels.forEach(channel => {
-            const channelName = channel.name || channel.channel_name || `Channel ${channel.channel_idx ?? channel.index}`;
-            const option = document.createElement('option');
-            option.value = channelName;
-            option.textContent = `${channelName} (${channel.channel_idx ?? channel.index})`;
-            select.appendChild(option);
-        });
-    }
-
-    async sendAnnouncement() {
-        const btn = document.getElementById('sendAnnouncementBtn');
-        const spinner = document.getElementById('announcementSpinner');
-        const icon = document.getElementById('announcementIcon');
-        const channel = document.getElementById('announcementChannel').value.trim();
-        const message = document.getElementById('announcementMessage').value.trim();
-
-        if (!channel || !message) {
-            this.setAnnouncementAlert('danger', 'Please select a channel and enter a message.');
-            return;
-        }
-
-        btn.disabled = true;
-        spinner.style.display = 'inline-block';
-        icon.style.display = 'none';
-        this.setAnnouncementAlert('', '');
-
-        try {
-            const result = await this.queueAndPoll('/api/radio/announcement', { channel, message });
-            if (result && result.status === 'completed') {
-                this.setAnnouncementAlert('success', 'Announcement sent successfully!');
-                document.getElementById('announcementMessage').value = '';
-            } else {
-                this.setAnnouncementAlert('danger', result?.error_message || 'Failed to send announcement.');
-            }
-        } catch (error) {
-            this.setAnnouncementAlert('danger', 'Error: ' + error.message);
-        } finally {
-            btn.disabled = false;
-            spinner.style.display = 'none';
-            icon.style.display = 'inline';
-        }
-    }
-
-    setAnnouncementAlert(type, message) {
-        const alert = document.getElementById('announcementAlert');
-        if (!alert) return;
-        if (!message) {
-            alert.style.display = 'none';
-            alert.textContent = '';
-            return;
-        }
-        alert.className = `alert alert-${type}`;
-        alert.textContent = message;
-        alert.style.display = 'block';
     }
 
     async readRadioParams({ silent = false } = {}) {
@@ -1973,65 +1901,20 @@ class RadioManager {
     }
 
     showError(message) {
-        const alert = document.createElement('div');
-        alert.className = 'alert alert-danger alert-dismissible fade show position-fixed';
-        alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 300px;';
         const messageNode = document.createElement('span');
         messageNode.textContent = String(message ?? '');
-        const closeButton = document.createElement('button');
-        closeButton.type = 'button';
-        closeButton.className = 'btn-close';
-        closeButton.dataset.bsDismiss = 'alert';
-        alert.append(messageNode, closeButton);
-        document.body.appendChild(alert);
-        setTimeout(() => alert.remove(), 5000);
+        window.viewerToast(messageNode, 'danger', 5000);
     }
-    
+
     showSuccess(message) {
-        const alert = document.createElement('div');
-        alert.className = 'alert alert-success alert-dismissible fade show position-fixed';
-        alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 300px;';
         const messageNode = document.createElement('span');
         messageNode.textContent = String(message ?? '');
-        const closeButton = document.createElement('button');
-        closeButton.type = 'button';
-        closeButton.className = 'btn-close';
-        closeButton.dataset.bsDismiss = 'alert';
-        alert.append(messageNode, closeButton);
-        document.body.appendChild(alert);
-        setTimeout(() => alert.remove(), 3000);
+        window.viewerToast(messageNode, 'success', 3000);
     }
 }
 
-// Initialize radio manager when page loads.
-// `radioAnnouncement` is the hook used to call back into this class.
+// Initialize radio manager when page loads
 let radioManager;
-window.radioAnnouncement = {
-    sendAnnouncement: () => radioManager && radioManager.sendAnnouncement(),
-    populateAnnouncementChannels: () => radioManager && radioManager.populateAnnouncementChannels(),
-};
-
-// Attach the announcement form submit handler directly here (inline, guaranteed to run).
-// The partial's inline script is a fallback; this is the primary path.
-(function () {
-    'use strict';
-    function attachAnnouncementHandler() {
-        const form = document.getElementById('announcementForm');
-        if (!form) return;
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            if (radioManager) {
-                radioManager.sendAnnouncement();
-            }
-        });
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', attachAnnouncementHandler);
-    } else {
-        attachAnnouncementHandler();
-    }
-})();
-
 document.addEventListener('DOMContentLoaded', () => {
     radioManager = new RadioManager();
 });
@@ -2067,9 +1950,9 @@ document.addEventListener('DOMContentLoaded', () => {
     color: var(--text-color);
 }
 
-/* Ensure all text in table cells is light in dark mode */
-[data-theme="dark"] .table td,
-[data-theme="dark"] .table td * {
+/* Table cells take the light text color in dark mode; children with their
+   own color (badges, buttons, status text) keep it. */
+[data-theme="dark"] .table td {
     color: var(--text-color) !important;
 }
 

@@ -297,6 +297,24 @@ SECTIONS: dict[str, SectionMeta] = {
         "mesh_cooldown_minutes": KeyMeta(type="float", default="30"),
         "max_warnings_per_day": KeyMeta(type="int", default="6"),
         "track_traffic": KeyMeta(type="bool", default="true"),
+        "flood_scope": KeyMeta(),
+    }),
+    "Channel_Occupancy": SectionMeta(keys={
+        # Airtime is estimated from the modulation, never measured: the bot is a client
+        # of a radio, not a controller of one, so there is no CAD/LBT reading here.
+        "enabled": KeyMeta(type="bool", default="false"),
+        "sample_seconds": KeyMeta(type="int", default="60"),
+        "max_samples": KeyMeta(type="int", default="5000"),
+        "half_life_seconds": KeyMeta(type="float", default="300"),
+        "fast_window_seconds": KeyMeta(type="float", default="10"),
+        "window_seconds": KeyMeta(type="float", default="60"),
+        "slow_window_seconds": KeyMeta(type="float", default="900"),
+        # Fallback modulation, used only when the device does not report its own.
+        "spreading_factor": KeyMeta(type="int", default="9"),
+        "bandwidth_khz": KeyMeta(type="int", default="125"),
+        "coding_rate": KeyMeta(type="int", default="5"),
+        "preamble_symbols": KeyMeta(type="int", default="8"),
+        "use_device_modulation": KeyMeta(type="bool", default="true"),
     }),
     "Announcements_Command": SectionMeta(dynamic_keys=True),
     "Alert_Command": SectionMeta(dynamic_keys=True),

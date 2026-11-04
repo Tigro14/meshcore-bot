@@ -122,6 +122,9 @@ def _filter_if_nonempty(value: str, ctx: dict[str, Any], args: str) -> str:
         return ''
     return args
 
+# The event-loop warning below is worth saying once, not once per reply.
+_warned_blocking_render = False
+
 RESPONSE_TEMPLATE_FILTERS: dict[str, FilterFn] = {
     'pathbytes_min': _filter_pathbytes_min,
     'pathbytes': _filter_pathbytes_min,

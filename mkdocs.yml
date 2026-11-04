@@ -62,7 +62,9 @@ nav:
     - Path Command: path-command-config.md
     - Universal Wiki.js RAG: wiki-rag.md
     - Config validation: config-validation.md
+    - Region scopes: region-scopes.md
     - Region warnings: region-warnings.md
+    - Channel occupancy: channel-occupancy.md
     - Storage monitoring and power cycle: io-health-monitoring.md
   - Web Viewer: web-viewer.md
   - Command Reference:

@@ -104,7 +104,7 @@ auto_update_device_name = true
 # Time window for correlating RF data with messages (seconds)
 rf_data_timeout = 15.0
 
-# Time to wait for RF data correlation (seconds)
+# Oldest RF log row (seconds) a channel message can be matched to by its contents
 message_correlation_timeout = 10.0
 
 # Enable enhanced correlation strategies
@@ -183,6 +183,14 @@ dm_max_flood_attempts = 2
 
 # Number of attempts before switching to flood mode
 dm_flood_after = 2
+
+# Shortest time in seconds to wait for a DM's ACK on each attempt. The radio's
+# own estimate is built from airtime and hop count with little fixed allowance,
+# so on fast presets a zero-hop attempt can wait barely a second, shorter than
+# the ACK takes to come back, and a delivered DM is reported as failed. An ACK
+# still ends the wait at once; this only delays giving up on a DM that is never
+# acknowledged. 0 uses the radio's estimate alone; at most 60.
+dm_min_ack_timeout = 8
 
 # Timezone for bot operations
 # Use standard timezone names (e.g., America/New_York, Europe/London, UTC)
@@ -454,9 +462,15 @@ dry_run = true
 # How the warning reaches the sender:
 #   dm      — a direct message to the sender (default; costs the least airtime).
 #             Only sent to a name the radio already has a contact for.
-#   channel — a reply on the channel they posted to, always at global scope,
-#             because a scoped reply would not reach someone outside your region
+#   channel — a reply on the channel they posted to, at the bot's usual
+#             channel scope (see flood_scope below)
 delivery = dm
+
+# Flood scope for channel delivery. Unset follows [Channels]
+# flood_scope.<channel>, then outgoing_flood_scope_override, then global flood.
+# A sender with no region still hears a scoped warning wherever the region's
+# repeaters reach. Use * to send warnings at global scope regardless.
+# flood_scope = #west
 
 # Only warn about messages on these channels (comma-separated, # optional).
 # Leave empty to consider every channel the bot hears.
@@ -486,6 +500,53 @@ mesh_cooldown_minutes = 30
 # unlimited (not recommended).
 max_warnings_per_day = 6
 
+[Channel_Occupancy]
+# Channel airtime accounting. Off by default: nothing is recorded until enabled.
+#
+# Airtime here is an ESTIMATE from the modulation, not a measurement. The bot is a
+# client of a radio over serial, BLE or TCP, so it cannot know whether the channel was
+# busy — only how long a packet of a given size occupies it at a given SF/BW/CR, using
+# the Semtech AN1200.13 formula. Real occupancy (CAD and LBT) belongs to a radio
+# driver, and a repeater's own occupancy comes from that repeater's API, not from here.
+#
+# Two shares are kept apart and never merged into one number:
+#   rx — airtime this node hears. A node only hears part of the channel (hidden nodes,
+#        antenna gain, spatial reuse), so an rx percentage is a local observation, not
+#        the airtime of the whole channel.
+#   tx — airtime the bot spends itself, the only part it can decide about.
+enabled = false
+
+# Bucket size for stored history, in seconds. A bucket is written only when it holds a
+# packet: a quiet period stays absent rather than becoming 0.0, because a chart that
+# draws an absence as a zero shows a cliff at the retention boundary that reads as an
+# outage.
+sample_seconds = 60
+
+# Rolling windows, reported as a percentage of their own duration. The instant window
+# answers "what is the channel doing right now", the slow one "what level is it at".
+fast_window_seconds = 10
+window_seconds = 60
+slow_window_seconds = 900
+
+# Half-life of the decayed sum, in seconds. A hard window reports a burst as a spike; a
+# decayed level keeps a chart line from jumping on one packet.
+half_life_seconds = 300
+
+# Bounded ring of samples kept in memory, so a busy mesh does not grow it for the whole
+# process lifetime.
+max_samples = 5000
+
+# Fallback modulation, used only when the device does not report its own; the device's
+# values win when it reports them. A bot configured for SF9 on a mesh running SF11
+# reports an airtime that no packet on the channel has ever had. A device reporting 0
+# keeps the last known values rather than zeroing them.
+# The coding rate is the denominator (5..8); an AN1200.13 index (1..4) is accepted too.
+use_device_modulation = true
+spreading_factor = 9
+bandwidth_khz = 125
+coding_rate = 5
+preamble_symbols = 8
+
 [Banned_Users]
 # List of banned sender names (comma-separated). Matching is prefix (starts-with):
 # "Awful Username" also matches "Awful Username 🍆". No bot responses in channels or DMs.
@@ -500,6 +561,14 @@ banned_users =
 # If locale-specific file not found, falls back to base language (e.g., es.json)
 # If translation file is missing or key not found, falls back to English
 language = en
+
+# Language for place names from geocoding (wx, gwx and other location replies)
+#   (empty) - follow language above, falling back to English where OpenStreetMap
+#             has no name in it ("Chiyoda, JP")
+#   local   - each place's own name ("千代田区, JP"), as before this setting existed
+#   en, de, ... - that language, whatever language replies are in
+# Default: empty
+place_name_language =
 
 # Path to translation files directory (relative to bot root)
 # Default: translations/
@@ -1009,25 +1078,42 @@ weather_provider = noaa
 
 # Default state for city name disambiguation
 # When users type "wx seattle", it will search for "seattle, WA, USA"
+# Replies for a city in this state leave out the place name; other states name it.
 # Use 2-letter state abbreviation (e.g., WA, CA, NY, TX)
 default_state = WA
 
 # Default country for city name disambiguation (for international weather plugin)
+# gwx replies for a city in another country name it ("Paris, FR: ...").
 # Use 2-letter country code (e.g., US, CA, GB, AU)
 default_country = US
 
 # When true, a bare "wx" or "gwx" (no location) uses bot_latitude/bot_longitude from [Bot]
-# if there is no default WXSIM source and no companion location in the database.
+# if there is no default custom source, no companion location in the database and no default_city.
 # Default: false (show usage instead)
 use_bot_location_when_no_location = false
 
-# Temperature unit for weather display
+# Only with weather_provider = noaa: when a place is outside NWS (weather.gov) coverage,
+# answer wx from Open-Meteo (as gwx would) instead of replying with an error.
+# NWS timeouts and server errors still reply with an error. Ignored with
+# weather_provider = openmeteo, where wx already uses Open-Meteo for everything.
+# Default: false
+openmeteo_fallback = false
+
+# When true, wx and gwx name the place in every reply a place is found for ("Lake Stevens, WA: ...").
+# When false, they name it only when it adds information: a city outside default_state or
+# default_country, or a position (the sender's, the bot's or typed coordinates).
+# The name takes message length from the forecast, and a ZIP code costs one extra reverse lookup.
+# Default: false
+always_show_location = false
+
+# Temperature unit for weather display (wx, gwx, the weather service)
 # Options: fahrenheit, celsius
+# Celsius also switches distances (visibility) to kilometers.
 # Default: fahrenheit
 temperature_unit = fahrenheit
 
-# Wind speed unit for weather display
-# Options: mph, kmh, ms (meters per second)
+# Wind speed unit for weather display (wx, gwx, the weather service)
+# Options: mph, kmh, ms (meters per second), kn (knots)
 # Default: mph
 wind_speed_unit = mph
 
@@ -1099,6 +1185,18 @@ enabled = true
 # Precipitation amount (mm per 15-min bucket) at/above which it counts as raining.
 # Lower = more sensitive to light drizzle; raise to ignore trace amounts. (default: 0.1)
 # precip_threshold_mm = 0.1
+# Append an estimated precipitation amount, e.g. "(est 0.2 in)" (default: true)
+# show_amount = true
+# Unit for that amount: in or mm (default: in)
+# amount_unit = in
+# Show the precipitation probability, e.g. "(…, 70%)" (default: true)
+# show_probability = true
+# Show the temperature when it is near freezing (about 30-38°F), where rain,
+# snow or ice is in doubt (default: true)
+# show_temp = true
+# Seconds to reuse a fetched forecast, shared with the weather service's rain
+# nowcast; 0 disables (default: 300)
+# cache_seconds = 300
 # Look up US ZIP -> "City, ST" via Zippopotam.us (free, no key). OpenStreetMap
 # often lacks the city for a ZIP centroid, so this gives nicer labels. Set false
 # to skip the external lookup and reverse-geocode instead. (default: true)
@@ -1254,6 +1352,17 @@ neighbor_observations_retention_days = 365
 # Battery voltage history (see [Battery_Monitor]). One row per polled target
 # per poll_interval_hours, so volume is small even at a generous window.
 battery_observations_retention_days = 90
+
+# Regional flood scope tallies and region-warning events (see [Region_Warnings]).
+# Both are tiny — one tally row per channel per day — so a long window is cheap.
+region_warning_retention_days = 90
+
+# Channel occupancy buckets and sender share (see [Channel_Occupancy]). One bucket row
+# per quiet-or-busy sample_seconds, so 30 days is a few thousand rows at 60-second
+# buckets. Pruning is what makes a "last 30 days" chart mean 30 days and not whatever
+# is left in the table.
+occupancy_samples_retention_days = 30
+occupancy_senders_retention_days = 90
 [Path_Command]
 # Enable or disable the path command
 enabled = true
@@ -1598,6 +1707,7 @@ mesh_info_format = \n\nMesh Info: {total_contacts} contacts, {repeaters} repeate
 # to greet new users. This prevents greeting everyone on an established mesh.
 # Set to 0 to disable rollout (will greet all new users immediately)
 # Note: Use auto_backfill to mark historical users and shorten/eliminate rollout period
+# The period runs once. A later restart does not start another one.
 rollout_days = 7
 
 # Auto-backfill from historical message_stats data
@@ -1704,11 +1814,11 @@ url_timeout = 10
 [Wx_Command]
 enabled = true
 
-# Temperature unit for weather reports: fahrenheit (default) or celsius
-temperature_unit = fahrenheit
-
-# Wind speed unit for weather reports: mph (default) or kmh
-wind_speed_unit = mph
+# Units come from [Weather] temperature_unit / wind_speed_unit. Set these
+# only to give wx (NOAA and WXSIM) different units from the other weather
+# commands; when set, they win for wx.
+# temperature_unit = fahrenheit
+# wind_speed_unit = mph
 # channels =
 # aliases = comma-separated additional trigger words, e.g.: aliases = weather, w
 
@@ -1962,9 +2072,11 @@ enabled = true
 maximum_hops = 5
 # Trace mode: one_byte (default) or two_byte (when firmware supports it)
 trace_mode = one_byte
-# Timeout: total = timeout_base_seconds + (path hops * timeout_per_hop_seconds); typical 6 hops ~1s, 10 ~2s
-timeout_base_seconds = 1.0
-timeout_per_hop_seconds = 0.5
+# Timeout per attempt: timeout_base_seconds + (path hops * timeout_per_hop_seconds). Each repeater waits a
+# random TX delay before forwarding, so allow a second or more per hop; a reply to an earlier attempt still
+# counts until the last attempt times out
+timeout_base_seconds = 2.0
+timeout_per_hop_seconds = 1.5
 # Retries: max attempts (default 2 = try once, then once more after delay)
 trace_retry_count = 2
 # Seconds to wait before retrying a failed trace

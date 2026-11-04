@@ -373,7 +373,7 @@ class LlmCommand(BaseCommand):
 
         return super().can_execute(message, skip_channel_check)
 
-    def get_help_text(self) -> str:
+    def get_help_text(self, message: MeshMessage | None = None) -> str:
         pfx = self._command_prefix
         return f"Usage: {pfx}llm <question> - Ask local llama.cpp for a short reply"
 
