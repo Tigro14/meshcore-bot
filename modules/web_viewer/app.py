@@ -400,11 +400,18 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         # and leaves another long-polling connection behind on each attempt, which is what
         # made the viewer unusable behind Caddy. Polling-only is the default; enable the
         # upgrade only when the proxy forwards Upgrade/Connection.
+        #
+        # allow_upgrades is set with it rather than left at its default True: engineio
+        # builds the handshake's "upgrades" list from its async driver table, not from the
+        # transports it was given, so a polling-only server still advertises websocket and a
+        # client that trusts the advertisement attempts an upgrade this server refuses.
         if self._websocket_enabled():
             self._socketio_kwargs['transports'] = ['websocket', 'polling']
+            self._socketio_kwargs['allow_upgrades'] = True
             self.logger.info("Socket.IO transports: websocket + polling (websocket_enabled=true)")
         else:
             self._socketio_kwargs['transports'] = ['polling']
+            self._socketio_kwargs['allow_upgrades'] = False
             self.logger.info("Socket.IO transports: polling only (websocket_enabled=false)")
 
         # Initialize SocketIO with Flask app now that config is loaded

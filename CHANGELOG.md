@@ -175,7 +175,10 @@ semantic versioning.
   that does not forward `Upgrade`/`Connection` means a failed attempt on every page visit,
   each leaving another long-polling connection behind, so the realtime page stops receiving
   data. The flag again decides the server transports, and the template passes it to the client
-  so the client does not attempt what the server would refuse. An unset `cors_allowed_origins`
+  so the client does not attempt what the server would refuse, and `allow_upgrades` is set with
+  the transport because engineio builds the handshake's `upgrades` list from its async driver
+  table rather than from the transports it was given: a polling-only server otherwise still
+  advertises websocket, and a client that trusts the advertisement attempts it anyway. An unset `cors_allowed_origins`
   again means any origin, because the Origin a browser sends through a proxy is the public
   host, not the address the viewer listens on; setting it explicitly still locks the list down.
   `config.ini.example` now documents that fallback.

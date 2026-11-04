@@ -13,6 +13,7 @@ public one, not the address the viewer listens on.
 from __future__ import annotations
 
 import configparser
+import json
 from unittest.mock import patch
 
 from modules.web_viewer.app import BotDataViewer
@@ -62,6 +63,22 @@ class TestTransportConfig:
         """Through a proxy the Origin is the public host, not the listener address."""
         viewer = _viewer(tmp_path, {"web_viewer_password": ""})
         assert viewer.socketio.server.eio.cors_allowed_origins == "*"
+
+    def test_handshake_does_not_advertise_an_upgrade_it_refuses(self, tmp_path):
+        """The advertisement has to be turned off with the transport, not left at its default.
+
+        engineio builds the handshake's "upgrades" from its async driver table rather than
+        from the transports it was given, so a polling-only server would still promise
+        websocket and a client would attempt something this server refuses.
+        """
+        viewer = _viewer(tmp_path, {"web_viewer_password": ""})
+        body = viewer.app.test_client().get("/socket.io/?EIO=4&transport=polling").data.decode()
+        assert "websocket" not in json.loads(body[1:])["upgrades"]
+
+    def test_handshake_advertises_the_upgrade_when_it_is_enabled(self, tmp_path):
+        viewer = _viewer(tmp_path, {"websocket_enabled": "true", "web_viewer_password": ""})
+        body = viewer.app.test_client().get("/socket.io/?EIO=4&transport=polling").data.decode()
+        assert "websocket" in json.loads(body[1:])["upgrades"]
 
     def test_explicit_cors_is_honoured(self, tmp_path):
         """The fallback is for an unset option, not an override of an operator's list."""
