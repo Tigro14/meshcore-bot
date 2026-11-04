@@ -53,6 +53,10 @@ from flask_socketio import (  # noqa: F401  kept for modules.web_viewer.app.disc
 )
 
 from modules import flood_scope, region_warning
+from modules.channel_occupancy import (
+    ChannelOccupancy,
+    render_key_value,
+)
 from modules.database_restore import (
     DEFAULT_MAX_RESTORE_BYTES,
     DatabaseRestoreError,
@@ -234,6 +238,8 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         'greeter_rollout',
         'daily_rollup',
         'dashboard_snapshot',
+        'occupancy_samples',
+        'occupancy_senders',
     }
 
     def __init__(self, db_path="meshcore_bot.db", repeater_db_path=None, config_path="config.ini"):
@@ -362,6 +368,14 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             self.multibyte_monitor_enabled = False
 
         self._init_dashboard_service()
+
+        # Channel occupancy reader.  The windows are computed in the bot process and
+        # reach the viewer through what the writer stored, so this instance carries the
+        # configuration the reader needs — bucket size, quantiles, staleness threshold —
+        # and recomputes nothing.  A reader that recomputed the windows by scanning
+        # packet_stream would report a different number than the writer, because the
+        # writer's window is a rolling monotonic window, not a table scan.
+        self.occupancy = ChannelOccupancy(self.config, self.logger)
 
         # Configure CORS for SocketIO — default to same-origin (no cross-origin)
         cors_raw = self.config.get('Web_Viewer', 'cors_allowed_origins', fallback='').strip()
@@ -878,6 +892,11 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             '/api/dashboard/series',
             '/api/dashboard/top',
             '/api/dashboard/windows',
+            # Channel occupancy probes. Read by an external agent, so they are public;
+            # the payload carries aggregate airtime counters and sender keys already
+            # visible on /api/contacts, nothing private.
+            '/api/telemetry/occupancy',
+            '/api/telemetry/occupancy/history',
             '/api/contacts',
             '/api/contact-detail',
             '/api/mesh/nodes',
@@ -2465,6 +2484,81 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             """Selector options derived from retention, so no label overclaims."""
             response = jsonify(self.dashboard_stats.derive_windows())
             response.headers['Cache-Control'] = 'private, max-age=300'
+            return response
+
+        @self.app.route('/api/telemetry/occupancy')
+        @self._api_errors('Error reading channel occupancy')
+        def api_channel_occupancy():
+            """Live airtime windows, as the writer last left them.
+
+            Airtime here is an estimate from the modulation, not a measurement of the
+            channel being busy, and the rx and tx shares are reported apart — merging
+            them would present a node's local hearing as the channel's airtime.  The
+            payload carries the snapshot's age and a stale flag, because a window that
+            has not been refreshed is not a measurement: without the age, a quiet
+            channel and a bot that stopped recording look identical.
+            """
+            with self._with_db_connection() as conn:
+                snapshot = self.occupancy.read_live(conn)
+                payload = {
+                    'enabled': self.occupancy.enabled,
+                    'age_seconds': snapshot['age_seconds'],
+                    'stale': snapshot['stale'],
+                    **snapshot['fields'],
+                }
+                if snapshot['fields']:
+                    try:
+                        limit = int(request.args.get('limit', 10))
+                    except (TypeError, ValueError):
+                        limit = 10
+                    payload['top_senders'] = self.occupancy.top_senders(conn, limit)
+
+            if request.args.get('format') == 'text':
+                # Only scalar fields, one per line: the sender list would become a comma
+                # blob on one line, which is not a field a shell can read.
+                text_fields = {k: v for k, v in payload.items() if not isinstance(v, (list, dict))}
+                response = self.app.response_class(render_key_value(text_fields), mimetype='text/plain')
+            else:
+                response = jsonify(payload)
+            response.headers['Cache-Control'] = 'private, max-age=30'
+            return response
+
+        @self.app.route('/api/telemetry/occupancy/history')
+        @self._api_errors('Error reading channel occupancy history')
+        def api_channel_occupancy_history():
+            """Bucketed airtime as sums and counts.
+
+            A bucket with no packet is absent from the array rather than 0.0.  Those
+            are two different facts — "nothing seen" and "a bucket that was observed
+            and held nothing on air" — and a chart that renders the first as the second
+            shows a cliff at the retention boundary that reads as an outage.
+            """
+            try:
+                days = int(request.args.get('days', 1))
+            except (TypeError, ValueError):
+                days = 1
+            days = max(1, min(days, 90))
+
+            end_ts = time.time()
+            with self._with_db_connection() as conn:
+                payload = self.occupancy.history(conn, end_ts - days * 86400, end_ts)
+
+            if request.args.get('format') == 'text':
+                summary = {
+                    'sample_seconds': payload['sample_seconds'],
+                    'buckets': len(payload['buckets']),
+                    'start_time': payload['start_time'],
+                    'end_time': payload['end_time'],
+                    'total_rx_ms': payload['total_rx_ms'],
+                    'total_tx_ms': payload['total_tx_ms'],
+                    'packets': payload['packets'],
+                    'p50_rx_ms': payload['p50_rx_ms'],
+                    'p95_rx_ms': payload['p95_rx_ms'],
+                }
+                response = self.app.response_class(render_key_value(summary), mimetype='text/plain')
+            else:
+                response = jsonify(payload)
+            response.headers['Cache-Control'] = 'private, max-age=30'
             return response
 
         @self.app.route('/api/dashboard/refresh', methods=['POST'])

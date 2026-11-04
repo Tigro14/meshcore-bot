@@ -1,8 +1,9 @@
 """Background cleanup for the web viewer: the hourly scheduler that drops
-stale Socket.IO clients and prunes old packet_stream rows."""
+stale Socket.IO clients and prunes old packet_stream and channel-occupancy rows."""
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from contextlib import suppress
 from typing import Any
@@ -17,9 +18,11 @@ class CleanupSchedulerMixin:
     """Mixed into BotDataViewer."""
 
     _cleanup_stale_clients: Any
+    _config_int: Any
     _with_db_connection: Any
     config: Any
     logger: Any
+    occupancy: Any
 
     def _start_cleanup_scheduler(self):
         """Start background thread for periodic database cleanup"""
@@ -36,6 +39,8 @@ class CleanupSchedulerMixin:
 
                     # Clean up old data every hour (after 12 stale client cleanups)
                     self._cleanup_old_data()
+                    if getattr(self, 'occupancy', None) is not None and self.occupancy.enabled:
+                        self._cleanup_occupancy()
 
                 except Exception as e:
                     self.logger.error(f"Error in cleanup scheduler: {e}", exc_info=True)
@@ -80,3 +85,48 @@ class CleanupSchedulerMixin:
             self.logger.warning(f"Database busy during cleanup (will retry next cycle): {e}")
         except Exception as e:
             self.logger.error(f"Error cleaning up old packet stream data: {e}", exc_info=True)
+
+    def _cleanup_occupancy(self):
+        """Prune the channel-occupancy buckets and sender totals.
+
+        The reader's chart window is bounded by what is left in the table, so pruning
+        is what makes a "last 30 days" chart actually mean 30 days rather than whatever
+        the writer has accumulated.  It goes through the same chunked helper as the
+        other tables so a first run after a long period does not hold the writer lock
+        for the whole delete.
+
+        Absent tables are skipped rather than reported: the occupancy tables exist only
+        when the feature has run at least once, and this scheduler also serves installs
+        that never enabled it.
+        """
+        try:
+            batch_size, pause_seconds = retention_delete_settings(self.config)
+            now = time.time()
+            with self._with_db_connection() as conn:
+                existing = {row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )}
+
+            for table, column, days in (
+                ('occupancy_samples', 'bucket_ts', self._config_int('Data_Retention', 'occupancy_samples_retention_days', 30)),
+                ('occupancy_senders', 'last_seen', self._config_int('Data_Retention', 'occupancy_senders_retention_days', 90)),
+            ):
+                if table not in existing:
+                    continue
+                deleted = delete_timestamp_rows_in_chunks(
+                    self._with_db_connection,
+                    table,
+                    column,
+                    now - max(1, int(days)) * 86400,
+                    batch_size=batch_size,
+                    pause_seconds=pause_seconds,
+                    logger=self.logger,
+                    progress_label=table,
+                )
+                if deleted > 0:
+                    self.logger.info(f"Cleaned up {deleted} old {table} rows (older than {days} days)")
+
+        except sqlite3.OperationalError as e:
+            self.logger.warning(f"Database busy during occupancy cleanup (will retry next cycle): {e}")
+        except Exception as e:
+            self.logger.error(f"Error cleaning up channel occupancy data: {e}", exc_info=True)
