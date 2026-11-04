@@ -63,6 +63,7 @@ nav:
     - Universal Wiki.js RAG: wiki-rag.md
     - Config validation: config-validation.md
     - Region warnings: region-warnings.md
+    - Storage monitoring and power cycle: io-health-monitoring.md
   - Web Viewer: web-viewer.md
   - Command Reference:
     - Overview: command-reference.md

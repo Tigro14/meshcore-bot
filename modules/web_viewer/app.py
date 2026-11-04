@@ -103,6 +103,7 @@ def _strip_ansi_codes(text: str) -> str:
 from modules.config_snapshot import config_to_redacted_sections
 from modules.feed_format import format_feed_message
 from modules.ini_writer import IniValueError, update_ini_values
+from modules.io_health import IOHealthMonitor
 from modules.models import channel_body_limit
 from modules.multibyte_detection import (
     bucket_hop_chunks,
@@ -188,6 +189,29 @@ def _validate_clock_sync_target(raw: Any) -> tuple[bool, str, str]:
         value,
         "target contains invalid characters (allowed: letters, digits, space, - _ . / ')",
     )
+
+
+def _storage_text(fields: dict[str, Any]) -> str:
+    """Render storage status as ``key=value`` lines for a monitoring agent.
+
+    Booleans become 0/1, collections become comma lists, empty values stay empty,
+    and a value containing whitespace is single-quoted so one field per line is
+    still readable by a shell.
+    """
+    lines: list[str] = []
+    for key, value in fields.items():
+        if isinstance(value, bool):
+            rendered = "1" if value else "0"
+        elif isinstance(value, (list, tuple, set)):
+            rendered = ",".join(str(item) for item in value)
+        elif value is None:
+            rendered = ""
+        else:
+            rendered = str(value)
+        if any(char in rendered for char in (" ", "\t", "\n")):
+            rendered = "'" + rendered.replace("'", "") + "'"
+        lines.append(f"{key}={rendered}")
+    return "\n".join(lines)
 
 
 class NeighborEvidenceKeys(NamedTuple):
@@ -1089,6 +1113,9 @@ class BotDataViewer:
         # keys, config, logs, backups, or private message firehose.
         _PUBLIC_API_GET_PATHS = frozenset([
             '/api/health',
+            # Storage monitoring probe. Read by an external agent, so it is public; the
+            # payload carries aggregate counters only, never mount paths.
+            '/api/health/storage',
             '/api/banner-status',
             '/api/stats',
             '/api/dashboard/summary',
@@ -2726,6 +2753,60 @@ class BotDataViewer:
                     'error': str(e),
                     'status': 'error'
                 }), 500
+
+        @self.app.route('/api/health/storage')
+        def api_health_storage():
+            """Read-only filesystem state for an external monitoring agent.
+
+            Aggregate only: no mount paths, no configuration values. The probe write is
+            not recorded as a storage fault, so a prober polling this route cannot push
+            the bot over its reboot threshold.
+            """
+            try:
+                monitor = IOHealthMonitor(self.config, self.logger, db_manager=self.db_manager)
+                fields = monitor.status()
+                fields['uptime_seconds'] = self._get_bot_uptime()
+                fields['timestamp'] = int(time.time())
+                if request.args.get('format') == 'text':
+                    return Response(_storage_text(fields), mimetype='text/plain; charset=utf-8')
+                return jsonify(fields)
+            except Exception:
+                self.logger.exception("Error building storage health view")
+                return jsonify({'error': 'Failed to build storage health view'}), 500
+
+        @self.app.route('/api/health/storage/powercycle', methods=['POST'])
+        def api_health_storage_powercycle():
+            """Run the configured power-cycle hook, or raise the reboot semaphore.
+
+            Admin-only. The reason (JSON body or ``?reason=``) is collapsed to one line
+            before it reaches the semaphore info file. A hook that fails answers 502 so
+            a monitoring script can tell the difference between "not delivered" and
+            "delivered".
+            """
+            try:
+                monitor = IOHealthMonitor(self.config, self.logger, db_manager=self.db_manager)
+                fields = monitor.status()
+
+                reason = ''
+                payload = request.get_json(silent=True)
+                if isinstance(payload, dict):
+                    reason = str(payload.get('reason', '') or '')
+                reason = (reason or request.args.get('reason', '') or 'manual:web').strip()
+
+                ok, action, detail = monitor.powercycle(reason)
+                result = {
+                    'powercycle': 'ok' if ok else 'failed',
+                    'action': action,
+                    'detail': detail,
+                    'state': fields['state'],
+                    'semaphore_pending': monitor.semaphore_pending(),
+                }
+                if request.args.get('format') == 'text':
+                    return Response(_storage_text(result), mimetype='text/plain; charset=utf-8'), (200 if ok else 502)
+                return jsonify(result), (200 if ok else 502)
+            except Exception:
+                self.logger.exception("Error running the power cycle request")
+                return jsonify({'error': 'Failed to run the power cycle request'}), 500
 
         @self.app.route('/api/stats')
         def api_stats():

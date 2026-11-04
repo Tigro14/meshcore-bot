@@ -219,6 +219,10 @@ class MeshCoreBot:
                 self.io_health.report_write_failure(e, db_path)
             raise
 
+        # The counters are read back by the web viewer, which runs in its own process,
+        # so they have to travel through the shared database rather than this instance.
+        self.io_health.db_manager = self.db_manager
+
         # Set length of prefix
         self.prefix_bytes = self.config.getint("Bot", "prefix_bytes", fallback=1)
         self.prefix_hex_chars = self.prefix_bytes * 2

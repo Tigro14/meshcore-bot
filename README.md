@@ -28,6 +28,7 @@ A Python bot that connects to MeshCore mesh networks via serial port, BLE, or TC
 - **Nightly Maintenance Email**: Daily digest with uptime, network activity, DB stats, and error counts
 - **Log Rotation**: Configurable log rotation via `[Logging]` section
 - **Logging**: Console and file logging with configurable levels; optional structured JSON mode for log aggregation (Loki, Elasticsearch, Splunk)
+- **Storage Monitoring and Power Cycle**: `GET /api/health/storage` reports the filesystem state (read-only mounts, probe, counters, reboot semaphore) as JSON or as parseable `key=value` lines for an external agent, and `POST /api/health/storage/powercycle` runs the configured power-cycle hook ([docs](docs/io-health-monitoring.md))
 
 ### Service Plugins
 
@@ -214,6 +215,49 @@ Features:
 - **Live Activity** — real-time color-coded packet/command/message feed with pause and clear controls
 - **Live Channel Messages** — real-time channel message monitor via SocketIO
 - **Logs** — real-time log viewer at `/logs`; level-based coloring, filter, pause, and clear
+
+### Storage Monitoring and Power Cycle
+
+Two routes for an external monitoring agent. The read is on the public allowlist, so it works
+without a session even when a password is configured, and it reports aggregate values only —
+no mount paths. Its probe write is not counted as a storage fault, so a prober cannot push the
+bot over `failure_threshold`.
+
+`GET /api/health/storage` — JSON, or `?format=text` for one `key=value` line per field:
+
+```text
+state=fault
+enabled=1
+mounts_checked=3
+mounts_readonly=1
+probe_write_ok=0
+probe_errno=EROFS
+failures_consecutive=4
+failures_total=11
+threshold_reached=1
+semaphore_pending=1
+last_signal_source=IOHealthWatchdog
+last_signal_at='2026-11-03 07:12:44'
+powercycle_configured=1
+```
+
+`state` is `ok`, `degraded` (probe failed or monitor disabled), or `fault` (a read-only mount
+or `EROFS`).
+
+`POST /api/health/storage/powercycle` — admin only. Runs `[IO_Health] powercycle_command`
+(a switched outlet, an IPMI/Redfish call, or a board on another machine), answers **200** when
+the hook ran and **502** when it failed or timed out, so a script can tell "delivered" from
+"not delivered". With no hook configured it raises the shared-memory semaphore that the
+external watcher consumes. This is the path that survives a dead disk: nothing on the host can
+reboot it.
+
+```bash
+state=$(curl -fsS 'http://localhost:8080/api/health/storage?format=text' | awk -F= '/^state=/ {print $2}')
+[ "$state" = fault ] && curl -fsS -X POST -H 'X-Requested-With: XMLHttpRequest' \
+  'http://localhost:8080/api/health/storage/powercycle?format=text'
+```
+
+Full field list and a monitoring script: [Storage monitoring and power cycle](docs/io-health-monitoring.md).
 
 ### Configuration Tab
 
