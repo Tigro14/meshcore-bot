@@ -2707,6 +2707,37 @@ class TestRadioPageFirmwareRemoval:
         assert "handleConnectToggle" in html
 
 
+class TestRadioTestDmCard:
+    """The Test DM card lives inside radio.html, in the branch's single-class style.
+
+    Main had the card as a standalone partial with its own self-contained script,
+    included by radio.html in one line. The merge resolved radio.html to the
+    branch's RadioManager page and dropped the include, which left the card
+    unreachable while POST /api/radio/test-dm kept answering. Branch style means
+    the markup is in the page and the handler is a method, so a future rebase
+    cannot lose the wiring by losing an include line.
+    """
+
+    def test_card_is_on_the_page(self, client):
+        html = client.get("/radio").data.decode()
+        assert 'id="test-dm-card"' in html
+        assert 'id="testDmForm"' in html
+        assert 'id="testDmLog"' in html
+
+    def test_handler_is_a_radio_manager_method_not_a_second_script(self, client):
+        html = client.get("/radio").data.decode()
+        assert "setupTestDmHandler()" in html
+        assert "async sendTestDm()" in html
+        # A self-contained script would bind the form separately and would not share
+        # the page's alert helper, which is how the card got orphaned in the first place.
+        assert "function sendTestDm(" not in html
+
+    def test_card_says_it_spends_no_airtime(self, client):
+        """The point of a local test DM is that it is not a transmission."""
+        html = client.get("/radio").data.decode()
+        assert "no airtime" in html
+
+
 # ===========================================================================
 # TASK-02: subscribe_commands history replay (BUG-023)
 # ===========================================================================

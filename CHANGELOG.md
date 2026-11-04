@@ -151,6 +151,13 @@ semantic versioning.
 
 ### Fixed
 
+- The Test DM card on `/radio` was unreachable. It had been a partial included by
+  `radio.html` in one line; the merge resolved `radio.html` to the single-class
+  `RadioManager` page and dropped the include, so `test_dm_card.html` was left in the
+  tree with no caller while `POST /api/radio/test-dm` kept answering. The card is now
+  written in the page, in that same style: markup plus a `RadioManager` method sharing
+  the page's alert helper, and the orphaned partial is gone.
+
 - `llm_command.py` kept unresolved merge-conflict content from PR #73: a stray
   conflict marker, duplicated `_post_chat` and `_get_llama_model_info` definitions,
   and an empty `if not content:` block. The module could not be imported, so the

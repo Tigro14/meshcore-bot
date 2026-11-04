@@ -355,6 +355,40 @@
                 </div>
             </div>
 
+            <!-- Local Test DM -->
+            <div class="card mb-4" id="test-dm-card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h2 class="h5 mb-0"><i class="fas fa-comment-dots me-2"></i>Test DM</h2>
+                    <small class="text-muted">Local command execution, no airtime</small>
+                </div>
+                <div class="card-body">
+                    <div id="testDmAlert" style="display:none"></div>
+
+                    <form id="testDmForm">
+                        <div class="mb-2">
+                            <label class="form-label" for="testDmMessage">Message</label>
+                            <input type="text" class="form-control" id="testDmMessage" maxlength="200"
+                                placeholder="llm hello">
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="testDmSendBtn">
+                            <span class="spinner-border spinner-border-sm me-1" id="testDmSpinner" style="display:none" role="status"></span>
+                            <i class="fas fa-paper-plane me-1"></i>Send
+                        </button>
+                    </form>
+
+                    <div class="mt-3">
+                        <div class="small text-muted mb-1">Responses</div>
+                        <div id="testDmLog" class="small"></div>
+                    </div>
+
+                    <small class="form-text text-muted d-block mt-2">
+                        The command runs through the bot's command manager and the reply comes
+                        back here instead of over the mesh, so this costs no airtime — unlike the
+                        advert buttons above, which do.
+                    </small>
+                </div>
+            </div>
+
             <!-- Region Scopes -->
             <div class="card mb-4" id="region-scopes-card">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -567,6 +601,7 @@ class RadioManager {
         this.setupRadioParamsHandlers();
         this.setupNodeSettingsHandlers();
         this.setupRegionScopeHandlers();
+        this.setupTestDmHandler();
         this.readRadioParams({ silent: true });
         this.readFirmwareConfig({ silent: true });
         this.loadRegionScopes();
@@ -1898,6 +1933,68 @@ class RadioManager {
         const el = document.getElementById('regionScopeStatus');
         el.className = cls || 'text-muted';
         el.textContent = text || '';
+    }
+
+    setupTestDmHandler() {
+        document.getElementById('testDmForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.sendTestDm();
+        });
+    }
+
+    async sendTestDm() {
+        const input = document.getElementById('testDmMessage');
+        const message = input.value.trim();
+        if (!message) {
+            this.setTestDmAlert('danger', 'Please enter a message.');
+            return;
+        }
+
+        const btn = document.getElementById('testDmSendBtn');
+        const spinner = document.getElementById('testDmSpinner');
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        this.setTestDmAlert('', '');
+        this.appendTestDmLine('You: ' + message, 'fw-semibold');
+        try {
+            const resp = await fetch('/api/radio/test-dm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify({ message })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                this.setTestDmAlert('danger', data.error || ('Test DM failed (' + resp.status + ')'));
+                return;
+            }
+            const replies = Array.isArray(data.replies) ? data.replies : [];
+            if (!replies.length) {
+                this.appendTestDmLine('Bot: no response', 'text-muted');
+            } else {
+                replies.forEach((reply) => this.appendTestDmLine('Bot: ' + reply, 'text-success'));
+            }
+            input.value = '';
+        } catch (e) {
+            this.setTestDmAlert('danger', 'Error: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+        }
+    }
+
+    appendTestDmLine(text, className) {
+        const line = document.createElement('div');
+        line.className = className || 'text-muted';
+        line.textContent = text;
+        document.getElementById('testDmLog').appendChild(line);
+    }
+
+    setTestDmAlert(type, message) {
+        const el = document.getElementById('testDmAlert');
+        if (!type || !message) { el.style.display = 'none'; return; }
+        el.className = `alert alert-${type}`;
+        el.textContent = message;
+        el.style.display = 'block';
     }
 
     showError(message) {
