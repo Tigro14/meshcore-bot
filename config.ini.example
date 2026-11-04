@@ -1815,7 +1815,7 @@ model =
 # System prompt (keep short for mesh bandwidth)
 system_prompt = You are a helpful assistant on a low-bandwidth mesh network. Reply briefly in one short sentence.
 
-# Maximum tokens in response (8-512, default 80)
+# Maximum tokens in response (8-1024, default 80)
 max_tokens = 80
 
 # Context budget for the active model. 0 means derive it from the model's

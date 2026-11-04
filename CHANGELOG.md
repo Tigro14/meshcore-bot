@@ -147,6 +147,13 @@ semantic versioning.
   `llm` plugin never loaded and every Web Viewer `/infos` request returned 500. The
   follow-up SQL answer also built and posted its payload twice.
 
+- The `max_tokens` ceiling was 512, so a configured value above it was silently
+  reduced at plugin init. The primary endpoint spends most of the generation budget
+  inside its thinking block before writing any visible content, so when that block
+  alone used the whole budget nothing was left to answer and `llm` reported
+  `answer truncated by max_tokens`. Measured on the same prompt: 2 answers out of 5
+  had empty content at 512, none out of 8 at 1024. The ceiling is now 1024.
+
 - An unset time reference (`0.0`) is no longer read as a cooldown or a cache hit still
   in effect. `IO_Health` skipped its first read-only-filesystem signal,
   `[Vigilance_Service]` skipped the first alert of a run, and `llm` sent its first

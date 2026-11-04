@@ -82,10 +82,14 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "timeout_seconds", fallback=20.0, value_type="float"),
             ),
         )
+        # The ceiling has to cover the primary endpoint, which spends most of the
+        # generation budget inside its thinking block before any visible content.
+        # With 512 the whole budget can be thinking and nothing is left to answer,
+        # which the caller reports as a truncation error.
         self.max_tokens = max(
             8,
             min(
-                512,
+                1024,
                 self.get_config_value("Llm_Command", "max_tokens", fallback=80, value_type="int"),
             ),
         )

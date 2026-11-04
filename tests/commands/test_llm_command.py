@@ -43,6 +43,20 @@ class TestLlmCommand:
         msg = mock_message(content="llm hello", is_dm=True)
         assert cmd.can_execute(msg) is False
 
+    def test_generation_budget_ceiling_keeps_room_after_thinking(self, command_mock_bot):
+        """A configured 1024 must survive the clamp: the primary endpoint can spend the
+        whole budget inside its thinking block, and a ceiling of 512 left nothing to
+        answer with, which the caller reports as truncation."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Llm_Command", "max_tokens", "1024")
+        assert LlmCommand(command_mock_bot).max_tokens == 1024
+
+        command_mock_bot.config.set("Llm_Command", "max_tokens", "2000")
+        assert LlmCommand(command_mock_bot).max_tokens == 1024
+
+        command_mock_bot.config.set("Llm_Command", "max_tokens", "40")
+        assert LlmCommand(command_mock_bot).max_tokens == 40
+
     def test_matches_keyword_no_prefix(self, command_mock_bot):
         """With no command_prefix configured, bare 'llm <text>' should match."""
         self._enable_llm(command_mock_bot)
