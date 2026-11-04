@@ -362,6 +362,18 @@
       "nation_not_found": "Nation '{nation}' not found in the current World Cup.",
       "error_fetching": "Error fetching World Cup data"
     },
+    "airtime": {
+      "description": "Show the estimated channel airtime for the last minute and the top talkers",
+      "header": "Airtime modelled from SF{sf}/{bw}kHz CR{cr}/5, not measured",
+      "window": "{seconds}s: rx {rx}% tx {tx}% ({packets} packet(s))",
+      "no_samples": "Nothing heard in the last {seconds}s - a quiet channel is not a stopped recorder",
+      "top_senders": "Talkers: {names}",
+      "top_senders_omitted": "(talkers list dropped: too long)",
+      "disabled": "Airtime command is disabled. Set enabled = true in [Airtime_Command].",
+      "unavailable": "Airtime is not available in this bot process.",
+      "recording_off": "Airtime recording is off. Set enabled = true in [Channel_Occupancy]; there is nothing to read until it runs.",
+      "error": "Error reading airtime: {error}"
+    },
     "stats": {
       "description": "Show statistics for past 24 hours. Use 'stats messages', 'stats channels', 'stats paths', or 'stats adverts' for specific stats.",
       "help": "Show 24h bot stats. Use 'stats' (basic), 'stats messages' (users), 'stats channels' (activity), 'stats paths', 'stats adverts'",

@@ -863,6 +863,40 @@ list of strings. The request times out after 10 seconds, and responses are cache
 
 ---
 
+### `airtime`
+
+Estimated channel airtime for the rolling window, and the top talkers. `occupancy` reaches
+the same command.
+
+**Usage:**
+- `airtime` - One window, and the talkers ranked by airtime
+
+**Examples:**
+```
+airtime
+```
+
+**Response:** The modulation the estimate is built from, the rx and tx percentages of one
+window with the packet count, and up to three talkers ranked by airtime rather than by
+packet count.
+
+The figures are an **estimate from the modulation** (SF/BW/CR/preamble), not a measurement:
+the bot is a client of a radio over serial, BLE or TCP and cannot see whether the channel
+was busy, only how long a packet of a given size occupies it. rx and tx are reported apart
+and never added, because one node's hearing is not the whole channel's airtime. The same
+caution, and the retention rules, are in [channel-occupancy.md](channel-occupancy.md),
+which is also where the web page `/airtime` reads these numbers from.
+
+**Config:** `[Airtime_Command] enabled` (default true) gates the command. The data comes
+from `[Channel_Occupancy]`, which is off by default, so with recording off the command says
+there is nothing to read instead of answering 0%.
+
+The reply is kept inside one message body. When the talker list does not fit, it is dropped
+and the reply says so: a name cut mid-way would read as a different node, and a list that
+quietly disappears reads as an empty channel.
+
+---
+
 ### `stats`
 
 Show bot usage statistics for the past 24 hours.

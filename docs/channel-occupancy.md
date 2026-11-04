@@ -96,9 +96,10 @@ days.
 
 ## Reading it
 
-The Web Viewer page `/occupancy` draws all of this — the windows, the history chart,
+The Web Viewer page `/airtime` draws all of this — the windows, the history chart,
 the percentiles and the sender share — from the two routes below, which are what it
-reads.
+reads. The mesh command `airtime` answers with one window and the top talkers, from the
+same numbers; the page is the whole picture, the command is the short version.
 
 `GET /api/telemetry/occupancy` — the live windows and the sender share:
 

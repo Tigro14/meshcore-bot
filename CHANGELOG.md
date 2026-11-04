@@ -93,7 +93,7 @@ semantic versioning.
   existing `alert` command. Replies are capped at 180 characters for the mesh. Requires
   `beautifulsoup4`, already in the dependencies. See `docs/vigilance-service.md`.
 
-- Web Viewer `/occupancy`, the screen for `[Channel_Occupancy]`, which had only the two
+- Web Viewer `/airtime`, the screen for `[Channel_Occupancy]`, which had only the two
   API routes and nothing to read them with. It shows the modulation, the three rolling
   windows with rx and tx kept apart, the history chart, the totals and the nearest-rank
   percentiles, and the sender share. The chart aggregates buckets to a readable number of
@@ -102,6 +102,20 @@ semantic versioning.
   outage. The page states that the airtime is modelled from the modulation rather than
   measured, and that a stale snapshot is not a measurement. The page itself is behind the
   login like every other screen; only its APIs are on the public allowlist.
+
+- The mesh command `airtime` (keywords `airtime` and `occupancy`), the on-demand version of
+  the same numbers the page reads: one rolling window and up to three talkers ranked by
+  airtime. The page and the command carry the same name, so the same question is not answered
+  under two names; the API routes keep `/api/telemetry/occupancy`, which is what
+  `docs/channel-occupancy.md` and any polling agent already use. `[Airtime_Command] enabled`
+  (default true) gates the command; the data comes from `[Channel_Occupancy]`, which is off
+  by default, so with recording off the reply says there is nothing to read instead of
+  answering 0%. The reply is built to fit one message body, because a second message is
+  airtime spent on the answer itself: when the talker list does not fit, it is dropped and the
+  reply says so, since a name cut mid-way would read as a different node and a list that
+  quietly disappears reads as an empty channel. Nothing that is part of the answer is cut — a
+  reply too long for the body travels in pieces, split at line boundaries.
+  `docs/command-reference.md`.
 
 ### Changed
 
@@ -158,6 +172,16 @@ semantic versioning.
   example value stays blank. `config.ini.example` shows
   `context_include_system_metrics = true`, which is the code default the identity
   depends on.
+
+- The 50-row packet replay is documented as a limit of python-socketio clients rather than
+  worked around. `engineio.payload.Payload.max_decode_packets` is 16, so a client built on
+  that library aborts when a payload carries the whole replay, while a browser has no such
+  limit and the page receives all 50 rows. Lowering the server's replay to 16 would answer
+  fewer rows to every reader to suit one library's decoder, so `docs/web-viewer.md` states the
+  limit instead. `docs/web-viewer.md` also records two things that made test scripts report
+  nothing: handlers registered before `connect()` make python-socketio join a namespace named
+  after the handler instead of the root one where the server's handlers live, and `41[...]` is
+  a disconnect packet, not an event.
 
 ### Fixed
 

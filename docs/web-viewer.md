@@ -267,6 +267,17 @@ One tape of what the bot's radio is hearing, newest first. It needs an admin ses
 
 Rows replayed from the database when the page opens sit under "Heard before you opened this page". The page keeps 300 rows; the server replays the newest 50 of each kind.
 
+The replay arrives as one payload of 50 packets, which a browser handles. A client built on
+python-socketio does not: `engineio.payload.Payload.max_decode_packets` is 16, so a payload
+carrying more than 16 packets makes that client abort with "Unexpected packet from server,
+aborting". The limit is in the client library, not in this server, so a script that
+subscribes to the packet stream gets nothing when the replay is 50 rows — keep such a client
+under 16 replayed rows, or read the raw polling response instead of the library's decoder.
+Two other things bite the same kind of script: handlers registered before `connect()` make
+python-socketio join a namespace named after the handler instead of the root one, where the
+server's handlers live, and `41[...]` is a disconnect packet rather than an event, so an
+event has to be sent as `42[...]`.
+
 ### Repeater Contacts
 - Active repeater contacts
 - Location information (city/coordinates)

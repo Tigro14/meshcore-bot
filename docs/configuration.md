@@ -168,6 +168,7 @@ Examples of sections that configure specific commands or features:
 - **`[Aurora_Command]`** – Aurora command (default coordinates).
 - **`[Alert_Command]`** – Emergency alerts (agency IDs, etc.).
 - **`[Sports_Command]`** – Sports scores (teams, leagues).
+- **`[Airtime_Command]`** – `airtime` (also `occupancy`): `enabled` only. The numbers it reports come from `[Channel_Occupancy]`, which is off by default, so a bot with recording off answers that there is nothing to read. See [Channel occupancy](channel-occupancy.md).
 - **`[Joke_Command]`**, **`[DadJoke_Command]`** – Joke sources and options.
 - **`[RandomLine]`** – Trigger-based random-line responses via `triggers.<key>`, `file.<key>`, optional `prefix.<key>`, optional channel restriction (`channel.<key>`/`channels.<key>`), and optional website category override (`category.<key>`). Website command reference groups RandomLine entries under **Fun Commands** by default unless `category.<key>` is set.
 - **`[IO_Health]`** – Read-only filesystem detection, and the power-cycle hook run by the Web Viewer monitoring route. See [Storage monitoring and power cycle](io-health-monitoring.md).

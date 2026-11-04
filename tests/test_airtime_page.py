@@ -1,4 +1,4 @@
-"""Tests for the /occupancy page.
+"""Tests for the /airtime page.
 
 The page is the reader for [Channel_Occupancy]; before it existed the feature had
 two API routes and no screen, so a percentage could only be read with curl. What
@@ -48,41 +48,41 @@ def viewer(tmp_path):
     return instance
 
 
-class TestOccupancyPage:
+class TestAirtimePage:
     def test_page_renders(self, viewer):
-        resp = viewer.app.test_client().get("/occupancy")
+        resp = viewer.app.test_client().get("/airtime")
         assert resp.status_code == 200
 
     def test_page_says_the_airtime_is_modelled(self, viewer):
         """The page cannot present a computed figure as a measurement of the channel."""
-        body = viewer.app.test_client().get("/occupancy").data.decode()
+        body = viewer.app.test_client().get("/airtime").data.decode()
         assert "modelled" in body
         assert "CAD" in body
 
     def test_page_keeps_rx_and_tx_apart(self, viewer):
         """rx is a local observation, tx is what the bot decides about: never one number."""
-        body = viewer.app.test_client().get("/occupancy").data.decode()
+        body = viewer.app.test_client().get("/airtime").data.decode()
         assert "rx" in body and "tx" in body
         assert "the two shares are kept apart" in body.lower() or "kept apart" in body.lower()
 
     def test_chart_draws_an_absent_bucket_as_a_gap(self, viewer):
         """A window with no written bucket must not render as 0.0."""
-        body = viewer.app.test_client().get("/occupancy").data.decode()
+        body = viewer.app.test_client().get("/airtime").data.decode()
         assert "spanGaps: false" in body
         assert "null" in body
 
     def test_page_script_carries_a_csp_nonce(self, viewer):
-        resp = viewer.app.test_client().get("/occupancy")
+        resp = viewer.app.test_client().get("/airtime")
         body = resp.data.decode()
         assert "<script nonce=" in body
         assert "unsafe-inline" not in resp.headers["Content-Security-Policy"].split("script-src")[0]
 
     def test_navbar_links_to_the_page(self, viewer):
-        body = viewer.app.test_client().get("/occupancy").data.decode()
-        assert 'href="/occupancy"' in body
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert 'href="/airtime"' in body
 
     def test_disabled_state_is_shown(self, viewer):
         """Off by default, so the page has to say why there is nothing to read."""
-        body = viewer.app.test_client().get("/occupancy").data.decode()
+        body = viewer.app.test_client().get("/airtime").data.decode()
         assert "[Channel_Occupancy]" in body
         assert "Recording is off" in body
