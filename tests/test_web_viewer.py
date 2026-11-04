@@ -351,6 +351,20 @@ class TestPageRoutes:
         assert 'href="https://meshcore.io"' in html
         assert "meshcore.co.uk" not in html
 
+    def test_infos_lists_commands_with_help(self, client):
+        """The command table is what /infos is for, so it cannot render empty.
+
+        The category names, the excluded categories and the enabled check are class
+        members of the viewer; when they are missing every loaded plugin is dropped
+        and the page falls back to "No command information available", which is what
+        the other /infos tests could not see because they only check the page renders.
+        """
+        html = client.get("/infos").get_data(as_text=True)
+        assert "No command information available" not in html
+        assert "Basic Commands" in html
+        assert "<strong>ping</strong>" in html
+        assert '<code class="usage">' in html
+
     def test_base_footer_uses_meshcore_io_url(self, client):
         """The base footer should link to meshcore.io on all pages."""
         resp = client.get("/")
