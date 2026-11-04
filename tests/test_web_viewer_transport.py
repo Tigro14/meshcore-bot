@@ -64,12 +64,20 @@ class TestTransportConfig:
         viewer = _viewer(tmp_path, {"web_viewer_password": ""})
         assert viewer.socketio.server.eio.cors_allowed_origins == "*"
 
+    def test_explicit_cors_is_honoured(self, tmp_path):
+        """The fallback is for an unset option, not an override of an operator's list."""
+        viewer = _viewer(
+            tmp_path,
+            {"cors_allowed_origins": "https://bot.tigro.fr", "web_viewer_password": ""},
+        )
+        assert viewer.socketio.server.eio.cors_allowed_origins == ["https://bot.tigro.fr"]
+
     def test_handshake_does_not_advertise_an_upgrade_it_refuses(self, tmp_path):
         """The advertisement has to be turned off with the transport, not left at its default.
 
-        engineio builds the handshake's "upgrades" from its async driver table rather than
-        from the transports it was given, so a polling-only server would still promise
-        websocket and a client would attempt something this server refuses.
+        engineio builds the handshake's "upgrades" from its async driver table, not from the
+        transports it was given, so a polling-only server would still promise websocket and a
+        client would attempt something this server refuses.
         """
         viewer = _viewer(tmp_path, {"web_viewer_password": ""})
         body = viewer.app.test_client().get("/socket.io/?EIO=4&transport=polling").data.decode()
@@ -79,14 +87,6 @@ class TestTransportConfig:
         viewer = _viewer(tmp_path, {"websocket_enabled": "true", "web_viewer_password": ""})
         body = viewer.app.test_client().get("/socket.io/?EIO=4&transport=polling").data.decode()
         assert "websocket" in json.loads(body[1:])["upgrades"]
-
-    def test_explicit_cors_is_honoured(self, tmp_path):
-        """The fallback is for an unset option, not an override of an operator's list."""
-        viewer = _viewer(
-            tmp_path,
-            {"cors_allowed_origins": "https://bot.tigro.fr", "web_viewer_password": ""},
-        )
-        assert viewer.socketio.server.eio.cors_allowed_origins == ["https://bot.tigro.fr"]
 
 
 class TestClientFollowsTheFlag:
