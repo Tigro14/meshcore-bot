@@ -82,10 +82,14 @@ class LlmCommand(BaseCommand):
                 self.get_config_value("Llm_Command", "timeout_seconds", fallback=20.0, value_type="float"),
             ),
         )
+        # The ceiling has to cover the primary endpoint, which spends most of the
+        # generation budget inside its thinking block before any visible content.
+        # With 512 the whole budget can be thinking and nothing is left to answer,
+        # which the caller reports as a truncation error.
         self.max_tokens = max(
             8,
             min(
-                512,
+                1024,
                 self.get_config_value("Llm_Command", "max_tokens", fallback=80, value_type="int"),
             ),
         )
@@ -959,6 +963,13 @@ class LlmCommand(BaseCommand):
                 if isinstance(n_ctx, int) and n_ctx > 0:
                     info["n_ctx"] = n_ctx
                 info["thinking"] = self._detect_thinking_model(meta, details)
+            else:
+                # Without a configured model name the identity in the prompt is built
+                # from this response alone, so a non-200 has to be visible: it silently
+                # leaves the model unnamed and the model then answers generically.
+                self.logger.warning(
+                    f"LLM model info unavailable for {endpoint}: status {response.status_code}"
+                )
         except Exception as e:
             self.logger.warning(f"LLM model info unavailable for {endpoint}: {e}")
 
@@ -1065,6 +1076,26 @@ class LlmCommand(BaseCommand):
         if model_name and isinstance(n_ctx, int) and n_ctx > 0:
             return f"{model_name} (n_ctx={n_ctx})"
         return str(model_name or "")
+
+    def _model_identity_statement(self, endpoint: str | None = None) -> str:
+        """Identity sentence for the top of the system prompt.
+
+        The `System:` data line at the end of the local context is read as telemetry,
+        so the model reports its identity only when it is stated as an instruction.
+        Empty when the model name is unknown, so no identity is invented.
+        """
+        active_endpoint = endpoint or self._resolve_endpoint()
+        info = self._model_info(active_endpoint)
+        model_name = info.get("model") or self.model
+        if not model_name:
+            return ""
+
+        n_ctx = info.get("n_ctx")
+        model_part = f"{model_name} (n_ctx={n_ctx})" if isinstance(n_ctx, int) and n_ctx > 0 else model_name
+        host = urlparse(active_endpoint).netloc
+        if host:
+            return f"You are {model_part}, the model answering through {host}."
+        return f"You are {model_part}."
 
     def _get_weather_for_location(self, location: str) -> str:
         """Get weather information for a specific location.
@@ -1314,13 +1345,16 @@ class LlmCommand(BaseCommand):
                 ]
                 rag_active = True
             else:
+                identity = self._model_identity_statement(endpoint)
                 local_budget = token_budget
                 if token_budget > 0:
                     used = self._estimate_tokens(self.system_prompt) + self._estimate_tokens(prompt)
+                    used += self._estimate_tokens(identity)
                     used += sum(self._estimate_tokens(entry.get("content", "")) for entry in history or [])
                     local_budget = max(0, token_budget - used)
                 system_prompt = self._inject_current_time_into_prompt(self.system_prompt, local_budget, endpoint)
-                messages = [{"role": "system", "content": system_prompt}]
+                system_content = f"{identity}\n{system_prompt}" if identity else system_prompt
+                messages = [{"role": "system", "content": system_content}]
                 if history:
                     messages.extend(history)
                 if prompt:

@@ -43,6 +43,20 @@ class TestLlmCommand:
         msg = mock_message(content="llm hello", is_dm=True)
         assert cmd.can_execute(msg) is False
 
+    def test_generation_budget_ceiling_keeps_room_after_thinking(self, command_mock_bot):
+        """A configured 1024 must survive the clamp: the primary endpoint can spend the
+        whole budget inside its thinking block, and a ceiling of 512 left nothing to
+        answer with, which the caller reports as truncation."""
+        self._enable_llm(command_mock_bot)
+        command_mock_bot.config.set("Llm_Command", "max_tokens", "1024")
+        assert LlmCommand(command_mock_bot).max_tokens == 1024
+
+        command_mock_bot.config.set("Llm_Command", "max_tokens", "2000")
+        assert LlmCommand(command_mock_bot).max_tokens == 1024
+
+        command_mock_bot.config.set("Llm_Command", "max_tokens", "40")
+        assert LlmCommand(command_mock_bot).max_tokens == 40
+
     def test_matches_keyword_no_prefix(self, command_mock_bot):
         """With no command_prefix configured, bare 'llm <text>' should match."""
         self._enable_llm(command_mock_bot)
@@ -858,7 +872,9 @@ class TestLlmCommand:
         with patch("modules.commands.llm_command.requests.post", return_value=response) as post_mock:
             assert await cmd.execute(mock_message(content="llm network status", is_dm=True)) is True
         payload = post_mock.call_args.kwargs["json"]
-        assert payload["messages"][0]["content"] == "normal network context"
+        # The identity sentence is prepended to the injected prompt; the normal network
+        # context is still what the wiki path would have replaced.
+        assert payload["messages"][0]["content"].endswith("normal network context")
         assert payload["temperature"] == cmd.temperature
 
     def test_get_llama_model_info_uses_active_endpoint(self, command_mock_bot):
@@ -897,3 +913,48 @@ class TestLlmCommand:
         prompt = cmd._inject_current_time_into_prompt("base prompt", 100, endpoint)
 
         assert "remote-model (n_ctx=231072)" in prompt
+
+    def test_model_info_warns_on_non_200_status(self, command_mock_bot):
+        """A non-200 model listing has to be visible: without a configured model name the
+        prompt identity is built from this response alone, and the model answers
+        generically when the identity silently becomes empty."""
+        self._enable_llm(command_mock_bot)
+        cmd = LlmCommand(command_mock_bot)
+
+        response = Mock(status_code=429)
+        with patch("modules.commands.llm_command.requests.get", return_value=response):
+            info = cmd._model_info("https://llm.tigro.fr/v1/chat/completions")
+
+        assert info["model"] == cmd.model
+        assert "status 429" in command_mock_bot.logger.warning.call_args[0][0]
+
+    def test_identity_statement_starts_the_system_prompt(self, command_mock_bot):
+        """The model name is stated as an instruction at the top of the system prompt,
+        because the `System:` data line at the end of the local context is read as
+        telemetry and the model does not report its identity from it."""
+        self._enable_llm(command_mock_bot)
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        endpoint = "https://llm.tigro.fr/v1/chat/completions"
+        cmd._model_info_cache[endpoint] = {
+            "model": "remote-model",
+            "n_ctx": 231072,
+            "checked_at": time.monotonic(),
+        }
+
+        payload = cmd._build_payload(prompt="hello", endpoint=endpoint)
+
+        assert payload["messages"][0]["content"].startswith("You are remote-model (n_ctx=231072)")
+
+    def test_no_identity_statement_when_the_model_name_is_unknown(self, command_mock_bot):
+        self._enable_llm(command_mock_bot)
+        cmd = LlmCommand(command_mock_bot)
+        cmd.include_local_context = False
+        cmd.model = ""
+        cmd.system_prompt = "Base prompt."
+        endpoint = "https://llm.tigro.fr/v1/chat/completions"
+        cmd._model_info_cache[endpoint] = {"model": "", "n_ctx": 0, "checked_at": time.monotonic()}
+
+        payload = cmd._build_payload(prompt="hello", endpoint=endpoint)
+
+        assert payload["messages"][0]["content"].startswith("Base prompt.")

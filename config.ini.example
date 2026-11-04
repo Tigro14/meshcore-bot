@@ -1925,7 +1925,7 @@ model =
 # System prompt (keep short for mesh bandwidth)
 system_prompt = You are a helpful assistant on a low-bandwidth mesh network. Reply briefly in one short sentence.
 
-# Maximum tokens in response (8-512, default 80)
+# Maximum tokens in response (8-1024, default 80)
 max_tokens = 80
 
 # Context budget for the active model. 0 means derive it from the model's
@@ -1974,7 +1974,9 @@ context_include_contacts = false
 context_include_moon = false
 context_include_sun = false
 context_include_commands = false
-context_include_system_metrics = false
+# The model name in this part is the only identity the prompt carries when `model`
+# is blank, so keep it on: the system prompt also states the identity as a sentence.
+context_include_system_metrics = true
 
 # Cache TTL for injected context (seconds)
 context_cache_seconds = 60
