@@ -158,6 +158,7 @@ class TestAllowedTables:
             'path_stats', 'unique_advert_packets', 'schema_version',
             'channel_operations', 'channels', 'feed_message_queue',
             'daily_rollup', 'dashboard_snapshot',
+            'occupancy_samples', 'occupancy_senders',
         }
         assert expected_tables == BotDataViewer.ALLOWED_TABLES
 

@@ -1437,6 +1437,50 @@
    "GET"
   ]
  },
+ "/api/telemetry/occupancy": {
+  "GET locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_channel_occupancy",
+  "methods": [
+   "GET"
+  ]
+ },
+ "/api/telemetry/occupancy/history": {
+  "GET locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_channel_occupancy_history",
+  "methods": [
+   "GET"
+  ]
+ },
  "/api/toggle-star-contact": {
   "POST locked anon": {
    "content_type": "application/json",
