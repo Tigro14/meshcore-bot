@@ -168,6 +168,21 @@ class TransmissionTracker:
 
         self.logger.debug(f"Recorded transmission: {message_type} to {target} at {record.timestamp}")
 
+        # Channel occupancy's tx share.  This is the moment the bot asks the radio to
+        # send, not the moment a packet is confirmed on air, so the share answers
+        # "what airtime did the bot spend" rather than "what airtime was confirmed".
+        # Only the message body is counted: the path and the MeshCore header are part
+        # of the on-air packet but are not something the bot can decide about, and
+        # adding an estimate for them would make the number look measured.
+        occupancy = getattr(self.bot, 'occupancy', None)
+        if occupancy is not None and occupancy.enabled:
+            try:
+                payload_bytes = len(content.encode('utf-8'))
+                if payload_bytes > 0:
+                    occupancy.record(payload_bytes, kind='tx', sender=self.bot_prefix)
+            except Exception as e:
+                self.logger.debug("occupancy: transmission not recorded: %s", e)
+
         # Periodically clean up old records to prevent unbounded memory growth
         self._maybe_cleanup()
 

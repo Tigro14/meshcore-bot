@@ -896,6 +896,58 @@ def _m0024_region_scope_tables(cursor: sqlite3.Cursor) -> None:
     )
 
 
+def _m0025_channel_occupancy_tables(cursor: sqlite3.Cursor) -> None:
+    """Bucketed channel-occupancy samples and the per-sender airtime share.
+
+    ``occupancy_samples`` stores sums and counts per bucket, never a mean, so any
+    window re-aggregates correctly.  A bucket is only written when it holds a
+    sample: absence is "nothing seen", and a row with 0.0 ms is "nothing on air
+    during a bucket that was observed".  Those are two different facts and a
+    reader must be able to tell them apart, which is why the table is not filled
+    with zeros for quiet periods.
+
+    The primary key is ``(bucket_ts, sample_seconds)`` rather than ``bucket_ts``
+    alone because the reader can be asked for a finer bucket than the writer's
+    default; a single-key table would then overwrite one resolution's rows with
+    another's.
+
+    ``occupancy_senders`` is one row per sender, keyed by public key.  It is
+    ranked by airtime rather than by packet count, because a talker that sends
+    many short packets can cost more airtime than one that sends a long message —
+    and that distinction is what a fairness limit has to be built on.
+
+    Both tables are pruned by ``[Data_Retention]`` through the viewer's hourly cleanup
+    scheduler, and the index on ``last_seen`` is what makes that prune a range scan
+    instead of a full scan.
+    """
+    _execute_statements(cursor,
+        """
+        CREATE TABLE IF NOT EXISTS occupancy_samples (
+            bucket_ts      INTEGER NOT NULL,
+            sample_seconds INTEGER NOT NULL,
+            rx_ms          REAL NOT NULL,
+            tx_ms          REAL NOT NULL,
+            packets        INTEGER NOT NULL,
+            rx_bytes       INTEGER,
+            PRIMARY KEY (bucket_ts, sample_seconds)
+        );
+
+        CREATE TABLE IF NOT EXISTS occupancy_senders (
+            sender     TEXT PRIMARY KEY,
+            airtime_ms REAL NOT NULL,
+            packets    INTEGER NOT NULL,
+            first_seen REAL NOT NULL,
+            last_seen  REAL NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_occupancy_samples_window
+            ON occupancy_samples(sample_seconds, bucket_ts);
+        CREATE INDEX IF NOT EXISTS idx_occupancy_senders_last_seen
+            ON occupancy_senders(last_seen);
+        """
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -927,6 +979,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (22, "neighbor discovery tables", _m0022_neighbor_tables),
     (23, "observed_paths: snr/rssi for zero-hop adverts", _m0023_observed_paths_zero_hop_signal),
     (24, "regional flood scope tallies and warning events", _m0024_region_scope_tables),
+    (25, "channel occupancy buckets and sender share", _m0025_channel_occupancy_tables),
 ]
 
 

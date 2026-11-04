@@ -394,6 +394,7 @@ class BotIntegration:
                                 [row[:3] for row in rows],
                             )
                         conn.commit()
+                        self._flush_occupancy(conn)
                     return
                 except sqlite3.OperationalError as e:
                     if "locked" in str(e).lower() and attempt < max_retries - 1:
@@ -472,6 +473,12 @@ class BotIntegration:
             # Convert non-serializable objects to strings
             serializable_data = self._make_json_serializable(packet_data)
 
+            # This is the one path that sees every packet the radio delivers, so it is
+            # where occupancy is recorded.  capture_channel_message sees the packets the
+            # bot parses as messages only, and recording in both would count the same
+            # packet twice.
+            self._record_occupancy(serializable_data, 'rx')
+
             # Store in database for web viewer to read (retries on database is locked)
             self._insert_packet_stream_row(
                 json.dumps(serializable_data),
@@ -482,6 +489,82 @@ class BotIntegration:
 
         except Exception as e:
             self.bot.logger.warning(f"Error storing packet data for web viewer: {e}")
+
+    def _record_occupancy(self, packet_data: dict, kind: str) -> None:
+        """Add one packet to the airtime windows from values already parsed.
+
+        Recording is memory-only: a float and a tuple in a bounded deque.  Nothing
+        here measures whether the channel was busy — the bot is a client of a radio,
+        not a controller of one — it only costs the airtime a packet of this size
+        takes at the modulation the device reports.  Storage happens once per flush,
+        not once per packet, so a busy mesh does not add a transaction to the writer.
+        """
+        occupancy = getattr(self.bot, 'occupancy', None)
+        if occupancy is None or not occupancy.enabled:
+            return
+
+        routing_info = packet_data.get('routing_info') or {}
+        if not isinstance(routing_info, dict):
+            routing_info = {}
+        try:
+            payload_bytes = int(routing_info.get('payload_length') or packet_data.get('payload_length') or 0)
+        except (TypeError, ValueError):
+            return
+        if payload_bytes <= 0:
+            # A packet with no payload is not a packet: an empty length is a decode
+            # failure, and recording it would put a zero-cost sample in a window that
+            # is meant to answer "how much of the channel is in use".
+            return
+
+        sender = (
+            packet_data.get('sender_pubkey')
+            or packet_data.get('sender')
+            or routing_info.get('from_prefix')
+        )
+        try:
+            occupancy.record(payload_bytes, kind=kind, sender=str(sender or '').strip() or None)
+        except Exception as e:
+            self.bot.logger.debug("occupancy: packet not recorded: %s", e)
+
+    def _flush_occupancy(self, conn) -> None:
+        """Refresh the modulation, then write what the windows hold.
+
+        Runs at the writer's own cadence, inside the transaction the flush already
+        opened.  The modulation is read once per batch rather than once per packet: a
+        radio reconfigured live changes the estimate for the next packet, and reading
+        it per packet would make a single packet's airtime depend on when the reader
+        happened to look.
+        """
+        occupancy = getattr(self.bot, 'occupancy', None)
+        if occupancy is None or not occupancy.enabled:
+            return
+
+        occupancy.refresh_from_device(getattr(getattr(self.bot, 'meshcore', None), 'self_info', None))
+        if not self._occupancy_tables_exist(conn):
+            return
+        try:
+            occupancy.flush(conn)
+        except Exception as e:
+            self.bot.logger.warning("occupancy: flush failed: %s", e)
+
+    def _occupancy_tables_exist(self, conn) -> bool:
+        """Probe once per process whether the occupancy tables are present.
+
+        Same reason as the dimension-columns probe: the viewer database can be a
+        separate file that this process never migrates. Writing to an absent table
+        would fail every flush and turn a storage detail into a warning storm.
+        """
+        cached = getattr(self, '_occupancy_tables_supported', None)
+        if cached is not None:
+            return cached
+        try:
+            existing = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )}
+            supported = 'occupancy_samples' in existing and 'bot_metadata' in existing
+        except Exception:
+            supported = False
+        self._occupancy_tables_supported = supported
 
     @staticmethod
     def _packet_dims_from_data(packet_data: dict) -> tuple:

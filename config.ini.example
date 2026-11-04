@@ -404,6 +404,53 @@ mesh_cooldown_minutes = 30
 # unlimited (not recommended).
 max_warnings_per_day = 6
 
+[Channel_Occupancy]
+# Channel airtime accounting. Off by default: nothing is recorded until enabled.
+#
+# Airtime here is an ESTIMATE from the modulation, not a measurement. The bot is a
+# client of a radio over serial, BLE or TCP, so it cannot know whether the channel was
+# busy — only how long a packet of a given size occupies it at a given SF/BW/CR, using
+# the Semtech AN1200.13 formula. Real occupancy (CAD and LBT) belongs to a radio
+# driver, and a repeater's own occupancy comes from that repeater's API, not from here.
+#
+# Two shares are kept apart and never merged into one number:
+#   rx — airtime this node hears. A node only hears part of the channel (hidden nodes,
+#        antenna gain, spatial reuse), so an rx percentage is a local observation, not
+#        the airtime of the whole channel.
+#   tx — airtime the bot spends itself, the only part it can decide about.
+enabled = false
+
+# Bucket size for stored history, in seconds. A bucket is written only when it holds a
+# packet: a quiet period stays absent rather than becoming 0.0, because a chart that
+# draws an absence as a zero shows a cliff at the retention boundary that reads as an
+# outage.
+sample_seconds = 60
+
+# Rolling windows, reported as a percentage of their own duration. The instant window
+# answers "what is the channel doing right now", the slow one "what level is it at".
+fast_window_seconds = 10
+window_seconds = 60
+slow_window_seconds = 900
+
+# Half-life of the decayed sum, in seconds. A hard window reports a burst as a spike; a
+# decayed level keeps a chart line from jumping on one packet.
+half_life_seconds = 300
+
+# Bounded ring of samples kept in memory, so a busy mesh does not grow it for the whole
+# process lifetime.
+max_samples = 5000
+
+# Fallback modulation, used only when the device does not report its own; the device's
+# values win when it reports them. A bot configured for SF9 on a mesh running SF11
+# reports an airtime that no packet on the channel has ever had. A device reporting 0
+# keeps the last known values rather than zeroing them.
+# The coding rate is the denominator (5..8); an AN1200.13 index (1..4) is accepted too.
+use_device_modulation = true
+spreading_factor = 9
+bandwidth_khz = 125
+coding_rate = 5
+preamble_symbols = 8
+
 [Banned_Users]
 # List of banned sender names (comma-separated). Matching is prefix (starts-with):
 # "Awful Username" also matches "Awful Username 🍆". No bot responses in channels or DMs.
@@ -1183,6 +1230,13 @@ neighbor_observations_retention_days = 365
 # Regional flood scope tallies and region-warning events (see [Region_Warnings]).
 # Both are tiny — one tally row per channel per day — so a long window is cheap.
 region_warning_retention_days = 90
+#
+# Channel occupancy buckets and sender share (see [Channel_Occupancy]). One bucket row
+# per quiet-or-busy sample_seconds, so 30 days is a few thousand rows at 60-second
+# buckets. Pruning is what makes a "last 30 days" chart mean 30 days and not whatever
+# is left in the table.
+occupancy_samples_retention_days = 30
+occupancy_senders_retention_days = 90
 [Path_Command]
 # Enable or disable the path command
 enabled = true

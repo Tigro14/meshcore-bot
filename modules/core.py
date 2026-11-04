@@ -236,6 +236,18 @@ class MeshCoreBot(ServiceSupervisorMixin, RadioLinkMixin, RadioOfflineBreaker, D
             self.logger.warning(f"Failed to initialize region warning monitor: {e}")
             self.region_warning_monitor = None
 
+        # Channel occupancy: airtime windows and bucketed history.  The instance is
+        # created here rather than inside a writer because two writers fill it — the
+        # packet path (packets heard) and the transmission tracker (packets the bot
+        # sent) — and the two shares have to be summed by the same object to be
+        # comparable.
+        try:
+            from .channel_occupancy import ChannelOccupancy
+            self.occupancy = ChannelOccupancy(self.config, self.logger)
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize channel occupancy: {e}")
+            self.occupancy = None
+
         # Initialize transmission tracker for monitoring TX success
         try:
             self.transmission_tracker = TransmissionTracker(self)
