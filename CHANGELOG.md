@@ -168,6 +168,19 @@ semantic versioning.
   written in the page, in that same style: markup plus a `RadioManager` method sharing
   the page's alert helper, and the orphaned partial is gone.
 
+- `[Web_Viewer] websocket_enabled` was still documented in `config.ini.example` while the
+  merge dropped the code that read it, and with it the empty-CORS fallback, so nothing looked
+  wrong: the option was there, the viewer just ignored it. The server went back to accepting
+  the polling to websocket upgrade and the browser back to attempting it, which behind a proxy
+  that does not forward `Upgrade`/`Connection` means a failed attempt on every page visit,
+  each leaving another long-polling connection behind, so the realtime page stops receiving
+  data. The flag again decides the server transports, and the template passes it to the client
+  so the client does not attempt what the server would refuse. An unset `cors_allowed_origins`
+  again means any origin, because the Origin a browser sends through a proxy is the public
+  host, not the address the viewer listens on; setting it explicitly still locks the list down.
+  `config.ini.example` now documents that fallback.
+
+
 - `llm_command.py` kept unresolved merge-conflict content from PR #73: a stray
   conflict marker, duplicated `_post_chat` and `_get_llama_model_info` definitions,
   and an empty `if not content:` block. The module could not be imported, so the

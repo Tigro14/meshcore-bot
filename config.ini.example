@@ -2166,6 +2166,12 @@ enabled = false
 # When false, Socket.IO uses long-polling only (safer behind most proxies).
 websocket_enabled = false
 
+# Allowed origins for Socket.IO. When unset or empty the viewer accepts any origin,
+# because through a reverse proxy the Origin a browser sends is the public host, not the
+# address the viewer listens on — same-origin there rejects every request, so live data
+# never reaches the page. Set it explicitly to lock the list down.
+# cors_allowed_origins = https://bot.tigro.fr
+
 # If set to a non-empty value, a login page is shown and all routes + SocketIO require auth.
 # If empty, unset, "", or a null placeholder (none / null / nil), authentication is disabled.
 # Recommendation: always set a password when host != 127.0.0.1

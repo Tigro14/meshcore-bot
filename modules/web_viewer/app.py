@@ -387,6 +387,26 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         if cors_raw:
             cors_origins = cors_raw if cors_raw == '*' else [o.strip() for o in cors_raw.split(',') if o.strip()]
             self._socketio_kwargs['cors_allowed_origins'] = cors_origins
+        else:
+            # Behind a reverse proxy the Origin the browser sends is the public one, not
+            # the address the viewer listens on, so same-origin rejects every Socket.IO
+            # request there. Empty config therefore means "allow any origin", which is the
+            # only way live data reaches a browser through a proxy. Set the option
+            # explicitly to lock it down.
+            self._socketio_kwargs['cors_allowed_origins'] = '*'
+
+        # Transport, decided here and in the template by the same flag: a client that
+        # tries the polling→websocket upgrade against a polling-only server keeps failing
+        # and leaves another long-polling connection behind on each attempt, which is what
+        # made the viewer unusable behind Caddy. Polling-only is the default; enable the
+        # upgrade only when the proxy forwards Upgrade/Connection.
+        if self._websocket_enabled():
+            self._socketio_kwargs['transports'] = ['websocket', 'polling']
+            self.logger.info("Socket.IO transports: websocket + polling (websocket_enabled=true)")
+        else:
+            self._socketio_kwargs['transports'] = ['polling']
+            self.logger.info("Socket.IO transports: polling only (websocket_enabled=false)")
+
         # Initialize SocketIO with Flask app now that config is loaded
         self.socketio.init_app(self.app, **self._socketio_kwargs)
 
@@ -557,6 +577,19 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             "date": info.get("date"),
         }
 
+    def _websocket_enabled(self) -> bool:
+        """[Web_Viewer] websocket_enabled, default False. Never raises.
+
+        The same flag decides the server transports and what the browser is allowed to
+        try, so both sides have to read it from the same place: a client told to upgrade
+        against a server that only accepts polling produces failed attempts, not a
+        connection.
+        """
+        try:
+            return self.config.getboolean('Web_Viewer', 'websocket_enabled', fallback=False)
+        except (configparser.NoSectionError, configparser.NoOptionError, ValueError, TypeError):
+            return False
+
     def _setup_template_context(self):
         """Setup template context processor to inject global variables"""
         version_info = self._version_info
@@ -603,6 +636,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     'radio_offline': radio_offline,
                     'radio_offline_since': radio_offline_since,
                     'bot_initializing': bot_initializing,
+                    'websocket_enabled': self._websocket_enabled(),
                     'auth_enabled': auth_enabled,
                     'is_admin': is_admin,
                 }
@@ -619,6 +653,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     'radio_zombie_since': None,
                     'radio_offline': False,
                     'radio_offline_since': None,
+                    'websocket_enabled': False,
                     'auth_enabled': bool(getattr(self, 'web_viewer_password', '')),
                     'is_admin': False,
                 }

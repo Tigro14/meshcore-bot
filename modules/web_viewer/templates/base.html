@@ -1360,10 +1360,14 @@
     {% block page_libs %}{% endblock %}
 
     <!-- Base JavaScript -->
-    <script nonce="{{ g.csp_nonce }}">
+    <script nonce="{{ g.csp_nonce }}" data-ws-enabled="{{ websocket_enabled|lower }}">
         // Display hint only — server enforces authenticated_admin. Read from a
         // data attribute so the inline script stays plain JS for ESLint.
         const IS_ADMIN = document.body.dataset.isAdmin === 'true';
+
+        // Read once at parse time: document.currentScript is null inside a handler
+        // called later, so capturing it inside initializeSocket() would not resolve.
+        const WS_ENABLED = document.currentScript.dataset.wsEnabled === 'true';
 
         // Global connection management
         class ModernConnectionManager {
@@ -1388,7 +1392,8 @@
                 // this same manager/socket.  forceNew created a second independent
                 // connection that interfered with the realtime-page socket.
                 this.socket = io({
-                    transports: ['websocket', 'polling'],
+                    transports: WS_ENABLED ? ['websocket', 'polling'] : ['polling'],
+                    upgrade: WS_ENABLED,
                     timeout: 5000
                 });
 
