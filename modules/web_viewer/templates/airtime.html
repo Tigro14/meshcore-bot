@@ -128,8 +128,11 @@
             <div id="ocWindows"></div>
             <small class="form-text text-muted d-block mt-2" id="ocDisabled" style="display:none">
                 Recording is off. Set <code>enabled = true</code> under
-                <code>[Channel_Occupancy]</code> in config.ini; until then nothing is
-                recorded and there is nothing to chart.
+                <code>[Channel_Occupancy]</code> in config.ini; nothing is recorded until then.
+            </small>
+            <small class="form-text text-muted d-block mt-2" id="ocSnapshotNote" style="display:none">
+                What is on screen was written while recording was on; the setting is off now.
+                The age above says how long ago that was.
             </small>
         </div>
     </div>
@@ -252,6 +255,12 @@
                 this.renderLive(data);
                 this.renderSenders(data.top_senders || []);
             } catch (err) {
+                // A failed request is not evidence that recording is off, so the claim from
+                // the last response has to be retracted here: otherwise the page goes on
+                // asserting a setting it no longer knows, beside an error saying the request
+                // failed.
+                el('ocDisabled').style.display = 'none';
+                el('ocSnapshotNote').style.display = 'none';
                 el('ocWindows').innerHTML = '<div class="oc-empty">' + escapeHtml(err.message) + '</div>';
             }
         }
@@ -286,6 +295,9 @@
             }
 
             el('ocDisabled').style.display = data.enabled ? 'none' : 'block';
+            // The setting and the snapshot are two different facts: recording can be off
+            // now while the figures on screen were written while it was on.
+            el('ocSnapshotNote').style.display = (!data.enabled && data.snapshot_enabled) ? 'block' : 'none';
 
             const windows = Object.keys(data)
                 .filter((key) => key.endsWith('_rx_percent'))

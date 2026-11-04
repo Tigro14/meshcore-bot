@@ -123,6 +123,14 @@ so read them as JSON. Both routes are on the anonymous allowlist, like the stora
 probe: the payload carries aggregate counters and sender keys that
 `GET /api/contacts` already shows.
 
+`enabled` is the setting as the reader knows it, not the value the snapshot happened to
+be written under: recording can have been on when the snapshot was written and off now,
+which is two facts. When they disagree the payload also carries `snapshot_enabled`, and
+the page says the same thing on screen — the setting is off now, and the figures shown
+were written while it was on, with the age saying how long ago. A request that fails is
+not evidence about the setting either, so the page takes back its claim rather than
+leaving it standing beside the error.
+
 ## What this can be used for
 
 - Deciding whether a mesh is actually busy, or whether a channel looks busy only from

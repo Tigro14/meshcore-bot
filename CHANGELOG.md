@@ -292,6 +292,19 @@ semantic versioning.
   multi-word aliases such as `dad joke` and `ps aux` still take precedence
   over the base-command fallback.
 
+- The `/airtime` page could state "Recording is off" on evidence it did not have. Two
+  defects let it. The API's `enabled` was the value the snapshot happened to be written
+  under, not the setting in force: `fields()` includes `enabled`, so the payload's spread
+  overwrote it, and a snapshot is only written while recording is on, which meant the page
+  told a reader to set `enabled = true` for a setting already true, or showed historical
+  numbers as current ones under an off note. `enabled` is now the setting as the reader knows
+  it, and when it disagrees with the stored value the payload keeps that as
+  `snapshot_enabled`; the page states the two apart — the setting is off now, and what is on
+  screen was written while it was on, with the age saying how long ago. The other defect was
+  the error path: the note is re-evaluated only on a successful response, so a failed request
+  left the previous claim standing beside an error saying the request failed. A failed request
+  now takes the claim back, since it is not evidence about the setting.
+
 ## [1.1.0] - 2026-09-13
 
 ### Added

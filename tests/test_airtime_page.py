@@ -86,3 +86,22 @@ class TestAirtimePage:
         body = viewer.app.test_client().get("/airtime").data.decode()
         assert "[Channel_Occupancy]" in body
         assert "Recording is off" in body
+
+    def test_the_page_keeps_the_setting_apart_from_the_snapshot(self, viewer):
+        """"Recording is off now" and "these figures were written while it was on" are two
+        different facts. Stating only the first presents the numbers on screen as current."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert "was written while recording was on" in body
+        assert "the setting is off now" in body
+
+    def test_a_failed_request_retracts_the_recording_claim(self, viewer):
+        """The page may only state what a response told it.
+
+        A request that failed is not evidence that recording is off, so the claim left by the
+        last successful response has to be taken back in the error path, otherwise the page
+        keeps asserting a setting it no longer knows beside an error saying the request failed.
+        """
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        error_path = body.split("async loadLive()")[1].split("catch (err) {", 1)[1]
+        assert "ocDisabled" in error_path
+        assert "ocSnapshotNote" in error_path

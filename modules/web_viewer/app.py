@@ -2553,11 +2553,22 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             with self._with_db_connection() as conn:
                 snapshot = self.occupancy.read_live(conn)
                 payload = {
-                    'enabled': self.occupancy.enabled,
                     'age_seconds': snapshot['age_seconds'],
                     'stale': snapshot['stale'],
                     **snapshot['fields'],
+                    # ``enabled`` is the setting as it stands now, not the value the
+                    # snapshot happens to carry: the page tells the reader to set it, so
+                    # it has to report the setting in force. The stored value is history —
+                    # numbers written while recording was on stay numbers from that window
+                    # even if recording has since been turned off.
+                    'enabled': self.occupancy.enabled,
                 }
+                stored = snapshot['fields'].get('enabled')
+                if stored is not None and stored != self.occupancy.enabled:
+                    # Saying the two apart is what keeps the page honest: a reader who sees
+                    # numbers under a "recording is off" note has to be able to tell which
+                    # is the current setting and which is the snapshot.
+                    payload['snapshot_enabled'] = stored
                 if snapshot['fields']:
                     try:
                         limit = int(request.args.get('limit', 10))

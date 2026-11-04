@@ -534,6 +534,22 @@ class TestApi:
         assert "window_rx_percent" in payload and "window_tx_percent" in payload
         assert not any("rx" in key and "tx" in key for key in payload)
 
+    def test_enabled_is_the_setting_now_not_the_one_the_snapshot_was_written_under(self, occupancy, conn, viewer):
+        """The page tells the reader to set [Channel_Occupancy] enabled, so it has to report
+        the setting in force rather than the value a snapshot happens to carry.
+
+        Recording may have been on when the snapshot was written and off now. Those are two
+        facts: a payload that reports only the stored one tells the reader to turn on what is
+        already on, or presents historical numbers as current ones.
+        """
+        _write_snapshot(occupancy, conn)
+        viewer.occupancy.enabled = False
+        payload = json.loads(viewer.app.test_client().get("/api/telemetry/occupancy").get_data())
+        assert payload["enabled"] is False
+        assert payload["snapshot_enabled"] is True
+        # The figures still stand for the window they were recorded in.
+        assert payload["window_rx_percent"] > 0.0
+
     def test_text_format_is_one_field_per_line(self, occupancy, conn, viewer):
         _write_snapshot(occupancy, conn)
         response = viewer.app.test_client().get("/api/telemetry/occupancy?format=text")
