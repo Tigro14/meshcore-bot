@@ -183,6 +183,12 @@ semantic versioning.
   host, not the address the viewer listens on; setting it explicitly still locks the list down.
   `config.ini.example` now documents that fallback.
 
+- The stream subscription handlers took no arguments, so a client that sends data with the event
+  name does not bind: `TypeError` inside flask_socketio, the error handler answers, the
+  subscription is never recorded, and that client receives neither the history replay nor the
+  live packets. Seen in the viewer log on the Pi from a client emitting
+  `emit('subscribe_packets', {})`. The handlers now take an optional payload, so both forms work.
+
 
 - `llm_command.py` kept unresolved merge-conflict content from PR #73: a stray
   conflict marker, duplicated `_post_chat` and `_get_llama_model_info` definitions,

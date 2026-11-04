@@ -33,7 +33,14 @@ class SocketClientsMixin:
     web_viewer_password: Any
 
     def _setup_socketio_handlers(self):
-        """Setup SocketIO event handlers using modern patterns"""
+        """Setup SocketIO event handlers using modern patterns
+
+        The stream handlers take an optional payload. A client that sends data with the event
+        name does not match a handler that takes none: flask_socketio raises TypeError, the
+        error handler answers, and the subscription is never recorded, so that client receives
+        neither the history replay nor the live packets. The page emits the bare event name, so
+        both forms have to work.
+        """
 
         @self.socketio.on('connect')
         def handle_connect():
@@ -104,7 +111,7 @@ class SocketClientsMixin:
                 self.logger.error(f"Error in handle_disconnect: {e}", exc_info=True)
 
         @self.socketio.on('subscribe_commands')
-        def handle_subscribe_commands():
+        def handle_subscribe_commands(data=None):
             """Handle command stream subscription — also replays recent history to the new subscriber."""
             try:
                 client_id = self._mark_subscribed('subscribed_commands')
@@ -119,7 +126,7 @@ class SocketClientsMixin:
                 self.logger.error(f"Error in handle_subscribe_commands: {e}", exc_info=True)
 
         @self.socketio.on('subscribe_packets')
-        def handle_subscribe_packets():
+        def handle_subscribe_packets(data=None):
             """Handle packet stream subscription — also replays recent history to the new subscriber."""
             try:
                 client_id = self._mark_subscribed('subscribed_packets')
@@ -136,7 +143,7 @@ class SocketClientsMixin:
                 self.logger.error(f"Error in handle_subscribe_packets: {e}", exc_info=True)
 
         @self.socketio.on('subscribe_mesh')
-        def handle_subscribe_mesh():
+        def handle_subscribe_mesh(data=None):
             """Handle mesh graph stream subscription"""
             try:
                 client_id = self._mark_subscribed('subscribed_mesh')
@@ -145,7 +152,7 @@ class SocketClientsMixin:
                 self.logger.error(f"Error in handle_subscribe_mesh: {e}", exc_info=True)
 
         @self.socketio.on('subscribe_messages')
-        def handle_subscribe_messages():
+        def handle_subscribe_messages(data=None):
             """Handle live channel message stream subscription — also replays recent messages."""
             try:
                 client_id = self._mark_subscribed('subscribed_messages')
@@ -159,7 +166,7 @@ class SocketClientsMixin:
                 self.logger.error(f"Error in handle_subscribe_messages: {e}", exc_info=True)
 
         @self.socketio.on('subscribe_logs')
-        def handle_subscribe_logs():
+        def handle_subscribe_logs(data=None):
             """Handle live log stream subscription — also sends last 200 log lines to the new subscriber."""
             try:
                 client_id = self._mark_subscribed('subscribed_logs')
@@ -184,7 +191,7 @@ class SocketClientsMixin:
                 self.logger.error(f"Error in handle_subscribe_logs: {e}", exc_info=True)
 
         @self.socketio.on('ping')
-        def handle_ping():
+        def handle_ping(data=None):
             """Handle client ping (modern ping/pong pattern)"""
             try:
                 client_id = getattr(request, 'sid', None)

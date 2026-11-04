@@ -2906,6 +2906,29 @@ class TestSubscribeCommandsHistoryReplay:
         assert len(command_events) == 1
         assert command_events[0]["args"][0]["t"] == "cmd"
 
+    def test_subscribe_handler_accepts_a_client_payload(self, socketio_viewer):
+        """A client that sends data along with the event name must still subscribe.
+
+        The handlers took no arguments, so a client emitting subscribe_packets with a payload
+        raised TypeError inside flask_socketio, the error handler answered, and the
+        subscription was never recorded: no replay, no live packets for that client.
+        """
+        from flask_socketio import SocketIOTestClient
+
+        sio_client = SocketIOTestClient(
+            socketio_viewer.app, socketio_viewer.socketio
+        )
+        sio_client.emit("subscribe_packets", {})
+
+        received = sio_client.get_received()
+        assert not [e for e in received if e["name"] == "error"]
+        with socketio_viewer._clients_lock:
+            flags = [
+                info.get("subscribed_packets", False)
+                for info in socketio_viewer.connected_clients.values()
+            ]
+        assert any(flags), "payload did not register the subscription"
+
     def test_polling_thread_last_timestamp_is_recent(self, socketio_viewer):
         """_start_database_polling initializes last_timestamp ~5 min back, not epoch 0."""
         import inspect
