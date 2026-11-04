@@ -93,6 +93,16 @@ semantic versioning.
   existing `alert` command. Replies are capped at 180 characters for the mesh. Requires
   `beautifulsoup4`, already in the dependencies. See `docs/vigilance-service.md`.
 
+- Web Viewer `/occupancy`, the screen for `[Channel_Occupancy]`, which had only the two
+  API routes and nothing to read them with. It shows the modulation, the three rolling
+  windows with rx and tx kept apart, the history chart, the totals and the nearest-rank
+  percentiles, and the sender share. The chart aggregates buckets to a readable number of
+  columns using sums — a coarser step is the same measurement, not a rounded one — and a
+  column with no written bucket stays a gap, because an absence drawn as zero reads as an
+  outage. The page states that the airtime is modelled from the modulation rather than
+  measured, and that a stale snapshot is not a measurement. The page itself is behind the
+  login like every other screen; only its APIs are on the public allowlist.
+
 ### Changed
 
 - `meshcore` now requires 2.3.14 or newer. Before 2.3.13, `send_msg_with_retry`

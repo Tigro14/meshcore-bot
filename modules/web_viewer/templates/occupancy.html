@@ -1,0 +1,399 @@
+{% extends "base.html" %}
+
+{% block title %}Channel occupancy - MeshCore Bot Data Viewer{% endblock %}
+
+{% block page_libs %}
+<script src="{{ url_for('static', filename='vendor/chart.js/chart.umd.js') }}"></script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    :root {
+        --oc-rx: #198754;
+        --oc-tx: #0d6efd;
+    }
+    [data-theme="dark"] {
+        --oc-rx: #2fa36b;
+        --oc-tx: #6ea8fe;
+    }
+
+    .oc-figure {
+        font-size: 1.5rem;
+        line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+    }
+    .oc-figure-label {
+        font-size: .8rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--text-muted);
+    }
+
+    /* One window per row: rx and tx kept apart, never merged into one number. */
+    .oc-window-row {
+        display: flex;
+        align-items: center;
+        gap: .75rem;
+        padding: .35rem 0;
+    }
+    .oc-window-name {
+        min-width: 6rem;
+        font-size: .85rem;
+        color: var(--text-muted);
+    }
+    .oc-bar {
+        flex: 1;
+        height: 8px;
+        border-radius: 4px;
+        background-color: var(--bg-tertiary);
+        overflow: hidden;
+    }
+    .oc-bar span { display: block; height: 100%; }
+    .oc-seg-rx { background-color: var(--oc-rx); }
+    .oc-seg-tx { background-color: var(--oc-tx); }
+
+    .oc-empty {
+        color: var(--text-muted);
+        font-style: italic;
+    }
+
+    .oc-stale {
+        color: var(--oc-tx);
+        font-weight: 600;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <h1 class="mb-0">
+            <i class="fas fa-stopwatch"></i> Channel occupancy
+        </h1>
+        <div class="d-flex align-items-center gap-2">
+            <label class="form-label mb-0 small" for="oc-window">History</label>
+            <select class="form-select form-select-sm" id="oc-window" style="width:auto">
+                <option value="1">Last 24 h</option>
+                <option value="7" selected>Last 7 days</option>
+                <option value="14">Last 14 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+            </select>
+            <button class="btn btn-sm btn-outline-secondary" id="ocRefreshBtn">
+                <span class="spinner-border spinner-border-sm me-1" id="ocSpinner" style="display:none" role="status"></span>
+                <i class="fas fa-sync me-1"></i>Refresh
+            </button>
+        </div>
+    </div>
+
+    <p class="small text-muted mb-4">
+        This is <strong>modelled</strong> airtime, not a measurement of the channel being busy.
+        Over serial, BLE or TCP the bot is a client of a radio: it cannot see whether the channel
+        was clear, only how long a packet of a given size occupies it at the current
+        SF/BW/coding rate. Real occupancy (CAD, LBT) belongs to a radio driver, and a repeater's
+        own occupancy comes from that repeater's API. The two shares are kept apart on purpose:
+        <strong>rx</strong> is what this node hears — a local observation, not the airtime of the
+        whole channel — and <strong>tx</strong> is what the bot spends itself.
+    </p>
+
+    <!-- Live windows -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h2 class="h5 mb-0"><i class="fas fa-tachometer-alt me-2"></i>Right now</h2>
+            <small class="text-muted" id="ocAge"></small>
+        </div>
+        <div class="card-body">
+            <div class="row g-3 mb-3">
+                <div class="col-md-2">
+                    <div class="oc-figure-label">Spreading factor</div>
+                    <div class="oc-figure" id="oc-sf">-</div>
+                </div>
+                <div class="col-md-2">
+                    <div class="oc-figure-label">Bandwidth</div>
+                    <div class="oc-figure" id="oc-bw">-</div>
+                </div>
+                <div class="col-md-2">
+                    <div class="oc-figure-label">Coding rate</div>
+                    <div class="oc-figure" id="oc-cr">-</div>
+                </div>
+                <div class="col-md-2">
+                    <div class="oc-figure-label">Preamble</div>
+                    <div class="oc-figure" id="oc-preamble">-</div>
+                </div>
+                <div class="col-md-2">
+                    <div class="oc-figure-label">Samples kept</div>
+                    <div class="oc-figure" id="oc-samples">-</div>
+                </div>
+            </div>
+            <div id="ocWindows"></div>
+            <small class="form-text text-muted d-block mt-2" id="ocDisabled" style="display:none">
+                Recording is off. Set <code>enabled = true</code> under
+                <code>[Channel_Occupancy]</code> in config.ini; until then nothing is
+                recorded and there is nothing to chart.
+            </small>
+        </div>
+    </div>
+
+    <!-- History -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="h5 mb-0"><i class="fas fa-chart-line me-2"></i>History</h2>
+        </div>
+        <div class="card-body">
+            <div class="row g-3 mb-3">
+                <div class="col-md-2">
+                    <div class="oc-figure-label">rx airtime</div>
+                    <div class="oc-figure" id="oc-total-rx">-</div>
+                </div>
+                <div class="col-md-2">
+                    <div class="oc-figure-label">tx airtime</div>
+                    <div class="oc-figure" id="oc-total-tx">-</div>
+                </div>
+                <div class="col-md-2">
+                    <div class="oc-figure-label">Packets</div>
+                    <div class="oc-figure" id="oc-packets">-</div>
+                </div>
+                <div class="col-md-2">
+                    <div class="oc-figure-label">p50 rx</div>
+                    <div class="oc-figure" id="oc-p50">-</div>
+                </div>
+                <div class="col-md-2">
+                    <div class="oc-figure-label">p95 rx</div>
+                    <div class="oc-figure" id="oc-p95">-</div>
+                </div>
+            </div>
+            <div id="ocChartError" class="oc-empty" style="display:none"></div>
+            <canvas id="oc-chart" height="140"></canvas>
+            <p class="small text-muted mt-3 mb-0">
+                A gap is not a zero: a period with no packet is absent from the result, so the
+                line breaks there rather than dropping to 0. A bucket that was observed and held
+                nothing on air stays a zero — those are two different facts, and a chart that
+                draws the first as the second shows a cliff that reads as an outage. Percentiles
+                are nearest-rank over the stored buckets, which is not the same measurement as
+                the instant windows above.
+            </p>
+        </div>
+    </div>
+
+    <!-- Sender share -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="h5 mb-0"><i class="fas fa-users me-2"></i>Senders by airtime</h2>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Sender</th>
+                            <th>Airtime</th>
+                            <th>Packets</th>
+                            <th>Last seen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="oc-senders"></tbody>
+                </table>
+            </div>
+            <p class="small text-muted mt-2 mb-0">
+                Ranked by airtime, not by packet count: a talker sending many small packets can
+                cost more than one sending a long message. Senders show once a packet is recorded,
+                so this reflects the retention window, not all time.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script nonce="{{ g.csp_nonce }}">
+(function () {
+    'use strict';
+
+    const el = (id) => document.getElementById(id);
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        }[c]));
+    }
+
+    function formatSeconds(seconds) {
+        if (seconds == null) return '-';
+        if (seconds < 60) return seconds.toFixed(1) + ' s';
+        if (seconds < 3600) return (seconds / 60).toFixed(1) + ' min';
+        return (seconds / 3600).toFixed(1) + ' h';
+    }
+
+    class Occupancy {
+        constructor() {
+            this.days = parseInt(el('oc-window').value, 10) || 7;
+            this.chart = null;
+            el('oc-window').addEventListener('change', (e) => {
+                this.days = parseInt(e.target.value, 10) || 7;
+                this.load();
+            });
+            el('ocRefreshBtn').addEventListener('click', () => this.load());
+            this.load();
+            // The "right now" panel is only worth reading if it stays current.
+            setInterval(() => this.loadLive(), 30000);
+        }
+
+        async load() {
+            await Promise.all([this.loadLive(), this.loadHistory()]);
+        }
+
+        async loadLive() {
+            try {
+                const resp = await fetch('/api/telemetry/occupancy?limit=10', {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                if (!resp.ok) throw new Error('Request failed (' + resp.status + ')');
+                const data = await resp.json();
+                this.renderLive(data);
+                this.renderSenders(data.top_senders || []);
+            } catch (err) {
+                el('ocWindows').innerHTML = '<div class="oc-empty">' + escapeHtml(err.message) + '</div>';
+            }
+        }
+
+        async loadHistory() {
+            try {
+                const resp = await fetch('/api/telemetry/occupancy/history?days=' + this.days, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                if (!resp.ok) throw new Error('Request failed (' + resp.status + ')');
+                this.renderHistory(await resp.json());
+            } catch (err) {
+                el('oc-chart').innerHTML = '';
+                el('ocChartError').textContent = err.message;
+                el('ocChartError').style.display = 'block';
+            }
+        }
+
+        renderLive(data) {
+            el('oc-sf').textContent = data.sf == null ? '-' : data.sf;
+            el('oc-bw').textContent = data.bw_khz == null ? '-' : data.bw_khz + ' kHz';
+            el('oc-cr').textContent = data.coding_rate == null ? '-' : '4/' + data.coding_rate;
+            el('oc-preamble').textContent = data.preamble == null ? '-' : data.preamble;
+            el('oc-samples').textContent = data.samples == null ? '-' : data.samples;
+
+            const age = el('ocAge');
+            if (data.age_seconds == null) {
+                age.textContent = 'no snapshot yet';
+            } else {
+                age.textContent = 'snapshot ' + formatSeconds(data.age_seconds) + ' old';
+                age.className = data.stale ? 'small oc-stale' : 'small text-muted';
+            }
+
+            el('ocDisabled').style.display = data.enabled ? 'none' : 'block';
+
+            const windows = Object.keys(data)
+                .filter((key) => key.endsWith('_rx_percent'))
+                .map((key) => key.slice(0, -'_rx_percent'.length));
+            if (!windows.length) {
+                el('ocWindows').innerHTML = '<div class="oc-empty">Nothing recorded yet.</div>';
+                return;
+            }
+            el('ocWindows').innerHTML = windows.map((name) => {
+                const rx = data[name + '_rx_percent'] || 0;
+                const tx = data[name + '_tx_percent'] || 0;
+                const seconds = data[name + '_seconds'] || 0;
+                return '<div class="oc-window-row">'
+                    + '<div class="oc-window-name">' + escapeHtml(name) + ' (' + seconds + ' s)</div>'
+                    + '<div class="oc-bar"><span class="oc-seg-rx" style="width:' + Math.min(rx, 100) + '%"></span></div>'
+                    + '<span class="small">' + rx.toFixed(1) + '% rx</span>'
+                    + '<span class="small">' + tx.toFixed(1) + '% tx</span>'
+                    + '</div>';
+            }).join('');
+        }
+
+        renderHistory(data) {
+            const buckets = data.buckets || [];
+            const sampleSeconds = data.sample_seconds || 60;
+            const hasData = buckets.length > 0;
+
+            el('ocChartError').textContent = hasData ? '' : 'Nothing recorded in this window.';
+            el('ocChartError').style.display = hasData ? 'none' : 'block';
+            el('oc-chart').style.display = hasData ? 'block' : 'none';
+
+            el('oc-total-rx').textContent = hasData ? (data.total_rx_ms / 1000).toFixed(1) + ' s' : '-';
+            el('oc-total-tx').textContent = hasData ? (data.total_tx_ms / 1000).toFixed(1) + ' s' : '-';
+            el('oc-packets').textContent = hasData ? data.packets : '-';
+            el('oc-p50').textContent = data.p50_rx_ms == null ? '-' : data.p50_rx_ms.toFixed(1) + ' ms';
+            el('oc-p95').textContent = data.p95_rx_ms == null ? '-' : data.p95_rx_ms.toFixed(1) + ' ms';
+
+            if (!hasData) return;
+
+            /* Aggregate to a readable number of columns. Sums can be re-aggregated
+               the way means cannot, so a coarser step is the same measurement rather
+               than a rounded one. A column with no written bucket stays a gap: "nothing
+               seen" and "observed and empty" are two different facts. */
+            const maxColumns = 120;
+            const duration = Math.max(data.end_time - data.start_time, sampleSeconds);
+            const step = Math.max(sampleSeconds, Math.ceil(duration / maxColumns));
+            const groups = new Map();
+            buckets.forEach((bucket) => {
+                const index = Math.floor((bucket.bucket_ts - data.start_time) / step);
+                const group = groups.get(index) || { rx: 0, tx: 0 };
+                group.rx += bucket.rx_ms;
+                group.tx += bucket.tx_ms;
+                groups.set(index, group);
+            });
+
+            const rxPoints = [];
+            const txPoints = [];
+            const columnCount = Math.floor(duration / step) + 1;
+            for (let index = 0; index < columnCount; index += 1) {
+                const group = groups.get(index);
+                const x = data.start_time + index * step;
+                const percentOfColumn = (millis) => millis / (step * 1000) * 100;
+                rxPoints.push({ x: x, y: group ? percentOfColumn(group.rx) : null });
+                txPoints.push({ x: x, y: group ? percentOfColumn(group.tx) : null });
+            }
+
+            const style = getComputedStyle(document.documentElement);
+            const datasets = [
+                { label: 'rx %', data: rxPoints, borderColor: style.getPropertyValue('--oc-rx').trim(), pointRadius: 2, spanGaps: false },
+                { label: 'tx %', data: txPoints, borderColor: style.getPropertyValue('--oc-tx').trim(), pointRadius: 2, spanGaps: false },
+            ];
+
+            if (this.chart) {
+                this.chart.data.datasets = datasets;
+                this.chart.update();
+                return;
+            }
+            this.chart = new Chart(el('oc-chart'), {
+                type: 'line',
+                data: { datasets: datasets },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            ticks: { callback: (value) => new Date(value * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit' }) },
+                        },
+                        y: { title: { display: true, text: 'occupancy %' }, beginAtZero: true },
+                    },
+                },
+            });
+        }
+
+        renderSenders(rows) {
+            const host = el('oc-senders');
+            if (!rows.length) {
+                host.innerHTML = '<tr><td colspan="4" class="oc-empty">No sender recorded yet.</td></tr>';
+                return;
+            }
+            host.innerHTML = rows.map((row) => '<tr>'
+                + '<td><code>' + escapeHtml(row.sender) + '</code></td>'
+                + '<td>' + escapeHtml(row.airtime_ms.toFixed(1)) + ' ms</td>'
+                + '<td>' + escapeHtml(row.packets) + '</td>'
+                + '<td>' + escapeHtml(new Date(row.last_seen * 1000).toLocaleString()) + '</td>'
+                + '</tr>').join('');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => new Occupancy());
+})();
+</script>
+{% endblock %}

@@ -2048,6 +2048,28 @@
    "GET"
   ]
  },
+ "/occupancy": {
+  "GET locked anon": {
+   "content_type": "text/html",
+   "csp_script_src": "script-src 'self' 'nonce-X'",
+   "location": "/login?next=/occupancy",
+   "status": 302,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "text/html",
+   "csp_script_src": "script-src 'self' 'nonce-X'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "occupancy_page",
+  "methods": [
+   "GET"
+  ]
+ },
  "/plugins": {
   "GET locked anon": {
    "content_type": "text/html",

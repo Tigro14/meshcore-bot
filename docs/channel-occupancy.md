@@ -96,6 +96,10 @@ days.
 
 ## Reading it
 
+The Web Viewer page `/occupancy` draws all of this — the windows, the history chart,
+the percentiles and the sender share — from the two routes below, which are what it
+reads.
+
 `GET /api/telemetry/occupancy` — the live windows and the sender share:
 
 ```json

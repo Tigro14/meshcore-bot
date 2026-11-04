@@ -1006,6 +1006,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 'greeter',
                 'region_warnings_page',
                 'regions_page',
+                'occupancy_page',
                 'logs',
                 'multibyte_rollout',
                 'mesh',
@@ -5566,6 +5567,10 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         def regions_page():
             """Public explainer: why the bot sends region warnings, with public stats."""
             return render_template('regions.html')
+        @self.app.route('/occupancy')
+        def occupancy_page():
+            """Channel airtime page: the modelled windows, the history buckets, the sender share."""
+            return render_template('occupancy.html')
         @self.app.route('/time')
         def time_page():
             """Time synchronization page"""
