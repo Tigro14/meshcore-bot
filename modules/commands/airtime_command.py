@@ -23,6 +23,16 @@ _TOP_SENDERS = 3
 _NAME_WIDTH = 12
 
 
+def _render_bw(bw_khz: float) -> str:
+    """Render a bandwidth without inventing precision: 125.0 reads as 125, 62.5 stays 62.5.
+
+    Rounding every bandwidth to an integer would report a 62.5 kHz radio as 62, which is a
+    different modulation and changes the airtime the reply is estimating from.
+    """
+    value = float(bw_khz)
+    return str(int(value)) if value.is_integer() else str(value)
+
+
 class AirtimeCommand(BaseCommand):
     """Reports the channel airtime estimate on demand.
 
@@ -106,7 +116,7 @@ class AirtimeCommand(BaseCommand):
             self.translate(
                 'commands.airtime.header',
                 sf=mod['sf'],
-                bw=int(mod['bw_khz']),
+                bw=_render_bw(mod['bw_khz']),
                 cr=mod['cr_den'],
             )
         ]

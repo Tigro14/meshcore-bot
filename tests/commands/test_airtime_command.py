@@ -110,6 +110,19 @@ class TestReply:
         assert 'Nothing heard' in reply
         assert '0%' not in reply
 
+    def test_bandwidth_keeps_its_fraction(self):
+        """62.5 kHz is not 62 kHz: the header states the modulation the estimate uses."""
+        occupancy = _occupancy()
+        occupancy.modulation = lambda: {'sf': 8, 'bw_khz': 62.5, 'cr_den': 8, 'preamble': 8}
+        reply = self.cmd.format_reply(occupancy, [], BODY)
+        assert 'SF8/62.5kHz' in reply
+
+    def test_an_integral_bandwidth_is_not_written_with_a_false_decimal(self):
+        """125.0kHz claims a precision the reading does not have; 125kHz does not."""
+        reply = self.cmd.format_reply(_occupancy(), [], BODY)
+        assert '125kHz' in reply
+        assert '125.0kHz' not in reply
+
     def test_senders_keep_the_airtime_order(self):
         """Ranking is by airtime: many short packets cost more than one long message."""
         senders = [_sender('B', 214, 12), _sender('A', 90, 1)]
