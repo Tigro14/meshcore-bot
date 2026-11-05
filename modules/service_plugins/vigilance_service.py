@@ -14,6 +14,8 @@ itself, whose markup carries no level (the old 'vigilancemeteo' package is unmai
 With a key the product is national, so one request answers every department. Without
 one the page is fetched once per poll: the cookie it sets is a session cookie, so the
 same token answers for every department, and only one request per department follows.
+Requests of one poll are spaced by ``request_delay`` (default 2 s) rather than sent as
+one burst.
 """
 
 import asyncio
@@ -89,6 +91,12 @@ _VIGILANCE_API_URL = 'https://public-api.meteofrance.fr/public/DPVigilance/v1/ca
 # page hands over as the `mfsession` cookie, which is that token written in ROT-13.
 # Metropolitan France and Corsica only, the overseas departments are another product.
 _VIGILANCE_API_V3 = 'https://rwg.meteofrance.com/wsft/v3'
+
+# Pause between two requests of the same poll. The endpoint is the site's own, with no
+# published rate limit, so a list of departments is spread out instead of fired as one burst:
+# ten departments take about 20 s instead of under a second, which is nothing on an 8 h poll.
+# Configured by `request_delay`.
+_REQUEST_DELAY_SECONDS = 2.0
 
 # Color codes used by the product: 1 is the lowest level.
 _COLOR_IDS = {1: 'Vert', 2: 'Jaune', 3: 'Orange', 4: 'Rouge'}
@@ -395,14 +403,18 @@ def _session_token(page_response: requests.Response) -> str:
 
 
 def fetch_vigilance_site_api(
-    department: str, token: str, url: str, timeout: int = 10
+    department: str, token: str, url: str, timeout: int = 10, delay: float = 0.0
 ) -> dict[str, Any]:
     """
     Read the level for a department from the JSON endpoint the site itself calls.
 
+    `delay` pauses before the request, so a batch of departments is not sent as one burst.
+
     Returns the same dict as fetch_vigilance.
     Raises requests.exceptions.RequestException on network errors.
     """
+    if delay > 0:
+        time.sleep(delay)
     response = requests.get(
         f'{_VIGILANCE_API_V3}/warning/full',
         params={'domain': department},
@@ -430,6 +442,13 @@ def fetch_vigilance_site_api(
     }
 
 
+def _spaced_page(url: str, timeout: int, delay: float) -> requests.Response:
+    """Fetch a page, after the pause that separates it from the previous request."""
+    if delay > 0:
+        time.sleep(delay)
+    return requests.get(url, headers=_VIGILANCE_HEADERS, timeout=timeout)
+
+
 def _page_entry(response: requests.Response, url: str) -> dict[str, Any]:
     """Build an entry from the page markup, which carries no level and reports Vert."""
     soup = BeautifulSoup(response.content, 'html.parser')
@@ -443,7 +462,7 @@ def _page_entry(response: requests.Response, url: str) -> dict[str, Any]:
 
 
 def fetch_vigilance_multi(
-    codes: list[str], api_key: str = '', timeout: int = 10
+    codes: list[str], api_key: str = '', timeout: int = 10, delay: float = 0.0
 ) -> dict[str, dict[str, Any]]:
     """
     Fetch current vigilance data for several French departments from Météo-France.
@@ -457,6 +476,10 @@ def fetch_vigilance_multi(
     same token answers for every department and only one request per department follows,
     which is one request per department instead of two. With no cookie there is nothing to
     authenticate with, so each department falls back to its own page.
+
+    ``delay`` is the pause between two requests of the same poll: the page fetch is not
+    preceded by one, and every request after it is. So a list of N costs N+1 requests and N
+    pauses.
 
     Returns code -> dict, each entry with keys: color, summary, bulletin_date, url.
     Raises ValueError for an empty list, for an unknown department, or for an overseas
@@ -484,21 +507,23 @@ def fetch_vigilance_multi(
                 f"Department {code} is overseas, so its level needs [Vigilance_Service] api_key"
             )
         if token:
-            entries[code] = fetch_vigilance_site_api(code, token, url, timeout)
+            # The page is already fetched, so every endpoint call here is a request after
+            # the first one of the poll and is spaced.
+            entries[code] = fetch_vigilance_site_api(code, token, url, timeout, delay)
         else:
             # No cookie, so nothing to authenticate with: fall back to what the markup
             # carries, which for a department page is no level at all, and every
             # department then needs its own page.
-            page = response if code == codes[0] else requests.get(
-                url, headers=_VIGILANCE_HEADERS, timeout=timeout
-            )
+            page = response if code == codes[0] else _spaced_page(url, timeout, delay)
             page.raise_for_status()
             entries[code] = _page_entry(page, url)
 
     return entries
 
 
-def fetch_vigilance(department: str, api_key: str = '', timeout: int = 10) -> dict[str, Any]:
+def fetch_vigilance(
+    department: str, api_key: str = '', timeout: int = 10, delay: float = 0.0
+) -> dict[str, Any]:
     """
     Fetch current vigilance data for a French department from Météo-France.
 
@@ -509,7 +534,7 @@ def fetch_vigilance(department: str, api_key: str = '', timeout: int = 10) -> di
     a key, and requests.exceptions.RequestException on network errors.
     """
     code = normalize_department(department)
-    return fetch_vigilance_multi([code], api_key, timeout)[code]
+    return fetch_vigilance_multi([code], api_key, timeout, delay)[code]
 
 
 class VigilanceService(BaseServicePlugin):
@@ -564,6 +589,17 @@ class VigilanceService(BaseServicePlugin):
             "help": "How often to check Météo-France (milliseconds). Default 8 h.",
         },
         {
+            "key": "request_delay",
+            "label": "Delay between requests",
+            "type": "float",
+            "min": 0,
+            "default": _REQUEST_DELAY_SECONDS,
+            "unit": "s",
+            "help": "Pause between two requests of the same poll. The site's endpoint has no "
+                    "published rate limit, so a list of departments is spread out rather than "
+                    "sent as one burst. 0 sends them back to back.",
+        },
+        {
             "key": "alert_throttle",
             "label": "Alert throttle",
             "type": "int",
@@ -612,6 +648,9 @@ class VigilanceService(BaseServicePlugin):
         poll_ms = self.bot.config.getint(section, 'poll_interval', fallback=28800000)
         self.poll_interval_seconds: float = poll_ms / 1000.0
         self.alert_throttle: int = self.bot.config.getint(section, 'alert_throttle', fallback=3600)
+        self.request_delay: float = self.bot.config.getfloat(
+            section, 'request_delay', fallback=_REQUEST_DELAY_SECONDS
+        )
         raw_levels = self.bot.config.get(section, 'alert_levels', fallback='Orange,Rouge')
         self.alert_levels: list[str] = [lvl.strip() for lvl in raw_levels.split(',') if lvl.strip()]
         self.silence_mesh: bool = self.bot.config.getboolean(
@@ -627,9 +666,10 @@ class VigilanceService(BaseServicePlugin):
         self._last_alert_time: dict[str, float] = {}
 
         self.logger.info(
-            "Vigilance service initialized: depts=%s channel=%s interval=%.0fs throttle=%ds levels=%s",
+            "Vigilance service initialized: depts=%s channel=%s interval=%.0fs throttle=%ds "
+            "levels=%s delay=%.1fs",
             ', '.join(self.departments), self.channel, self.poll_interval_seconds,
-            self.alert_throttle, ', '.join(self.alert_levels),
+            self.alert_throttle, ', '.join(self.alert_levels), self.request_delay,
         )
         if not self.api_key:
             self.logger.warning(
@@ -724,7 +764,9 @@ class VigilanceService(BaseServicePlugin):
 
         for attempt in range(max_retries):
             try:
-                data = fetch_vigilance_multi(self.departments, self.api_key)
+                data = fetch_vigilance_multi(
+                    self.departments, self.api_key, delay=self.request_delay
+                )
                 if attempt > 0:
                     self.logger.info(
                         "Vigilance fetched after %d attempt(s)", attempt + 1
@@ -737,12 +779,12 @@ class VigilanceService(BaseServicePlugin):
                 return data
             except transient_errors as e:
                 if attempt < max_retries - 1:
-                    delay = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
+                    backoff = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
                     self.logger.info(
                         "Vigilance fetch error (%s), retry %d/%d in %.1fs",
-                        type(e).__name__, attempt + 1, max_retries, delay,
+                        type(e).__name__, attempt + 1, max_retries, backoff,
                     )
-                    time.sleep(delay)
+                    time.sleep(backoff)
                 else:
                     self.logger.error(
                         "Vigilance fetch failed after %d attempts: %s: %s",

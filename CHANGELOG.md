@@ -134,6 +134,13 @@ semantic versioning.
   list, because a reply naming all of them would not fit the RF budget. See
   `docs/vigilance-service.md`.
 
+- `[Vigilance_Service] request_delay` (default 2 s) puts a pause between two requests of the same
+  poll, so a list of departments is spread out instead of arriving as one burst: the page fetch is
+  not preceded by a pause and every request after it is, which makes a list of 10 cost 11 requests
+  and 10 pauses, about 20 s on an 8 h poll. `vigi` is paced by the same key. With an API key a poll
+  is one request, so nothing is spaced, and `request_delay = 0` sends the requests back to back.
+  See `docs/vigilance-service.md`.
+
 ### Changed
 
 - `meshcore` now requires 2.3.14 or newer. Before 2.3.13, `send_msg_with_retry`

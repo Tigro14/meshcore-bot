@@ -35,6 +35,9 @@ channel = #general
 # Minimum seconds between two alerts for the same department
 alert_throttle = 3600
 
+# Pause between two requests of the same poll (seconds). 0 sends them back to back
+request_delay = 2
+
 # Levels that trigger a post
 alert_levels = Orange,Rouge
 ```
@@ -56,6 +59,7 @@ comments.
 | `api_key` | Optional key from portail-api.meteofrance.fr (`DonneesPubliquesVigilance`); required for the overseas departments | — |
 | `channel` | Mesh channel for vigilance alerts | `#general` |
 | `poll_interval` | How often to check Météo-France (milliseconds) | `28800000` (8 h) |
+| `request_delay` | Pause between two requests of the same poll, in seconds | `2` |
 | `alert_throttle` | Minimum seconds between successive alerts | `3600` (1 h) |
 | `alert_levels` | Comma-separated levels that trigger an alert (`Vert,Jaune,Orange,Rouge`) | `Orange,Rouge` |
 | `flood_scope` | Optional regional TC_FLOOD scope, e.g. `#west` | inherits `[Channels]` |
@@ -91,6 +95,11 @@ comments.
   request; without one the page is fetched once (the `mfsession` cookie is a session cookie, so
   the same token answers for every department) and one request per department follows — a list
   of 10 costs 11 requests, not 20.
+- **Pacing**: `request_delay` (default 2 s) is the pause between two requests of the same poll,
+  so a list is spread out instead of fired as one burst. The first request of a poll is not
+  preceded by a pause and every one after it is, so a list of 10 costs 11 requests and 10 pauses,
+  about 20 s — nothing on an 8 h poll. `vigi` is paced by the same key. With an API key there is
+  one request per poll, so nothing is spaced. `request_delay = 0` sends the requests back to back.
 - **Throttle**: `alert_throttle` prevents a flood of posts when the level stays elevated
   across polls. Level changes are logged even when no alert is sent.
 - **Retries**: transient network errors (connection reset, timeouts, remote disconnects)

@@ -416,6 +416,80 @@ class TestFetchVigilanceSources:
         assert svc.departments == ["75", "974"]
 
 
+class TestRequestDelay:
+    """Requests of one poll are spaced instead of sent as one burst."""
+
+    def _endpoint(self, code, color):
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "update_time": 1762329600,
+            "domain_id": code,
+            "color_max": color,
+            "timelaps": [],
+        }
+        return response
+
+    def _page(self):
+        page = Mock(status_code=200)
+        page.cookies = {"mfsession": "rlz"}
+        return page
+
+    def _run(self, codes, api_key, delay, responses):
+        order = []
+
+        def fake_get(*args, **kwargs):
+            order.append("get")
+            return next(responses)
+
+        def fake_sleep(seconds):
+            order.append(f"sleep:{seconds}")
+
+        with patch(
+            "modules.service_plugins.vigilance_service.requests.get", side_effect=fake_get
+        ), patch(
+            "modules.service_plugins.vigilance_service.time.sleep", side_effect=fake_sleep
+        ):
+            entries = fetch_vigilance_multi(codes, api_key, delay=delay)
+        return order, entries
+
+    def test_the_first_request_is_not_preceded_by_a_pause(self):
+        responses = iter([self._page(), self._endpoint("95", 3), self._endpoint("13", 2)])
+        order, entries = self._run(["95", "13"], "", 2.0, responses)
+        assert order == ["get", "sleep:2.0", "get", "sleep:2.0", "get"]
+        assert entries["95"]["color"] == "Orange"
+
+    def test_zero_delay_sends_the_requests_back_to_back(self):
+        responses = iter([self._page(), self._endpoint("95", 3), self._endpoint("13", 2)])
+        order, _ = self._run(["95", "13"], "", 0.0, responses)
+        assert order == ["get", "get", "get"]
+
+    def test_pages_are_spaced_too_when_the_page_sets_no_cookie(self):
+        page_95 = Mock(status_code=200)
+        page_95.cookies = {}
+        page_95.content = ORANGE_HTML.encode("utf-8")
+        page_25 = Mock(status_code=200)
+        page_25.cookies = {}
+        page_25.content = GREEN_HTML.encode("utf-8")
+        order, entries = self._run(["95", "25"], "", 2.0, iter([page_95, page_25]))
+        assert order == ["get", "sleep:2.0", "get"]
+        assert entries["25"]["color"] == "Vert"
+
+    def test_default_is_two_seconds(self):
+        assert _svc().request_delay == 2.0
+
+    def test_delay_parsed_from_config(self):
+        assert _svc(request_delay="1.5").request_delay == 1.5
+
+    def test_service_passes_the_configured_delay(self):
+        svc = _svc(request_delay="1.5")
+        with patch(
+            "modules.service_plugins.vigilance_service.fetch_vigilance_multi",
+            return_value={"25": _info("Orange")},
+        ) as fetch:
+            svc._fetch_with_retry()
+        assert fetch.call_args.kwargs["delay"] == 1.5
+
+
 class TestFetchWithRetry:
     def test_returns_data_on_first_attempt(self):
         svc = _svc()

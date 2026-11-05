@@ -2771,6 +2771,11 @@ channel = #general
 # How often to check Météo-France (milliseconds). Default: 28800000 (8 hours)
 poll_interval = 28800000
 
+# Pause between two requests of the same poll, in seconds, so a list of departments is
+# spread out instead of sent as one burst. The first request of a poll is not preceded by a
+# pause. Default: 2. 0 sends the requests back to back.
+request_delay = 2
+
 # Minimum seconds between successive alerts for the same department (throttle).
 # Default: 3600 (1 hour)
 alert_throttle = 3600

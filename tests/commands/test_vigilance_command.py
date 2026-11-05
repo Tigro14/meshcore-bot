@@ -169,6 +169,21 @@ class TestExecute:
         assert fetch.call_args[0][1] == "key"
 
     @pytest.mark.asyncio
+    async def test_execute_passes_the_configured_delay(self, command_mock_bot):
+        _vigilance_section(command_mock_bot, department="95")
+        command_mock_bot.config.set("Vigilance_Service", "request_delay", "1.5")
+        cmd = _command(command_mock_bot)
+        msg = mock_message(content="vigi 95", is_dm=True)
+
+        with patch(
+            "modules.commands.vigilance_command.fetch_vigilance",
+            return_value={"color": "Vert", "summary": "", "url": ""},
+        ) as fetch:
+            assert await cmd.execute(msg) is True
+
+        assert fetch.call_args.kwargs["delay"] == 1.5
+
+    @pytest.mark.asyncio
     async def test_execute_reports_fetch_failure_without_crashing(self, command_mock_bot):
         cmd = _command(command_mock_bot)
         msg = mock_message(content="vigi", is_dm=True)

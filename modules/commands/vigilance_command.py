@@ -7,7 +7,11 @@ Provides current weather vigilance status for a French department
 import asyncio
 
 from ..models import MeshMessage
-from ..service_plugins.vigilance_service import fetch_vigilance, normalize_department
+from ..service_plugins.vigilance_service import (
+    _REQUEST_DELAY_SECONDS,
+    fetch_vigilance,
+    normalize_department,
+)
 from .base_command import BaseCommand
 
 
@@ -55,11 +59,15 @@ class VigilanceCommand(BaseCommand):
             _trigger, args = self.split_trigger_and_args(message.content)
             dept = self._parse_department(args)
             api_key = str(self.get_config_value("Vigilance_Service", "api_key", fallback="")).strip()
+            delay = float(self.get_config_value(
+                "Vigilance_Service", "request_delay", fallback=_REQUEST_DELAY_SECONDS,
+                value_type="float",
+            ))
 
             # Fetch vigilance data in executor to avoid blocking
             loop = asyncio.get_event_loop()
             vigilance_data = await loop.run_in_executor(
-                None, lambda: fetch_vigilance(dept, api_key)
+                None, lambda: fetch_vigilance(dept, api_key, delay=delay)
             )
 
             # Format response
