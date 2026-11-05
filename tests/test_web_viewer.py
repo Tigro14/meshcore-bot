@@ -3067,10 +3067,15 @@ class TestSubscribeCommandsHistoryReplay:
                 return super().execute(sql, parameters)
 
         def tracing_connect(*args, **kwargs):
-            kwargs["factory"] = TracingConnection
+            # Other viewers may refresh their own databases concurrently.
+            database = args[0] if args else kwargs.get("database")
+            if str(database) == str(viewer.db_path):
+                kwargs["factory"] = TracingConnection
             return real_connect(*args, **kwargs)
 
         monkeypatch.setattr(sqlite3, "connect", tracing_connect)
+        with closing(sqlite3.connect(":memory:")) as unrelated:
+            unrelated.execute("PRAGMA foreign_keys=ON")
         viewer.db_manager._journal_mode_initialized.discard("Web_Viewer")
         for _ in range(3):
             with closing(viewer._get_db_connection()):
