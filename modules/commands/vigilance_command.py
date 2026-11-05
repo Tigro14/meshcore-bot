@@ -28,7 +28,7 @@ class VigilanceCommand(BaseCommand):
     # Documentation
     short_description = "Get Météo-France weather vigilance alerts (France only)"
     usage = "vigi [department_number]"
-    examples = ["vigi", "vigi 75", "vigi 25"]
+    examples = ["vigi", "vigi 75", "vigi 95", "vigi 2A"]
     parameters = [
         {
             "name": "department",
@@ -54,11 +54,12 @@ class VigilanceCommand(BaseCommand):
             # Parse department from arguments, fall back to config or default
             _trigger, args = self.split_trigger_and_args(message.content)
             dept = self._parse_department(args)
+            api_key = str(self.get_config_value("Vigilance_Service", "api_key", fallback="")).strip()
 
             # Fetch vigilance data in executor to avoid blocking
             loop = asyncio.get_event_loop()
             vigilance_data = await loop.run_in_executor(
-                None, lambda: fetch_vigilance(dept)
+                None, lambda: fetch_vigilance(dept, api_key)
             )
 
             # Format response
@@ -71,19 +72,21 @@ class VigilanceCommand(BaseCommand):
             return False
 
     def _parse_department(self, args: str) -> str:
-        """Parse department number from the arguments after the trigger keyword.
+        """Parse department code from the arguments after the trigger keyword.
 
-        Falls back to the configured department, then '75'.
+        Accepts the numeric codes (``95``) and the Corsican ones (``2a``/``2b``),
+        which Météo-France writes as ``2A``/``2B``. Falls back to the configured
+        department, then '75'.
 
         Args:
             args: Argument text (e.g. "25" for "vigi 25")
 
         Returns:
-            str: The department number
+            str: The department code
         """
         dept = args.strip()
-        if dept.isdigit() and 1 <= len(dept) <= 3:
-            return dept.zfill(2)  # Pad to 2 digits (01, 02, etc.)
+        if dept.isalnum() and 1 <= len(dept) <= 3:
+            return dept.zfill(2) if dept.isdigit() else dept.upper()
 
         # Fall back to the configured department
         return str(self.get_config_value("Vigilance_Service", "department", fallback="75")).strip()
@@ -134,7 +137,8 @@ class VigilanceCommand(BaseCommand):
             "Examples:\n"
             "  vigi        — uses configured department\n"
             "  vigi 75     — Paris\n"
-            "  vigi 25     — Doubs\n"
+            "  vigi 95     — Val-d'Oise\n"
+            "  vigi 2A     — Corse-du-Sud\n"
             "Levels: Vert (✅) = no alert, Jaune (⚠️) = yellow, Orange (🟠) = orange, Rouge (🔴) = red"
         )
 

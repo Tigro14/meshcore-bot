@@ -2745,13 +2745,20 @@ send_link = true
 
 [Vigilance_Service]
 # Météo-France weather vigilance alert monitor (France only)
-# Polls vigilance.meteofrance.fr and posts to a channel when Orange or Rouge
+# Polls the official vigilance product and posts to a channel when Orange or Rouge
 # vigilance is active for the configured department.
 # Requires: requests, beautifulsoup4
 enabled = false
 
-# French department number to monitor (e.g. 75 for Paris, 25 for Doubs)
+# French department to monitor: number (75 for Paris, 25 for Doubs, 95 for Val-d'Oise),
+# Corsican code (2A/2B), or a department name.
 department = 75
+
+# Optional key from https://portail-api.meteofrance.fr, subscribed to
+# DonneesPubliquesVigilance. Without it the level comes from the site's own JSON endpoint,
+# using the session cookie the page sets, which covers metropolitan France and Corsica only:
+# an overseas department needs the key.
+# api_key =
 
 # Channel to post vigilance alerts to
 channel = #general

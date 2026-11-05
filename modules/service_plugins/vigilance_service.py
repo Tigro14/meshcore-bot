@@ -5,17 +5,22 @@ Vigilance Météo Service for MeshCore Bot
 Polls Météo-France vigilance weather alerts for a French department and posts
 to a configured channel when the alert level reaches Orange or Rouge.
 
-The scraper directly fetches https://vigilance.meteofrance.fr — no external
-package needed (the old 'vigilancemeteo' package is unmaintained).
+The level comes from the official DonneesPubliquesVigilance product with the key
+in [Vigilance_Service] api_key. Without a key it is read from the JSON endpoint the
+site's own JavaScript calls, authenticated with the session cookie the page sets; that
+path covers metropolitan France and Corsica only. beautifulsoup4 is kept for the page
+itself, whose markup carries no level (the old 'vigilancemeteo' package is unmaintained).
 """
 
 import asyncio
+import codecs
 import contextlib
 import http.client
 import random
 import re
 import socket
 import time
+import unicodedata
 from datetime import datetime
 from typing import Any, Optional
 
@@ -24,15 +29,40 @@ from bs4 import BeautifulSoup, Tag
 
 from .base_service import BaseServicePlugin
 
-# Default département → URL-slug mapping for Météo-France vigilance pages.
-_DEPT_URL_NAMES: dict[str, str] = {
-    '06': 'nice', '13': 'marseille', '14': 'caen', '21': 'dijon',
-    '25': 'besancon', '29': 'brest', '31': 'toulouse', '33': 'bordeaux',
-    '34': 'montpellier', '35': 'rennes', '37': 'tours', '44': 'nantes',
-    '45': 'orleans', '54': 'nancy', '57': 'metz', '59': 'lille',
-    '63': 'clermont-ferrand', '67': 'strasbourg', '69': 'lyon',
-    '75': 'paris', '76': 'rouen', '80': 'amiens', '86': 'poitiers',
-    '87': 'limoges',
+# Département → URL-slug mapping for Météo-France vigilance pages. The site serves
+# pages by department name, never by number: /fr/95 is a 404 while /fr/val-d-oise
+# answers. A slug is the name folded to ASCII with apostrophes and spaces turned into
+# hyphens, so the whole table follows that rule except '90' and '93', spelled as the
+# site uses them. City names (the old table) are not slugs and 404.
+_DEPT_SLUGS: dict[str, str] = {
+    '01': 'ain', '02': 'aisne', '03': 'allier', '04': 'alpes-de-haute-provence',
+    '05': 'hautes-alpes', '06': 'alpes-maritimes', '07': 'ardeche', '08': 'ardennes',
+    '09': 'ariege', '10': 'aube', '11': 'aude', '12': 'aveyron',
+    '13': 'bouches-du-rhone', '14': 'calvados', '15': 'cantal', '16': 'charente',
+    '17': 'charente-maritime', '18': 'cher', '19': 'correze', '2A': 'corse-du-sud',
+    '2B': 'haute-corse', '21': 'cote-d-or', '22': 'cotes-d-armor', '23': 'creuse',
+    '24': 'dordogne', '25': 'doubs', '26': 'drome', '27': 'eure',
+    '28': 'eure-et-loir', '29': 'finistere', '30': 'gard', '31': 'haute-garonne',
+    '32': 'gers', '33': 'gironde', '34': 'herault', '35': 'ille-et-vilaine',
+    '36': 'indre', '37': 'indre-et-loire', '38': 'isere', '39': 'jura',
+    '40': 'landes', '41': 'loir-et-cher', '42': 'loire', '43': 'haute-loire',
+    '44': 'loire-atlantique', '45': 'loiret', '46': 'lot', '47': 'lot-et-garonne',
+    '48': 'lozere', '49': 'maine-et-loire', '50': 'manche', '51': 'marne',
+    '52': 'haute-marne', '53': 'mayenne', '54': 'meurthe-et-moselle', '55': 'meuse',
+    '56': 'morbihan', '57': 'moselle', '58': 'nievre', '59': 'nord',
+    '60': 'oise', '61': 'orne', '62': 'pas-de-calais', '63': 'puy-de-dome',
+    '64': 'pyrenees-atlantiques', '65': 'hautes-pyrenees', '66': 'pyrenees-orientales',
+    '67': 'bas-rhin', '68': 'haut-rhin', '69': 'rhone', '70': 'haute-saone',
+    '71': 'saone-et-loire', '72': 'sarthe', '73': 'savoie', '74': 'haute-savoie',
+    '75': 'paris', '76': 'seine-maritime', '77': 'seine-et-marne', '78': 'yvelines',
+    '79': 'deux-sevres', '80': 'somme', '81': 'tarn', '82': 'tarn-et-garonne',
+    '83': 'var', '84': 'vaucluse', '85': 'vendee', '86': 'vienne',
+    '87': 'haute-vienne', '88': 'vosges', '89': 'yonne', '90': 'terr-de-belfort',
+    '91': 'essonne', '92': 'hauts-de-seine', '93': 'seine-st-denis', '94': 'val-de-marne',
+    '95': 'val-d-oise',
+    # Overseas departments. Saint-Pierre-et-Miquelon (975) has no vigilance page.
+    '971': 'guadeloupe', '972': 'martinique', '973': 'guyane', '974': 'la-reunion',
+    '976': 'mayotte',
 }
 
 _COLOR_CLASSES = ['vert', 'jaune', 'orange', 'rouge', 'green', 'yellow', 'red']
@@ -44,6 +74,25 @@ _VIGILANCE_HEADERS = {
                   '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+}
+
+# Official vigilance product (DonneesPubliquesVigilance). One call answers every
+# department, so the department is picked out of the returned national product.
+_VIGILANCE_API_URL = 'https://public-api.meteofrance.fr/public/DPVigilance/v1/cartevigilance/encours'
+
+# The JSON endpoint the site's own JavaScript calls, for a department page. The markup
+# carries no level and the endpoint refuses an anonymous request: it takes the token the
+# page hands over as the `mfsession` cookie, which is that token written in ROT-13.
+# Metropolitan France and Corsica only, the overseas departments are another product.
+_VIGILANCE_API_V3 = 'https://rwg.meteofrance.com/wsft/v3'
+
+# Color codes used by the product: 1 is the lowest level.
+_COLOR_IDS = {1: 'Vert', 2: 'Jaune', 3: 'Orange', 4: 'Rouge'}
+
+_PHENOMENON_NAMES = {
+    '1': 'Vent', '2': 'Pluie-inondation', '3': 'Orages', '4': 'Crues',
+    '5': 'Neige-verglas', '6': 'Canicule', '7': 'Grand froid',
+    '8': 'Avalanches', '9': 'Vagues-submersion',
 }
 
 
@@ -206,17 +255,181 @@ def _extract_bulletin_date(soup: BeautifulSoup) -> datetime:
     return datetime.now()
 
 
-def fetch_vigilance(department: str, timeout: int = 10) -> dict[str, Any]:
+def _slugify(name: str) -> str:
+    """Fold a department name into the slug Météo-France uses in its URLs."""
+    folded = unicodedata.normalize('NFD', name.strip().lower())
+    folded = ''.join(ch for ch in folded if unicodedata.category(ch) != 'Mn')
+    return folded.replace("'", '-').replace(' ', '-')
+
+
+def _dept_slug(department: str) -> str:
+    """Resolve a department code ('95', '2A') to its page slug.
+
+    Numbers must be in ``_DEPT_SLUGS``: the site has no numeric path, so an unmapped
+    number could only ever 404 and is reported instead. Anything that is not a number
+    is taken as a department name and folded into a slug.
+
+    Raises:
+        ValueError: when the code is a number with no vigilance page.
+    """
+    code = department.strip().upper()
+    slug = _DEPT_SLUGS.get(code) or _DEPT_SLUGS.get(code.zfill(2))
+    if slug:
+        return slug
+    if code.isdigit():
+        raise ValueError(
+            f"Unknown department '{department}': Météo-France has no vigilance page for it"
+        )
+    return _slugify(department)
+
+
+def _parse_api_datetime(value: Any) -> datetime:
+    """Parse the product's update_time (UTC), falling back to now()."""
+    for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S+00:00', '%Y-%m-%dT%H:%M:%S'):
+        try:
+            return datetime.strptime(str(value).strip(), fmt)
+        except (ValueError, TypeError):
+            continue
+    return datetime.now()
+
+
+def _api_summary(color: str, phenomena: list[dict[str, Any]]) -> str:
+    """Build the compact summary the message formatter expects."""
+    if color == 'Vert':
+        return "Pas de vigilance particulière"
+    lines = [f"Vigilance {color.lower()} :"]
+    for item in phenomena:
+        pid = str(item.get('phenomenon_id', ''))
+        lines.append(f"- {_PHENOMENON_NAMES.get(pid, pid)}")
+    return '\n'.join(lines)
+
+
+def fetch_vigilance_api(department: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
+    """
+    Fetch the current level for a department from the official vigilance product.
+
+    The product is national, so the department is read out of its block in the
+    period J timelaps. Returns the same dict as fetch_vigilance.
+    Raises requests.exceptions.RequestException on network errors and
+    ValueError when the product carries no block for that department.
+    """
+    response = requests.get(
+        _VIGILANCE_API_URL,
+        headers={**_VIGILANCE_HEADERS, 'apikey': api_key},
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    try:
+        payload = response.json()
+    except requests.exceptions.JSONDecodeError:
+        # The portal answers HTML when the key is missing or refused.
+        raise ValueError(
+            "The vigilance API did not return JSON: check [Vigilance_Service] api_key"
+        ) from None
+    product = payload.get('product') or {}
+
+    code = department.strip().upper()
+    domain = None
+    for period in product.get('periods') or []:
+        for item in (period.get('timelaps') or {}).get('domain_ids') or []:
+            if str(item.get('domain_id', '')).upper() == code:
+                domain = item
+                break
+        if domain:
+            break
+    if domain is None:
+        raise ValueError(f"The vigilance product has no block for department '{department}'")
+
+    color = _COLOR_IDS.get(int(domain.get('max_color_id') or 1), 'Vert')
+    active = [
+        p for p in domain.get('phenomenon_items') or []
+        if int(p.get('phenomenon_max_color_id') or 1) > 1
+    ]
+
+    return {
+        'color': color,
+        'summary': _api_summary(color, active),
+        'bulletin_date': _parse_api_datetime(product.get('update_time')),
+        'url': f"https://vigilance.meteofrance.fr/fr/{_dept_slug(department)}",
+    }
+
+
+def _session_token(page_response: requests.Response) -> str:
+    """Turn the page's `mfsession` cookie into the Bearer token the JSON endpoint wants."""
+    cookie = page_response.cookies.get('mfsession', '')
+    return codecs.encode(cookie, 'rot13') if cookie else ''
+
+
+def fetch_vigilance_site_api(
+    department: str, token: str, url: str, timeout: int = 10
+) -> dict[str, Any]:
+    """
+    Read the level for a department from the JSON endpoint the site itself calls.
+
+    Returns the same dict as fetch_vigilance.
+    Raises requests.exceptions.RequestException on network errors.
+    """
+    response = requests.get(
+        f'{_VIGILANCE_API_V3}/warning/full',
+        params={'domain': department},
+        headers={**_VIGILANCE_HEADERS, 'Authorization': f'Bearer {token}'},
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    color = _COLOR_IDS.get(int(data.get('color_max') or 1), 'Vert')
+    active: list[dict[str, Any]] = []
+    for item in data.get('timelaps') or []:
+        colors = [int(t.get('color_id') or 1) for t in item.get('timelaps_items') or []]
+        active.append({
+            'phenomenon_id': str(item.get('phenomenon_id', '')),
+            'phenomenon_max_color_id': max(colors) if colors else 1,
+        })
+
+    stamp = data.get('update_time')
+    return {
+        'color': color,
+        'summary': _api_summary(color, [p for p in active if p['phenomenon_max_color_id'] > 1]),
+        'bulletin_date': datetime.fromtimestamp(int(stamp)) if stamp else datetime.now(),
+        'url': url,
+    }
+
+
+def fetch_vigilance(department: str, api_key: str = '', timeout: int = 10) -> dict[str, Any]:
     """
     Fetch current vigilance data for a French department from Météo-France.
 
+    Sources, in order: the official product when ``api_key`` is set, then the JSON
+    endpoint the site's JavaScript calls, then the page markup, which carries no level
+    and reports Vert.
+
     Returns a dict with keys: color, summary, bulletin_date, url.
-    Raises requests.exceptions.RequestException on network errors.
+    Raises ValueError for an unknown department, or for an overseas department without
+    a key, and requests.exceptions.RequestException on network errors.
     """
-    slug = _DEPT_URL_NAMES.get(department, department)
-    url = f"https://vigilance.meteofrance.fr/fr/{slug}"
+    code = department.strip().upper()
+    url = f"https://vigilance.meteofrance.fr/fr/{_dept_slug(code)}"
+
+    if api_key:
+        return fetch_vigilance_api(code, api_key, timeout)
+
     response = requests.get(url, headers=_VIGILANCE_HEADERS, timeout=timeout)
     response.raise_for_status()
+
+    if len(code) != 2:
+        # Overseas department: the site's endpoint has no block for it, only the
+        # official product does, and that one needs a key.
+        raise ValueError(
+            f"Department {code} is overseas, so its level needs [Vigilance_Service] api_key"
+        )
+
+    token = _session_token(response)
+    if token:
+        return fetch_vigilance_site_api(code, token, url, timeout)
+
+    # No cookie, so nothing to authenticate with: fall back to what the markup carries,
+    # which for a department page is no level at all.
     soup = BeautifulSoup(response.content, 'html.parser')
     color = _extract_color(soup)
     return {
@@ -246,6 +459,15 @@ class VigilanceService(BaseServicePlugin):
             "default": "75",
             "help": "French department number to monitor (e.g. 75 for Paris, 25 for Doubs).",
             "required": True,
+        },
+        {
+            "key": "api_key",
+            "label": "Météo-France API key",
+            "type": "str",
+            "default": "",
+            "help": "DonneesPubliquesVigilance key from portail-api.meteofrance.fr. Optional: "
+                    "without it the level comes from the site's own endpoint, which covers "
+                    "metropolitan France and Corsica only. Required for an overseas department.",
         },
         {
             "key": "channel",
@@ -300,6 +522,7 @@ class VigilanceService(BaseServicePlugin):
         section = self.config_section
 
         self.department: str = self.bot.config.get(section, 'department', fallback='75').strip()
+        self.api_key: str = self.bot.config.get(section, 'api_key', fallback='').strip()
         self.channel: str = self.bot.config.get(section, 'channel', fallback='#general').strip()
         poll_ms = self.bot.config.getint(section, 'poll_interval', fallback=28800000)
         self.poll_interval_seconds: float = poll_ms / 1000.0
@@ -322,6 +545,11 @@ class VigilanceService(BaseServicePlugin):
             self.department, self.channel, self.poll_interval_seconds,
             self.alert_throttle, ', '.join(self.alert_levels),
         )
+        if not self.api_key:
+            self.logger.warning(
+                "Vigilance: no api_key configured, so the level comes from the site's own "
+                "endpoint, which covers metropolitan France and Corsica only"
+            )
 
     async def start(self) -> None:
         if not self.enabled:
@@ -403,7 +631,7 @@ class VigilanceService(BaseServicePlugin):
 
         for attempt in range(max_retries):
             try:
-                data = fetch_vigilance(self.department)
+                data = fetch_vigilance(self.department, self.api_key)
                 if attempt > 0:
                     self.logger.info(
                         "Vigilance fetched after %d attempt(s)", attempt + 1

@@ -1,9 +1,15 @@
 # Vigilance Météo-France Service
 
-Polls the [Météo-France vigilance](https://vigilance.meteofrance.fr) page for one French
+Polls the [Météo-France vigilance](https://vigilance.meteofrance.fr) data for one French
 department and posts an alert to a channel when the active level reaches Orange or Rouge.
-No API key: the page is fetched directly with `requests` and parsed with `beautifulsoup4`.
 France only.
+
+The level never comes from the page markup, because the page is filled by JavaScript. It comes
+from the JSON endpoint the site's own JavaScript calls, using the anonymous session cookie the
+page sets, or from the official
+[DonneesPubliquesVigilance](https://portail-api.meteofrance.fr/web/fr/api/DonneesPubliquesVigilance)
+product when `api_key` is set. The key is optional for metropolitan France and Corsica, and
+required for the overseas departments.
 
 Pairs with the [`vigi` command](command-reference.md#vigi-or-vigilance) for on-demand lookups.
 
@@ -16,8 +22,13 @@ Pairs with the [`vigi` command](command-reference.md#vigi-or-vigilance) for on-d
 ```ini
 [Vigilance_Service]
 enabled = true
-department = 75
+department = 95
 channel = #general
+
+# Optional. Key from portail-api.meteofrance.fr, subscribed to DonneesPubliquesVigilance
+# (60 requests/min). Without it the level comes from the site's own endpoint, which covers
+# metropolitan France and Corsica only.
+# api_key =
 
 # Minimum seconds between two alerts for the same event
 alert_throttle = 3600
@@ -39,7 +50,8 @@ comments.
 | Option | Description | Default |
 |--------|-------------|---------|
 | `enabled` | Turn the service on or off | `false` |
-| `department` | French department number to monitor (e.g. `75`, `25`) | `75` |
+| `department` | French department to monitor: number (`75`, `25`, `95`) or Corsican code (`2A`), or a department name | `75` |
+| `api_key` | Optional key from portail-api.meteofrance.fr (`DonneesPubliquesVigilance`); required for the overseas departments | — |
 | `channel` | Mesh channel for vigilance alerts | `#general` |
 | `poll_interval` | How often to check Météo-France (milliseconds) | `28800000` (8 h) |
 | `alert_throttle` | Minimum seconds between successive alerts | `3600` (1 h) |
@@ -53,12 +65,21 @@ comments.
 
 ## Features
 
-- **Page parsing**: the color is read from `data-color`/`data-level` attributes first, then
-  alert CSS classes (legend/menu blocks are skipped), then compound class prefixes such as
-  `vigilance-rouge`, then meta tags, then active-alert text such as
-  `vigilance rouge en cours`. Pages with no alert resolve to `Vert`.
-- **Department slugs**: common departments map to their page slug (`25` → `besancon`);
-  unmapped numbers are used as-is.
+- **Level source**: the level comes from a JSON answer, with color codes 1 Vert … 4 Rouge.
+  Without `api_key` that answer is the endpoint the site's own JavaScript calls
+  (`/wsft/v3/warning/full`), and the token is the ROT-13 of the `mfsession` cookie the page
+  sets — the same translation the page's JavaScript does. With `api_key` the official product
+  is used instead, where the department is read out of the national `periods` →
+  `timelaps.domain_ids` block; one call covers every department, so a 60 req/min key is enough
+  for the default 8 h poll, and it is the only source for the overseas departments.
+- **Page parsing** (last resort, when the endpoint cannot be authenticated): the color is read
+  from `data-color`/`data-level` attributes first, then alert CSS classes (legend/menu blocks
+  are skipped), then compound class prefixes such as `vigilance-rouge`, then meta tags, then
+  active-alert text such as `vigilance rouge en cours`. Pages with no alert resolve to `Vert`.
+- **Department slugs**: every department resolves to its page slug, which is the department
+  name (`95` → `val-d-oise`, `25` → `doubs`, `2A` → `corse-du-sud`). The site has no page for
+  a bare number, so an unmapped number is refused with a clear error instead of fetching a
+  404; a name typed in config (`department = Val-d'Oise`) is folded to its slug.
 - **Throttle**: `alert_throttle` prevents a flood of posts when the level stays elevated
   across polls. Level changes are logged even when no alert is sent.
 - **Retries**: transient network errors (connection reset, timeouts, remote disconnects)
@@ -79,8 +100,10 @@ The page link is appended for Discord/Telegram (the mesh post stays short).
 
 ## Notes
 
-- The service scrapes an HTML page, so a Météo-France redesign can change what the parser
-  finds. When the level cannot be determined it reports `Vert` rather than guessing.
+- The keyless path is the site's own endpoint, not a published API: the path, the cookie and the
+  ROT-13 form of the token can change without warning. If the page does not set the cookie, the
+  service falls back to the markup and reports `Vert`. An overseas department cannot be answered
+  without a key. At start the service logs a warning when no key is configured.
 - Alerts are not persisted across restarts: after a restart, an elevated level triggers a
   new alert on the next poll.
 - The bot must have internet access for this service and for `vigi`.

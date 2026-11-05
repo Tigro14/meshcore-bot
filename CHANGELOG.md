@@ -191,6 +191,24 @@ semantic versioning.
 
 ### Fixed
 
+- The vigilance level is read from JSON. The department page Météo-France serves is filled by
+  JavaScript, so the parser had nothing to read and `vigi` answered `Vert` for every department
+  — verified on a live case: the Bouches-du-Rhône were in Jaune while the bot reported Vert. The
+  official product (free key, portail-api.meteofrance.fr, `DonneesPubliquesVigilance`) is used
+  when `[Vigilance_Service] api_key` is set; otherwise the endpoint the site's own JavaScript
+  calls answers, authenticated with the ROT-13 form of the anonymous `mfsession` cookie the page
+  sets. That keyless path covers metropolitan France and Corsica only, so an overseas department
+  still needs the key. HTML parsing remains the last resort when the page sets no cookie, and a
+  warning is logged at start when no key is configured.
+
+- `vigi 95` answered with an HTTP 404 for every department outside a small hand-written
+  table. That table held city names (`besancon`, `nice`), but Météo-France serves vigilance
+  pages under the department name — `/fr/doubs`, `/fr/val-d-oise` — and a bare number is not
+  a slug, so the fallback (`/fr/95`) could only 404. The table now covers all 101 departments
+  under their real slugs, a department name given in `department` is folded to its slug, and
+  a number with no page is refused with a clear message instead of being fetched. `vigi` also
+  accepts the Corsican codes `2A`/`2B`.
+
 - The Test DM card on `/radio` was unreachable. It had been a partial included by
   `radio.html` in one line; the merge resolved `radio.html` to the single-class
   `RadioManager` page and dropped the include, so `test_dm_card.html` was left in the

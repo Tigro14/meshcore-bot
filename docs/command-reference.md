@@ -305,8 +305,11 @@ When no location is given, uses the sender's companion location if known, then t
 
 ### `vigi` or `vigilance`
 
-Current Météo-France weather vigilance for a French department (France only). Scrapes
-[vigilance.meteofrance.fr](https://vigilance.meteofrance.fr) directly — no API key.
+Current Météo-France weather vigilance for a French department (France only). The level comes
+from JSON, never from the page markup, which JavaScript fills: the site's own endpoint when
+`[Vigilance_Service] api_key` is empty, the
+[DonneesPubliquesVigilance](https://portail-api.meteofrance.fr/web/fr/api/DonneesPubliquesVigilance)
+product when it is set.
 
 **Usage:**
 ```
@@ -318,7 +321,8 @@ vigi [department_number]
 ```
 vigi
 vigi 75
-vigi 25
+vigi 95
+vigi 2A
 ```
 
 **Response:** the active level with an emoji, plus the first phenomenon line when the page
