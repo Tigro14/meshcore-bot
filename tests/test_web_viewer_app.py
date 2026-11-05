@@ -157,11 +157,17 @@ class TestAllowedTables:
             'greeted_users', 'feed_subscriptions', 'feed_activity', 'feed_errors',
             'path_stats', 'unique_advert_packets', 'schema_version',
             'channel_operations', 'channels', 'feed_message_queue',
-            'bbs_messages', 'daily_rollup',
+            'bbs_messages', 'bbs_inbox', 'daily_rollup',
             'dashboard_snapshot',
             'occupancy_samples', 'occupancy_senders',
         }
         assert expected_tables == BotDataViewer.ALLOWED_TABLES
+
+    def test_whitelist_includes_bbs_inbox(self):
+        """The pubkey-keyed BBS mailbox table must be browsable in the viewer."""
+        from modules.web_viewer.app import BotDataViewer
+
+        assert 'bbs_inbox' in BotDataViewer.ALLOWED_TABLES
 
 
 class TestIsSafeTableName:
