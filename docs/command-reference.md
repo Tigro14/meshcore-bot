@@ -136,6 +136,37 @@ status
 
 ---
 
+### `bbs`
+
+Store-and-forward private mailbox between mesh nodes. Mailboxes are keyed on each node's full public key, so nodes that share a name still get separate mailboxes and queued messages survive a rename.
+
+**Usage:**
+- `s <name>` - look up a contact and show a numbered shortlist (each candidate shown with its key prefix)
+- `s <N> <message>` - store the message for candidate N of the shortlist
+- `s <hex-prefix> <message>` - send directly to the contact whose public key starts with the prefix (4+ hex characters)
+- `bbs r` - read your pending messages (DM only)
+- `bbs list` - count your pending messages (DM only)
+- `bbs whoami` - show the name and key prefix the BBS uses for you (DM only)
+
+**Examples:**
+```
+s Tom COD
+s 2 Meet at noon.
+bbs s a1b2c3 Meet at noon.
+bbs r
+bbs list
+```
+
+**Response:** Confirmation when a message is stored; the stored messages themselves when reading.
+
+**Notes:**
+- Recipients are resolved in order: exact name, then public-key prefix (for hexadecimal tokens), then partial name match.
+- Reading is DM-only for privacy. Pending messages are marked read only after the full reply went out on the radio, so a failed send never silently drops them.
+- Senders are notified of pending messages when they DM the bot (unless the DM is itself a `bbs`/`s`/`send` command).
+- Limits are configured in `[BBS_Command]`: mailbox size, daily per-sender quota, commands per minute, message age purge, notification cooldown.
+
+---
+
 ## Information Commands
 
 ### `channels`

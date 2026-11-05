@@ -8,6 +8,16 @@ semantic versioning.
 
 ### Added
 
+- Rebuilt the **BBS** store-and-forward mailbox on `bbs_inbox` (migration 34), keyed on full public
+  keys: two nodes advertising the same name no longer share a mailbox, and a queued message stays
+  deliverable when the recipient renames its node. Recipients resolve in MeshCore-BBS order —
+  exact name, then public-key prefix (4+ hex characters), then partial name — and ambiguous
+  shortlists now print key prefixes (`1 John [a1b2]`); `s <keyprefix> <message>` sends in one step.
+  `bbs whoami` reports the name and key prefix the BBS uses for a node. The inbox reminder on
+  inbound DMs now actually fires (`message_handler` never called `check_inbox_notification`), and
+  `[BBS_Command]` documents every limit plus the new `rate_limit_per_minute` and
+  `notify_cooldown_seconds` keys. See `docs/command-reference.md`.
+
 - Per-channel **Live Channel Messages** publication controls in Radio channel
   management and creation, disabled by default. Hidden channels remain available
   to the bot and statistics; server-side filtering covers live messages, history,
@@ -150,6 +160,11 @@ semantic versioning.
   `docs/web-viewer.md`.
 
 ### Changed
+
+- `bbs r` marks messages read only after the whole reply went out on the radio; a failed send now
+  leaves the mailbox unread so `bbs r` can be retried instead of silently dropping the messages.
+  New messages land only in `bbs_inbox`; the legacy name-keyed `bbs_messages` table stays served
+  read-only by `bbs r` and `bbs list` and empties under the existing age purge.
 
 - `meshcore` now requires 2.3.14 or newer. Before 2.3.13, `send_msg_with_retry`
   reported ACKed DMs as failures: it subscribed to the ACK only after `send_msg`
