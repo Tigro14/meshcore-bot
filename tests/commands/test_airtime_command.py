@@ -117,6 +117,20 @@ class TestReply:
         reply = self.cmd.format_reply(occupancy, [], BODY)
         assert 'SF8/62.5kHz' in reply
 
+    def test_the_header_names_the_coding_rate_as_the_modulation_uses(self):
+        """A coding rate is 4 over a denominator (5..8), not the denominator over 4.
+
+        The header states which modulation the estimate was built from, so putting the
+        denominator above the 4 states a modulation that no packet on the channel has ever
+        had: CR8/5 is not a coding rate, while the airtime beside it was computed for 4/8.
+        The web page renders the same reading as 4/8, so the two must not disagree.
+        """
+        occupancy = _occupancy()
+        occupancy.modulation = lambda: {'sf': 8, 'bw_khz': 62.5, 'cr_den': 8, 'preamble': 8}
+        reply = self.cmd.format_reply(occupancy, [], BODY)
+        assert 'CR4/8' in reply
+        assert 'CR8/5' not in reply
+
     def test_an_integral_bandwidth_is_not_written_with_a_false_decimal(self):
         """125.0kHz claims a precision the reading does not have; 125kHz does not."""
         reply = self.cmd.format_reply(_occupancy(), [], BODY)

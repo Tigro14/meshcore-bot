@@ -305,6 +305,12 @@ semantic versioning.
   left the previous claim standing beside an error saying the request failed. A failed request
   now takes the claim back, since it is not evidence about the setting.
 
+- The `airtime` reply wrote the coding rate the wrong way round: the catalog string was
+  `CR{cr}/5`, which puts the denominator above the 4, so a bot recording CR 4/8 answered
+  "CR8/5" — not a coding rate — beside an airtime computed for 4/8. The header names the
+  modulation the estimate is built from, so it has to state that modulation as it is; the
+  string now renders `CR4/{cr}`, the same reading the `/airtime` page uses.
+
 ## [1.1.0] - 2026-09-13
 
 ### Added

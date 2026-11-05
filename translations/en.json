@@ -364,7 +364,7 @@
     },
     "airtime": {
       "description": "Show the estimated channel airtime for the last minute and the top talkers",
-      "header": "Airtime modelled from SF{sf}/{bw}kHz CR{cr}/5, not measured",
+      "header": "Airtime modelled from SF{sf}/{bw}kHz CR4/{cr}, not measured",
       "window": "{seconds}s: rx {rx}% tx {tx}% ({packets} packet(s))",
       "no_samples": "Nothing heard in the last {seconds}s - a quiet channel is not a stopped recorder",
       "top_senders": "Talkers: {names}",
