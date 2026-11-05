@@ -2504,6 +2504,8 @@ class TestClockDriftFreshness:
         """rows: list of dicts with keys name, public_key, message (drift, age),
         advert (drift, age). age = seconds ago the packet was received."""
         db_path = viewer.db_path
+        # All receipt strings in these fixtures are explicitly generated in UTC.
+        viewer.config.set("Bot", "timezone", "UTC")
         now_epoch = int(time.time())
 
         def ts(epoch):
