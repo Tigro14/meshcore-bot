@@ -24,6 +24,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 from meshcore.events import EventType
 
+from .clock_observations import latest_clock_samples, observation_window, parse_timestamp, utc_iso
+from .clock_reply import ClockReplyWatch
 from .flood_scope import scope_key_hex
 from .maintenance import MaintenanceRunner, read_smtp_settings, send_smtp_message
 from .models import CHANNEL_REGIONAL_FLOOD_SCOPE_BODY_OVERHEAD, channel_body_limit, self_info_name
@@ -400,74 +402,23 @@ class MessageScheduler:
             )
 
     def _resolve_clock_sync_target_contact(self, identifier: str) -> dict[str, Any] | None:
-        """Resolve configured identifier to a mesh contact by name or public key/prefix."""
-        meshcore = getattr(self.bot, "meshcore", None)
-        if not meshcore:
+        """Resolve clock targets with the same unique identity rules as ordinary DMs."""
+        from .dm_contacts import DmContactResolver
+        if not getattr(self.bot, 'meshcore', None):
             return None
-        needle = (identifier or "").strip()
-        if not needle:
+        resolver = getattr(self.bot, 'dm_contact_resolver', None)
+        if not isinstance(resolver, DmContactResolver):
+            resolver = DmContactResolver(self.bot)
+            self.bot.dm_contact_resolver = resolver
+        key, row, reason = resolver.identify(identifier)
+        if key is None:
+            self.logger.warning('Clock_Sync_Admin target unresolved | Reason: %s', reason)
             return None
-
-        try:
-            contact = meshcore.get_contact_by_name(needle)
-            if contact:
-                self.logger.debug(
-                    "Clock_Sync_Admin resolved target %s via contact name lookup",
-                    sanitize_name(needle),
-                )
-                return contact
-        except Exception:
-            pass
-
-        contacts = getattr(meshcore, "contacts", {}) or {}
-        for contact_data in contacts.values():
-            public_key = (contact_data.get("public_key", "") or "").strip()
-            if not public_key:
-                continue
-            if public_key == needle or public_key.startswith(needle):
-                self.logger.debug(
-                    "Clock_Sync_Admin resolved target %s via public key lookup (%s...)",
-                    sanitize_name(needle),
-                    public_key[:12],
-                )
-                return contact_data
-
-        # Fallback: resolve against the persistent complete_contact_tracking table.
-        # This keeps the cron job working even when the node is not present in the
-        # live radio contact table (e.g. radio restarted / contact purged), as long
-        # as it was ever tracked. Stored targets are usually full pubkeys, so this
-        # is the most reliable resolution path.
-        db_manager = getattr(self.bot, "db_manager", None)
-        if db_manager:
-            try:
-                with db_manager.connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT name, public_key FROM complete_contact_tracking "
-                        "WHERE lower(public_key) = lower(?) OR lower(name) = lower(?) "
-                        "OR lower(public_key) LIKE lower(?) || '%' LIMIT 1",
-                        (needle, needle, needle),
-                    )
-                    row = cursor.fetchone()
-                    if row and row[0] and row[1]:
-                        self.logger.debug(
-                            "Clock_Sync_Admin resolved target %s via DB fallback (%s...)",
-                            sanitize_name(needle),
-                            row[1][:12],
-                        )
-                        return {
-                            "name": row[0],
-                            "adv_name": row[0],
-                            "public_key": row[1],
-                        }
-            except Exception as exc:
-                self.logger.debug("Clock_Sync_Admin DB fallback resolve failed: %s", exc)
-
-        self.logger.debug(
-            "Clock_Sync_Admin could not resolve target %s",
-            sanitize_name(needle),
-        )
-        return None
+        self.logger.debug('Clock_Sync_Admin resolved target | Key prefix: %s', key[:12])
+        cached = next((c for c in resolver._radio_contacts() if resolver._key(c) == key), None)
+        if cached is not None:
+            return cached
+        return {'public_key': key, 'name': (row or {}).get('name') or key[:12]}
 
     def _get_clock_sync_admin_payload(self) -> str:
         """Return configured Clock_Sync_Admin payload, with a safe default."""
@@ -493,187 +444,44 @@ class MessageScheduler:
 
     @staticmethod
     def _clock_sync_parse_db_timestamp(value: Any) -> Optional[float]:
-        """Parse a naive UTC timestamp from the DB into epoch seconds."""
-        if value is None:
+        return parse_timestamp(value, utc=True)
+
+    def _get_clock_sync_target_drift(self, contact_name: str, public_key: str = "") -> Optional[int]:
+        """Use exactly the same clock evidence and time bases as Time/Contacts."""
+        db_manager = getattr(self.bot, 'db_manager', None)
+        if not db_manager or not contact_name:
             return None
-        text = str(value).strip()
-        for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
-            try:
-                return datetime.datetime.strptime(text, fmt).replace(
-                    tzinfo=datetime.timezone.utc
-                ).timestamp()
-            except ValueError:
-                continue
-        return None
-
-    def _get_clock_sync_target_drift(
-        self, contact_name: str, public_key: str = ""
-    ) -> Optional[int]:
-        """Latest clock drift (seconds) for a target, from its clocked packets.
-
-        Considers the latest message (``message_stats``) and the latest
-        advertisement (``complete_contact_tracking.raw_advert_data.advert_time``
-        sender clock vs ``last_heard`` reception) and returns the drift of the
-        freshest sample — the same source the web viewer drift badge uses.
-
-        Returns None when no parsable sender timestamp is available (drift
-        unknown); callers should still send in that case.
-        """
-        db_manager = getattr(self.bot, "db_manager", None)
-        if not db_manager:
-            return None
-        name = (contact_name or "").strip()
-        if not name:
-            return None
-
-        samples: list[tuple[float, int]] = []  # (received_at, drift)
         try:
             with db_manager.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    WITH latest_message_per_sender AS (
-                        SELECT sender_id, MAX(id) AS latest_id
-                        FROM message_stats
-                        GROUP BY sender_id
-                    )
-                    SELECT
-                        m.timestamp AS sender_timestamp,
-                        m.created_at AS received_at
-                    FROM latest_message_per_sender lm
-                    INNER JOIN message_stats m ON m.id = lm.latest_id
-                    WHERE lm.sender_id = ?
-                        AND m.timestamp IS NOT NULL
-                        AND CAST(m.timestamp AS INTEGER) > 0
-                    """,
-                    (name,),
-                )
-                row = cursor.fetchone()
-                if row is not None:
-                    received_at = self._clock_sync_parse_db_timestamp(row[1])
-                    if received_at is not None:
-                        try:
-                            sender_epoch = int(row[0])
-                        except (TypeError, ValueError):
-                            sender_epoch = 0
-                        if sender_epoch > 0:
-                            samples.append((received_at, abs(int(received_at) - sender_epoch)))
-
-                lookup_key = (public_key or "").strip() or name
-                cursor.execute(
-                    """
-                    SELECT last_heard, raw_advert_data
-                    FROM complete_contact_tracking
-                    WHERE last_heard IS NOT NULL
-                        AND raw_advert_data IS NOT NULL
-                        AND (public_key = ? OR name = ?)
-                    ORDER BY last_heard DESC
-                    LIMIT 1
-                    """,
-                    (lookup_key, name),
-                )
-                row = cursor.fetchone()
-                if row is not None:
-                    received_at = self._clock_sync_parse_db_timestamp(row[0])
-                    if received_at is not None:
-                        raw = row[1]
-                        if isinstance(raw, str):
-                            try:
-                                raw = json.loads(raw)
-                            except (TypeError, ValueError):
-                                raw = None
-                        if isinstance(raw, dict):
-                            try:
-                                sender_epoch = int(raw.get("advert_time"))
-                            except (TypeError, ValueError):
-                                sender_epoch = 0
-                            if sender_epoch > 0:
-                                samples.append(
-                                    (received_at, abs(int(received_at) - sender_epoch))
-                                )
-        except Exception as e:
-            self.logger.debug(
-                "Clock_Sync_Admin drift lookup failed for %s: %s",
-                sanitize_name(name),
-                e,
+                sample = latest_clock_samples(conn.cursor(), self.bot.config).get(contact_name)
+            if sample is None or time.time() - sample['received_at'] > observation_window(self.bot.config):
+                return None
+            self.logger.info(
+                'Clock_Sync_Admin measurement for %s | Drift: %ds | Source: %s | Received: %s',
+                sanitize_name(contact_name), sample['drift'], sample['source'], utc_iso(sample['received_at']),
             )
-            return None
-
-        if not samples:
-            return None
-        samples.sort(key=lambda item: item[0], reverse=True)
-        return samples[0][1]
-
-    async def _wait_for_clock_sync_reply(
-        self, public_key: str, run_started_at: int
-    ) -> tuple[bool, str]:
-        """Wait a short window for a DM reply from the target (best-effort).
-
-        send_msg_with_retry() returns None when the radio ACK is not received,
-        even though the DM may still have been delivered (targets that process
-        the command often reply via a DM). If a fresh DM from the target arrives
-        within the window, treat the delivery as confirmed.
-
-        Args:
-            public_key: Full public key of the target contact.
-            run_started_at: Epoch second this job run started, to discard stale
-                DMs from before the run that could otherwise be mistaken for a reply.
-
-        Returns:
-            (True, reply_text) when a fresh reply arrived, (False, "") otherwise.
-        """
-        meshcore = getattr(self.bot, "meshcore", None)
-        dispatcher = getattr(meshcore, "dispatcher", None) if meshcore else None
-        if dispatcher is None or not hasattr(dispatcher, "wait_for_event"):
-            return (False, "")
-        prefix = (public_key or "")[:12]
-        if len(prefix) < 12:
-            return (False, "")
-        window = self.bot.config.getfloat(
-            "Clock_Sync_Admin",
-            "clock_sync_admin_reply_window_seconds",
-            fallback=30.0,
-        )
-        if window <= 0:
-            return (False, "")
-
-        try:
-            reply = await dispatcher.wait_for_event(
-                EventType.CONTACT_MSG_RECV,
-                attribute_filters={"pubkey_prefix": prefix},
-                timeout=window,
-            )
+            return sample['drift']
         except Exception as exc:
-            self.logger.debug(
-                "Clock_Sync_Admin reply wait error for %s: %s",
-                sanitize_name(prefix),
-                exc,
-            )
-            return (False, "")
+            self.logger.debug('Clock_Sync_Admin drift lookup failed: %s', exc)
+            return None
 
-        if reply is None:
-            return (False, "")
+    def _clock_reply_window(self) -> float:
+        return max(0.0, self.bot.config.getfloat(
+            "Clock_Sync_Admin", "clock_sync_admin_reply_window_seconds", fallback=30.0,
+        ))
 
-        payload = getattr(reply, "payload", None)
-        reply_text = ""
-        if isinstance(payload, dict):
-            reply_text = (payload.get("text", "") or "").strip()
-            reply_ts = payload.get("sender_timestamp")
-            if isinstance(reply_ts, int) and reply_ts < run_started_at:
-                self.logger.debug(
-                    "Clock_Sync_Admin discarding stale DM from %s (ts=%s < run start %s)",
-                    sanitize_name(prefix),
-                    reply_ts,
-                    run_started_at,
-                )
-                return (False, "")
+    async def _wait_for_clock_sync_reply(self, replies: ClockReplyWatch) -> tuple[bool, str]:
+        result = await replies.wait(self._clock_reply_window())
+        if result[0]:
+            self.logger.debug("Clock_Sync_Admin confirmed delivery via target DM reply")
+        return result
 
-        self.logger.debug(
-            "Clock_Sync_Admin confirmed delivery to %s via DM reply %r",
-            sanitize_name(prefix),
-            sanitize_name(reply_text or ""),
-        )
-        return (True, reply_text)
+    def _clock_sync_timeout(self, targets: int = 1) -> float:
+        # Include recipient preparation, all existing retries, reply collection
+        # and the optional clkreboot send. Waiting here does not block the loop.
+        attempts = max(1, self.bot.config.getint('Bot', 'dm_max_retries', fallback=3))
+        send_budget = 20.0 + attempts * 60.0 + 30.0
+        return max(300.0, targets * (2 * send_budget + self._clock_reply_window()) + 60.0)
 
     def _log_clock_sync_admin_attempt(
         self, public_key: str, target_name: str, success: bool, error_message: Optional[str] = None
@@ -796,7 +604,7 @@ class MessageScheduler:
         """APScheduler sync wrapper: resend the clock-sync payload once, giving
         a target time to finish rebooting after an auto-clkreboot."""
         self._run_async_on_main_loop(
-            self._post_clkreboot_resync_job_async(recipient, contact_name), timeout=60.0
+            self._post_clkreboot_resync_job_async(recipient, contact_name), timeout=self._clock_sync_timeout()
         )
 
     async def _post_clkreboot_resync_job_async(self, recipient: str, contact_name: str) -> None:
@@ -821,7 +629,10 @@ class MessageScheduler:
 
     def run_clock_sync_admin_job_sync(self) -> None:
         """APScheduler sync wrapper for the async Clock_Sync_Admin DM run."""
-        self._run_async_on_main_loop(self._run_clock_sync_admin_job_async(), timeout=300.0)
+        self._run_async_on_main_loop(
+            self._run_clock_sync_admin_job_async(),
+            timeout=self._clock_sync_timeout(max(1, len(self._get_clock_sync_targets()))),
+        )
 
     async def _run_clock_sync_admin_job_async(self) -> dict[str, Any]:
         """Resolve targets and send configured clock-sync admin payload via DM.
@@ -871,7 +682,6 @@ class MessageScheduler:
         skipped_in_sync_count = 0
         min_sync_drift = self._get_clock_sync_min_drift()
         seen_contacts: set[str] = set()
-        run_started_at = int(time.time())
 
         for target in targets:
             self.logger.debug(
@@ -911,7 +721,7 @@ class MessageScheduler:
             if drift is not None and drift <= min_sync_drift:
                 skipped_in_sync_count += 1
                 self.logger.info(
-                    "Clock_Sync_Admin skipping %s — in sync (drift %ds <= min_sync_drift %ds)",
+                    "Clock_Sync_Admin skipping %s — last measured drift %ds <= min_sync_drift %ds",
                     sanitize_name(contact_name),
                     drift,
                     min_sync_drift,
@@ -934,61 +744,67 @@ class MessageScheduler:
             # _maybe_auto_clkreboot's opt-in + cooldown check.
             target_row = self._get_clock_sync_target_row(target)
             try:
-                ok = await command_manager.send_dm(
-                    recipient,
-                    payload,
-                    skip_user_rate_limit=True,
-                )
-                reply_text = ""
-                if ok:
-                    sent_count += 1
-                    self.logger.info(
-                        "Clock_Sync_Admin sent to %s",
-                        sanitize_name(contact_name),
+                with ClockReplyWatch(self.bot, public_key) as replies:
+                    delivery_report: dict[str, str] = {}
+                    ok = await command_manager.send_dm(
+                        recipient,
+                        payload,
+                        skip_user_rate_limit=True,
+                        delivery_report=delivery_report,
                     )
-                    # Log successful send
-                    self._log_clock_sync_admin_attempt(public_key, contact_name, True)
-                    # A radio ACK only confirms delivery, not what the firmware
-                    # replied — only pay the reply-wait latency here for targets
-                    # that opted into auto-clkreboot, since that's the only
-                    # place the reply's content matters on this path.
-                    if target_row and target_row.get("auto_clkreboot_enabled"):
-                        _, reply_text = await self._wait_for_clock_sync_reply(
-                            public_key, run_started_at
-                        )
-                else:
-                    reply_ok, reply_text = await self._wait_for_clock_sync_reply(
-                        public_key, run_started_at
-                    )
-                    if reply_ok:
+                    _, reply_text = await replies.wait(0)
+                    if ok:
                         sent_count += 1
-                        error_message = (
-                            reply_text if reply_text.startswith("ERR:") else None
-                        )
                         self.logger.info(
-                            "Clock_Sync_Admin sent to %s (confirmed by DM reply%s)",
+                            "Clock_Sync_Admin sent to %s",
                             sanitize_name(contact_name),
-                            f" - {sanitize_name(reply_text)}" if error_message else "",
                         )
-                        # Log successful send, carrying any firmware error body.
+                        # A radio ACK only confirms delivery, not what the firmware
+                        # replied — only pay the reply-wait latency here for targets
+                        # that opted into auto-clkreboot, since that's the only
+                        # place the reply's content matters on this path.
+                        if target_row and target_row.get("auto_clkreboot_enabled"):
+                            _, reply_text = await self._wait_for_clock_sync_reply(replies)
                         self._log_clock_sync_admin_attempt(
-                            public_key, contact_name, True, error_message
+                            public_key, contact_name, True,
+                            reply_text if reply_text.startswith("ERR:") else None,
                         )
-                    else:
+                    elif delivery_report.get('state') == 'not_sent':
                         failed_count += 1
-                        self.logger.warning(
-                            "Clock_Sync_Admin send failed for %s",
-                            sanitize_name(contact_name),
-                        )
-                        # Log failed send
-                        self._log_clock_sync_admin_attempt(
-                            public_key, contact_name, False, "Send returned False"
-                        )
+                        self.logger.warning('Clock_Sync_Admin not emitted for %s | Reason: %s',
+                                            sanitize_name(contact_name), delivery_report.get('reason', 'unknown'))
+                        self._log_clock_sync_admin_attempt(public_key, contact_name, False,
+                                                           'Not emitted: ' + delivery_report.get('reason', 'unknown'))
+                    else:
+                        reply_ok, reply_text = await self._wait_for_clock_sync_reply(replies)
+                        if reply_ok:
+                            sent_count += 1
+                            error_message = (
+                                reply_text if reply_text.startswith("ERR:") else None
+                            )
+                            self.logger.info(
+                                "Clock_Sync_Admin sent to %s (confirmed by DM reply; firmware_error=%s)",
+                                sanitize_name(contact_name), bool(error_message),
+                            )
+                            # Log successful send, carrying any firmware error body.
+                            self._log_clock_sync_admin_attempt(
+                                public_key, contact_name, True, error_message
+                            )
+                        else:
+                            failed_count += 1
+                            self.logger.warning(
+                                "Clock_Sync_Admin send failed for %s",
+                                sanitize_name(contact_name),
+                            )
+                            # Log failed send
+                            self._log_clock_sync_admin_attempt(
+                                public_key, contact_name, False, "Send returned False"
+                            )
 
-                if reply_text:
-                    await self._maybe_auto_clkreboot(
-                        target, public_key, contact_name, recipient, reply_text, target_row
-                    )
+                    if reply_text:
+                        await self._maybe_auto_clkreboot(
+                            target, public_key, contact_name, recipient, reply_text, target_row
+                        )
             except Exception as e:
                 failed_count += 1
                 self.logger.warning(

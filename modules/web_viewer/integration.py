@@ -661,6 +661,7 @@ class BotIntegration:
                 'user_input': user_input,
                 'response': response,
                 'success': success,
+                'dm_delivery': dict(message.dm_delivery) if isinstance(getattr(message, 'dm_delivery', None), dict) and getattr(message, 'is_dm', False) else {},
                 'timestamp': time.time(),
                 'repeat_count': repeat_count,
                 'repeater_prefixes': repeater_prefixes,
