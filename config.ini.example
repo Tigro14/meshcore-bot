@@ -1880,6 +1880,21 @@ enabled = true
 [Contact_Command]
 enabled = true
 # channels =
+[BBS_Command]
+# Store-and-forward private mailbox between mesh nodes (keywords: bbs, s, send).
+# Mailboxes are keyed on full public keys, so same-name nodes stay separate.
+enabled = true
+# Max unread messages one recipient may hold (0 = unlimited)
+max_messages_per_user = 10
+# Messages older than this many days are purged on the next BBS activity
+max_message_age_days = 7
+# Max messages one sender may store per day (0 = unlimited)
+max_messages_per_sender_per_day = 20
+# Max BBS commands one user may issue per minute (0 = no limit)
+rate_limit_per_minute = 10
+# Minimum seconds between two inbox reminders to the same user
+notify_cooldown_seconds = 300
+# channels =
 [Cmd_Command]
 enabled = true
 # Optional: override `cmd` output with a link to your full docs page
