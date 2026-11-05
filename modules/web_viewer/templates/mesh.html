@@ -143,6 +143,9 @@
         min-height: 0;
         flex: 1;
     }
+    .mesh-clock-symbol {display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:3px;vertical-align:middle;border-radius:50%;background:#fff;color:#374151;line-height:1;text-shadow:none;box-shadow:0 0 2px #0005}
+    .leaflet-tooltip.mesh-clock-indicator {background:transparent;border:0;box-shadow:none;padding:0}
+    .leaflet-tooltip.mesh-clock-indicator::before {display:none}
 </style>
 
 <div id="mesh-graph-container" class="d-flex flex-column">
@@ -507,11 +510,23 @@
         touch-action: pan-x pan-y;
     }
     .mesh-node-popup .leaflet-popup-content {
-        margin: 10px 15px;
+        margin: 12px 16px;
+        box-sizing: border-box;
+        overflow-x: hidden;
+        overflow-wrap: anywhere;
+        scrollbar-width: thin;
     }
     .mesh-node-popup .leaflet-popup-content table {
+        width: 100%;
+        table-layout: fixed;
         border-collapse: collapse;
     }
+    .mesh-node-popup .mesh-popup-label {width: 100px;vertical-align:top}
+    .mesh-node-popup .leaflet-popup-content td {overflow-wrap:anywhere;word-break:normal}
+    .mesh-node-popup .leaflet-popup-content code {white-space:normal;overflow-wrap:anywhere;word-break:break-all}
+    .mesh-node-title {display:block;font-size:1.1em;padding-right:18px;overflow-wrap:anywhere}
+    .mesh-node-popup .leaflet-popup-content::-webkit-scrollbar {width:6px;height:0}
+    .mesh-node-popup .leaflet-popup-content::-webkit-scrollbar-thumb {background:#aaa;border-radius:5px}
     .mesh-node-popup .leaflet-popup-content code,
     .mesh-edge-popup .leaflet-popup-content code {
         background-color: var(--mesh-code-bg);
@@ -1199,6 +1214,102 @@
         const hi = Math.log(nodeHeatRange.max);
         if (hi <= lo) return 1;
         return Math.min(1, Math.max(0, (Math.log(total) - lo) / (hi - lo)));
+    }
+
+    function nodeClockNumber(value) {
+        return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    }
+
+    function nodeHasClockWarning(node) {
+        return node.clock_drift_exceeded === true && nodeClockNumber(node.clock_drift_seconds) !== null;
+    }
+
+    function formatClockDriftDuration(value) {
+        const number = nodeClockNumber(value);
+        if (number === null) return 'Not measured';
+        const seconds = Math.abs(Math.round(number));
+        if (seconds < 60) return `${seconds} s`;
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes} min ${seconds % 60} s`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours} h ${minutes % 60} min`;
+        return `${Math.floor(hours / 24)} d ${hours % 24} h`;
+    }
+
+    function nodeClockSummary(node) {
+        const drift = nodeClockNumber(node.clock_drift_seconds);
+        if (drift === null) return '';
+        const signed = nodeClockNumber(node.clock_signed_drift_seconds);
+        const duration = formatClockDriftDuration(drift);
+        if (signed === null || signed === 0) return `Measured drift: ${duration}`;
+        return `${signed < 0 ? 'Behind' : 'Ahead'} by ${duration}`;
+    }
+
+    function nodeClockObservation(node) {
+        const observed = nodeClockNumber(node.clock_observed_at);
+        if (observed === null) return 'Observation time unknown';
+        const date = new Date(observed * 1000);
+        if (Number.isNaN(date.getTime())) return 'Observation time unknown';
+        const source = node.clock_drift_source === 'advert' ? 'advert' : 'message';
+        return `Measured at ${date.toLocaleString()} · ${source}${node.clock_observation_stale ? ' · old observation' : ''}`;
+    }
+
+    function clockGlyphHTML() {
+        return '<svg class="mesh-clock-outline" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v5l3.3 2"></path></svg>';
+    }
+
+    function nodeClockHTML(node) {
+        const summary = nodeClockSummary(node);
+        if (!summary) return '';
+        const border = nodeHasClockWarning(node) ? '#eab308' : 'var(--bs-border-color,#aaa)';
+        return `<div class="mesh-clock-detail" style="margin-top:8px;padding:8px;border:1px solid ${border};border-radius:5px;"><strong><span class="mesh-clock-symbol">${clockGlyphHTML()}</span> Clock</strong><div>${escapeHtml(summary)}</div><div class="small text-muted">${escapeHtml(nodeClockObservation(node))}</div></div>`;
+    }
+
+    function ensureNodeIndicatorPanes(mapInstance) {
+        for (const [name, zIndex] of [['meshClockMarkers', '625'], ['meshClockLabels', '670']]) {
+            const pane = mapInstance.getPane(name) || mapInstance.createPane(name);
+            pane.style.zIndex = zIndex;
+            if (name === 'meshClockLabels') pane.style.pointerEvents = 'none';
+        }
+    }
+
+    function bindNodeLabel(marker, node) {
+        const toggle = document.getElementById('filter-node-labels');
+        const showName = toggle && toggle.checked;
+        const clockWarning = nodeHasClockWarning(node);
+        if (!showName && !clockWarning) return;
+        const label = document.createElement('span');
+        label.textContent = showName ? getNodeShortLabel(node) || node.name : '';
+        if (clockWarning) {
+            const clock = document.createElement('span');
+            clock.className = 'mesh-clock-symbol';
+            clock.innerHTML = clockGlyphHTML();
+            label.appendChild(clock);
+            label.title = `${nodeClockSummary(node)}. ${nodeClockObservation(node)}`;
+            label.setAttribute('aria-label', `${node.name}: ${label.title}`);
+            label.setAttribute('role', 'button');
+            label.tabIndex = 0;
+            label.style.cursor = 'pointer';
+            L.DomEvent.disableClickPropagation(label);
+            const openNode = () => marker.fire('click');
+            label.addEventListener('click', openNode);
+            label.addEventListener('keydown', event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openNode();
+                }
+            });
+        }
+        marker.bindTooltip(label, {
+            permanent: true,
+            pane: clockWarning ? 'meshClockLabels' : 'tooltipPane',
+            interactive: clockWarning,
+            direction: showName ? 'top' : 'right',
+            offset: showName ? [0, 0] : [6, 0],
+            className: showName ? 'mesh-node-label' : 'mesh-clock-indicator',
+            opacity: 1
+        });
     }
 
     function getNodeFillColor(node) {
@@ -2560,6 +2671,7 @@
             edgeToNodes.set(edgeKey, { fromNode: fromNode, toNode: toNode, edge: edge });
         });
         
+        ensureNodeIndicatorPanes(map);
         // Add markers for nodes AFTER edges (so they appear on top and are easier to click)
         filteredNodes.forEach(node => {
             // Zoom-scaled size based on current filtered edges (changes with filters/zoom)
@@ -2575,7 +2687,7 @@
                 weight: borderWeight,
                 opacity: 1,
                 fillOpacity: 0.8,
-                pane: 'markerPane' // Use markerPane for nodes (higher z-index than overlayPane)
+                pane: nodeHasClockWarning(node) ? 'meshClockMarkers' : 'markerPane'
             });
             
             // Create information-rich tooltip with all node details
@@ -2602,8 +2714,8 @@
             numBytes = Math.min(3, Math.max(1, numBytes));
             
             const tooltipContent = `
-                <div style="min-width: 250px;">
-                    <strong style="font-size: 1.1em;">${escapeHtml(node.name)}</strong><br>
+                <div class="mesh-node-detail">
+                    <strong class="mesh-node-title">${escapeHtml(node.name)}</strong>
                     <hr class="mesh-popup-rule">
                     <table style="width: 100%; font-size: 0.9em;">
                         <tr>
@@ -2643,28 +2755,20 @@
                             <td style="padding: 2px 0;">${(nodeHeatTotals.get(getNodeId(node)) || 0).toLocaleString()}</td>
                         </tr>
                     </table>
+                    ${nodeClockHTML(node)}
                 </div>
             `;
 
             marker.bindPopup(tooltipContent, {
-                maxWidth: 300,
+                minWidth: Math.min(340, map.getSize().x - 60),
+                maxWidth: Math.min(410, map.getSize().x - 60),
                 className: 'mesh-node-popup',
-                autoPan: false  // Prevent bounding box/auto-pan when popup opens
+                maxHeight: Math.max(180, Math.min(560, map.getSize().y - 70, window.innerHeight - 120)),
+                autoPan: true,
+                autoPanPadding: [16, 16]
             });
 
-            // Optional visible label (short name / adv_name), same behavior as the graph view
-            const labelsToggle = document.getElementById('filter-node-labels');
-            if (labelsToggle && labelsToggle.checked) {
-                const shortLabel = getNodeShortLabel(node);
-                if (shortLabel) {
-                    marker.bindTooltip(escapeHtml(shortLabel), {
-                        permanent: true,
-                        direction: 'top',
-                        className: 'mesh-node-label',
-                        opacity: 1
-                    });
-                }
-            }
+            bindNodeLabel(marker, node);
 
             // Add click handler to highlight connections - pass the actual node object
             marker.on('click', (e) => {
@@ -2673,8 +2777,6 @@
                     clearPathHighlight();
                 }
                 highlightNodeConnectionsForNode(node);
-                // Close hover tooltip if it's open (though nodes don't have hover tooltips, this is for consistency)
-                marker.closeTooltip();
                 // Open popup on click
                 marker.openPopup();
             });
@@ -2763,8 +2865,8 @@
                 }
                 nodeMapById.set(nodeId, {
                     id: nodeId,
-                    label: shortLabel,
-                    title: `${escapeHtml(node.name)} (${escapeHtml(node.prefix)})`, // Full name in tooltip (rendered as HTML by vis-network)
+                    label: shortLabel + (nodeHasClockWarning(node) ? ' ◷' : ''),
+                    title: `${escapeHtml(node.name)} (${escapeHtml(node.prefix)})` + nodeClockHTML(node), // Full name in tooltip (rendered as HTML by vis-network)
                     prefix: node.prefix, // Store prefix for reference
                     color: {
                         background: getNodeFillColor(node),
