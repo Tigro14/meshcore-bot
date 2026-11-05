@@ -2704,6 +2704,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             hop_filter = request.args.get('hop_filter', '').strip()
             location_filter = request.args.get('location_filter', '').strip()
             starred = request.args.get('starred', '').strip()
+            region_filter = request.args.get('region_filter', '').strip().lower()
             sort = request.args.get('sort', 'last_seen')
             direction = request.args.get('direction', 'desc').lower()
             contacts = self._get_tracking_data(
@@ -2716,6 +2717,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 hop_filter=hop_filter,
                 location_filter=location_filter,
                 starred=starred,
+                region_filter=region_filter,
                 sort=sort,
                 direction=direction,
             )

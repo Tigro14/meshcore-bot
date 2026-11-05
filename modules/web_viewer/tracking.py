@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+# Window the contacts list is filtered by, as SQL modifiers. `since` is the page's
+# "Heard in" select; both the contact rows and the per-contact evidence use it, so a
+# badge means the same window as the list it sits in.
+DATETIME_OFFSETS = {
+    '24h': "'-24 hours'",
+    '7d': "'-7 days'",
+    '30d': "'-30 days'",
+    '90d': "'-90 days'",
+}
+
 
 class ContactTrackingMixin:
     """Mixed into BotDataViewer."""
@@ -31,6 +41,7 @@ class ContactTrackingMixin:
         hop_filter: str = '',
         location_filter: str = '',
         starred: str = '',
+        region_filter: str = '',
         sort: str = 'last_seen',
         direction: str = 'desc',
     ):
@@ -41,6 +52,9 @@ class ContactTrackingMixin:
         /api/contact-detail.  The interactive route supplies ``page`` and ``page_size`` so path
         enrichment is limited to visible contacts. include_detail=True (the export endpoint)
         keeps the legacy full-result behavior and full fields.
+
+        region_filter='unscoped' keeps only the contacts with at least one channel message
+        received as an unscoped FLOOD inside the same window.
         """
         try:
             with self._db_connection() as conn:
@@ -51,7 +65,8 @@ class ContactTrackingMixin:
                 bot_lon = self.config.getfloat('Bot', 'bot_longitude', fallback=None)
 
                 where_clause, where_params, path_bytes_expression = self._tracking_where(
-                    since, search, path_bytes, device_role, hop_filter, location_filter, starred, include_detail
+                    since, search, path_bytes, device_role, hop_filter, location_filter, starred,
+                    include_detail, region_filter
                 )
 
                 pagination = None
@@ -222,6 +237,7 @@ class ContactTrackingMixin:
                     self._get_latest_clock_drift_samples(cursor),
                     self._get_latest_battery_samples(cursor),
                     clock_drift_threshold,
+                    self._get_region_samples(cursor, since),
                 )
 
                 # Get server statistics for daily tracking using direct database queries
@@ -242,7 +258,8 @@ class ContactTrackingMixin:
             return {'error': str(e)}
 
     def _tracking_where(
-        self, since, search, path_bytes, device_role, hop_filter, location_filter, starred, include_detail
+        self, since, search, path_bytes, device_role, hop_filter, location_filter, starred,
+        include_detail, region_filter=''
     ):
         """WHERE clause and parameters for the contact filters, and the path-bytes SQL expression the sort reuses."""
         # Filter by last_heard (default: last 30 days). last_heard is stored as ISO-text
@@ -250,12 +267,6 @@ class ContactTrackingMixin:
         # so the cutoff must also be local: datetime('now', 'localtime', ...). Using bare
         # datetime('now', ...) computes the cutoff in UTC and shaves the local UTC offset off
         # the window (e.g. a "24h" filter only returns ~17h of data in US/Pacific).
-        datetime_offsets = {
-            '24h': "'-24 hours'",
-            '7d':  "'-7 days'",
-            '30d': "'-30 days'",
-            '90d': "'-90 days'",
-        }
         where_parts = []
         where_params: list[Any] = []
         # A node can have more than one observed advert path.  Treat its byte class as
@@ -273,8 +284,8 @@ class ContactTrackingMixin:
                   AND op.bytes_per_hop IN (1, 2, 3)
             ), CASE WHEN c.out_bytes_per_hop IN (1, 2, 3)
                      THEN c.out_bytes_per_hop ELSE 0 END)"""
-        if since in datetime_offsets:
-            offset = datetime_offsets[since]
+        if since in DATETIME_OFFSETS:
+            offset = DATETIME_OFFSETS[since]
             # Rows written before the ISO-text switch can still hold a numeric epoch, so
             # accept both shapes on their own scale instead of dropping legacy rows.
             where_parts.append(
@@ -339,8 +350,85 @@ class ContactTrackingMixin:
         elif starred == 'no':
             where_parts.append('COALESCE(c.is_starred, 0) = 0')
 
+        if str(region_filter or '').strip().lower() == 'unscoped':
+            # Only 'global' is positive evidence that the sender has no region. A row
+            # with no verdict, or 'unknown', only means the transport code was never
+            # seen for that packet, so it cannot stand for "no region".
+            where_parts.append(
+                "EXISTS (SELECT 1 FROM message_stats m "
+                "WHERE m.sender_id = c.name AND m.is_dm = 0 AND m.scope_verdict = 'global'"
+                + self._region_window(since) + ")"
+            )
+
         where_clause = (' WHERE ' + ' AND '.join(where_parts)) if where_parts else ''
         return where_clause, where_params, path_bytes_expression
+
+    @staticmethod
+    def _region_window(since: str) -> str:
+        """SQL condition limiting message_stats rows to the window the page is filtered by.
+
+        ``message_stats.timestamp`` is an epoch, so the window is expressed as
+        ``strftime('%s', 'now', ...)`` rather than the local-time ``datetime`` comparison
+        the contact rows use. 'all' has no window and comes back empty.
+        """
+        if since in DATETIME_OFFSETS:
+            return (
+                " AND CAST(m.timestamp AS INTEGER) >= "
+                f"CAST(strftime('%s', 'now', {DATETIME_OFFSETS[since]}) AS INTEGER)"
+            )
+        return ''
+
+    def _get_region_samples(self, cursor, since: str) -> dict[str, dict[str, Any]]:
+        """Per-sender flood-scope evidence over the window the page is filtered by.
+
+        Only channel messages carry a scope verdict (a DM has no flood scope), and only
+        ``global`` is evidence that a sender has no region. A sender with both kinds of
+        rows keeps both counts, so the badge can show the mix instead of picking a side.
+
+        ``message_stats.sender_id`` is the contact *name*, the same join the clock drift
+        samples use.
+
+        Returns ``{name: {'unscoped': int, 'scoped': int, 'unknown': int,
+        'last_unscoped': str | None, 'status': 'unscoped' | 'scoped' | 'unknown'}}``;
+        senders with no channel message in the window are absent.
+        """
+        samples: dict[str, dict[str, Any]] = {}
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    m.sender_id,
+                    SUM(CASE WHEN m.scope_verdict = 'global' THEN 1 ELSE 0 END) AS unscoped,
+                    SUM(CASE WHEN m.scope_verdict = 'scoped' THEN 1 ELSE 0 END) AS scoped,
+                    SUM(CASE WHEN m.scope_verdict = 'unknown' OR m.scope_verdict IS NULL THEN 1 ELSE 0 END) AS unknown,
+                    datetime(MAX(CASE WHEN m.scope_verdict = 'global'
+                                      THEN CAST(m.timestamp AS INTEGER) END),
+                             'unixepoch', 'localtime') AS last_unscoped
+                FROM message_stats m
+                WHERE m.is_dm = 0
+                """ + self._region_window(since) + """
+                GROUP BY m.sender_id
+                """
+            )
+            for row in cursor.fetchall():
+                name = row['sender_id']
+                if not name:
+                    continue
+                unscoped = int(row['unscoped'] or 0)
+                scoped = int(row['scoped'] or 0)
+                samples[name] = {
+                    'unscoped': unscoped,
+                    'scoped': scoped,
+                    'unknown': int(row['unknown'] or 0),
+                    'last_unscoped': row['last_unscoped'],
+                    # 'unscoped' wins over 'scoped' when a sender has both: the mixed
+                    # case still has positive evidence of a message sent without a region.
+                    'status': 'unscoped' if unscoped else ('scoped' if scoped else 'unknown'),
+                }
+        except Exception as e:
+            self.logger.error(f"Error computing region scope samples: {e}")
+            return {}
+        return samples
 
     def _tracking_entries(
         self,
@@ -354,6 +442,7 @@ class ContactTrackingMixin:
         clock_drift_samples: dict[str, dict[str, Any]],
         battery_samples: dict[str, dict[str, Any]],
         clock_drift_threshold: int,
+        region_samples: dict[str, dict[str, Any]],
     ):
         """Append one response entry per contact row to *tracking*."""
         for row in main_rows:
@@ -392,6 +481,7 @@ class ContactTrackingMixin:
                 drift_status = 'in_sync'
             battery_sample = battery_samples.get(row['public_key'])
             battery_voltage = battery_sample['voltage'] if battery_sample is not None else None
+            region_sample = region_samples.get(row['name'])
 
             # The badge/tooltip decodes out_path (the "primary" path) using out_bytes_per_hop.
             # The contact column can be stale (e.g. left at 1 while the primary path is a 3-byte
@@ -442,6 +532,10 @@ class ContactTrackingMixin:
                 'battery_observed_at': battery_sample['observed_at'] if battery_sample is not None else None,
                 'battery_status': self._battery_status(battery_voltage),
                 'battery_percent': self._battery_percent(battery_voltage),
+                'region_status': region_sample['status'] if region_sample is not None else 'unknown',
+                'unscoped_messages': region_sample['unscoped'] if region_sample is not None else 0,
+                'scoped_messages': region_sample['scoped'] if region_sample is not None else 0,
+                'last_unscoped': region_sample['last_unscoped'] if region_sample is not None else None,
             }
             if include_detail:
                 # Full fidelity for the export endpoint (size-tolerant, infrequent download).

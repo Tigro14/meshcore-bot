@@ -141,6 +141,14 @@ semantic versioning.
   is one request, so nothing is spaced, and `request_delay = 0` sends the requests back to back.
   See `docs/vigilance-service.md`.
 
+- The Contacts page puts a red globe badge next to the name of a contact whose channel
+  messages arrived as an unscoped FLOOD (no region code), alongside the existing clock-drift
+  badge, with an infobulle giving the count, the window and the last unscoped message. Only
+  `message_stats.scope_verdict = 'global'` counts as evidence, over the window the page's
+  "Heard in" filter is set to; `unknown` and DMs carry no scope, so they cannot stand for
+  "no region". `Filters → Region code` narrows the list to the flagged contacts. See
+  `docs/web-viewer.md`.
+
 ### Changed
 
 - `meshcore` now requires 2.3.14 or newer. Before 2.3.13, `send_msg_with_retry`
