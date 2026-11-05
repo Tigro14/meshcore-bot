@@ -6623,10 +6623,6 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 self.meshcore = None
                 self.is_radio_zombie = False
                 self.is_radio_offline = False
-                # The stub carries the state a command reads, not the radio. airtime answers from
-                # the same occupancy instance the pages read, so without this the card reports the
-                # command unavailable for a state the viewer does have.
-                self.occupancy = getattr(app, 'occupancy', None)
 
         bot = _TestBot(self)
         manager = CommandManager(bot)

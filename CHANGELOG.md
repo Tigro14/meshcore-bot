@@ -311,13 +311,15 @@ semantic versioning.
   modulation the estimate is built from, so it has to state that modulation as it is; the
   string now renders `CR4/{cr}`, the same reading the `/airtime` page uses.
 
-- The Test DM card answered with a key, not a reply: its stub bot had no catalog (a stub
-  translator that returns the key), so a preview showed `commands.airtime.unavailable`, and
-  it carried no state, so `airtime` reported itself unavailable for a state the viewer does
-  have. The card now reads the catalog of the configured language and carries the same
-  occupancy instance the pages read, so what it shows is the reply the bot would give.
-  `commands.airtime` existed only in `en.json`, so a bot whose `language = fr` answered this
-  command in English through the fallback; the French catalog carries the block now.
+- The Test DM card answered with a key, not a reply: its stub bot had no catalog, so a stub
+  translator that returns the key made the card show `commands.airtime.unavailable` where an
+  answer should be. It reads the catalog of the configured language now. What the card cannot
+  do is still stated: a command that reads runtime state answers that it is not available in
+  this process, because the card runs against a stub and the viewer's own state is not the
+  bot's — numbers that read as the bot's reply while describing another process would be a
+  second opinion, not a preview. `commands.airtime` existed only in `en.json`, so a bot whose
+  `language = fr` answered this command in English through the fallback; the French catalog
+  carries the block now.
 
 ## [1.1.0] - 2026-09-13
 

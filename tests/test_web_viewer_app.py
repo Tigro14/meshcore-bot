@@ -2912,19 +2912,28 @@ class TestWebViewerTestDmRoute:
         )
 
     def test_test_dm_preview_answers_in_the_language_the_bot_is_set_to(self, mock_viewer):
-        """The card is a preview of what the bot would answer, so it has to read what the bot reads.
-
-        A stub translator that hands back the key shows "commands.airtime.unavailable" where an
-        answer should be, and a stub bot without the state a read-only command reads reports the
-        command unavailable for a state the viewer does have. Both make the card say something the
-        bot would not say.
+        """The card is a preview of what the bot would answer, so it reads the catalog the bot
+        answers from. A stub translator that hands back the key showed
+        "commands.airtime.unavailable" where an answer should be: the preview was a key, not an
+        answer.
         """
         mock_viewer.config.add_section('Localization')
         mock_viewer.config.set('Localization', 'language', 'fr')
         bot = mock_viewer._test_command_manager().bot
         assert bot.translator.language == 'fr'
         assert bot.translator.translate('commands.airtime.unavailable') != 'commands.airtime.unavailable'
-        assert bot.occupancy is mock_viewer.occupancy
+
+    def test_test_dm_preview_does_not_answer_with_state_it_does_not_have(self, mock_viewer):
+        """The card runs against a stub, so a command that reads runtime state has to say so.
+
+        airtime answers from the recorder in the process running it. Carrying the viewer's own
+        instance over would make the card answer with the viewer's state, which is not the bot's:
+        the numbers would read as the bot's reply while describing a different process, and the two
+        could disagree on the same host.
+        """
+        bot = mock_viewer._test_command_manager().bot
+        assert not hasattr(bot, 'occupancy')
+        assert bot.meshcore is None
 
     def test_test_dm_route_rejects_empty_message(self, mock_viewer):
         with mock_viewer.app.test_client() as client:
