@@ -626,7 +626,7 @@ class TestHandleContactMessage:
         handler.bot.connection_time = None
         handler.bot.meshcore.contacts = {
             "key1": {
-                "public_key": "ab12deadbeef",
+                "public_key": "ab12deadbeef" + "00" * 26,
                 "name": "Alice",
                 "out_path": "",
                 "out_path_len": 0,

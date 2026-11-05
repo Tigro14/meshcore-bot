@@ -825,6 +825,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for('static', filename='js/clock_drift.js') }}"></script>
         <script nonce="{{ g.csp_nonce }}">
 // IS_ADMIN comes from base.html (display hint only; mutations are enforced
 // server-side via authenticated_admin). Redeclaring it here is a SyntaxError.
@@ -2854,35 +2855,21 @@ class ModernContactsManager {
             this.executePurge(parseInt(select.value));
         });
     }
+    clockObservationText(contact) {
+        if (!contact.clock_observed_at) return 'Observation time unknown';
+        const date = new Date(Number(contact.clock_observed_at) * 1000);
+        const source = contact.clock_drift_source === 'advert' ? 'advert' : 'message';
+        return `Measured at ${date.toLocaleString()} · ${source}`;
+    }
+
     formatClockDriftBadge(contact) {
-        const status = contact.clock_drift_status || 'unknown';
-        const hasDrift = contact.clock_drift_seconds !== null
-            && contact.clock_drift_seconds !== undefined
-            && Number.isFinite(Number(contact.clock_drift_seconds));
-        const drift = hasDrift ? Math.abs(Number(contact.clock_drift_seconds)) : 0;
+        const badge = this.clockDriftBadge(contact);
+        if (!contact.clock_observed_at) return badge;
+        return badge + `<span class="d-block small text-muted">${this.clockObservationText(contact)}</span>`;
+    }
 
-        if (status === 'unknown' || !hasDrift) {
-            return ' <span class="badge clock-drift-badge bg-secondary"'
-                + ' data-bs-toggle="tooltip" data-bs-placement="top"'
-                 + ' title="No drift data — no recent packet with a timestamp">N/D</span>';
-        }
-
-        const compact = this.formatDriftCompact(drift);
-        const full = this.formatDrift(drift);
-
-        if (status === 'in_sync') {
-            return ` <span class="badge clock-drift-badge bg-success"`
-                + ` data-bs-toggle="tooltip" data-bs-placement="top"`
-                + ` title="In sync — drift ${full}">${compact}</span>`;
-        }
-        if (status === 'warning') {
-            return ` <span class="badge clock-drift-badge bg-warning text-dark"`
-                + ` data-bs-toggle="tooltip" data-bs-placement="top"`
-                + ` title="Drift approaching threshold — ${full}"><i class="fas fa-clock"></i> ${compact}</span>`;
-        }
-        return ` <span class="badge clock-drift-badge bg-danger"`
-            + ` data-bs-toggle="tooltip" data-bs-placement="top"`
-            + ` title="Device clock out of sync — drift ${full}"><i class="fas fa-clock"></i> ${compact}</span>`;
+    clockDriftBadge(contact) {
+        return globalThis.MeshClockBadges.badge(contact);
     }
 
     formatRegionBadge(contact) {
@@ -2911,28 +2898,11 @@ class ModernContactsManager {
     }
 
     formatDriftCompact(seconds) {
-        const s = Math.abs(Math.round(seconds));
-        if (s < 60) return `${s}s`;
-        const minutes = Math.floor(s / 60);
-        if (minutes < 60) return `${minutes}m${s % 60 ? `${s % 60}s` : ''}`;
-        const hours = Math.floor(minutes / 60);
-        if (hours < 24) return `${hours}h${minutes % 60 ? `${minutes % 60}m` : ''}`;
-        const days = Math.floor(hours / 24);
-        return `${days}d${hours % 24 ? `${hours % 24}h` : ''}`;
+        return globalThis.MeshClockBadges.compact(seconds);
     }
 
     formatDrift(seconds) {
-        const s = Math.abs(Math.round(seconds));
-        const days = Math.floor(s / 86400);
-        const hours = Math.floor((s % 86400) / 3600);
-        const minutes = Math.floor((s % 3600) / 60);
-        const secs = s % 60;
-        const parts = [];
-        if (days > 0) parts.push(`${days}d`);
-        if (hours > 0) parts.push(`${hours}h`);
-        if (minutes > 0) parts.push(`${minutes}m`);
-        parts.push(`${secs}s`);
-        return parts.join(' ');
+        return globalThis.MeshClockBadges.full(seconds);
     }
 
     formatBattery(contact) {

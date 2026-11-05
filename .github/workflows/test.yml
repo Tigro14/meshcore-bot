@@ -35,6 +35,9 @@ jobs:
       - name: ESLint — lint inline JavaScript
         run: npm run lint:js
 
+      - name: JavaScript regression tests
+        run: npm test
+
   vendor-sync:
     name: Vendored front-end libraries match their lockfile
     # On a Dependabot pull request the first commit only bumps the lockfile;

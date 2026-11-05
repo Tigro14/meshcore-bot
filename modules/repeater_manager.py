@@ -167,6 +167,32 @@ class RepeaterManager:
         self._purge_inflight_keys = set()
         self._purging_log_has_details: Optional[bool] = None
 
+    def _dm_contact_in_use(self, public_key: str) -> bool:
+        from .dm_contacts import DmContactResolver
+        resolver = getattr(self.bot, 'dm_contact_resolver', None)
+        return isinstance(resolver, DmContactResolver) and resolver.is_in_use(public_key)
+
+    async def _remove_contact_from_radio(self, public_key: str):
+        """Claim the key before awaiting serial I/O, so a DM cannot race a cleanup."""
+        if self._dm_contact_in_use(public_key):
+            from meshcore.events import Event
+            return Event(EventType.ERROR, {'reason': 'contact_in_use_for_dm'})
+        if not isinstance(getattr(self, "_purge_inflight_keys", None), set):
+            self._purge_inflight_keys = set()
+        own_claim = public_key not in self._purge_inflight_keys
+        self._purge_inflight_keys.add(public_key)
+        try:
+            result = await self.bot.meshcore.commands.remove_contact(public_key)
+            if getattr(result, 'type', None) == EventType.OK:
+                from .dm_contacts import DmContactResolver
+                resolver = getattr(self.bot, 'dm_contact_resolver', None)
+                if isinstance(resolver, DmContactResolver):
+                    resolver.invalidate(public_key)
+            return result
+        finally:
+            if own_claim:
+                self._purge_inflight_keys.discard(public_key)
+
     def _start_purge_attempt(self, public_key: str, contact_type: str) -> bool:
         """Mark a purge as in-flight; return False when another attempt is already active."""
         if public_key in self._purge_inflight_keys:
@@ -2190,6 +2216,9 @@ class RepeaterManager:
 
     async def purge_repeater_from_contacts(self, public_key: str, reason: str = "Manual purge") -> bool:
         """Remove a specific repeater from the device's contact list using proper MeshCore API"""
+        if self._dm_contact_in_use(public_key):
+            self.logger.info('Contact cleanup deferred during DM | Key prefix: %s', public_key[:12])
+            return False
         if not self._start_purge_attempt(public_key, "repeater"):
             return True
 
@@ -2242,7 +2271,7 @@ class RepeaterManager:
                 device_removal_successful = False
                 self.logger.info(f"Removing contact '{contact_name}' from device using MeshCore API...")
                 try:
-                    result = await self.bot.meshcore.commands.remove_contact(public_key)
+                    result = await self._remove_contact_from_radio(public_key)
 
                     if result.type == EventType.OK:
                         device_removal_successful = True
@@ -2291,6 +2320,9 @@ class RepeaterManager:
 
     async def purge_companion_from_contacts(self, public_key: str, reason: str = "Manual purge") -> bool:
         """Remove a companion contact from the device's contact list"""
+        if self._dm_contact_in_use(public_key):
+            self.logger.info('Contact cleanup deferred during DM | Key prefix: %s', public_key[:12])
+            return False
         if not self._start_purge_attempt(public_key, "companion"):
             return True
 
@@ -2328,7 +2360,7 @@ class RepeaterManager:
                 device_removal_successful = False
                 self.logger.info(f"Removing companion '{contact_name}' from device using MeshCore API...")
                 try:
-                    result = await self.bot.meshcore.commands.remove_contact(public_key)
+                    result = await self._remove_contact_from_radio(public_key)
 
                     if result.type == EventType.OK:
                         device_removal_successful = True
@@ -2387,6 +2419,8 @@ class RepeaterManager:
 
     async def purge_repeater_by_contact_key(self, contact_key: str, reason: str = "Manual purge") -> bool:
         """Remove a repeater using the contact key (public_key hex) from the device's contact list"""
+        if self._dm_contact_in_use(contact_key):
+            return False
         self.logger.info(f"Starting purge process for contact_key: {contact_key}")
         self.logger.debug(f"Purge reason: {reason}")
 
@@ -2430,7 +2464,7 @@ class RepeaterManager:
             device_removal_successful = False
             self.logger.info(f"Removing contact '{contact_name}' from device using MeshCore API...")
             try:
-                result = await self.bot.meshcore.commands.remove_contact(public_key)
+                result = await self._remove_contact_from_radio(public_key)
 
                 if result.type == EventType.OK:
                     device_removal_successful = True
@@ -2866,9 +2900,12 @@ class RepeaterManager:
                         self.logger.warning(f"Skipping stale contact '{contact_name}': no public key available")
                         continue
 
+                    if self._dm_contact_in_use(public_key):
+                        continue
+
                     # Remove from device using MeshCore API
                     result = await asyncio.wait_for(
-                        self.bot.meshcore.commands.remove_contact(public_key),
+                        self._remove_contact_from_radio(public_key),
                         timeout=15.0
                     )
 

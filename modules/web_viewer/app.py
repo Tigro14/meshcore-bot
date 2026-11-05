@@ -58,6 +58,13 @@ from modules.channel_occupancy import (
     ChannelOccupancy,
     render_key_value,
 )
+from modules.clock_observations import (
+    latest_clock_samples,
+    map_clock_fields,
+    parse_timestamp,
+    target_clock_status,
+    utc_iso,
+)
 from modules.database_restore import (
     DEFAULT_MAX_RESTORE_BYTES,
     DatabaseRestoreError,
@@ -2829,6 +2836,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     cursor.execute(query, params)
                     rows = cursor.fetchall()
 
+                    clock_samples = self._get_latest_clock_drift_samples(cursor)
                     nodes = []
                     for row in rows:
                         # adv_name (Meshcore short name) is stored inside raw_advert_data JSON.
@@ -2845,6 +2853,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                             except (ValueError, TypeError):
                                 adv_name = None
                         nodes.append({
+                            **map_clock_fields(clock_samples.get(row['name']), self.config),
                             'public_key': row['public_key'],
                             'prefix': row['prefix'].lower(),
                             'name': row['name'] or f"Node {row['prefix']}",
@@ -5158,13 +5167,13 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                         try:
                             cursor.execute(
                                 "SELECT success, error_message, sent_at FROM clock_sync_admin_log WHERE public_key = ? OR target_name = ? ORDER BY sent_at DESC LIMIT 1",
-                                (r[1], r[1]),
+                                (t.get('public_key') or r[1], t.get('contact_name') or r[1]),
                             )
                             sync = cursor.fetchone()
                             if sync:
                                 t['last_sync_success'] = bool(sync[0])
                                 t['last_sync_error'] = sync[1]
-                                t['last_sync_at'] = sync[2]
+                                t['last_sync_at'] = utc_iso(sync[2])
                         except Exception:
                             pass
                         targets.append(t)
@@ -5174,8 +5183,10 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                         for t in targets:
                             name = t.get('contact_name') or t['target']
                             sample = drift_samples.get(name)
-                            if sample:
-                                t['clock_drift'] = sample.get('drift')
+                            attempt = {'at': t['last_sync_at'], 'success': t['last_sync_success'],
+                                       'error': t.get('last_sync_error')} if t.get('last_sync_at') else None
+                            t.update(target_clock_status(sample, attempt, self.config))
+                            t['clock_drift_status'] = target_clock_status(sample, None, self.config)['clock_state']
                     except Exception:
                         pass
                     # Enrich with battery level (same Battery_Monitor data as
@@ -5348,7 +5359,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     )
                     logs = cursor.fetchall()
                     history = [
-                        {'success': bool(l[0]), 'error': l[1], 'at': l[2]}
+                        {'success': bool(l[0]), 'error': l[1], 'at': utc_iso(l[2])}
                         for l in logs if l
                     ]
                 return jsonify({'history': history})
@@ -5949,60 +5960,18 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 conn = self._get_db_connection()
                 cursor = conn.cursor()
 
-                # Get message stats with clock drift information
-                cutoff_time = time.time() - (check_window_hours * 3600)
-                cursor.execute(
-                    """
-                    WITH latest_message_per_sender AS (
-                        SELECT sender_id, MAX(id) AS latest_id
-                        FROM message_stats
-                        GROUP BY sender_id
-                    )
-                    SELECT
-                        c.name,
-                        c.public_key,
-                        c.role,
-                        c.hop_count,
-                        CAST(strftime('%s', m.created_at) AS INTEGER) AS received_at,
-                        m.timestamp AS sender_timestamp,
-                        CASE
-                            WHEN m.timestamp IS NULL THEN NULL
-                            WHEN CAST(m.timestamp AS INTEGER) <= 0 THEN NULL
-                            ELSE ABS(
-                                CAST(strftime('%s', m.created_at) AS INTEGER)
-                                - CAST(m.timestamp AS INTEGER)
-                            )
-                        END AS drift_seconds
-                    FROM complete_contact_tracking c
-                    JOIN latest_message_per_sender lm ON c.name = lm.sender_id
-                    JOIN message_stats m ON m.id = lm.latest_id
-                    WHERE CAST(strftime('%s', m.created_at) AS INTEGER) >= ?
-                    AND m.timestamp IS NOT NULL
-                    AND CAST(m.timestamp AS INTEGER) > 0
-                    """,
-                    (cutoff_time,)
-                )
-
+                samples = self._get_latest_clock_drift_samples(cursor)
+                cursor.execute('SELECT public_key, name, last_heard FROM complete_contact_tracking')
                 for row in cursor.fetchall():
-                    drift_data[row[1]] = {  # public_key as key
-                        'name': row[0],
-                        'role': row[2],
-                        'hop_count': row[3],
-                        'received_at': row[4],
-                        'sender_timestamp': row[5],
-                        'drift_seconds': int(row[6]) if row[6] is not None else None,
-                    }
-
-                # Get last_heard timestamps for all contacts
-                cursor.execute(
-                    """
-                    SELECT public_key, CAST(strftime('%s', last_heard) AS INTEGER) AS last_heard_ts
-                    FROM complete_contact_tracking
-                    WHERE last_heard IS NOT NULL
-                    """
-                )
-                for row in cursor.fetchall():
-                    last_heard_data[row[0]] = row[1]  # public_key -> last_heard timestamp
+                    sample = samples.get(row[1])
+                    if sample:
+                        drift_data[row[0]] = {
+                            'received_at': sample['received_at'],
+                            'sender_timestamp': sample['sender_timestamp'],
+                            'drift_seconds': sample['drift'],
+                            'sample': sample,
+                        }
+                    last_heard_data[row[0]] = parse_timestamp(row[2], config=self.config)
 
                 # Build a DB-backed contact lookup (name/role/hop_count) as a fallback
                 # when a target is not present in the radio's live contact table.
@@ -6145,6 +6114,15 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                             target_info['last_seen'] = last_heard_data[public_key]
                         target_info['status'] = 'Unknown'
 
+                evidence = drift_data.get(target_info['public_key'], {}).get('sample')
+                attempt = {'at': target_info['last_sync_at'], 'success': target_info['last_sync_success'],
+                           'error': target_info['last_sync_error']} if target_info['last_sync_at'] else None
+                target_info.update(target_clock_status(evidence, attempt, self.config))
+                target_info['status'] = {
+                    'in_sync': 'In Sync', 'warning': 'Clock Drift', 'out_of_sync': 'Out of Sync', 'unset': 'Clock Unset',
+                    'awaiting_verification': 'Awaiting Verification', 'rejected': 'Rejected',
+                    'stale': 'Stale', 'unknown': 'Unknown',
+                }[target_info['clock_state']]
                 targets_status.append(target_info)
 
             return {
@@ -6364,104 +6342,15 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         return samples
 
     def _get_latest_clock_drift_samples(self, cursor: Any) -> dict[str, dict[str, Any]]:
-        """Latest per-contact clock drift sample, from messages and adverts.
-
-        ``message_stats.sender_id`` stores the contact *name* (not the public
-        key), so the join is against ``complete_contact_tracking.name`` — the
-        same join the clock sync dashboard uses. For every contact the freshest
-        clocked packet wins: the latest message or the latest advertisement
-        (``raw_advert_data.advert_time`` is the sender clock, ``last_heard``
-        the reception time). Continuous adverts keep the drift current even
-        when a device stops sending messages (e.g. a companion that is clock
-        synced at bot startup but only advertises afterwards).
-
-        Returns ``{name: {'drift': int, 'received_at': float,
-        'sender_timestamp': int, 'source': 'message' | 'advert'}}``; contacts
-        with no parsable sender timestamp are excluded (drift unknown, not
-        "in sync").
-        """
-        samples: dict[str, dict[str, Any]] = {}
         try:
-            cursor.execute(
-                """
-                WITH latest_message_per_sender AS (
-                    SELECT sender_id, MAX(id) AS latest_id
-                    FROM message_stats
-                    GROUP BY sender_id
-                )
-                SELECT
-                    c.name,
-                    m.timestamp AS sender_timestamp,
-                    m.created_at AS received_at
-                FROM complete_contact_tracking c
-                INNER JOIN latest_message_per_sender lm
-                    ON lm.sender_id = c.name
-                INNER JOIN message_stats m
-                    ON m.id = lm.latest_id
-                WHERE m.timestamp IS NOT NULL
-                    AND CAST(m.timestamp AS INTEGER) > 0
-                """
-            )
-            for row in cursor.fetchall():
-                sender_timestamp = row['sender_timestamp']
-                received_at = self._parse_db_timestamp(row['received_at'])
-                if received_at is None:
-                    continue
-                try:
-                    sender_epoch = int(sender_timestamp)
-                except (TypeError, ValueError):
-                    continue
-                if sender_epoch <= 0:
-                    continue
-                samples[row['name']] = {
-                    'drift': abs(int(received_at) - sender_epoch),
-                    'received_at': received_at,
-                    'sender_timestamp': sender_epoch,
-                    'source': 'message',
-                }
-
-            cursor.execute(
-                """
-                SELECT name, last_heard, raw_advert_data
-                FROM complete_contact_tracking
-                WHERE name IS NOT NULL
-                    AND last_heard IS NOT NULL
-                    AND raw_advert_data IS NOT NULL
-                """
-            )
-            for row in cursor.fetchall():
-                received_at = self._parse_db_timestamp(row['last_heard'])
-                if received_at is None:
-                    continue
-                sender_epoch = self._extract_advert_sender_timestamp(row['raw_advert_data'])
-                if sender_epoch is None:
-                    continue
-                existing = samples.get(row['name'])
-                if existing is not None and existing['received_at'] >= received_at:
-                    continue
-                samples[row['name']] = {
-                    'drift': abs(int(received_at) - sender_epoch),
-                    'received_at': received_at,
-                    'sender_timestamp': sender_epoch,
-                    'source': 'advert',
-                }
-        except Exception as e:
-            self.logger.error(f"Error computing clock drift samples: {e}")
+            return latest_clock_samples(cursor, self.config)
+        except Exception as exc:
+            self.logger.error('Error computing clock drift samples: %s', exc)
             return {}
-        return samples
 
-    @staticmethod
-    def _parse_db_timestamp(value: Any) -> Optional[float]:
-        """Parse a naive UTC timestamp from the DB into epoch seconds."""
-        if value is None:
-            return None
-        text = str(value).strip()
-        for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
-            try:
-                return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc).timestamp()
-            except ValueError:
-                continue
-        return None
+    def _parse_db_timestamp(self, value: Any) -> Optional[float]:
+        """Legacy helper for local advertisement receipt timestamps."""
+        return parse_timestamp(value, config=self.config)
 
     @staticmethod
 

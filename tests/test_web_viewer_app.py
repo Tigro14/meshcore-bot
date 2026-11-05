@@ -74,6 +74,7 @@ def viewer_with_db(tmp_path):
     with patch.object(BotDataViewer, "_start_database_polling"), \
          patch.object(BotDataViewer, "_start_log_tailing"), \
          patch.object(BotDataViewer, "_start_cleanup_scheduler"), \
+         patch.object(BotDataViewer, "_start_dashboard_refresher"), \
          patch.object(BotDataViewer, "_setup_socketio_handlers"), \
          patch("modules.web_viewer.app.RepeaterManager"):
         viewer = BotDataViewer(db_path=db_path, config_path=config_path)
@@ -128,6 +129,7 @@ def mock_viewer(tmp_path):
     with patch.object(BotDataViewer, "_start_database_polling"), \
          patch.object(BotDataViewer, "_start_log_tailing"), \
          patch.object(BotDataViewer, "_start_cleanup_scheduler"), \
+         patch.object(BotDataViewer, "_start_dashboard_refresher"), \
          patch.object(BotDataViewer, "_setup_socketio_handlers"), \
          patch("modules.web_viewer.app.RepeaterManager"):
         viewer = BotDataViewer(db_path=db_path, config_path=config_path)
@@ -2324,6 +2326,7 @@ class TestGetClockSyncTargetsStatus:
         with patch.object(BotDataViewer, "_start_database_polling"), \
              patch.object(BotDataViewer, "_start_log_tailing"), \
              patch.object(BotDataViewer, "_start_cleanup_scheduler"), \
+             patch.object(BotDataViewer, "_start_dashboard_refresher"), \
              patch.object(BotDataViewer, "_setup_socketio_handlers"), \
              patch("modules.web_viewer.app.RepeaterManager"):
             viewer = BotDataViewer(db_path=db_path, config_path=config_path)
@@ -2619,6 +2622,8 @@ class TestClockDriftFreshness:
         """rows: list of dicts with keys name, public_key, message (drift, age),
         advert (drift, age). age = seconds ago the packet was received."""
         db_path = viewer.db_path
+        # All receipt strings in these fixtures are explicitly generated in UTC.
+        viewer.config.set("Bot", "timezone", "UTC")
         now_epoch = int(time.time())
 
         def ts(epoch):

@@ -5,6 +5,7 @@ Contains shared data structures used across modules
 """
 
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import Any, Optional
 
 from .flood_scope import channel_scope_entry, is_global_marker, outgoing_override
@@ -107,6 +108,8 @@ class MeshMessage:
     # On-air body at construction. Mention/prefix cleanup may rewrite ``content``
     # for command matching; display and web-viewer capture must use this snapshot.
     original_content: str = ""
+    # Per-request delivery metadata; contains no message body.
+    dm_delivery: dict[str, str] = dataclass_field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.original_content:

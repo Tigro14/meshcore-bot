@@ -90,6 +90,7 @@ function loadManagerClass() {
             setTimeout,
         },
     });
+    vm.runInContext(fs.readFileSync(new URL('../../modules/web_viewer/static/js/clock_drift.js', import.meta.url), 'utf8'), context);
     vm.runInContext(
         `${classSource}\nglobalThis.ModernContactsManager = ModernContactsManager;`,
         context,
@@ -569,4 +570,22 @@ test('setupBatteryBadges wires a click handler once per badge', () => {
     const previousHandler = badge.listeners.click;
     manager.setupBatteryBadges();
     assert.equal(badge.listeners.click, previousHandler);
+});
+
+test('Contacts always shows numeric drift, independently of clock verification', () => {
+    const { Manager } = loadManagerClass();
+    const manager = Object.create(Manager.prototype);
+    for (const state of ['unset', 'awaiting_verification', 'rejected', 'stale']) {
+        const badge = manager.formatClockDriftBadge({
+            clock_drift_status: state, clock_drift_seconds: 1793177892,
+            clock_observed_at: 1793840295, clock_drift_source: 'advert',
+        });
+        assert.match(badge, />\s*20754d8h</);
+        assert.match(badge, /Measured at/);
+        assert.doesNotMatch(badge, /Awaiting verification|Clock unset|Command rejected|N\/D/);
+    }
+    assert.match(manager.formatClockDriftBadge({
+        clock_drift_status: 'stale', clock_drift_seconds: 27,
+        clock_observed_at: 1793818149, clock_drift_source: 'advert',
+    }), />27s</);
 });

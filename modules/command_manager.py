@@ -34,6 +34,7 @@ from .config_validation import (
     _channel_name_is_public,
     strip_optional_quotes,
 )
+from .dm_contacts import DmContactResolver
 from .flood_scope import (
     channel_scope_entry,
     is_global_marker,
@@ -52,7 +53,7 @@ from .models import (
 
 # Default for [Bot] dm_min_ack_timeout: the shortest per-attempt wait for a DM's
 # ACK, in seconds. See CommandManager._dm_min_ack_timeout.
-DM_MIN_ACK_TIMEOUT_DEFAULT = 8.0
+DM_MIN_ACK_TIMEOUT_DEFAULT = 30.0
 DM_MIN_ACK_TIMEOUT_MAX = 60.0
 
 # Links the bot puts on the air, for keeping them intact across a chunk boundary.
@@ -146,6 +147,11 @@ class CommandManager:
     def __init__(self, bot):
         self.bot = bot
         self.logger = bot.logger
+        resolver = getattr(bot, 'dm_contact_resolver', None)
+        if not isinstance(resolver, DmContactResolver):
+            resolver = DmContactResolver(bot)
+            bot.dm_contact_resolver = resolver
+        self.dm_contacts = resolver
 
         # Load configuration
         self.keywords = self.load_keywords()
@@ -1187,6 +1193,7 @@ class CommandManager:
         command_id: str | None = None,
         skip_user_rate_limit: bool = False,
         rate_limit_key: str | None = None,
+        delivery_report: dict[str, str] | None = None,
     ) -> bool:
         """Send a direct message using meshcore-cli command.
 
@@ -1202,6 +1209,8 @@ class CommandManager:
         Returns:
             bool: True if sent successfully, False otherwise.
         """
+        report = delivery_report if delivery_report is not None else {}
+        report.update(state='not_sent', reason='radio_unavailable')
         if not self.bot.connected or not self.bot.meshcore:
             return False
 
@@ -1217,7 +1226,7 @@ class CommandManager:
                 trial,
                 lambda: self.send_dm(
                     recipient_id, content, command_id=command_id,
-                    skip_user_rate_limit=skip_user_rate_limit, rate_limit_key=rate_limit_key,
+                    skip_user_rate_limit=skip_user_rate_limit, rate_limit_key=rate_limit_key, delivery_report=report,
                 ),
             )
 
@@ -1226,105 +1235,77 @@ class CommandManager:
             skip_user_rate_limit=skip_user_rate_limit, rate_limit_key=rate_limit_key
         )
         if not can_send:
+            report.update(state='not_sent', reason='rate_limited')
             if reason:
                 self.logger.warning(reason)
             return False
 
         try:
-            # Name lookup first (backward compatible), then pubkey/prefix in the
-            # radio snapshot and NEW_CONTACT pending list (not yet in contacts).
-            contact = self.bot.meshcore.get_contact_by_name(recipient_id)
-            lookup_type = "name"
-            if not contact:
-                recipient_key = (recipient_id or "").strip()
-                sources: list[tuple[str, dict[str, Any]]] = []
-                contacts = getattr(self.bot.meshcore, "contacts", None)
-                if isinstance(contacts, dict) and contacts:
-                    sources.append(("pubkey_prefix", contacts))
-                pending = getattr(self.bot.meshcore, "pending_contacts", None)
-                if isinstance(pending, dict) and pending:
-                    sources.append(("pending_contact", pending))
-                for source_name, source in sources:
-                    for contact_data in source.values():
-                        if not isinstance(contact_data, dict):
-                            continue
-                        public_key = (contact_data.get("public_key", "") or "").strip()
-                        if not public_key:
-                            continue
-                        if public_key == recipient_key or public_key.startswith(recipient_key):
-                            contact = contact_data
-                            lookup_type = source_name
-                            self.logger.debug(
-                                "Resolved DM recipient '%s' via %s lookup",
-                                sanitize_name(recipient_key),
-                                source_name,
+            async with self.dm_contacts.use(recipient_id) as resolved:
+                if resolved.contact is None:
+                    report.update(state='not_sent', reason=resolved.reason)
+                    self.logger.warning('DM not emitted for %s | Reason: %s', sanitize_name(recipient_id), resolved.reason)
+                    return False
+                contact = resolved.contact
+                lookup_type = resolved.reason
+                # Use the contact name for logging
+                contact_name = contact.get('name') or contact.get('adv_name') or recipient_id
+                if lookup_type != "name":
+                    self.logger.info(
+                        "Sending DM to %s (resolved via %s)",
+                        sanitize_name(contact_name),
+                        lookup_type,
+                    )
+                else:
+                    self.logger.info("Sending DM to %s", sanitize_name(contact_name))
+
+                command_id = self._record_transmission(
+                    content, contact_name, 'dm', command_id,
+                    recipient_key=contact.get('public_key') if isinstance(contact, dict) else None,
+                )
+
+                # Central DM length guard: firmware MAX_TEXT_LEN is 160; bot budget is 158.
+                dm_max_bytes = DM_BODY_LIMIT
+                content_bytes = len(content.encode("utf-8"))
+                if content_bytes > dm_max_bytes:
+                    chunks = self.split_text_into_utf8_chunks(content, dm_max_bytes)
+                    self.logger.warning(
+                        "DM to %s exceeds %d UTF-8 bytes (%d); auto-splitting into %d chunk(s)",
+                        sanitize_name(contact_name),
+                        dm_max_bytes,
+                        content_bytes,
+                        len(chunks),
+                    )
+                    sleep_time = self._chunk_spacing_seconds()
+                    for i, chunk in enumerate(chunks):
+                        if i > 0:
+                            await self.bot.bot_tx_rate_limiter.wait_for_tx()
+                            await asyncio.sleep(sleep_time)
+                            can_send_chunk, reason = await self._check_rate_limits(
+                                skip_user_rate_limit=True, rate_limit_key=rate_limit_key
                             )
-                            break
-                    if contact:
-                        break
-
-            if not contact:
-                self.logger.error(
-                    "Contact not found for DM recipient identifier: %s",
-                    sanitize_name(recipient_id),
-                )
-                return False
-
-            # Use the contact name for logging
-            contact_name = contact.get('name', contact.get('adv_name', recipient_id))
-            if lookup_type != "name":
-                self.logger.info(
-                    "Sending DM to %s (resolved via %s)",
-                    sanitize_name(contact_name),
-                    lookup_type,
-                )
-            else:
-                self.logger.info("Sending DM to %s", sanitize_name(contact_name))
-
-            command_id = self._record_transmission(
-                content, contact_name, 'dm', command_id,
-                recipient_key=contact.get('public_key') if isinstance(contact, dict) else None,
-            )
-
-            # Central DM length guard: firmware MAX_TEXT_LEN is 160; bot budget is 158.
-            dm_max_bytes = DM_BODY_LIMIT
-            content_bytes = len(content.encode("utf-8"))
-            if content_bytes > dm_max_bytes:
-                chunks = self.split_text_into_utf8_chunks(content, dm_max_bytes)
-                self.logger.warning(
-                    "DM to %s exceeds %d UTF-8 bytes (%d); auto-splitting into %d chunk(s)",
-                    sanitize_name(contact_name),
-                    dm_max_bytes,
-                    content_bytes,
-                    len(chunks),
-                )
-                sleep_time = self._chunk_spacing_seconds()
-                for i, chunk in enumerate(chunks):
-                    if i > 0:
-                        await self.bot.bot_tx_rate_limiter.wait_for_tx()
-                        await asyncio.sleep(sleep_time)
-                        can_send_chunk, reason = await self._check_rate_limits(
-                            skip_user_rate_limit=True, rate_limit_key=rate_limit_key
-                        )
-                        if not can_send_chunk:
-                            if reason:
-                                self.logger.warning(reason)
+                            if not can_send_chunk:
+                                if reason:
+                                    self.logger.warning(reason)
+                                report.update(state="partial", reason="rate_limited")
+                                return False
+                        if not await self._send_dm_payload(
+                            contact, contact_name, chunk, rate_limit_key=rate_limit_key, delivery_report=report
+                        ):
+                            if i > 0:
+                                report["state"] = "partial"
+                            self.logger.warning(
+                                "Auto-split DM failed at chunk %d of %d to %s",
+                                i + 1,
+                                len(chunks),
+                                sanitize_name(contact_name),
+                            )
                             return False
-                    if not await self._send_dm_payload(
-                        contact, contact_name, chunk, rate_limit_key=rate_limit_key
-                    ):
-                        self.logger.warning(
-                            "Auto-split DM failed at chunk %d of %d to %s",
-                            i + 1,
-                            len(chunks),
-                            sanitize_name(contact_name),
-                        )
-                        return False
-                return True
+                    return True
 
-            return await self._send_dm_payload(
-                contact, contact_name, content, rate_limit_key=rate_limit_key
-            )
+                return await self._send_dm_payload(
+                    contact, contact_name, content, rate_limit_key=rate_limit_key, delivery_report=report
+                )
 
         except Exception as e:
             self.logger.error(f"Failed to send DM: {e}")
@@ -1363,10 +1344,15 @@ class CommandManager:
         content: str,
         *,
         rate_limit_key: str | None = None,
+        delivery_report: dict[str, str] | None = None,
     ) -> bool:
         """Send a single DM payload that is already within the RF byte budget."""
+        report = delivery_report if delivery_report is not None else {}
+        report.update(state='unconfirmed', reason='send_not_confirmed')
         try:
-            try:
+            retry = getattr(self.bot.meshcore.commands, "send_msg_with_retry", None)
+            used_retry_method = callable(retry)
+            if used_retry_method:
                 self.logger.debug("Using send_msg_with_retry for improved reliability")
 
                 # Use send_msg_with_retry with configurable retry parameters
@@ -1380,7 +1366,7 @@ class CommandManager:
                     f"Attempting DM send with {max_attempts} max attempts "
                     f"(ACK wait at least {min_timeout:g}s per attempt)"
                 )
-                result = await self.bot.meshcore.commands.send_msg_with_retry(
+                result = await retry(
                     contact,
                     content,
                     max_attempts=max_attempts,
@@ -1390,21 +1376,25 @@ class CommandManager:
                     min_timeout=min_timeout,
                 )
 
-            except AttributeError:
+            else:
                 # Fallback to regular send_msg for older meshcore versions
                 self.logger.debug("send_msg_with_retry not available, using send_msg")
                 result = await self.bot.meshcore.commands.send_msg(contact, content)
 
-            # Check if send_msg_with_retry was used
-            used_retry_method = (hasattr(self.bot.meshcore, 'commands') and
-                               hasattr(self.bot.meshcore.commands, 'send_msg_with_retry'))
-
             # Handle result using unified handler
-            return self._handle_send_result(
+            success = self._handle_send_result(
                 result, "DM", contact_name, used_retry_method, rate_limit_key=rate_limit_key
             )
+            if success:
+                report.update(state='acknowledged' if used_retry_method else 'unconfirmed',
+                              reason='ack_received' if used_retry_method else 'radio_accepted')
+            elif getattr(result, 'type', None) == EventType.ERROR:
+                report.update(state='not_sent', reason='radio_rejected')
+            else:
+                report.update(state='unconfirmed', reason='ack_missing')
+            return success
         except Exception as e:
-            self.logger.error(f"Failed to send DM payload: {e}")
+            self.logger.error("DM payload send failed | Error type: %s", type(e).__name__)
             return False
 
     async def send_channel_message(
@@ -1880,6 +1870,7 @@ class CommandManager:
                     command_id,
                     skip_user_rate_limit=skip_user_rate_limit,
                     rate_limit_key=rate_limit_key,
+                    delivery_report=message.dm_delivery,
                 )
             else:
                 return await self.send_channel_message(
@@ -2094,8 +2085,11 @@ class CommandManager:
                     chunk,
                     skip_user_rate_limit=skip,
                     rate_limit_key=rate_limit_key,
+                    delivery_report=message.dm_delivery,
                 )
                 if not success:
+                    if i > 0:
+                        message.dm_delivery["state"] = "partial"
                     self.logger.warning(
                         "Chunked DM send failed at chunk %d of %d to %s",
                         i + 1, len(chunks), message.sender_id,
