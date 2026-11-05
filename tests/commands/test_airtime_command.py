@@ -131,6 +131,16 @@ class TestReply:
         assert 'CR4/8' in reply
         assert 'CR8/5' not in reply
 
+    def test_the_french_catalog_carries_the_reply_strings(self):
+        """A bot whose language is fr answers in fr; a command whose strings ship only in en.json
+        answers in English through the fallback, so the reader's setting is not what they get."""
+        fr = json.loads(pathlib.Path('translations/fr.json').read_text(encoding='utf-8'))['commands']['airtime']
+        assert set(CATALOG) <= set(fr)
+        assert 'non mesuré' in fr['header']
+        # The same notation as the English string and as the page: the coding rate is 4 over its
+        # denominator, whatever language the reply is written in.
+        assert 'CR4/{cr}' in fr['header']
+
     def test_an_integral_bandwidth_is_not_written_with_a_false_decimal(self):
         """125.0kHz claims a precision the reading does not have; 125kHz does not."""
         reply = self.cmd.format_reply(_occupancy(), [], BODY)

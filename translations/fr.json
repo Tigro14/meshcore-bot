@@ -317,6 +317,18 @@
       "nation_not_found": "Pays '{nation}' introuvable dans la Coupe du Monde actuelle.",
       "error_fetching": "Erreur lors de la récupération des données de la Coupe du Monde"
     },
+    "airtime": {
+      "description": "Airtime estimé du canal sur la dernière minute et les principaux émetteurs",
+      "header": "Airtime estimé d'après SF{sf}/{bw}kHz CR4/{cr}, non mesuré",
+      "window": "{seconds}s : rx {rx}% tx {tx}% ({packets} paquet(s))",
+      "no_samples": "Rien entendu sur les {seconds} dernières s - un canal silencieux n'est pas un enregistreur arrêté",
+      "top_senders": "Émetteurs : {names}",
+      "top_senders_omitted": "(liste des émetteurs retirée : trop longue)",
+      "disabled": "Commande airtime désactivée. Mettez enabled = true dans [Airtime_Command].",
+      "unavailable": "Airtime indisponible dans ce processus du bot.",
+      "recording_off": "Enregistrement airtime arrêté. Mettez enabled = true dans [Channel_Occupancy]; rien à lire avant qu'il tourne.",
+      "error": "Erreur de lecture de l'airtime : {error}"
+    },
     "stats": {
       "description": "Stats des dernières 24h. 'stats messages', 'stats channels' ou 'stats paths' pour stats spécifiques.",
       "help": "Stats bot 24h. Commandes: 'stats' (basique), 'stats messages' (utilisateurs), 'stats channels' (activité canaux), 'stats paths' (chemins longs)",

@@ -6605,11 +6605,28 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 self.db_manager = getattr(app, 'db_manager', None)
                 self.bot_root = app.bot_root
                 self._local_root = Path(app.bot_root) / 'local'
+                # The card previews what the bot would answer, so it reads the catalog the bot
+                # answers from. A stub that hands back the key shows "commands.airtime.unavailable"
+                # where an answer should be: the preview is then a key, not an answer.
                 self.translator = _DummyTranslator()
+                try:
+                    from modules.i18n import Translator  # noqa: PLC0415
+
+                    self.translator = Translator(
+                        app.config.get('Localization', 'language', fallback='en'),
+                        str(Path(app.bot_root) / 'translations'),
+                        str(self._local_root / 'translations'),
+                    )
+                except Exception as e:  # noqa: BLE001
+                    app.logger.warning(f"Test DM preview has no catalog ({e}); replies show as keys")
                 self.command_manager = None
                 self.meshcore = None
                 self.is_radio_zombie = False
                 self.is_radio_offline = False
+                # The stub carries the state a command reads, not the radio. airtime answers from
+                # the same occupancy instance the pages read, so without this the card reports the
+                # command unavailable for a state the viewer does have.
+                self.occupancy = getattr(app, 'occupancy', None)
 
         bot = _TestBot(self)
         manager = CommandManager(bot)
