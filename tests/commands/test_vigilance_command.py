@@ -36,10 +36,20 @@ class TestDepartmentResolution:
         cmd = _command(command_mock_bot)
         assert cmd._parse_department("201") == "201"
 
+    def test_letter_department_code_is_uppercased(self, command_mock_bot):
+        cmd = _command(command_mock_bot)
+        assert cmd._parse_department("2a") == "2A"
+
     def test_falls_back_to_configured_department(self, command_mock_bot):
         _vigilance_section(command_mock_bot, department="69")
         cmd = _command(command_mock_bot)
         assert cmd._parse_department("") == "69"
+
+    def test_comma_list_falls_back_to_its_first_department(self, command_mock_bot):
+        """Answering for every configured department at once would not fit the RF budget."""
+        _vigilance_section(command_mock_bot, department="75, 77, 95")
+        cmd = _command(command_mock_bot)
+        assert cmd._parse_department("") == "75"
 
     def test_invalid_argument_falls_back_to_config(self, command_mock_bot):
         _vigilance_section(command_mock_bot, department="69")
@@ -141,6 +151,37 @@ class TestExecute:
             assert await cmd.execute(msg) is True
 
         assert fetch.call_args[0][0] == "69"
+
+    @pytest.mark.asyncio
+    async def test_execute_passes_the_configured_api_key(self, command_mock_bot):
+        _vigilance_section(command_mock_bot, department="95")
+        command_mock_bot.config.set("Vigilance_Service", "api_key", "key")
+        cmd = _command(command_mock_bot)
+        msg = mock_message(content="vigi 95", is_dm=True)
+
+        with patch(
+            "modules.commands.vigilance_command.fetch_vigilance",
+            return_value={"color": "Jaune", "summary": "", "url": ""},
+        ) as fetch:
+            assert await cmd.execute(msg) is True
+
+        assert fetch.call_args[0][0] == "95"
+        assert fetch.call_args[0][1] == "key"
+
+    @pytest.mark.asyncio
+    async def test_execute_passes_the_configured_delay(self, command_mock_bot):
+        _vigilance_section(command_mock_bot, department="95")
+        command_mock_bot.config.set("Vigilance_Service", "request_delay", "1.5")
+        cmd = _command(command_mock_bot)
+        msg = mock_message(content="vigi 95", is_dm=True)
+
+        with patch(
+            "modules.commands.vigilance_command.fetch_vigilance",
+            return_value={"color": "Vert", "summary": "", "url": ""},
+        ) as fetch:
+            assert await cmd.execute(msg) is True
+
+        assert fetch.call_args.kwargs["delay"] == 1.5
 
     @pytest.mark.asyncio
     async def test_execute_reports_fetch_failure_without_crashing(self, command_mock_bot):

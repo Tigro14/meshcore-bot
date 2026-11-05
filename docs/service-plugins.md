@@ -12,7 +12,7 @@ Service plugins extend the bot with background services that run alongside the m
 | MQTT Weather Relay (`MqttWeather`) | Relay weather data to custom MQTT topics configured under `[Weather]` |
 | Webhook Service (`Webhook`) | Accept inbound HTTP POST payloads and relay to mesh channels or DMs |
 | [Earthquake Service](earthquake-service.md) | Earthquake alerts for a configured region (USGS API, defaults: California) |
-| [Vigilance Météo-France Service](vigilance-service.md) | Vigilance alerts for a French department (scrapes vigilance.meteofrance.fr, Orange/Rouge by default) |
+| [Vigilance Météo-France Service](vigilance-service.md) | Vigilance alerts for one or several French departments, one message each (JSON level, Orange/Rouge by default) |
 | [Repeater Prefix Collision Service](repeater-prefix-collision-service.md) | Alerts when a newly heard repeater prefix collides with an existing repeater prefix |
 | [World Cup Live Service](worldcup.md) | Proactive FIFA World Cup match announcements (auto-detects the active tournament) |
 

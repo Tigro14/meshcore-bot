@@ -591,6 +591,13 @@
                                         <option value="">Any location</option><option value="known">Location known</option><option value="unknown">Location unknown</option>
                                     </select>
                                 </div>
+                                <div class="mb-2">
+                                    <label class="form-label small mb-1" for="contacts-region-filter">Region code</label>
+                                    <select class="form-select form-select-sm contacts-list-filter" id="contacts-region-filter"
+                                            title="No region keeps contacts whose channel messages were received as an unscoped FLOOD, inside the window above">
+                                        <option value="">Any region state</option><option value="unscoped">No region code</option>
+                                    </select>
+                                </div>
                                 <div class="mb-3">
                                     <label class="form-label small mb-1" for="contacts-starred-filter">Starred</label>
                                     <select class="form-select form-select-sm contacts-list-filter" id="contacts-starred-filter">
@@ -880,6 +887,7 @@ class ModernContactsManager {
                 device_role: document.getElementById('contacts-device-role').value,
                 hop_filter: document.getElementById('contacts-hop-filter').value,
                 location_filter: document.getElementById('contacts-location-filter').value,
+                region_filter: document.getElementById('contacts-region-filter').value,
                 starred: document.getElementById('contacts-starred-filter').value,
                 sort: this.sortColumn,
                 direction: this.sortDirection,
@@ -1184,7 +1192,7 @@ class ModernContactsManager {
                     <div class="flex-grow-1 min-w-0">
                         <div class="d-flex justify-content-between align-items-start gap-2">
                             <div class="min-w-0">
-                                <div class="fw-bold">${this.escapeHtml(contact.username || 'Unknown')}${this.formatClockDriftBadge(contact)}</div>
+                                <div class="fw-bold">${this.escapeHtml(contact.username || 'Unknown')}${this.formatClockDriftBadge(contact)}${this.formatRegionBadge(contact)}</div>
                                 <small class="text-muted text-break d-block">${this.escapeHtml(contact.user_id ? contact.user_id.substring(0, 16) + '...' : 'Unknown')}</small>
                             </div>
                             <div class="contact-mobile-device text-end flex-shrink-0">${this.formatDeviceType(contact)}</div>
@@ -1254,7 +1262,7 @@ class ModernContactsManager {
                     <input type="checkbox" class="form-check-input contact-row-checkbox" data-contact-index="${contactIndex}" aria-label="Select ${this.escapeAttribute(contact.username || 'Unknown')}" ${this.selectedContactIds.has(contact.user_id) ? 'checked' : ''}>
                 </td>` : ''}
                 <td>
-                    <strong>${this.escapeHtml(contact.username || 'Unknown')}${this.formatClockDriftBadge(contact)}</strong>
+                    <strong>${this.escapeHtml(contact.username || 'Unknown')}${this.formatClockDriftBadge(contact)}${this.formatRegionBadge(contact)}</strong>
                     <br>
                     <small class="text-muted">${this.escapeHtml(contact.user_id ? contact.user_id.substring(0, 16) + '...' : 'Unknown')}</small>
                 </td>
@@ -1297,7 +1305,7 @@ class ModernContactsManager {
         // Setup path tooltips after rendering
         this.setupPathTooltips();
         this.setupBatteryBadges();
-        this.setupDriftTooltips();
+        this.setupBadgeTooltips();
         this.updateBulkDeleteButton();
         this.updateSelectAllCheckbox();
         if (mobileStack && this.mobileLayout.matches) {
@@ -2877,6 +2885,31 @@ class ModernContactsManager {
             + ` title="Device clock out of sync — drift ${full}"><i class="fas fa-clock"></i> ${compact}</span>`;
     }
 
+    formatRegionBadge(contact) {
+        // Only positive evidence is a flag: 'global' means the radio saw the packet
+        // arrive as an unscoped FLOOD. A contact with a region observed, or with no
+        // channel message at all, gets no badge.
+        const unscoped = Number(contact.unscoped_messages) || 0;
+        if (unscoped === 0) return '';
+
+        const scoped = Number(contact.scoped_messages) || 0;
+        let title = `No region code — ${unscoped} unscoped channel message${unscoped === 1 ? '' : 's'}`;
+        const windowLabel = this.regionWindowLabel();
+        if (windowLabel) title += ` (${windowLabel})`;
+        if (scoped) title += `, ${scoped} scoped`;
+        if (contact.last_unscoped) title += `, last ${this.formatTimeAgo(contact.last_unscoped)}`;
+
+        return ' <span class="badge region-badge bg-danger" data-bs-toggle="tooltip" data-bs-placement="top"'
+            + ` title="${this.escapeAttribute(title)}"`
+            + `><i class="fas fa-globe" aria-hidden="true"></i> ${unscoped}</span>`;
+    }
+
+    regionWindowLabel() {
+        const select = document.getElementById('contacts-timespan');
+        const option = select && select.selectedOptions ? select.selectedOptions[0] : null;
+        return option ? option.textContent.trim() : '';
+    }
+
     formatDriftCompact(seconds) {
         const s = Math.abs(Math.round(seconds));
         if (s < 60) return `${s}s`;
@@ -3008,9 +3041,11 @@ class ModernContactsManager {
         }
     }
 
-    setupDriftTooltips() {
+    setupBadgeTooltips() {
         if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
-        const targets = document.querySelectorAll('.clock-drift-badge[data-bs-toggle="tooltip"]');
+        const targets = document.querySelectorAll(
+            '.clock-drift-badge[data-bs-toggle="tooltip"], .region-badge[data-bs-toggle="tooltip"]'
+        );
         targets.forEach((el) => {
             const existing = bootstrap.Tooltip.getInstance(el);
             if (existing) existing.dispose();

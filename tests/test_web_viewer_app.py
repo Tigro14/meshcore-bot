@@ -2484,6 +2484,121 @@ class TestContactsClockDriftStatus:
         assert 595 <= out["clock_drift_seconds"] <= 605
 
 
+class TestContactsRegionStatus:
+    """Per-contact flood-scope evidence in the /api/contacts tracking payload.
+
+    Only ``global`` is positive evidence that a sender has no region: ``unknown`` means
+    the transport code was never seen for that packet, and a DM has no flood scope at
+    all. A sender with both kinds of row is still flagged, and keeps both counts.
+    """
+
+    WEEK = 7 * 24 * 3600
+
+    def _seed(self, viewer):
+        """Populate complete_contact_tracking + message_stats (same schema as prod)."""
+        db_path = viewer.db_path
+        now_epoch = int(time.time())
+        now_sql = datetime.fromtimestamp(now_epoch, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        out_of_window = now_epoch - (self.WEEK + 1)
+
+        contacts = [
+            # (name, [(scope_verdict, is_dm, epoch)])
+            ("NoRegion", [("global", 0, now_epoch - 3600)]),
+            ("HasRegion", [("scoped", 0, now_epoch - 3600)]),
+            ("Mixed", [("global", 0, now_epoch - 7200), ("scoped", 0, now_epoch - 3600)]),
+            ("NoEvidence", [("unknown", 0, now_epoch - 3600)]),
+            ("DmOnly", [("global", 1, now_epoch - 3600)]),
+            ("OutOfWindow", [("global", 0, out_of_window)]),
+        ]
+
+        with sqlite3.connect(db_path, timeout=60) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    channel TEXT,
+                    content TEXT NOT NULL,
+                    is_dm BOOLEAN NOT NULL,
+                    hops INTEGER,
+                    snr REAL,
+                    rssi INTEGER,
+                    path TEXT,
+                    scope_verdict TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            for name, rows in contacts:
+                cursor.execute(
+                    """
+                    INSERT INTO complete_contact_tracking
+                    (public_key, name, role, device_type, hop_count,
+                     first_heard, last_heard, advert_count, is_currently_tracked)
+                    VALUES (?, ?, 'client', 'mobile', 1, ?, ?, 1, 1)
+                    """,
+                    (name.lower().ljust(64, "0"), name, now_sql, now_sql),
+                )
+                for verdict, is_dm, epoch in rows:
+                    cursor.execute(
+                        """
+                        INSERT INTO message_stats
+                        (timestamp, sender_id, channel, content, is_dm, hops, scope_verdict, created_at)
+                        VALUES (?, ?, 'Public', 'hello', ?, 1, ?, ?)
+                        """,
+                        (epoch, name, int(is_dm), verdict, now_sql),
+                    )
+            conn.commit()
+
+    def _find(self, tracking, name):
+        for row in tracking:
+            if row["username"] == name:
+                return row
+        return None
+
+    def test_only_positive_evidence_flags_a_contact(self, viewer_with_db):
+        self._seed(viewer_with_db)
+        tracking = viewer_with_db._get_tracking_data(since="30d")["tracking_data"]
+
+        assert self._find(tracking, "NoRegion")["region_status"] == "unscoped"
+        assert self._find(tracking, "Mixed")["region_status"] == "unscoped"
+        # No positive evidence: a region observed, an unclassified packet, or only a DM.
+        assert self._find(tracking, "HasRegion")["region_status"] == "scoped"
+        assert self._find(tracking, "NoEvidence")["region_status"] == "unknown"
+        assert self._find(tracking, "DmOnly")["region_status"] == "unknown"
+
+        # Both counts survive for the mixed case, and the tooltip's "last" is the local
+        # ISO text the page formats the same way it formats last_heard.
+        mixed = self._find(tracking, "Mixed")
+        assert mixed["unscoped_messages"] == 1
+        assert mixed["scoped_messages"] == 1
+        assert mixed["last_unscoped"]
+
+    def test_the_window_is_the_one_the_page_is_filtered_by(self, viewer_with_db):
+        """A message older than the page window does not flag the contact."""
+        self._seed(viewer_with_db)
+        by_7d = viewer_with_db._get_tracking_data(since="7d")["tracking_data"]
+        by_all = viewer_with_db._get_tracking_data(since="all")["tracking_data"]
+
+        out_of_window = self._find(by_7d, "OutOfWindow")
+        assert out_of_window["region_status"] == "unknown"
+        assert out_of_window["unscoped_messages"] == 0
+        assert self._find(by_all, "OutOfWindow")["region_status"] == "unscoped"
+
+    def test_filter_keeps_only_the_flagged_contacts(self, viewer_with_db):
+        self._seed(viewer_with_db)
+        # 7d: OutOfWindow's unscoped message is 8 days old, so it is outside the window
+        # the page (and the filter) is using.
+        with viewer_with_db.app.test_client() as client:
+            response = client.get("/api/contacts?since=7d&region_filter=unscoped")
+
+        assert response.status_code == 200
+        names = {row["username"] for row in response.get_json()["tracking_data"]}
+        assert names == {"NoRegion", "Mixed"}
+
+
 # ---------------------------------------------------------------------------
 # Drift freshness: latest clocked packet wins (message vs advert)
 # ---------------------------------------------------------------------------

@@ -123,6 +123,32 @@ semantic versioning.
   reply too long for the body travels in pieces, split at line boundaries.
   `docs/command-reference.md`.
 
+- `[Vigilance_Service] department` accepts a comma-separated list, so one instance can watch
+  several departments at once (e.g. `75, 77, 78, 91, 92, 93, 94, 95, 60, 27`). One alert is
+  posted per department that is at an alert level, and `alert_throttle` applies per department,
+  so an alert sent for one no longer holds the others back. Per poll the request budget is one
+  call with an API key (the product is national), and without a key one page fetch plus one call
+  per department, since the `mfsession` cookie is a session cookie and the same token answers for
+  every department. A department that needs a key and has none is named in the start-up warning
+  and left out of the poll. `vigi` without an argument answers for the first department of the
+  list, because a reply naming all of them would not fit the RF budget. See
+  `docs/vigilance-service.md`.
+
+- `[Vigilance_Service] request_delay` (default 2 s) puts a pause between two requests of the same
+  poll, so a list of departments is spread out instead of arriving as one burst: the page fetch is
+  not preceded by a pause and every request after it is, which makes a list of 10 cost 11 requests
+  and 10 pauses, about 20 s on an 8 h poll. `vigi` is paced by the same key. With an API key a poll
+  is one request, so nothing is spaced, and `request_delay = 0` sends the requests back to back.
+  See `docs/vigilance-service.md`.
+
+- The Contacts page puts a red globe badge next to the name of a contact whose channel
+  messages arrived as an unscoped FLOOD (no region code), alongside the existing clock-drift
+  badge, with an infobulle giving the count, the window and the last unscoped message. Only
+  `message_stats.scope_verdict = 'global'` counts as evidence, over the window the page's
+  "Heard in" filter is set to; `unknown` and DMs carry no scope, so they cannot stand for
+  "no region". `Filters → Region code` narrows the list to the flagged contacts. See
+  `docs/web-viewer.md`.
+
 ### Changed
 
 - `meshcore` now requires 2.3.14 or newer. Before 2.3.13, `send_msg_with_retry`
@@ -190,6 +216,24 @@ semantic versioning.
   a disconnect packet, not an event.
 
 ### Fixed
+
+- The vigilance level is read from JSON. The department page Météo-France serves is filled by
+  JavaScript, so the parser had nothing to read and `vigi` answered `Vert` for every department
+  — verified on a live case: the Bouches-du-Rhône were in Jaune while the bot reported Vert. The
+  official product (free key, portail-api.meteofrance.fr, `DonneesPubliquesVigilance`) is used
+  when `[Vigilance_Service] api_key` is set; otherwise the endpoint the site's own JavaScript
+  calls answers, authenticated with the ROT-13 form of the anonymous `mfsession` cookie the page
+  sets. That keyless path covers metropolitan France and Corsica only, so an overseas department
+  still needs the key. HTML parsing remains the last resort when the page sets no cookie, and a
+  warning is logged at start when no key is configured.
+
+- `vigi 95` answered with an HTTP 404 for every department outside a small hand-written
+  table. That table held city names (`besancon`, `nice`), but Météo-France serves vigilance
+  pages under the department name — `/fr/doubs`, `/fr/val-d-oise` — and a bare number is not
+  a slug, so the fallback (`/fr/95`) could only 404. The table now covers all 101 departments
+  under their real slugs, a department name given in `department` is folded to its slug, and
+  a number with no page is refused with a clear message instead of being fetched. `vigi` also
+  accepts the Corsican codes `2A`/`2B`.
 
 - The Test DM card on `/radio` was unreachable. It had been a partial included by
   `radio.html` in one line; the merge resolved `radio.html` to the single-class

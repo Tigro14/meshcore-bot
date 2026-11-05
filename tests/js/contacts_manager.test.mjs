@@ -141,6 +141,7 @@ test('loadContactsData sends bounded server-side list parameters', async () => {
     elements.set('contacts-device-role', fakeElement({ value: 'repeater' }));
     elements.set('contacts-hop-filter', fakeElement({ value: '2' }));
     elements.set('contacts-location-filter', fakeElement({ value: 'known' }));
+    elements.set('contacts-region-filter', fakeElement({ value: 'unscoped' }));
     elements.set('contacts-starred-filter', fakeElement({ value: 'yes' }));
     const manager = bareManager(Manager);
     manager.currentPage = 3;
@@ -182,6 +183,7 @@ test('loadContactsData sends bounded server-side list parameters', async () => {
     assert.equal(url.searchParams.get('device_role'), 'repeater');
     assert.equal(url.searchParams.get('hop_filter'), '2');
     assert.equal(url.searchParams.get('location_filter'), 'known');
+    assert.equal(url.searchParams.get('region_filter'), 'unscoped');
     assert.equal(url.searchParams.get('starred'), 'yes');
     assert.equal(url.searchParams.get('sort'), 'distance');
     assert.equal(url.searchParams.get('direction'), 'asc');
@@ -196,6 +198,7 @@ test('a newer contacts request aborts the stale request', async () => {
     elements.set('contacts-device-role', fakeElement({ value: '' }));
     elements.set('contacts-hop-filter', fakeElement({ value: '' }));
     elements.set('contacts-location-filter', fakeElement({ value: '' }));
+    elements.set('contacts-region-filter', fakeElement({ value: '' }));
     elements.set('contacts-starred-filter', fakeElement({ value: '' }));
     const manager = bareManager(Manager);
     manager.setLoadingState = () => {};
@@ -457,13 +460,46 @@ test('formatDriftCompact keeps two units at most', () => {
     assert.equal(manager.formatDriftCompact(266400), '3d2h');
 });
 
-test('setupDriftTooltips initializes tooltips for drift badges', () => {
+test('formatRegionBadge flags only positive evidence of no region', () => {
+    const { context, elements, Manager } = loadManagerClass();
+    elements.set('contacts-timespan', fakeElement({
+        selectedOptions: [{ textContent: 'Last 30 days' }],
+    }));
+    const manager = bareManager(Manager);
+
+    // Nothing to show when there is no positive evidence: a region observed, an
+    // unclassified packet, or no channel message in the window at all.
+    assert.equal(manager.formatRegionBadge({ unscoped_messages: 0, scoped_messages: 3 }), '');
+    assert.equal(manager.formatRegionBadge({}), '');
+
+    const flagged = manager.formatRegionBadge({
+        unscoped_messages: 4,
+        scoped_messages: 2,
+        last_unscoped: new Date(Date.now() - 3600000).toISOString(),
+    });
+    assert.match(flagged, /bg-danger/);
+    assert.match(flagged, /fa-globe/);
+    assert.match(flagged, / 4<\/span>/);
+    assert.match(flagged, /4 unscoped channel messages/);
+    assert.match(flagged, /Last 30 days/);
+    assert.match(flagged, /2 scoped/);
+    assert.match(flagged, /last 1h ago/);
+
+    // The singular form, and no window text when the page is not filtered by one.
+    elements.delete('contacts-timespan');
+    const single = manager.formatRegionBadge({ unscoped_messages: 1 });
+    assert.match(single, /1 unscoped channel message"/);
+    assert.doesNotMatch(single, /Last 30 days/);
+});
+
+test('setupBadgeTooltips initializes tooltips for drift and region badges', () => {
     const { context, Manager } = loadManagerClass();
     const manager = bareManager(Manager);
 
-    const badge = {};
-    context.document.querySelectorAll = selector =>
-        selector === '.clock-drift-badge[data-bs-toggle="tooltip"]' ? [badge] : [];
+    const driftBadge = {};
+    const regionBadge = {};
+    const selector = '.clock-drift-badge[data-bs-toggle="tooltip"], .region-badge[data-bs-toggle="tooltip"]';
+    context.document.querySelectorAll = queried => (queried === selector ? [driftBadge, regionBadge] : []);
     let created = [];
     context.bootstrap.Tooltip = class Tooltip {
         constructor(el) {
@@ -474,11 +510,11 @@ test('setupDriftTooltips initializes tooltips for drift badges', () => {
         }
     };
 
-    manager.setupDriftTooltips();
-    assert.deepEqual(created, [badge]);
+    manager.setupBadgeTooltips();
+    assert.deepEqual(created, [driftBadge, regionBadge]);
 
-    manager.setupDriftTooltips();
-    assert.equal(created.length, 2);
+    manager.setupBadgeTooltips();
+    assert.equal(created.length, 4);
 });
 
 test('formatBattery renders a badge per status and nothing when no reading yet', () => {

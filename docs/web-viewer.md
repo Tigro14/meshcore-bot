@@ -293,6 +293,14 @@ event has to be sent as `42[...]`.
 - Hop count and routing information
 - Advertisement data
 - Currently tracked status
+- Region-code status: a red globe badge next to the name flags a contact whose channel
+  messages were received as an unscoped FLOOD, i.e. sent without a region code (see
+  [Region scopes](region-scopes.md)). Only `global` counts as evidence — `unknown` means the
+  transport code was never seen for that packet, and a DM has no flood scope — so a contact
+  with a region observed, or with no channel message in the window, gets no badge. The
+  tooltip gives the count, the window it was measured over and when the last unscoped
+  message was heard. `Filters → Region code` narrows the list to those contacts, and both
+  the badge and the filter use the window the page's "Heard in" select is set to.
 
 ### Battery Level
 When `[Battery_Monitor]` is enabled (see [Command reference](command-reference.md#schedule)),
