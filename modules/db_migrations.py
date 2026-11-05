@@ -1100,6 +1100,14 @@ def _m0032_channel_occupancy_tables(cursor: sqlite3.Cursor) -> None:
     )
 
 
+def _m0033_channel_web_visibility(cursor: sqlite3.Cursor) -> None:
+    """Persist publication consent independently of radio channel slot sync."""
+    cursor.execute("""CREATE TABLE IF NOT EXISTS channel_web_visibility (
+        channel_identity TEXT PRIMARY KEY,
+        live_messages_visible INTEGER NOT NULL DEFAULT 0 CHECK(live_messages_visible IN (0,1))
+    )""")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -1139,6 +1147,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (30, "daily_rollup: single-byte repeater advert total", _m0030_daily_rollup_singlebyte_advert_total),
     (31, "message_stats: scope_verdict", _m0031_message_stats_scope_verdict),
     (32, "channel occupancy buckets and sender share", _m0032_channel_occupancy_tables),
+    (33, "per-channel web message visibility", _m0033_channel_web_visibility),
 ]
 
 

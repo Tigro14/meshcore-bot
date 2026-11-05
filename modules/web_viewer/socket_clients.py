@@ -15,8 +15,9 @@ from typing import Any
 from flask import request, session
 from flask_socketio import disconnect, emit
 
+from modules.log_privacy import web_log_line
 from modules.utils import resolve_path
-from modules.web_viewer.live_stream import _strip_ansi_codes
+from modules.web_viewer.channel_visibility import encrypted_packet_view
 
 
 class SocketClientsMixin:
@@ -24,6 +25,7 @@ class SocketClientsMixin:
 
     _clients_lock: Any
     _config_base: Any
+    _can_publish_channel_data: Any
     config: Any
     connected_clients: Any
     db_path: Any
@@ -184,7 +186,9 @@ class SocketClientsMixin:
                         with open(log_file, encoding='utf-8', errors='replace') as _fh:
                             recent_lines = _fh.readlines()[-200:]
                         for line in recent_lines:
-                            emit('log_line', {'line': _strip_ansi_codes(line.rstrip())})
+                            safe_line = web_log_line(line)
+                            if safe_line is not None:
+                                emit('log_line', {'line': safe_line})
                     except Exception as e:
                         self.logger.debug(f"Error reading log history: {e}")
             except Exception as e:
@@ -245,7 +249,12 @@ class SocketClientsMixin:
                 if isinstance(data, dict):
                     data['stream_ts'] = row['timestamp']
                     data['replayed'] = True
-                emit(event_for_type(row['type']), data)
+                event = event_for_type(row['type'])
+                if event == 'packet_data':
+                    data = encrypted_packet_view(data)
+                elif not self._can_publish_channel_data(data, command=event == 'command_data'):
+                    continue
+                emit(event, data)
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
 

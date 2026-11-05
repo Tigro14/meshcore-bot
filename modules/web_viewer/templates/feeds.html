@@ -346,7 +346,7 @@ class FeedManager {
     
     async loadChannels() {
         try {
-            const response = await fetch('/api/channels');
+            const response = await fetch('/radio/api/channels');
             const data = await response.json();
             this.channels = (data.channels || []).filter(c => !c.decode_only);
             this.updateChannelSelect();

@@ -1420,8 +1420,10 @@
     // Public channel secret (well-known, publicly documented)
     const PUBLIC_CHANNEL_SECRET = '8b3387e9c5cdea6ac9e5edbaa115cd72';
 
-    // Channel secrets storage (Public + derived hashtag keys)
-    let channelSecrets = [PUBLIC_CHANNEL_SECRET];
+    // Channel secrets storage (Public + derived hashtag keys). Only channels the
+    // operator published are decoded here, so a hidden channel's key is never sent
+    // to the browser as part of the decoder key store.
+    let channelSecrets = [];
 
     // Channel hash to name mapping (for displaying friendly channel names)
     // Maps hash -> array of {name, secret} since multiple channels can share a hash
@@ -1485,15 +1487,21 @@
         if (keyStoreStarted) return;
         keyStoreStarted = true;
         try {
-            const response = await fetch('/api/channels');
+            // Fetch the channels the operator has agreed to publish.
+            const response = await fetch('/api/channels/live');
             const data = await response.json();
 
             let radioChannels = 0;
             let decodeOnlyChannels = 0;
 
-            const publicHash = await computeChannelHash(PUBLIC_CHANNEL_SECRET);
-            if (publicHash) {
-                channelHashMap.set(publicHash, [{ name: 'Public', secret: PUBLIC_CHANNEL_SECRET }]);
+            channelSecrets = [];
+            channelHashMap.clear();
+            // Only explicitly visible channels participate in browser decoding.
+            const publicVisible = (data.channels || []).some(c => String(c.name).toLowerCase() === 'public');
+            if (publicVisible) {
+                channelSecrets.push(PUBLIC_CHANNEL_SECRET);
+                const publicHash = await computeChannelHash(PUBLIC_CHANNEL_SECRET);
+                if (publicHash) channelHashMap.set(publicHash, [{ name: 'Public', secret: PUBLIC_CHANNEL_SECRET }]);
             }
 
             if (data.channels && data.channels.length > 0) {
@@ -3110,6 +3118,9 @@
         socket.on('packet_data', data => ingest('packet', data));
         socket.on('message_data', data => ingest('message', data));
         socket.on('command_data', data => ingest('command', data));
+        // Consent changed: the page only decodes published channels, so it has to
+        // rebuild its key store rather than keep showing stale rows.
+        socket.on('channel_visibility_changed', () => window.location.reload());
     }
     decoderReady.then(() => decodePendingRows());
     renderStrip();
@@ -3591,7 +3602,7 @@
 
         // Decrypted message - check if decoder decrypted it
         const decryptedSection = document.getElementById('decrypted-section');
-        if (decodedPayload?.decrypted) {
+        if (decodedPayload?.decrypted && channelEntries.length > 0) {
             decryptedSection.style.display = 'block';
             const decrypted = decodedPayload.decrypted;
             document.getElementById('decrypted-sender').textContent = decrypted.sender || decrypted.senderPubKeyPrefix || 'Unknown';
@@ -3618,7 +3629,7 @@
             }
             document.getElementById('decrypted-channel').textContent = resolvedChannelName;
             document.getElementById('decrypted-message').textContent = decrypted.message || decrypted.text || '';
-        } else if (serverData.decrypted_message) {
+        } else if (serverData.decrypted_message && channelEntries.length > 0) {
             // Fallback to server-provided decryption
             decryptedSection.style.display = 'block';
             document.getElementById('decrypted-sender').textContent = serverData.decrypted_sender || 'Unknown';

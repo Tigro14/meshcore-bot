@@ -67,6 +67,7 @@ nav:
     - Channel occupancy: channel-occupancy.md
     - Storage monitoring and power cycle: io-health-monitoring.md
   - Web Viewer: web-viewer.md
+  - Channel message visibility: channel-message-visibility.md
   - Command Reference:
     - Overview: command-reference.md
     - Repeater Commands: repeater-commands.md

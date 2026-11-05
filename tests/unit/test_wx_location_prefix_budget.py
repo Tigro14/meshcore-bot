@@ -56,7 +56,7 @@ class TestLocationPrefixIsReserved:
     BUDGET = 143  # channel body budget for a 15-byte bot name
 
     @staticmethod
-    def _run(cmd, budget, body):
+    def _run(cmd, budget, body, location_label="Lockhart, Texas"):
         """Drive the sync path with NOAA stubbed by a formatter that obeys its budget.
 
         The real formatters trim to the max_length they are handed; a stub that
@@ -73,16 +73,14 @@ class TestLocationPrefixIsReserved:
             seen["body"] = trimmed
             return trimmed, {}
 
-        with patch.object(
-            WxCommand, "get_max_message_length", Mock(return_value=budget)
-        ), patch.object(
-            WxCommand, "get_noaa_weather", Mock(side_effect=fake_get_noaa_weather)
-        ), patch.object(
-            WxCommand, "get_weather_alerts_noaa", Mock(return_value=WxCommand.NO_ALERTS)
+        with (
+            patch.object(WxCommand, "get_max_message_length", Mock(return_value=budget)),
+            patch.object(WxCommand, "get_noaa_weather", Mock(side_effect=fake_get_noaa_weather)),
+            patch.object(WxCommand, "get_weather_alerts_noaa", Mock(return_value=WxCommand.NO_ALERTS)),
+            patch.object(WxCommand, "_coordinates_to_location_string", return_value=location_label) as reverse_lookup,
         ):
-            result = cmd._get_weather_for_location_sync(
-                "30.8,-97.6", "coordinates", message=Mock()
-            )
+            result = cmd._get_weather_for_location_sync("30.8,-97.6", "coordinates", message=Mock())
+        reverse_lookup.assert_called_once_with(30.8, -97.6)
         return result, seen.get("max_length"), seen.get("body")
 
     def test_a_prefix_is_actually_in_play(self, mock_logger):
@@ -91,7 +89,14 @@ class TestLocationPrefixIsReserved:
         result, given, body = self._run(cmd, self.BUDGET, EMOJI_BODY)
         assert given is not None, "get_noaa_weather was never reached"
         assert result.endswith(body)
+        assert result.startswith("Lockhart,"), "no location prefix was prepended"
         assert result != body, "no location prefix was prepended"
+
+    def test_no_reverse_location_keeps_the_full_body_budget(self, mock_logger):
+        cmd = _wx_command(mock_logger)
+        result, given, body = self._run(cmd, self.BUDGET, EMOJI_BODY, location_label=None)
+        assert given == self.BUDGET
+        assert result == body
 
     def test_formatter_budget_excludes_the_prefix(self, mock_logger):
         cmd = _wx_command(mock_logger)

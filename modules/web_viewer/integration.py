@@ -614,6 +614,18 @@ class BotIntegration:
         content = getattr(message, "content", fallback)
         return content if isinstance(content, str) else fallback
 
+    def _channel_visibility_identity(self, message):
+        from .channel_visibility import message_identity
+        try:
+            import sqlite3
+            from pathlib import Path
+            from urllib.parse import quote
+            path = Path(self._get_web_viewer_db_path()).resolve()
+            with closing(sqlite3.connect("file:" + quote(str(path)) + "?mode=ro", uri=True, timeout=5)) as conn:
+                return message_identity(conn, getattr(message, 'channel', None))
+        except Exception:
+            return None
+
     def capture_command(self, message, command_name, response, success, command_id=None):
         """Capture command data and store in database for web viewer"""
         try:
@@ -641,6 +653,8 @@ class BotIntegration:
 
             # Construct command data structure
             command_data = {
+                'channel_visibility_id': self._channel_visibility_identity(message),
+                'is_dm': bool(getattr(message, 'is_dm', False)),
                 'user': user,
                 'channel': channel,
                 'command': command_name,
@@ -677,6 +691,7 @@ class BotIntegration:
             import time
             data = {
                 'type': 'message',
+                'channel_visibility_id': self._channel_visibility_identity(message),
                 'timestamp': time.time(),
                 'sender': getattr(message, 'sender_id', ''),
                 'channel': getattr(message, 'channel', ''),

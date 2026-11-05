@@ -119,8 +119,8 @@ class ChannelManager:
             self.logger.warning("Device not connected, skipping channel fetch")
             return []
 
-        # Clear cache for fresh fetch
-        self._channels_cache.clear()
+        # Keep readers on the current snapshot until the scan is complete.
+        refreshed_cache: dict[int, dict[str, Any]] = {}
         valid_channels = []
         consecutive_empty = 0
         max_consecutive_empty = 3  # Abort after 3 consecutive missing/empty channels
@@ -131,7 +131,7 @@ class ChannelManager:
                 result = await self._fetch_single_channel(channel_idx)
 
                 if result and result.get("channel_name"):
-                    self._channels_cache[channel_idx] = result
+                    refreshed_cache[channel_idx] = result
                     valid_channels.append(result)
                     consecutive_empty = 0  # Reset on success
                     self.logger.debug(f"Found channel {channel_idx}: {result.get('channel_name')}")
@@ -159,8 +159,10 @@ class ChannelManager:
                     break
                 continue
 
+        self._channels_cache = refreshed_cache
         self._cache_valid = bool(valid_channels)
         self.logger.info(f"Successfully fetched {len(valid_channels)} channels")
+        self.logger.info("Channel cache ready: indexes=%s", sorted(refreshed_cache))
 
         # Update the bot's meshcore channels for compatibility
         self.bot.meshcore.channels = self._channels_cache
@@ -234,20 +236,38 @@ class ChannelManager:
         try:
             # The native library API; the old CLI wrapper's overhead crashed the
             # device under rapid-fire requests.
-            try:
-                res = await asyncio.wait_for(
-                    self.bot.meshcore.commands.get_channel(channel_idx),
-                    timeout=self._fetch_timeout,
-                )
-            except asyncio.TimeoutError:
-                self.logger.debug(f"Timeout waiting for channel {channel_idx} response")
+            # The library waits for any CHANNEL_INFO event, not for this slot. A
+            # reply delayed beyond a previous request's timeout can otherwise label
+            # Public (slot 0) as slot 1 in our cache.
+            payload = None
+            for attempt in range(2):
+                try:
+                    res = await asyncio.wait_for(
+                        self.bot.meshcore.commands.get_channel(channel_idx),
+                        timeout=self._fetch_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.debug(
+                        "Timeout waiting for channel %d response (attempt %d/2)", channel_idx, attempt + 1
+                    )
+                else:
+                    candidate = getattr(res, 'payload', None)
+                    if not isinstance(candidate, dict) or not candidate:
+                        return None
+                    actual_idx = candidate.get('channel_idx')
+                    if type(actual_idx) is int and actual_idx == channel_idx:
+                        payload = copy.deepcopy(candidate)
+                        break
+                    self.logger.warning(
+                        "Ignoring channel response for index %s while requesting index %d (attempt %d/2)",
+                        actual_idx if type(actual_idx) is int else None,
+                        channel_idx,
+                        attempt + 1,
+                    )
+                if attempt == 0:
+                    await asyncio.sleep(0.2)
+            if payload is None:
                 return None
-
-            if not hasattr(res, 'payload') or not res.payload:
-                self.logger.debug(f"No channel {channel_idx} found")
-                return None
-
-            payload = res.payload
 
             # Store channel key as hex for decryption
             channel_secret = payload.get('channel_secret', b'')

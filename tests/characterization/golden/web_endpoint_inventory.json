@@ -186,17 +186,25 @@
   ]
  },
  "/api/channels": {
-  "POST locked anon": {
+  "GET locked anon": {
    "content_type": "application/json",
    "csp_script_src": "script-src 'self' 'unsafe-inline'",
    "location": "",
-   "status": 401,
+   "status": 200,
    "x_content_type_options": "nosniff",
    "x_frame_options": "SAMEORIGIN"
   },
-  "endpoint": "api_create_channel",
+  "GET open": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_published_channels",
   "methods": [
-   "POST"
+   "GET"
   ]
  },
  "/api/channels/<int:channel_idx>": {
@@ -215,6 +223,28 @@
  },
  "/api/channels/<int:channel_idx>/feeds": {
   "endpoint": "api_channel_feeds",
+  "methods": [
+   "GET"
+  ]
+ },
+ "/api/channels/live": {
+  "GET locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_published_channels",
   "methods": [
    "GET"
   ]
@@ -2112,6 +2142,34 @@
   "endpoint": "radio",
   "methods": [
    "GET"
+  ]
+ },
+ "/radio/api/channels": {
+  "POST locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 401,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_create_channel",
+  "methods": [
+   "POST"
+  ]
+ },
+ "/radio/api/channels/live-visibility": {
+  "PUT locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 401,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_channel_live_visibility",
+  "methods": [
+   "PUT"
   ]
  },
  "/realtime": {

@@ -8,6 +8,12 @@ semantic versioning.
 
 ### Added
 
+- Per-channel **Live Channel Messages** publication controls in Radio channel
+  management and creation, disabled by default. Hidden channels remain available
+  to the bot and statistics; server-side filtering covers live messages, history,
+  command streams and decrypted packet fields. Technical logs retain packet and
+  diagnostic information while masking conversation text.
+
 - `[Llm_Command] primary_endpoint` sends `llm` requests to a remote
   OpenAI-compatible endpoint (strata, `https://llm.tigro.fr`) with `api_key`.
   Its health path is probed at most once per `ping_cache_seconds` (default 60);
@@ -332,7 +338,7 @@ semantic versioning.
 - `[Weather] openmeteo_fallback` (default `false`, only with `weather_provider = noaa`): `wx` answers a place outside NWS coverage from Open-Meteo, in `gwx`'s format and `wx`'s units, instead of replying with an error. Current conditions, `tomorrow`, `Nd` and `hourly` fall back; `wx <place> alerts` there replies that alerts are not available. Only NWS's no-coverage answer triggers it, not timeouts or server errors, and the point is remembered for 24 hours so later requests skip NWS. It's also in the web viewer's `wx` settings.
 - `[Weather] always_show_location` (default `false`): when `true`, `wx` and `gwx` name the place in every reply a place is found for (`Lake Stevens, WA: …`), including ZIP codes and cities in the bot's own state or country, instead of only when the name adds information. The name takes message length from the forecast, and a ZIP code costs one extra reverse lookup. It's also in the web viewer's `wx` settings.
 - `gwx <place> hourly`: the next hours from Open-Meteo, packed into one reply like `wx`'s NOAA hourly forecast (time, condition, chance of precipitation, temperature, wind), in the configured units and translated. `gwx` listed `hourly` in its help but read it as part of the place name. `wx` with `weather_provider = openmeteo` gets it too.
-- Web viewer admin role when `web_viewer_password` is set: Dashboard, Contacts, and Mesh Graph are readable anonymously; Real-time, Radio, Config, Logs, and all mutating APIs require an admin session. Real-time's live Socket.IO streams (and `/api/channels`) can expose decrypted traffic and channel keys, so the page redirects anonymous visitors to the login page and drops out of their navigation instead of showing them an empty page.
+- Web viewer admin role when `web_viewer_password` is set: Dashboard, Contacts, and Mesh Graph are readable anonymously; Real-time, Radio, Config, Logs, and all mutating APIs require an admin session. Real-time's live Socket.IO streams (and the full channel list on `/radio/api/channels`) can expose decrypted traffic and channel keys, so the page redirects anonymous visitors to the login page and drops out of their navigation instead of showing them an empty page.
 
 - `[Weather_Service] weather_alerts_enabled` (default `true`) turns the NOAA
   weather-alert polling loop off on its own. Alert monitoring previously started
@@ -368,6 +374,11 @@ semantic versioning.
 - The footer's MeshCore link now points at the official site, meshcore.io.
 
 ### Fixed
+
+- Channel reads validate the returned slot before updating the channel cache and
+  retry one transient timeout or delayed reply. A late response could otherwise
+  place Public under another slot and hide its messages from the live feed.
+  Cache refreshes publish a complete snapshot after scanning.
 
 - A repeater heard twice in a row no longer posts two "new repeater" messages to Discord and Telegram. The prefix-collision service decided to announce a key and only recorded that key after the posts returned, so a second NEW_CONTACT while the first post was still in flight sent again (and the same gap double-posted a prefix-collision alert onto the mesh, which the bridges delivered twice). It now records the key before it sends.
 - The greeter's warmup (`rollout_days`) runs once, the first time the greeter starts. A restart more than a day after the previous warmup ended used to open another one, and anyone who spoke during it was marked greeted and never welcomed. Ending a warmup, or it expiring, no longer starts a new one on the next boot.
