@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from modules.clock_observations import latest_clock_attempts, target_clock_status
+
 
 class ContactTrackingMixin:
     """Mixed into BotDataViewer."""
@@ -217,12 +219,18 @@ class ContactTrackingMixin:
                 )
 
                 tracking: list[Any] = []
+                clock_samples = self._get_latest_clock_drift_samples(cursor)
+                clock_attempts = latest_clock_attempts(cursor)
                 self._tracking_entries(
                     main_rows, paths_by_key, chunk_buckets, bot_lat, bot_lon, include_detail, tracking,
-                    self._get_latest_clock_drift_samples(cursor),
+                    clock_samples,
                     self._get_latest_battery_samples(cursor),
                     clock_drift_threshold,
                 )
+
+                for entry in tracking:
+                    entry.update(target_clock_status(clock_samples.get(entry['username']),
+                        clock_attempts.get(entry['user_id']), self.config))
 
                 # Get server statistics for daily tracking using direct database queries
                 server_stats: dict[str, Any] = {}
@@ -381,15 +389,8 @@ class ContactTrackingMixin:
             # Per-contact clock drift (freshest clocked packet wins) and the latest
             # Battery_Monitor reading, both keyed for the contacts-page badges.
             drift_sample = clock_drift_samples.get(row['name'])
-            drift_value = drift_sample['drift'] if drift_sample is not None else None
-            if drift_value is None:
-                drift_status = 'unknown'
-            elif drift_value > clock_drift_threshold:
-                drift_status = 'out_of_sync'
-            elif drift_value > clock_drift_threshold / 2:
-                drift_status = 'warning'
-            else:
-                drift_status = 'in_sync'
+            drift_value = drift_sample['drift'] if drift_sample else None
+            drift_status = target_clock_status(drift_sample, None, self.config)['clock_state']
             battery_sample = battery_samples.get(row['public_key'])
             battery_voltage = battery_sample['voltage'] if battery_sample is not None else None
 
@@ -435,6 +436,8 @@ class ContactTrackingMixin:
                 'clock_drift_seconds': drift_value,
                 'clock_drift_status': drift_status,
                 'clock_drift_source': drift_sample['source'] if drift_sample is not None else None,
+                'clock_observed_at': drift_sample['received_at'] if drift_sample else None,
+                'clock_timestamp_valid': drift_sample['timestamp_valid'] if drift_sample else None,
                 'clock_drift_detected': bool(
                     drift_value is not None and drift_value > clock_drift_threshold
                 ),

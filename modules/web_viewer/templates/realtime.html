@@ -2226,16 +2226,44 @@
         const cmd = tx.command;
         const reply = makeElement('div', 'rt-reply');
         const failed = cmd.success === false;
+        const delivery = cmd.dm_delivery || {};
+        const deliveryLabels = {
+            not_sent: 'Not sent', unconfirmed: 'Delivery unconfirmed',
+            acknowledged: 'Delivery confirmed', partial: 'Partially sent',
+        };
+        const reasonLabels = {
+            contact_missing: 'Contact not found.', ambiguous_contact: 'Recipient matches multiple contacts.',
+            contact_data_incomplete: 'Insufficient data to restore this contact.',
+            contact_table_full: 'The radio contact table is full.',
+            contact_refresh_failed: 'Unable to verify radio contacts.',
+            contact_resolution_timeout: 'Contact verification timed out.',
+            invalid_recipient: 'Missing or invalid recipient.',
+            contact_resolution_failed: 'Unable to prepare the recipient.',
+            contact_restore_failed: 'The radio could not add this contact.',
+            contact_restore_unavailable: 'Contact restoration is unavailable.',
+            send_not_confirmed: 'Transmission could not be confirmed.',
+            contact_capacity_unknown: 'Unable to verify contact table capacity.',
+            contact_restore_disabled: 'Automatic contact management is disabled.',
+            contact_restore_unconfirmed: 'The radio did not confirm the restored contact.',
+            contact_cleanup_in_progress: 'Contact cleanup is in progress.',
+            radio_unavailable: 'Radio unavailable.', rate_limited: 'Transmission temporarily rate limited.',
+            radio_rejected: 'The radio rejected this transmission.', ack_missing: 'No ACK received.',
+            ack_received: 'ACK received.', radio_accepted: 'Transmission accepted by the radio; no verified ACK.',
+        };
+        const deliveryLabel = deliveryLabels[delivery.state];
         const head = makeElement('div', 'rt-reply-head');
         head.append(makeIcon('fas fa-robot'), makeElement('span', '', 'Bot reply'));
         if (cmd.command) head.appendChild(makeElement('span', 'rt-mono', cmd.command));
-        head.appendChild(makeElement('span', `rt-badge${failed ? ' is-failed' : ''}`, failed ? 'Failed' : 'Sent'));
+        head.appendChild(makeElement('span', `rt-badge${failed ? ' is-failed' : ''}`, deliveryLabel || (failed ? 'Failed' : 'Sent')));
         head.appendChild(makeElement('span', 'rt-reply-when', clockText(cmd.timestamp || tx.t)));
         reply.appendChild(head);
         reply.appendChild(makeElement('p', 'rt-reply-text', cmd.response || 'No response'));
         const status = makeElement('div', `rt-reply-status${failed ? ' is-failed' : ''}`);
-        if (failed) {
-            status.append(makeIcon('fas fa-circle-exclamation'), document.createTextNode(' Didn\'t send'));
+        if (deliveryLabel) {
+            const detail = reasonLabels[delivery.reason] || 'See technical logs for details.';
+            status.appendChild(document.createTextNode(detail));
+        } else if (failed) {
+            status.append(makeIcon('fas fa-circle-exclamation'), document.createTextNode(' Delivery failed'));
         } else {
             status.appendChild(tipify(
                 makeElement('span', '', repeatSummary(cmd, tx.echoes)),

@@ -49,6 +49,7 @@ def cm_bot(mock_logger):
         side_effect=lambda key, **kw: f"{key}: {' '.join(str(v) for v in kw.values())}"
     )
     bot.meshcore = None
+    bot.radio_session = None
     bot.is_radio_zombie = False
     bot.is_radio_offline = False
     bot.rate_limiter = Mock()
@@ -67,6 +68,17 @@ def _strip_part_suffix(text: str) -> str:
 
 def make_manager(bot, commands=None):
     """Create CommandManager with mocked PluginLoader."""
+    # Provide a realistic read-only radio lookup for tests focused on sending.
+    radio = getattr(bot, 'meshcore', None)
+    records = getattr(radio, 'contacts', None)
+    commands_api = getattr(radio, 'commands', None)
+    if isinstance(records, dict) and commands_api is not None and not hasattr(commands_api, 'get_contact_by_key'):
+        from meshcore import EventType
+        from meshcore.events import Event
+        async def radio_lookup(key):
+            record = next((r for r in records.values() if r.get('public_key') == key.hex()), None)
+            return Event(EventType.NEXT_CONTACT, record) if record else Event(EventType.ERROR, {})
+        commands_api.get_contact_by_key = AsyncMock(side_effect=radio_lookup)
     with patch("modules.command_manager.PluginLoader") as mock_loader_class:
         mock_loader = Mock()
         mock_loader.load_all_plugins = Mock(return_value=commands or {})
@@ -562,7 +574,7 @@ class TestSendDMRecipientResolution:
             "contact1": {
                 "name": "Alice",
                 "adv_name": "AliceAdv",
-                "public_key": "ab12deadbeefcafebabe",
+                "public_key": "ab12deadbeef" + "ab" * 26,
             }
         }
         cm_bot.meshcore.commands = Mock(spec=["send_msg"])
@@ -570,10 +582,10 @@ class TestSendDMRecipientResolution:
         cm_bot.bot_tx_rate_limiter.wait_for_tx = AsyncMock(return_value=None)
         manager = make_manager(cm_bot)
 
-        result = await manager.send_dm("ab12", "Hello mesh")
+        result = await manager.send_dm("ab12deadbeef", "Hello mesh")
 
         assert result is True
-        cm_bot.meshcore.get_contact_by_name.assert_called_once_with("ab12")
+        cm_bot.meshcore.get_contact_by_name.assert_not_called()
         cm_bot.meshcore.commands.send_msg.assert_awaited_once()
         sent_contact = cm_bot.meshcore.commands.send_msg.await_args.args[0]
         assert sent_contact["name"] == "Alice"
@@ -588,19 +600,19 @@ class TestSendDMRecipientResolution:
         cm_bot.meshcore.contacts = {
             "contact1": {
                 "name": "Bob",
-                "public_key": "ffffdeadbeefcafebabe",
+                "public_key": "ffffdeadbeef" + "ab" * 26,
             }
         }
         cm_bot.meshcore.pending_contacts = {}
         cm_bot.bot_tx_rate_limiter.wait_for_tx = AsyncMock(return_value=None)
         manager = make_manager(cm_bot)
 
-        result = await manager.send_dm("ab12", "Hello mesh")
+        result = await manager.send_dm("ab12deadbeef", "Hello mesh")
 
         assert result is False
-        cm_bot.meshcore.get_contact_by_name.assert_called_once_with("ab12")
-        cm_bot.logger.error.assert_called()
-        assert "Contact not found for DM recipient identifier" in cm_bot.logger.error.call_args.args[0]
+        cm_bot.meshcore.get_contact_by_name.assert_not_called()
+        cm_bot.logger.warning.assert_called()
+        assert "DM not emitted" in cm_bot.logger.warning.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_send_dm_resolves_pending_contact_by_pubkey_prefix(self, cm_bot):
@@ -611,7 +623,7 @@ class TestSendDMRecipientResolution:
         cm_bot.meshcore = Mock()
         cm_bot.meshcore.get_contact_by_name = Mock(return_value=None)
         cm_bot.meshcore.contacts = {}
-        pending_key = "3a2418b4ad42cafebabe0123456789abcdef0123456789abcdef0123456789"
+        pending_key = "3a2418b4ad42" + "ab" * 26
         cm_bot.meshcore.pending_contacts = {
             pending_key: {
                 "name": "NewCompanion",
@@ -619,7 +631,9 @@ class TestSendDMRecipientResolution:
                 "public_key": pending_key,
             }
         }
-        cm_bot.meshcore.commands = Mock(spec=["send_msg"])
+        from meshcore.events import Event
+        cm_bot.meshcore.commands = Mock(spec=["send_msg", "get_contact_by_key"])
+        cm_bot.meshcore.commands.get_contact_by_key = AsyncMock(return_value=Event(EventType.NEXT_CONTACT, cm_bot.meshcore.pending_contacts[pending_key]))
         cm_bot.meshcore.commands.send_msg = AsyncMock(return_value=Mock(type=EventType.MSG_SENT, payload=None))
         cm_bot.bot_tx_rate_limiter.wait_for_tx = AsyncMock(return_value=None)
         manager = make_manager(cm_bot)
@@ -645,12 +659,12 @@ class TestSendDMRecipientResolution:
             "contact1": {
                 "name": "Alice",
                 "adv_name": "Alice",
-                "public_key": "aabbccddeeff001122",
+                "public_key": ("aabbccddeeff001122" + "ab" * 23),
             },
             "contact2": {
                 "name": "Alice-repeater",
                 "adv_name": "Alice-repeater",
-                "public_key": "ffeeddccbbaa998877",
+                "public_key": ("ffeeddccbbaa998877" + "cd" * 23),
             },
         }
         cm_bot.meshcore.commands = Mock(spec=["send_msg"])
@@ -662,7 +676,7 @@ class TestSendDMRecipientResolution:
         msg = MeshMessage(
             content="hello",
             sender_id="Alice",
-            sender_pubkey="aabbccddeeff001122",
+            sender_pubkey=("aabbccddeeff001122" + "ab" * 23),
             is_dm=True,
         )
 
@@ -670,9 +684,9 @@ class TestSendDMRecipientResolution:
 
         assert result is True
         # send_dm must have been called with the pubkey, not the name
-        cm_bot.meshcore.get_contact_by_name.assert_called_once_with("aabbccddeeff001122")
+        cm_bot.meshcore.get_contact_by_name.assert_not_called()
         sent_contact = cm_bot.meshcore.commands.send_msg.await_args.args[0]
-        assert sent_contact["public_key"] == "aabbccddeeff001122"
+        assert sent_contact["public_key"] == ("aabbccddeeff001122" + "ab" * 23)
 
     @pytest.mark.asyncio
     async def test_failed_send_does_not_invoke_listeners(self, cm_bot):
@@ -1078,8 +1092,10 @@ class TestSendDMLengthGuard:
 
         cm_bot.connected = True
         cm_bot.meshcore = Mock()
-        contact = {"name": "Alice", "public_key": "ab12deadbeef"}
+        contact = {"name": "Alice", "public_key": "ab" * 32}
         cm_bot.meshcore.get_contact_by_name = Mock(return_value=contact)
+        cm_bot.meshcore.contacts = {contact["public_key"]: contact}
+        cm_bot.meshcore.pending_contacts = {}
         cm_bot.meshcore.commands = Mock(spec=["send_msg"])
         cm_bot.meshcore.commands.send_msg = AsyncMock(
             return_value=Mock(type=EventType.MSG_SENT, payload=None)
@@ -1105,8 +1121,10 @@ class TestSendDMLengthGuard:
 
         cm_bot.connected = True
         cm_bot.meshcore = Mock()
-        contact = {"name": "Alice", "public_key": "ab12deadbeef"}
+        contact = {"name": "Alice", "public_key": "ab" * 32}
         cm_bot.meshcore.get_contact_by_name = Mock(return_value=contact)
+        cm_bot.meshcore.contacts = {contact["public_key"]: contact}
+        cm_bot.meshcore.pending_contacts = {}
         cm_bot.meshcore.commands = Mock(spec=["send_msg"])
         cm_bot.meshcore.commands.send_msg = AsyncMock(
             return_value=Mock(type=EventType.MSG_SENT, payload=None)
@@ -1689,14 +1707,14 @@ class TestDMAckTimeoutFloor:
     @pytest.mark.parametrize(
         ("configured", "expected"),
         [
-            (None, 8.0),
+            (None, 30.0),
             ("15", 15.0),
             ("2.5", 2.5),
             ("0", 0.0),
-            ("-1", 8.0),
-            ("soon", 8.0),
+            ("-1", 30.0),
+            ("soon", 30.0),
             ("8000", 60.0),
-            ("nan", 8.0),
+            ("nan", 30.0),
             ("inf", 60.0),
         ],
     )

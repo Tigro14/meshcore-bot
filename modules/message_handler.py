@@ -342,18 +342,19 @@ class MessageHandler(MeshGraphRecorderMixin, ContactEventsMixin, RfCorrelationMi
             # Look up contact name from pubkey prefix
             sender_id = sanitize_name(payload.get("pubkey_prefix", ""))
             sender_name = sender_id  # Default to sender_id
-            # An empty prefix matches the first contact here; that is long-standing
-            # behavior for the display name, but the full key below requires a prefix.
-            contact = self._find_contact(lambda c: c.get("public_key", "").startswith(sender_id))
+            # A prefix must resolve uniquely before it can identify a DM peer.
+            from .dm_contacts import DmContactResolver
+            resolver = DmContactResolver(self.bot)
+            try:
+                key, row, _ = resolver.identify(sender_id)
+            except Exception:
+                key, row = None, None
+            contact = next((r for r in resolver._radio_contacts() if resolver._key(r) == key), None)
+            if contact is None:
+                contact = row
             if contact:
-                # Use the contact name if available, otherwise use adv_name
-                sender_name = sanitize_name(contact.get("name", contact.get("adv_name", sender_id)))
-
-            # Get the full public key from contacts if available
-            sender_pubkey = sender_id  # Default to pubkey prefix (same value as sender_id at this point)
-            if sender_id and contact:
-                sender_pubkey = contact.get("public_key", sender_id)
-                self.logger.debug(f"Found full public key for {sender_name}: {sender_pubkey[:16]}...")
+                sender_name = sanitize_name(contact.get("name") or contact.get("adv_name") or sender_id)
+            sender_pubkey = key or sender_id
 
             # Sanitize message content to prevent injection attacks
             # Note: Firmware enforces 150-char limit at hardware level, so we disable length check

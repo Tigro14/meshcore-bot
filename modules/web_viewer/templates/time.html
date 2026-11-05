@@ -2,10 +2,44 @@
 
 {% block title %}Time Synchronization - MeshCore Bot Data Viewer{% endblock %}
 
+{% block extra_css %}
+<style>
+    .time-page-heading {gap:12px;flex-wrap:wrap}
+    .time-config-panel code {overflow-wrap:anywhere;white-space:normal}
+    #clock-sync-targets-container {max-width:100%;overflow-x:auto}
+    .time-targets-table {width:100%}
+    .time-targets-table td {overflow-wrap:anywhere}
+    .time-targets-table .time-target-name {min-width:0}
+    .time-targets-header {gap:12px;flex-wrap:wrap}
+    @media(max-width:991.98px) {
+        .time-page-heading h1 {font-size:clamp(1.35rem,5.2vw,1.8rem);line-height:1.25}
+        .time-targets-header > span {min-width:0;overflow-wrap:anywhere}
+        #clock-sync-targets-container {overflow:visible}
+        .time-targets-table,.time-targets-table tbody {display:block;width:100%}
+        .time-targets-table thead {display:none}
+        .time-targets-table tr {
+            display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+            gap:12px 16px;position:relative;padding:14px;margin-bottom:14px;
+            border:1px solid var(--bs-border-color,#dee2e6);border-radius:8px;
+        }
+        .time-targets-table td {display:block;min-width:0;padding:0;border:0;background:transparent;box-shadow:none}
+        .time-targets-table td::before {content:attr(data-label);display:block;font-size:.75rem;color:var(--bs-secondary-color,#6c757d);margin-bottom:4px;font-weight:600}
+        .time-targets-table .time-target-name {grid-column:1/-1;padding-right:82px;padding-bottom:10px;border-bottom:1px solid var(--bs-border-color,#dee2e6)}
+        .time-targets-table .time-target-name::before,.time-targets-table .time-target-actions::before {display:none}
+        .time-targets-table .time-target-drift {grid-column:1/-1}
+        .time-targets-table .time-target-actions {position:absolute;top:12px;right:12px}
+        .time-target-actions .btn {min-width:36px;min-height:36px;display:inline-flex;align-items:center;justify-content:center}
+        .time-targets-table .badge {max-width:100%;white-space:normal;text-align:left}
+        .time-targets-table .form-switch {min-height:30px;padding-top:2px}
+        .time-targets-table .form-check-input {width:2.6em;height:1.5em;min-height:24px;margin-top:0}
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="row">
     <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="time-page-heading d-flex justify-content-between align-items-center mb-4">
             <h1 class="mb-0">
                 <i class="fas fa-clock"></i> Time Synchronization
             </h1>
@@ -17,7 +51,7 @@
 <!-- Configuration Info Section -->
 <div class="row mb-4">
     <div class="col-12">
-        <div class="card h-100">
+        <div class="card h-100 time-config-panel">
             <div class="card-header">
                 <i class="fas fa-info-circle"></i> Configuration
             </div>
@@ -25,7 +59,7 @@
                 <div class="alert alert-secondary small mb-3" style="opacity:0.9;">
                     <i class="fas fa-info-circle me-1"></i>
                     <strong>FR:</strong> Cette fonction envoie la commande <code id="desc-command">clock sync admin</code> par DM aux nœuds ci-dessous pour synchroniser leur horloge.<br>
-                    La commande n'est envoyée <strong>que si le drift constaté dépasse le seuil max</strong> indiqué plus bas (sinon le sync est sauté).<br>
+                    La commande est envoyée si la mesure récente dépasse <strong>Min Sync Drift</strong>, ou si la dérive est inconnue. Une réception confirmée ne prouve pas que l'horloge est réglée.<br>
                     Pour que cela fonctionne, le nœud cible doit avoir ajouté le bot dans sa liste d'<strong>admins</strong>.<br><br>
                     <strong>Méthode Android (la plus simple) :</strong><br>
                     1. Ouvrez l'app Meshcore sur le nœud cible<br>
@@ -37,7 +71,7 @@
                     <strong>Alternative (pubkey) :</strong> Ajouter manuellement la public key du bot :<br>
                     <code class="user-select-all" id="desc-bot-pubkey">...</code><br><br>
                     <strong>EN:</strong> This feature sends <code id="desc-command-en">clock sync admin</code> via DM to each listed node to sync its clock.<br>
-                    The command is only sent <strong>if the observed drift exceeds the max threshold</strong> shown below (otherwise the sync is skipped).<br>
+                    The command is sent if a recent measurement exceeds <strong>Min Sync Drift</strong>, or if the drift is unknown. Confirmed delivery does not prove that the clock is synchronized.<br>
                     For this to work, the target node must have added the bot to its <strong>admins</strong> list.<br><br>
                     <strong>Android method (easiest):</strong><br>
                     1. Open the Meshcore app on the target node<br>
@@ -75,7 +109,7 @@
 <div class="row mb-4">
     <div class="col-12">
         <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card-header time-targets-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-broadcast-tower"></i> Clock_Sync_Admin Targets</span>
                 <button id="clock-sync-run-now-btn" class="btn btn-sm btn-outline-primary" type="button">
                     <i class="fas fa-play me-1"></i>Run Now
@@ -152,6 +186,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for('static', filename='js/clock_drift.js') }}"></script>
 <script>
     class TimeViewer {
         constructor() {
@@ -222,7 +257,8 @@
                     const r = result.result_data || {};
                     this.showRunNowAlert(
                         `Clock_Sync_Admin run complete — sent: ${r.sent ?? 0}, failed: ${r.failed ?? 0}, ` +
-                        `unknown: ${r.unknown ?? 0}, duplicates skipped: ${r.duplicates_skipped ?? 0}.`,
+                        `unknown: ${r.unknown ?? 0}, already in sync: ${r.in_sync_skipped ?? 0}, ` +
+                        `duplicates skipped: ${r.duplicates_skipped ?? 0}.`,
                         (r.failed ?? 0) > 0 ? 'warning' : 'success'
                     );
                 } else if (status === 'timeout') {
@@ -413,12 +449,12 @@
                     content.innerHTML = '<div class="text-muted text-center">No sync history yet.</div>';
                     return;
                 }
-                let html = '<table class="table table-sm mb-0"><thead><tr><th>Time</th><th>Status</th><th>Detail</th></tr></thead><tbody>';
+                let html = '<table class="table table-sm mb-0"><thead><tr><th>Date</th><th>Delivery</th><th>Detail</th></tr></thead><tbody>';
                 history.forEach(h => {
                     const time = this.formatTimestamp(h.at);
                     const status = h.success
-                        ? '<span class="badge bg-success">OK</span>'
-                        : '<span class="badge bg-danger">Fail</span>';
+                        ? '<span class="badge bg-info text-dark">Delivery confirmed</span>'
+                        : '<span class="badge bg-secondary">Delivery unconfirmed</span>';
                     const detail = h.error ? this.escapeHtml(h.error) : '-';
                     html += `<tr><td class="text-muted small">${time}</td><td>${status}</td><td class="small">${detail}</td></tr>`;
                 });
@@ -492,8 +528,8 @@
                 return;
             }
 
-            let html = '<table class="table table-sm align-middle mb-0">';
-            html += '<thead><tr><th>Target</th><th>Drift</th><th>Status</th><th>Battery</th><th>Auto clkreboot</th><th>Last Sync</th><th class="text-end">Actions</th></tr></thead><tbody>';
+            let html = '<table class="time-targets-table table table-sm align-middle mb-0">';
+            html += '<thead><tr><th>Target</th><th>Measured drift</th><th>Clock</th><th>Battery</th><th>Auto clkreboot</th><th>Last send</th><th class="text-end">Actions</th></tr></thead><tbody>';
             targets.forEach(t => {
                 const id = t.id;
                 const displayTarget = this.escapeHtml(t.target || 'unknown');
@@ -503,23 +539,15 @@
                 const toggleIcon = enabled ? 'fa-check' : 'fa-pause';
                 const toggleTitle = enabled ? 'Click to disable' : 'Click to enable';
 
-                // Drift
-                let driftHtml = '<span class="text-muted">-</span>';
-                if (t.clock_drift !== undefined && t.clock_drift !== null) {
-                    const drift = t.clock_drift;
-                    const driftClass = Math.abs(drift) > 300 ? 'text-danger' : (Math.abs(drift) > 60 ? 'text-warning' : 'text-success');
-                    driftHtml = `<span class="${driftClass}">${drift}s</span>`;
+                let driftHtml = globalThis.MeshClockBadges.badge({
+                    clock_drift_seconds: t.clock_drift,
+                    clock_drift_status: t.clock_drift_status,
+                });
+                if (t.clock_observed_at) {
+                    const source = t.clock_source === 'advert' ? 'advert' : 'message';
+                    driftHtml += `<div class="small text-muted">${this.formatObservation(t.clock_observed_at)} · ${source}</div>`;
                 }
-
-                // Sync status
-                let syncBadge = '<span class="badge bg-secondary">No data</span>';
-                if (t.last_sync_at) {
-                    if (t.last_sync_success) {
-                        syncBadge = '<span class="badge bg-success"><i class="fas fa-check"></i> OK</span>';
-                    } else {
-                        syncBadge = `<span class="badge bg-danger" title="${this.escapeHtml(t.last_sync_error || '')}"><i class="fas fa-times"></i> Fail</span>`;
-                    }
-                }
+                const syncBadge = this.clockStatusBadge(t.clock_state);
 
                 // Battery (Battery_Monitor polls this same target list)
                 let batteryHtml = '<span class="text-muted">-</span>';
@@ -546,7 +574,8 @@
                 // Last sync time
                 let lastSync = '-';
                 if (t.last_sync_at) {
-                    lastSync = this.formatTimestamp(t.last_sync_at);
+                    const delivery = t.last_sync_success ? 'Delivery confirmed' : 'Delivery unconfirmed';
+                    lastSync = `${delivery}<div class="small text-muted">${this.formatTimestamp(t.last_sync_at)}</div>`;
                 }
 
                 const deleteTitle = `Delete target ${displayTarget}`;
@@ -554,23 +583,23 @@
                 const autoClkrebootChecked = t.auto_clkreboot_enabled ? 'checked' : '';
 
                 html += `<tr>
-                    <td>
+                    <td class="time-target-name" data-label="Relais">
                         <a href="#" class="text-decoration-none" onclick="document.querySelector('#TimeViewer').showHistory(${id}, '${displayName.replace(/'/g, "\\'")}')" title="View sync history">
                             <strong>${displayName}</strong>
                         </a>
                         ${contactName ? `<br><code class="small">${displayTarget.substring(0, 16)}...</code>` : ''}
                     </td>
-                    <td>${driftHtml}</td>
-                    <td>${syncBadge}</td>
-                    <td>${batteryHtml}</td>
-                    <td>
+                    <td class="time-target-drift" data-label="Measured drift">${driftHtml}</td>
+                    <td data-label="Clock">${syncBadge}</td>
+                    <td data-label="Battery">${batteryHtml}</td>
+                    <td data-label="Auto clkreboot">
                         <div class="form-check form-switch mb-0" title="If this target replies 'clock cannot go backwards' (its clock is ahead of real time -- a normal sync can never fix that), automatically clkreboot it then resync it">
-                            <input class="form-check-input" type="checkbox" role="switch" ${autoClkrebootChecked}
+                            <input class="form-check-input" type="checkbox" role="switch" aria-label="Auto clkreboot" ${autoClkrebootChecked}
                                 onchange="document.querySelector('#TimeViewer').toggleAutoClkreboot(${id}, this.checked)">
                         </div>
                     </td>
-                    <td class="text-muted small">${lastSync}</td>
-                    <td class="text-end">
+                    <td class="text-muted small" data-label="Last send">${lastSync}</td>
+                    <td class="time-target-actions text-end" data-label="Actions">
                         <div class="d-flex gap-1 justify-content-end">
                             <button class="btn btn-sm ${toggleClass}" title="${toggleTitle}" onclick="document.querySelector('#TimeViewer').toggleTarget(${id}, ${enabled})">
                                 <i class="fas ${toggleIcon}"></i>
@@ -666,11 +695,40 @@
             }
         }
 
+        clockStatusBadge(state) {
+            const states = {
+                in_sync: ['success', 'In sync'],
+                warning: ['warning text-dark', 'Clock drift'],
+                out_of_sync: ['danger', 'Out of sync'],
+                unset: ['danger', 'Clock unset'],
+                awaiting_verification: ['warning text-dark', 'Awaiting verification'],
+                rejected: ['danger', 'Command rejected'],
+                stale: ['secondary', 'Old observation'],
+                unknown: ['secondary', 'Not measured'],
+            };
+            const [color, label] = states[state] || states.unknown;
+            return `<span class="badge bg-${color}">${label}</span>`;
+        }
+
+        timestampDate(ts) {
+            if (typeof ts === 'number') return new Date(ts * 1000);
+            if (typeof ts !== 'string' || !ts.trim()) return null;
+            let text = ts.trim().replace(' ', 'T');
+            // SQLite sync/battery log dates are UTC, including legacy responses.
+            if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(text)) text += 'Z';
+            const date = new Date(text);
+            return Number.isNaN(date.getTime()) ? null : date;
+        }
+
+        formatObservation(ts) {
+            const date = this.timestampDate(ts);
+            return date ? `Measured at ${date.toLocaleString()}` : 'Unknown date';
+        }
+
         formatTimestamp(ts) {
-            if (!ts) return '-';
-            const date = new Date(ts.includes('T') || ts.includes(' ') ? ts : ts * 1000);
-            const now = new Date();
-            const diff = Math.floor((now - date) / 1000);
+            const date = this.timestampDate(ts);
+            if (!date) return '-';
+            const diff = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
             if (diff < 60) return `${diff}s ago`;
             if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
             if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -693,14 +751,18 @@
 
         async toggleAutoClkreboot(id, autoClkrebootEnabled) {
             try {
-                await fetch(`/api/clock-sync-targets-admin/${id}`, {
+                const response = await fetch(`/api/clock-sync-targets-admin/${id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ auto_clkreboot_enabled: autoClkrebootEnabled }),
                 });
-                this.loadData();
+                if (!response.ok) {
+                    throw new Error(`Unable to save setting (HTTP ${response.status}).`);
+                }
             } catch (err) {
-                alert('Toggle failed: ' + err.message);
+                alert('Auto clkreboot setting not saved : ' + err.message);
+            } finally {
+                await this.loadData();
             }
         }
 
@@ -731,6 +793,7 @@
         el._viewer = viewer;
         document.body.appendChild(el);
         el.toggleTarget = viewer.toggleTarget.bind(viewer);
+        el.toggleAutoClkreboot = viewer.toggleAutoClkreboot.bind(viewer);
         el.promptDelete = viewer.promptDelete.bind(viewer);
         el.showHistory = viewer.showHistory.bind(viewer);
     });
