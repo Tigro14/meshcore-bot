@@ -335,9 +335,11 @@ Levels: ✅ Vert, ⚠️ Jaune, 🟠 Orange, 🔴 Rouge. The answer is capped at
 single mesh transmission carries it.
 
 **Configuration:** the department comes from `[Vigilance_Service]` (`department`, default
-`75`), the same section used by the [Vigilance Météo-France Service](vigilance-service.md)
-that posts proactive Orange/Rouge alerts. The command has no own section, so the two cannot
-disagree.
+`75`, comma-separated for several), the same section used by the
+[Vigilance Météo-France Service](vigilance-service.md) that posts proactive Orange/Rouge
+alerts. With several departments configured, `vigi` without an argument answers for the first
+one: a reply naming all of them would not fit the RF budget. The command has no own section, so
+the two cannot disagree.
 
 **Note:** `alert` and `alerte` are not keywords of this command — they belong to
 [`alert <location>`](command-reference.md#alert-location-all).

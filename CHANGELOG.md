@@ -123,6 +123,17 @@ semantic versioning.
   reply too long for the body travels in pieces, split at line boundaries.
   `docs/command-reference.md`.
 
+- `[Vigilance_Service] department` accepts a comma-separated list, so one instance can watch
+  several departments at once (e.g. `75, 77, 78, 91, 92, 93, 94, 95, 60, 27`). One alert is
+  posted per department that is at an alert level, and `alert_throttle` applies per department,
+  so an alert sent for one no longer holds the others back. Per poll the request budget is one
+  call with an API key (the product is national), and without a key one page fetch plus one call
+  per department, since the `mfsession` cookie is a session cookie and the same token answers for
+  every department. A department that needs a key and has none is named in the start-up warning
+  and left out of the poll. `vigi` without an argument answers for the first department of the
+  list, because a reply naming all of them would not fit the RF budget. See
+  `docs/vigilance-service.md`.
+
 ### Changed
 
 - `meshcore` now requires 2.3.14 or newer. Before 2.3.13, `send_msg_with_retry`

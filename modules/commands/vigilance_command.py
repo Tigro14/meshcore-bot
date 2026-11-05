@@ -7,7 +7,7 @@ Provides current weather vigilance status for a French department
 import asyncio
 
 from ..models import MeshMessage
-from ..service_plugins.vigilance_service import fetch_vigilance
+from ..service_plugins.vigilance_service import fetch_vigilance, normalize_department
 from .base_command import BaseCommand
 
 
@@ -32,7 +32,7 @@ class VigilanceCommand(BaseCommand):
     parameters = [
         {
             "name": "department",
-            "description": "French department number (optional; defaults to configured dept or 75)",
+            "description": "French department number (optional; defaults to the first configured dept or 75)",
         }
     ]
 
@@ -76,7 +76,8 @@ class VigilanceCommand(BaseCommand):
 
         Accepts the numeric codes (``95``) and the Corsican ones (``2a``/``2b``),
         which Météo-France writes as ``2A``/``2B``. Falls back to the configured
-        department, then '75'.
+        department, then '75'. When the configuration lists several, the first one is
+        used: answering for all of them at once would not fit the RF budget.
 
         Args:
             args: Argument text (e.g. "25" for "vigi 25")
@@ -88,8 +89,11 @@ class VigilanceCommand(BaseCommand):
         if dept.isalnum() and 1 <= len(dept) <= 3:
             return dept.zfill(2) if dept.isdigit() else dept.upper()
 
-        # Fall back to the configured department
-        return str(self.get_config_value("Vigilance_Service", "department", fallback="75")).strip()
+        # Fall back to the configured department, which may be a comma-separated list
+        configured = str(
+            self.get_config_value("Vigilance_Service", "department", fallback="75")
+        ).strip()
+        return normalize_department(configured.split(',')[0])
 
     def _format_response(self, dept: str, data: dict) -> str:
         """Format a compact vigilance alert message.
@@ -135,7 +139,7 @@ class VigilanceCommand(BaseCommand):
             "Get Météo-France weather vigilance status.\n"
             "Usage: vigi [department_number]\n"
             "Examples:\n"
-            "  vigi        — uses configured department\n"
+            "  vigi        — uses the configured department (the first when several)\n"
             "  vigi 75     — Paris\n"
             "  vigi 95     — Val-d'Oise\n"
             "  vigi 2A     — Corse-du-Sud\n"

@@ -45,6 +45,12 @@ class TestDepartmentResolution:
         cmd = _command(command_mock_bot)
         assert cmd._parse_department("") == "69"
 
+    def test_comma_list_falls_back_to_its_first_department(self, command_mock_bot):
+        """Answering for every configured department at once would not fit the RF budget."""
+        _vigilance_section(command_mock_bot, department="75, 77, 95")
+        cmd = _command(command_mock_bot)
+        assert cmd._parse_department("") == "75"
+
     def test_invalid_argument_falls_back_to_config(self, command_mock_bot):
         _vigilance_section(command_mock_bot, department="69")
         cmd = _command(command_mock_bot)

@@ -2,14 +2,18 @@
 """
 Vigilance Météo Service for MeshCore Bot
 
-Polls Météo-France vigilance weather alerts for a French department and posts
-to a configured channel when the alert level reaches Orange or Rouge.
+Polls Météo-France vigilance weather alerts for one or several French departments
+and posts to a configured channel when the alert level reaches Orange or Rouge.
 
 The level comes from the official DonneesPubliquesVigilance product with the key
 in [Vigilance_Service] api_key. Without a key it is read from the JSON endpoint the
 site's own JavaScript calls, authenticated with the session cookie the page sets; that
 path covers metropolitan France and Corsica only. beautifulsoup4 is kept for the page
 itself, whose markup carries no level (the old 'vigilancemeteo' package is unmaintained).
+
+With a key the product is national, so one request answers every department. Without
+one the page is fetched once per poll: the cookie it sets is a session cookie, so the
+same token answers for every department, and only one request per department follows.
 """
 
 import asyncio
@@ -283,6 +287,24 @@ def _dept_slug(department: str) -> str:
     return _slugify(department)
 
 
+def normalize_department(raw: str) -> str:
+    """Fold one department to the form Météo-France writes: '7' → '07', '2a' → '2A'.
+
+    A name is left as it is, since ``_dept_slug`` is what turns it into a slug.
+    """
+    code = raw.strip().upper()
+    return code.zfill(2) if code.isdigit() else code
+
+
+def parse_departments(value: str) -> list[str]:
+    """Split the configured ``department`` value, which accepts a comma-separated list."""
+    return [normalize_department(part) for part in value.split(',') if part.strip()]
+
+
+def _page_url(code: str) -> str:
+    return f"https://vigilance.meteofrance.fr/fr/{_dept_slug(code)}"
+
+
 def _parse_api_datetime(value: Any) -> datetime:
     """Parse the product's update_time (UTC), falling back to now()."""
     for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S+00:00', '%Y-%m-%dT%H:%M:%S'):
@@ -304,15 +326,8 @@ def _api_summary(color: str, phenomena: list[dict[str, Any]]) -> str:
     return '\n'.join(lines)
 
 
-def fetch_vigilance_api(department: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
-    """
-    Fetch the current level for a department from the official vigilance product.
-
-    The product is national, so the department is read out of its block in the
-    period J timelaps. Returns the same dict as fetch_vigilance.
-    Raises requests.exceptions.RequestException on network errors and
-    ValueError when the product carries no block for that department.
-    """
+def _fetch_product(api_key: str, timeout: int) -> dict[str, Any]:
+    """Fetch the national vigilance product. One call answers every department."""
     response = requests.get(
         _VIGILANCE_API_URL,
         headers={**_VIGILANCE_HEADERS, 'apikey': api_key},
@@ -326,9 +341,16 @@ def fetch_vigilance_api(department: str, api_key: str, timeout: int = 10) -> dic
         raise ValueError(
             "The vigilance API did not return JSON: check [Vigilance_Service] api_key"
         ) from None
-    product = payload.get('product') or {}
+    return payload.get('product') or {}
 
-    code = department.strip().upper()
+
+def _product_entry(department: str, product: dict[str, Any]) -> dict[str, Any]:
+    """Read one department out of the national product.
+
+    Raises:
+        ValueError: when the product carries no block for that department.
+    """
+    code = normalize_department(department)
     domain = None
     for period in product.get('periods') or []:
         for item in (period.get('timelaps') or {}).get('domain_ids') or []:
@@ -350,8 +372,20 @@ def fetch_vigilance_api(department: str, api_key: str, timeout: int = 10) -> dic
         'color': color,
         'summary': _api_summary(color, active),
         'bulletin_date': _parse_api_datetime(product.get('update_time')),
-        'url': f"https://vigilance.meteofrance.fr/fr/{_dept_slug(department)}",
+        'url': _page_url(code),
     }
+
+
+def fetch_vigilance_api(department: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
+    """
+    Fetch the current level for a department from the official vigilance product.
+
+    The product is national, so the department is read out of its block in the
+    period J timelaps. Returns the same dict as fetch_vigilance.
+    Raises requests.exceptions.RequestException on network errors and
+    ValueError when the product carries no block for that department.
+    """
+    return _product_entry(department, _fetch_product(api_key, timeout))
 
 
 def _session_token(page_response: requests.Response) -> str:
@@ -396,40 +430,8 @@ def fetch_vigilance_site_api(
     }
 
 
-def fetch_vigilance(department: str, api_key: str = '', timeout: int = 10) -> dict[str, Any]:
-    """
-    Fetch current vigilance data for a French department from Météo-France.
-
-    Sources, in order: the official product when ``api_key`` is set, then the JSON
-    endpoint the site's JavaScript calls, then the page markup, which carries no level
-    and reports Vert.
-
-    Returns a dict with keys: color, summary, bulletin_date, url.
-    Raises ValueError for an unknown department, or for an overseas department without
-    a key, and requests.exceptions.RequestException on network errors.
-    """
-    code = department.strip().upper()
-    url = f"https://vigilance.meteofrance.fr/fr/{_dept_slug(code)}"
-
-    if api_key:
-        return fetch_vigilance_api(code, api_key, timeout)
-
-    response = requests.get(url, headers=_VIGILANCE_HEADERS, timeout=timeout)
-    response.raise_for_status()
-
-    if len(code) != 2:
-        # Overseas department: the site's endpoint has no block for it, only the
-        # official product does, and that one needs a key.
-        raise ValueError(
-            f"Department {code} is overseas, so its level needs [Vigilance_Service] api_key"
-        )
-
-    token = _session_token(response)
-    if token:
-        return fetch_vigilance_site_api(code, token, url, timeout)
-
-    # No cookie, so nothing to authenticate with: fall back to what the markup carries,
-    # which for a department page is no level at all.
+def _page_entry(response: requests.Response, url: str) -> dict[str, Any]:
+    """Build an entry from the page markup, which carries no level and reports Vert."""
     soup = BeautifulSoup(response.content, 'html.parser')
     color = _extract_color(soup)
     return {
@@ -440,10 +442,83 @@ def fetch_vigilance(department: str, api_key: str = '', timeout: int = 10) -> di
     }
 
 
+def fetch_vigilance_multi(
+    codes: list[str], api_key: str = '', timeout: int = 10
+) -> dict[str, dict[str, Any]]:
+    """
+    Fetch current vigilance data for several French departments from Météo-France.
+
+    Sources, in order: the official product when ``api_key`` is set, then the JSON
+    endpoint the site's JavaScript calls, then the page markup, which carries no level
+    and reports Vert.
+
+    With a key the product is national, so one request answers the whole list. Without one,
+    the page is fetched once: the ``mfsession`` cookie it sets is a session cookie, so the
+    same token answers for every department and only one request per department follows,
+    which is one request per department instead of two. With no cookie there is nothing to
+    authenticate with, so each department falls back to its own page.
+
+    Returns code -> dict, each entry with keys: color, summary, bulletin_date, url.
+    Raises ValueError for an empty list, for an unknown department, or for an overseas
+    department without a key, and requests.exceptions.RequestException on network errors.
+    """
+    codes = [normalize_department(code) for code in codes]
+    if not codes:
+        raise ValueError("No department to check")
+
+    if api_key:
+        product = _fetch_product(api_key, timeout)
+        return {code: _product_entry(code, product) for code in codes}
+
+    response = requests.get(_page_url(codes[0]), headers=_VIGILANCE_HEADERS, timeout=timeout)
+    response.raise_for_status()
+    token = _session_token(response)
+
+    entries: dict[str, dict[str, Any]] = {}
+    for code in codes:
+        url = _page_url(code)
+        if len(code) != 2:
+            # Overseas department: the site's endpoint has no block for it, only the
+            # official product does, and that one needs a key.
+            raise ValueError(
+                f"Department {code} is overseas, so its level needs [Vigilance_Service] api_key"
+            )
+        if token:
+            entries[code] = fetch_vigilance_site_api(code, token, url, timeout)
+        else:
+            # No cookie, so nothing to authenticate with: fall back to what the markup
+            # carries, which for a department page is no level at all, and every
+            # department then needs its own page.
+            page = response if code == codes[0] else requests.get(
+                url, headers=_VIGILANCE_HEADERS, timeout=timeout
+            )
+            page.raise_for_status()
+            entries[code] = _page_entry(page, url)
+
+    return entries
+
+
+def fetch_vigilance(department: str, api_key: str = '', timeout: int = 10) -> dict[str, Any]:
+    """
+    Fetch current vigilance data for a French department from Météo-France.
+
+    The single-department form of fetch_vigilance_multi, same sources in the same order.
+
+    Returns a dict with keys: color, summary, bulletin_date, url.
+    Raises ValueError for an unknown department, or for an overseas department without
+    a key, and requests.exceptions.RequestException on network errors.
+    """
+    code = normalize_department(department)
+    return fetch_vigilance_multi([code], api_key, timeout)[code]
+
+
 class VigilanceService(BaseServicePlugin):
     """
-    Polls Météo-France vigilance alerts for a French department and posts to a
-    channel when Orange or Rouge vigilance is active.
+    Polls Météo-France vigilance alerts for one or several French departments and
+    posts to a channel when Orange or Rouge vigilance is active.
+
+    One alert per department that is at an alert level, each with its own throttle, so
+    a level in one department does not silence the alert of another one.
 
     Config section: ``[Vigilance_Service]``
     """
@@ -454,10 +529,11 @@ class VigilanceService(BaseServicePlugin):
     settings_schema = [
         {
             "key": "department",
-            "label": "Department number",
+            "label": "Department number(s)",
             "type": "str",
             "default": "75",
-            "help": "French department number to monitor (e.g. 75 for Paris, 25 for Doubs).",
+            "help": "French department number(s) to monitor, comma-separated "
+                    "(e.g. 75, or 75,77,78,91,92,93,94,95,60,27).",
             "required": True,
         },
         {
@@ -467,7 +543,9 @@ class VigilanceService(BaseServicePlugin):
             "default": "",
             "help": "DonneesPubliquesVigilance key from portail-api.meteofrance.fr. Optional: "
                     "without it the level comes from the site's own endpoint, which covers "
-                    "metropolitan France and Corsica only. Required for an overseas department.",
+                    "metropolitan France and Corsica only, so an overseas department listed here "
+                    "is not polled. With a key the national product answers the whole list in one "
+                    "request.",
         },
         {
             "key": "channel",
@@ -492,7 +570,7 @@ class VigilanceService(BaseServicePlugin):
             "min": 60,
             "default": 3600,
             "unit": "s",
-            "help": "Minimum seconds between successive alerts for the same event.",
+            "help": "Minimum seconds between successive alerts for the same department.",
         },
         {
             "key": "alert_levels",
@@ -521,8 +599,15 @@ class VigilanceService(BaseServicePlugin):
         super().__init__(bot)
         section = self.config_section
 
-        self.department: str = self.bot.config.get(section, 'department', fallback='75').strip()
         self.api_key: str = self.bot.config.get(section, 'api_key', fallback='').strip()
+        codes = parse_departments(self.bot.config.get(section, 'department', fallback='75'))
+        # Without a key the site's endpoint has no block for an overseas department, so a
+        # code of three digits can never be read: it is named in the log and left out of the
+        # poll rather than fetched for a 404.
+        overseas = [code for code in codes if len(code) != 2]
+        self.departments: list[str] = codes if self.api_key else [c for c in codes if len(c) == 2]
+        # `vigi` with no argument answers for this one, so the reply stays inside the RF budget.
+        self.department: str = self.departments[0] if self.departments else ''
         self.channel: str = self.bot.config.get(section, 'channel', fallback='#general').strip()
         poll_ms = self.bot.config.getint(section, 'poll_interval', fallback=28800000)
         self.poll_interval_seconds: float = poll_ms / 1000.0
@@ -533,16 +618,17 @@ class VigilanceService(BaseServicePlugin):
             section, 'silence_mesh_output', fallback=False
         )
 
-        # Runtime state
+        # Runtime state, one entry per department: a level or a throttle held for one
+        # department must not be read as the state of another.
         self._running = False
         self._poll_task: Optional[asyncio.Task] = None
-        self._last_color: Optional[str] = None
-        self._last_bulletin_date: Optional[datetime] = None
-        self._last_alert_time: float = 0.0
+        self._last_color: dict[str, Optional[str]] = {}
+        self._last_bulletin_date: dict[str, datetime] = {}
+        self._last_alert_time: dict[str, float] = {}
 
         self.logger.info(
-            "Vigilance service initialized: dept=%s channel=%s interval=%.0fs throttle=%ds levels=%s",
-            self.department, self.channel, self.poll_interval_seconds,
+            "Vigilance service initialized: depts=%s channel=%s interval=%.0fs throttle=%ds levels=%s",
+            ', '.join(self.departments), self.channel, self.poll_interval_seconds,
             self.alert_throttle, ', '.join(self.alert_levels),
         )
         if not self.api_key:
@@ -550,13 +636,18 @@ class VigilanceService(BaseServicePlugin):
                 "Vigilance: no api_key configured, so the level comes from the site's own "
                 "endpoint, which covers metropolitan France and Corsica only"
             )
+            if overseas:
+                self.logger.warning(
+                    "Vigilance: %s is overseas and needs api_key, so it is not polled",
+                    ', '.join(overseas),
+                )
 
     async def start(self) -> None:
         if not self.enabled:
             self.logger.info("Vigilance service is disabled, not starting")
             return
         self._running = True
-        self.logger.info("Starting vigilance service for department %s", self.department)
+        self.logger.info("Starting vigilance service for departments %s", ', '.join(self.departments))
         self._poll_task = asyncio.create_task(self._poll_loop())
 
     async def stop(self) -> None:
@@ -590,34 +681,36 @@ class VigilanceService(BaseServicePlugin):
                 break
 
     async def _check_and_alert(self) -> None:
-        """Fetch vigilance data and send an alert if warranted."""
-        loop = asyncio.get_event_loop()
-        info = await loop.run_in_executor(None, self._fetch_with_retry)
-        if info is None:
+        """Fetch the levels and send one alert per department that warrants one."""
+        if not self.departments:
             return
 
-        color = info['color']
+        loop = asyncio.get_event_loop()
+        infos = await loop.run_in_executor(None, self._fetch_with_retry)
+        if not infos:
+            return
 
-        # Log level changes
-        if color != self._last_color:
-            self.logger.info(
-                "Vigilance level changed for dept %s: %s → %s",
-                self.department, self._last_color, color,
-            )
+        for code, info in infos.items():
+            color = info['color']
+            previous = self._last_color.get(code)
 
-        self._last_color = color
-        self._last_bulletin_date = info['bulletin_date']
+            # Log level changes
+            if color != previous:
+                self.logger.info(
+                    "Vigilance level changed for dept %s: %s → %s", code, previous, color
+                )
 
-        if self._should_alert(info):
-            message = self._format_message(info)
-            await self._send_alert(message, info)
-            self._last_alert_time = time.monotonic()
-            self.logger.info(
-                "Vigilance alert sent for dept %s: %s", self.department, color
-            )
+            self._last_color[code] = color
+            self._last_bulletin_date[code] = info['bulletin_date']
 
-    def _fetch_with_retry(self) -> Optional[dict[str, Any]]:
-        """Fetch vigilance data with exponential-backoff retries (called in executor)."""
+            if self._should_alert(code, info):
+                message = self._format_message(code, info)
+                await self._send_alert(message, info)
+                self._last_alert_time[code] = time.monotonic()
+                self.logger.info("Vigilance alert sent for dept %s: %s", code, color)
+
+    def _fetch_with_retry(self) -> Optional[dict[str, dict[str, Any]]]:
+        """Fetch the levels with exponential-backoff retries (called in executor)."""
         max_retries = 3
         base_delay = 2.0
         transient_errors = (
@@ -631,14 +724,15 @@ class VigilanceService(BaseServicePlugin):
 
         for attempt in range(max_retries):
             try:
-                data = fetch_vigilance(self.department, self.api_key)
+                data = fetch_vigilance_multi(self.departments, self.api_key)
                 if attempt > 0:
                     self.logger.info(
                         "Vigilance fetched after %d attempt(s)", attempt + 1
                     )
                 else:
                     self.logger.debug(
-                        "Vigilance check dept %s: %s", self.department, data['color']
+                        "Vigilance check %s",
+                        ', '.join(f"{code} {entry['color']}" for code, entry in data.items()),
                     )
                 return data
             except transient_errors as e:
@@ -657,8 +751,8 @@ class VigilanceService(BaseServicePlugin):
                     return None
             except Exception as e:
                 self.logger.error(
-                    "Unexpected error fetching vigilance for dept %s: %s: %s",
-                    self.department, type(e).__name__, e,
+                    "Unexpected error fetching vigilance for depts %s: %s: %s",
+                    ', '.join(self.departments), type(e).__name__, e,
                 )
                 return None
         return None
@@ -667,27 +761,31 @@ class VigilanceService(BaseServicePlugin):
     # Alert logic
     # ------------------------------------------------------------------
 
-    def _should_alert(self, info: dict[str, Any]) -> bool:
+    def _should_alert(self, code: str, info: dict[str, Any]) -> bool:
         color = info['color']
         if color not in self.alert_levels:
             return False
+        # The throttle is per department: an alert sent for one department would otherwise
+        # hold the reference that says whether another one is still throttled.
         # 0.0 means "no alert sent yet in this run". time.monotonic() starts close to zero
         # on a freshly booted host (containers, CI runners), so an unset reference looked
         # like a throttle still running and the first alert of a run was skipped.
-        if self._last_alert_time:
-            elapsed = time.monotonic() - self._last_alert_time
+        last = self._last_alert_time.get(code, 0.0)
+        if last:
+            elapsed = time.monotonic() - last
             if elapsed < self.alert_throttle:
                 self.logger.debug(
-                    "Vigilance alert throttled (%.0fs remaining)", self.alert_throttle - elapsed
+                    "Vigilance alert throttled for dept %s (%.0fs remaining)",
+                    code, self.alert_throttle - elapsed
                 )
                 return False
         return True
 
-    def _format_message(self, info: dict[str, Any]) -> str:
-        """Format a compact LoRa-friendly alert message (≤ 180 chars)."""
+    def _format_message(self, code: str, info: dict[str, Any]) -> str:
+        """Format a compact LoRa-friendly alert message (≤ 180 chars) for one department."""
         color = info['color']
         emoji = {'Vert': '✅', 'Jaune': '⚠️', 'Orange': '🟠', 'Rouge': '🔴'}.get(color, '🌦️')
-        lines = [f"{emoji} VIGILANCE {color.upper()}", f"Dept {self.department}"]
+        lines = [f"{emoji} VIGILANCE {color.upper()}", f"Dept {code}"]
         summary = info.get('summary', '')
         if summary and ':' in summary:
             for part in summary.split('\n')[1:3]:

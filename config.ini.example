@@ -2745,13 +2745,15 @@ send_link = true
 
 [Vigilance_Service]
 # Météo-France weather vigilance alert monitor (France only)
-# Polls the official vigilance product and posts to a channel when Orange or Rouge
-# vigilance is active for the configured department.
+# Polls the vigilance level and posts to a channel when Orange or Rouge is active for a
+# monitored department.
 # Requires: requests, beautifulsoup4
 enabled = false
 
-# French department to monitor: number (75 for Paris, 25 for Doubs, 95 for Val-d'Oise),
-# Corsican code (2A/2B), or a department name.
+# French department(s) to monitor: number (75 for Paris, 25 for Doubs, 95 for Val-d'Oise),
+# Corsican code (2A/2B), or a department name. Comma-separated for several, and one alert is
+# posted per department that is at an alert level.
+# Example: department = 75, 77, 78, 91, 92, 93, 94, 95, 60, 27
 department = 75
 
 # Optional key from https://portail-api.meteofrance.fr, subscribed to
@@ -2769,7 +2771,7 @@ channel = #general
 # How often to check Météo-France (milliseconds). Default: 28800000 (8 hours)
 poll_interval = 28800000
 
-# Minimum seconds between successive alerts for the same event (throttle).
+# Minimum seconds between successive alerts for the same department (throttle).
 # Default: 3600 (1 hour)
 alert_throttle = 3600
 
