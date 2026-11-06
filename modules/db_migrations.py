@@ -1108,6 +1108,38 @@ def _m0033_channel_web_visibility(cursor: sqlite3.Cursor) -> None:
     )""")
 
 
+def _m0034_bbs_inbox_table(cursor: sqlite3.Cursor) -> None:
+    """Create bbs_inbox table: pubkey-keyed BBS private messages.
+
+    Replaces the name-keyed bbs_messages table. Identity is the FULL public
+    key of sender and recipient, so two nodes advertising the same name no
+    longer share one mailbox and queued messages survive a recipient rename.
+    bbs_messages is kept for legacy retrieval (read-only) until its TTL
+    empties it; new messages only ever land in bbs_inbox.
+    """
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bbs_inbox (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_key     TEXT NOT NULL,
+            sender_name    TEXT,
+            recipient_key  TEXT NOT NULL,
+            recipient_name TEXT,
+            message        TEXT NOT NULL,
+            sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            read_at        TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bbs_inbox_recipient "
+        "ON bbs_inbox(recipient_key, read_at)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bbs_inbox_sent_at ON bbs_inbox(sent_at)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -1148,6 +1180,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (31, "message_stats: scope_verdict", _m0031_message_stats_scope_verdict),
     (32, "channel occupancy buckets and sender share", _m0032_channel_occupancy_tables),
     (33, "per-channel web message visibility", _m0033_channel_web_visibility),
+    (34, "bbs_inbox table", _m0034_bbs_inbox_table),
 ]
 
 

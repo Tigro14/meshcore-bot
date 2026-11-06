@@ -1381,30 +1381,41 @@ class MessageScheduler:
             except Exception as e:
                 self.logger.debug(f"Error getting new device counts or 30-day activity: {e}")
 
-            # Collect BBS statistics
+            # Collect BBS statistics (new pubkey-keyed table plus legacy table)
             try:
                 with self.bot.db_manager.connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "SELECT 1 FROM sqlite_master "
-                        "WHERE type='table' AND name='bbs_messages'"
+                        "SELECT name FROM sqlite_master "
+                        "WHERE type='table' AND name IN ('bbs_messages', 'bbs_inbox')"
                     )
-                    if cursor.fetchone():
+                    bbs_tables = {row[0] for row in cursor.fetchall()}
+                    if bbs_tables:
+                        union_parts = []
+                        if "bbs_inbox" in bbs_tables:
+                            union_parts.append(
+                                "SELECT sent_at, read_at, recipient_key AS recipient "
+                                "FROM bbs_inbox"
+                            )
+                        if "bbs_messages" in bbs_tables:
+                            union_parts.append(
+                                "SELECT sent_at, read_at, recipient_name AS recipient "
+                                "FROM bbs_messages"
+                            )
+                        union = " UNION ALL ".join(union_parts)
+
                         cursor.execute(
-                            "SELECT COUNT(*) FROM bbs_messages "
-                            "WHERE date(sent_at) = date('now')"
+                            f"SELECT COUNT(*) FROM ({union}) WHERE date(sent_at) = date('now')"
                         )
                         info['bbs_messages_today'] = cursor.fetchone()[0] or 0
 
                         cursor.execute(
-                            "SELECT COUNT(*) FROM bbs_messages "
-                            "WHERE read_at IS NULL"
+                            f"SELECT COUNT(*) FROM ({union}) WHERE read_at IS NULL"
                         )
                         info['bbs_pending_messages'] = cursor.fetchone()[0] or 0
 
                         cursor.execute(
-                            "SELECT COUNT(DISTINCT recipient_name) FROM bbs_messages "
-                            "WHERE read_at IS NULL"
+                            f"SELECT COUNT(DISTINCT recipient) FROM ({union}) WHERE read_at IS NULL"
                         )
                         info['bbs_users_with_pending'] = cursor.fetchone()[0] or 0
             except Exception as e:

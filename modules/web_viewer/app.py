@@ -248,6 +248,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         'schema_version',
         'greeter_rollout',
         'bbs_messages',
+        'bbs_inbox',
         'daily_rollup',
         'dashboard_snapshot',
         'occupancy_samples',
@@ -621,6 +622,11 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 except (configparser.NoSectionError, configparser.NoOptionError, ValueError, TypeError):
                     feed_manager_enabled = False
                 try:
+                    # Mirrors BBSCommand's own default (enabled when unset).
+                    bbs_enabled = self.config.getboolean('BBS_Command', 'enabled', fallback=True)
+                except (configparser.NoSectionError, configparser.NoOptionError, ValueError, TypeError):
+                    bbs_enabled = True
+                try:
                     bot_name = (self.config.get('Bot', 'bot_name', fallback='MeshCore Bot') or '').strip() or 'MeshCore Bot'
                 except (configparser.NoSectionError, configparser.NoOptionError):
                     bot_name = 'MeshCore Bot'
@@ -642,6 +648,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 return {
                     'greeter_enabled': greeter_enabled,
                     'feed_manager_enabled': feed_manager_enabled,
+                    'bbs_enabled': bbs_enabled,
                     'multibyte_monitor_enabled': self.multibyte_monitor_enabled,
                     'bot_name': bot_name,
                     'version_info': version_info,
@@ -659,6 +666,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 return {
                     'greeter_enabled': False,
                     'feed_manager_enabled': False,
+                    'bbs_enabled': True,
                     'multibyte_monitor_enabled': False,
                     'bot_name': 'MeshCore Bot',
                     'bot_initializing': False,
@@ -1057,6 +1065,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 'contacts',
                 'plugins_page',
                 'greeter',
+                'bbs_page',
                 'region_warnings_page',
                 'regions_page',
                 'airtime_page',
@@ -1193,6 +1202,11 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         def greeter():
             """Greeter management page"""
             return render_template('greeter.html')
+
+        @self.app.route('/bbs')
+        def bbs_page():
+            """BBS mailbox statistics page"""
+            return render_template('bbs.html')
 
         @self.app.route('/region-warnings')
         def region_warnings_page():
@@ -3841,6 +3855,188 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             except Exception as e:
                 self.logger.error(f"Error getting greeter data: {e}", exc_info=True)
                 return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/bbs')
+        @self._api_errors('Error getting BBS stats')
+        def api_bbs():
+            """BBS mailbox statistics: totals, pending recipients, top senders, age, daily activity.
+
+            Only counts, names and key prefixes are exposed — never message bodies.
+            """
+            try:
+                settings = {
+                    'enabled': self.config.getboolean('BBS_Command', 'enabled', fallback=True),
+                    'max_messages_per_user': self.config.getint('BBS_Command', 'max_messages_per_user', fallback=10),
+                    'max_message_age_days': self.config.getint('BBS_Command', 'max_message_age_days', fallback=7),
+                    'max_messages_per_sender_per_day': self.config.getint(
+                        'BBS_Command', 'max_messages_per_sender_per_day', fallback=20),
+                    'rate_limit_per_minute': self.config.getint('BBS_Command', 'rate_limit_per_minute', fallback=10),
+                    'notify_cooldown_seconds': self.config.getint('BBS_Command', 'notify_cooldown_seconds', fallback=300),
+                }
+            except (configparser.NoSectionError, configparser.NoOptionError, ValueError, TypeError):
+                settings = {
+                    'enabled': True,
+                    'max_messages_per_user': 10,
+                    'max_message_age_days': 7,
+                    'max_messages_per_sender_per_day': 20,
+                    'rate_limit_per_minute': 10,
+                    'notify_cooldown_seconds': 300,
+                }
+
+            empty_payload = {
+                'enabled': settings['enabled'],
+                'settings': settings,
+                'totals': {'pending': 0, 'recipients_with_pending': 0, 'stored_today': 0,
+                           'stored_total': 0, 'read_total': 0, 'active_senders': 0},
+                'pending_recipients': [],
+                'top_senders': [],
+                'age_buckets': {'lt_1d': 0, 'd1_3': 0, 'd3_7': 0, 'gte_7d': 0},
+                'daily': [],
+            }
+
+            with self._db_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name IN ('bbs_messages', 'bbs_inbox')"
+                )
+                bbs_tables = {row[0] for row in cursor.fetchall()}
+                if not bbs_tables:
+                    return jsonify({**empty_payload, 'error': 'BBS tables not found'})
+
+                # One view over both tables. Legacy rows are name-keyed: they have
+                # no public-key columns, so the key fields stay NULL.
+                union_parts = []
+                if 'bbs_inbox' in bbs_tables:
+                    union_parts.append(
+                        "SELECT sender_key, sender_name, recipient_key, recipient_name, sent_at, read_at "
+                        "FROM bbs_inbox"
+                    )
+                if 'bbs_messages' in bbs_tables:
+                    union_parts.append(
+                        "SELECT NULL AS sender_key, sender_id AS sender_name, "
+                        "NULL AS recipient_key, recipient_name, sent_at, read_at "
+                        "FROM bbs_messages"
+                    )
+                union = " UNION ALL ".join(union_parts)
+
+                cursor.execute(f'''
+                    SELECT COUNT(*) AS stored_total,
+                           SUM(read_at IS NULL) AS pending,
+                           SUM(read_at IS NOT NULL) AS read_total,
+                           SUM(date(sent_at) = date('now')) AS stored_today,
+                           COUNT(DISTINCT COALESCE(sender_key, sender_name)) AS active_senders,
+                           COUNT(DISTINCT CASE WHEN read_at IS NULL
+                               THEN COALESCE(recipient_key, recipient_name) END) AS recipients_with_pending
+                    FROM ({union})
+                ''')
+                totals_row = cursor.fetchone()
+                totals = {
+                    'pending': totals_row['pending'] or 0,
+                    'recipients_with_pending': totals_row['recipients_with_pending'] or 0,
+                    'stored_today': totals_row['stored_today'] or 0,
+                    'stored_total': totals_row['stored_total'] or 0,
+                    'read_total': totals_row['read_total'] or 0,
+                    'active_senders': totals_row['active_senders'] or 0,
+                }
+
+                # A mailbox is one recipient key (or a legacy recipient name when no
+                # key column exists); key and name identities never merge.
+                cursor.execute(f'''
+                    SELECT COALESCE(recipient_key, recipient_name) AS identity,
+                           MAX(recipient_key) AS recipient_key,
+                           MAX(recipient_name) AS name,
+                           COUNT(*) AS pending,
+                           MIN(sent_at) AS oldest,
+                           MAX(sent_at) AS newest
+                    FROM ({union})
+                    WHERE read_at IS NULL
+                    GROUP BY identity
+                    ORDER BY pending DESC, name ASC
+                    LIMIT 200
+                ''')
+                pending_recipients = [
+                    {
+                        'name': row['name'] or '(unknown)',
+                        'key_prefix': (row['recipient_key'] or '')[:4],
+                        'pending': row['pending'],
+                        'oldest': row['oldest'],
+                        'newest': row['newest'],
+                    }
+                    for row in cursor.fetchall()
+                ]
+
+                cursor.execute(f'''
+                    SELECT COALESCE(sender_key, sender_name) AS identity,
+                           MAX(sender_key) AS sender_key,
+                           MAX(sender_name) AS name,
+                           COUNT(*) AS sent_total,
+                           SUM(date(sent_at) = date('now')) AS sent_today
+                    FROM ({union})
+                    GROUP BY identity
+                    ORDER BY sent_total DESC, name ASC
+                    LIMIT 10
+                ''')
+                top_senders = [
+                    {
+                        'name': row['name'] or '(unknown)',
+                        'key_prefix': (row['sender_key'] or '')[:4],
+                        'sent_total': row['sent_total'],
+                        'sent_today': row['sent_today'] or 0,
+                    }
+                    for row in cursor.fetchall()
+                ]
+
+                cursor.execute(f'''
+                    SELECT
+                        SUM((julianday('now') - julianday(sent_at)) < 1) AS lt_1d,
+                        SUM((julianday('now') - julianday(sent_at)) >= 1
+                            AND (julianday('now') - julianday(sent_at)) < 3) AS d1_3,
+                        SUM((julianday('now') - julianday(sent_at)) >= 3
+                            AND (julianday('now') - julianday(sent_at)) < 7) AS d3_7,
+                        SUM((julianday('now') - julianday(sent_at)) >= 7) AS gte_7d
+                    FROM ({union})
+                    WHERE read_at IS NULL
+                ''')
+                age_row = cursor.fetchone()
+                age_buckets = {
+                    'lt_1d': age_row['lt_1d'] or 0,
+                    'd1_3': age_row['d1_3'] or 0,
+                    'd3_7': age_row['d3_7'] or 0,
+                    'gte_7d': age_row['gte_7d'] or 0,
+                }
+
+                cursor.execute(f'''
+                    SELECT date(sent_at) AS day, COUNT(*) AS sent
+                    FROM ({union})
+                    WHERE date(sent_at) >= date('now', '-13 days')
+                    GROUP BY day
+                ''')
+                daily_sent = {row['day']: row['sent'] for row in cursor.fetchall()}
+
+                cursor.execute(f'''
+                    SELECT date(read_at) AS day, COUNT(*) AS read
+                    FROM ({union})
+                    WHERE read_at IS NOT NULL AND date(read_at) >= date('now', '-13 days')
+                    GROUP BY day
+                ''')
+                daily_read = {row['day']: row['read'] for row in cursor.fetchall()}
+
+                daily = [
+                    {'date': day, 'sent': daily_sent.get(day, 0), 'read': daily_read.get(day, 0)}
+                    for day in sorted(set(daily_sent) | set(daily_read), reverse=True)
+                ]
+
+                return jsonify({
+                    'enabled': settings['enabled'],
+                    'settings': settings,
+                    'totals': totals,
+                    'pending_recipients': pending_recipients,
+                    'top_senders': top_senders,
+                    'age_buckets': age_buckets,
+                    'daily': daily,
+                })
 
         @self.app.route('/api/greeter/end-rollout', methods=['POST'])
         def api_end_rollout():

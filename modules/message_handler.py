@@ -1082,6 +1082,17 @@ class MessageHandler(MeshGraphRecorderMixin, ContactEventsMixin, RfCorrelationMi
         from .log_privacy import message_metadata
         self.logger.info(message_metadata(message))
 
+        # Notify about pending BBS messages on every inbound DM (the BBS
+        # command skips DMs that are themselves BBS commands, and enforces
+        # its own notification cooldown).
+        if message.is_dm:
+            bbs_command = self.bot.command_manager.commands.get("bbs")
+            if bbs_command and hasattr(bbs_command, "check_inbox_notification"):
+                try:
+                    await bbs_command.check_inbox_notification(message)
+                except Exception as e:
+                    self.logger.error(f"Error checking BBS inbox notification: {e}", exc_info=True)
+
         # Check for advert command (DM only)
         if message.is_dm and message.content.strip().lower() == "advert":
             await self.bot.command_manager.handle_advert_command(message)

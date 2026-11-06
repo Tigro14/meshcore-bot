@@ -191,6 +191,7 @@ def test_nonce_hardened_templates_have_no_inline_event_attributes() -> None:
         "multibyte_rollout.html",
         "mesh.html",
         "api_explorer.html",
+        "bbs.html",
     ):
         assert not event_attribute.search(_source(template_name)), template_name
 
@@ -210,6 +211,7 @@ def test_nonce_hardened_templates_have_no_inline_event_attributes() -> None:
         "/multibyte-rollout",
         "/mesh",
         "/api-explorer",
+        "/bbs",
     ],
 )
 def test_csp_nonce_matches_every_rendered_inline_script(client, path: str) -> None:

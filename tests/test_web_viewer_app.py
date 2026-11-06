@@ -157,11 +157,17 @@ class TestAllowedTables:
             'greeted_users', 'feed_subscriptions', 'feed_activity', 'feed_errors',
             'path_stats', 'unique_advert_packets', 'schema_version',
             'channel_operations', 'channels', 'feed_message_queue',
-            'bbs_messages', 'daily_rollup',
+            'bbs_messages', 'bbs_inbox', 'daily_rollup',
             'dashboard_snapshot',
             'occupancy_samples', 'occupancy_senders',
         }
         assert expected_tables == BotDataViewer.ALLOWED_TABLES
+
+    def test_whitelist_includes_bbs_inbox(self):
+        """The pubkey-keyed BBS mailbox table must be browsable in the viewer."""
+        from modules.web_viewer.app import BotDataViewer
+
+        assert 'bbs_inbox' in BotDataViewer.ALLOWED_TABLES
 
 
 class TestIsSafeTableName:
@@ -3061,3 +3067,157 @@ class TestWebViewerTestDmRoute:
 
         assert response.status_code == 400
         assert response.get_json() == {'error': 'Message is required'}
+
+
+# ---------------------------------------------------------------------------
+# /bbs page and /api/bbs
+# ---------------------------------------------------------------------------
+
+
+class TestBbsWebPage:
+    def test_bbs_page_loads_200(self, viewer_with_db):
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/bbs')
+        assert response.status_code == 200
+        assert 'BBS Mailbox Statistics' in response.get_data(as_text=True)
+
+    def test_nav_shows_bbs_link_by_default(self, viewer_with_db):
+        """BBSCommand enables itself when [BBS_Command] is absent, so so does the nav item."""
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/')
+        assert 'BBS Mailbox' in response.get_data(as_text=True)
+
+    def test_nav_hides_bbs_link_when_bbs_disabled(self, viewer_with_db):
+        viewer_with_db.config.add_section('BBS_Command')
+        viewer_with_db.config.set('BBS_Command', 'enabled', 'false')
+        with viewer_with_db.app.test_client() as client:
+            response = client.get('/')
+        assert 'BBS Mailbox' not in response.get_data(as_text=True)
+
+
+class TestApiBbs:
+    @staticmethod
+    def _reset_bbs_tables(viewer):
+        """Empty both BBS tables so each test seeds exactly what it asserts."""
+        with sqlite3.connect(viewer.db_path, timeout=60) as conn:
+            conn.execute('DELETE FROM bbs_inbox')
+            conn.execute('DELETE FROM bbs_messages')
+            conn.commit()
+
+    def test_missing_bbs_tables_answer_zeroed_payload(self, mock_viewer):
+        with sqlite3.connect(mock_viewer.db_path, timeout=60) as conn:
+            conn.execute('DROP TABLE IF EXISTS bbs_inbox')
+            conn.execute('DROP TABLE IF EXISTS bbs_messages')
+            conn.commit()
+
+        with mock_viewer.app.test_client() as client:
+            response = client.get('/api/bbs')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['error'] == 'BBS tables not found'
+        assert data['totals']['pending'] == 0
+        assert data['totals']['stored_total'] == 0
+        assert data['pending_recipients'] == []
+        assert data['daily'] == []
+
+    def test_seeded_inbox_and_legacy_rows_union_into_stats(self, mock_viewer):
+        now = datetime.now(timezone.utc)
+
+        def ts(**delta):
+            return (now - timedelta(**delta)).strftime('%Y-%m-%d %H:%M:%S')
+
+        self._reset_bbs_tables(mock_viewer)
+        with sqlite3.connect(mock_viewer.db_path, timeout=60) as conn:
+            # Pubkey-keyed mailboxes.
+            conn.executemany(
+                'INSERT INTO bbs_inbox (sender_key, sender_name, recipient_key, recipient_name,'
+                ' message, sent_at, read_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [
+                    ('a1b2c3d4e5f6', 'Alice', 'eeff00112233', 'Bob', 'body one', ts(hours=2), None),
+                    ('a1b2c3d4e5f6', 'Alice', 'eeff00112233', 'Bob', 'body two', ts(days=5), None),
+                    ('ffff0000aaaa', 'Carol', 'eeff00112233', 'Bob', 'body three',
+                     ts(hours=1), ts(minutes=30)),
+                ],
+            )
+            # Legacy name-keyed rows: identity is sender_id/recipient_name.
+            conn.executemany(
+                'INSERT INTO bbs_messages (sender_id, sender_name, recipient_name, message,'
+                ' sent_at, read_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [
+                    ('Dave', None, 'Bob', 'old legacy body', ts(days=10), None),
+                    ('Erin', None, 'Zoe', 'legacy body', ts(minutes=30), None),
+                ],
+            )
+            conn.commit()
+
+        all_sent = [ts(hours=2), ts(days=5), ts(hours=1), ts(days=10), ts(minutes=30)]
+        today = now.strftime('%Y-%m-%d')
+        expected_today = sum(1 for value in all_sent if value[:10] == today)
+
+        with mock_viewer.app.test_client() as client:
+            response = client.get('/api/bbs')
+        assert response.status_code == 200
+        data = response.get_json()
+
+        assert data['totals'] == {
+            'pending': 4,
+            'recipients_with_pending': 3,
+            'stored_today': expected_today,
+            'stored_total': 5,
+            'read_total': 1,
+            'active_senders': 4,
+        }
+
+        # Inbox mailboxes group by key, legacy rows group by name: two "Bob" identities
+        # with the same display name must stay separate.
+        recipients = data['pending_recipients']
+        assert [(r['name'], r['key_prefix'], r['pending']) for r in recipients] == [
+            ('Bob', 'eeff', 2),
+            ('Bob', '', 1),
+            ('Zoe', '', 1),
+        ]
+        assert recipients[0]['oldest'] == ts(days=5)
+        assert recipients[2]['newest'] == ts(minutes=30)
+
+        assert [(s['name'], s['key_prefix'], s['sent_total']) for s in data['top_senders']] == [
+            ('Alice', 'a1b2', 2),
+            ('Carol', 'ffff', 1),
+            ('Dave', '', 1),
+            ('Erin', '', 1),
+        ]
+
+        # 30 min + 2h < 1d; 5d in [3,7); 10d >= 7d. The 1–3d bucket is empty on purpose.
+        assert data['age_buckets'] == {'lt_1d': 2, 'd1_3': 0, 'd3_7': 1, 'gte_7d': 1}
+
+        assert sum(row['sent'] for row in data['daily']) == 5
+        assert sum(row['read'] for row in data['daily']) == 1
+
+    def test_settings_come_from_config_with_command_defaults(self, mock_viewer):
+        mock_viewer.config.add_section('BBS_Command')
+        mock_viewer.config.set('BBS_Command', 'enabled', 'false')
+        mock_viewer.config.set('BBS_Command', 'max_messages_per_user', '25')
+        mock_viewer.config.set('BBS_Command', 'notify_cooldown_seconds', '60')
+
+        with mock_viewer.app.test_client() as client:
+            response = client.get('/api/bbs')
+        data = response.get_json()
+        settings = data['settings']
+        assert data['enabled'] is False
+        assert settings['enabled'] is False
+        assert settings['max_messages_per_user'] == 25
+        assert settings['notify_cooldown_seconds'] == 60
+        # Unset options fall back to BBSCommand's own defaults.
+        assert settings['max_message_age_days'] == 7
+        assert settings['max_messages_per_sender_per_day'] == 20
+        assert settings['rate_limit_per_minute'] == 10
+
+    def test_settings_survive_unparseable_config_values(self, mock_viewer):
+        mock_viewer.config.add_section('BBS_Command')
+        mock_viewer.config.set('BBS_Command', 'max_messages_per_user', 'not-a-number')
+
+        with mock_viewer.app.test_client() as client:
+            response = client.get('/api/bbs')
+        assert response.status_code == 200
+        settings = response.get_json()['settings']
+        assert settings['max_messages_per_user'] == 10
+        assert settings['enabled'] is True

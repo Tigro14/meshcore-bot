@@ -471,16 +471,26 @@ class StatsCommand(BaseCommand):
 {self.translate('commands.stats.basic.top_command', command=top_command)}
 {self.translate('commands.stats.basic.top_user', user=top_user)}"""
 
-                # BBS pending-message summary (only when the table exists)
+                # BBS pending-message summary (any of the two tables, new or legacy)
                 try:
                     cursor.execute(
                         "SELECT name FROM sqlite_master "
-                        "WHERE type='table' AND name='bbs_messages'"
+                        "WHERE type='table' AND name IN ('bbs_messages', 'bbs_inbox')"
                     )
-                    if cursor.fetchone():
+                    bbs_tables = {row[0] for row in cursor.fetchall()}
+                    if bbs_tables:
+                        selects = []
+                        if "bbs_inbox" in bbs_tables:
+                            selects.append(
+                                "SELECT recipient_key AS identity FROM bbs_inbox WHERE read_at IS NULL"
+                            )
+                        if "bbs_messages" in bbs_tables:
+                            selects.append(
+                                "SELECT recipient_name AS identity FROM bbs_messages WHERE read_at IS NULL"
+                            )
                         cursor.execute(
-                            "SELECT COUNT(*), COUNT(DISTINCT recipient_name) "
-                            "FROM bbs_messages WHERE read_at IS NULL"
+                            f"SELECT COUNT(*), COUNT(DISTINCT identity) "
+                            f"FROM ({' UNION ALL '.join(selects)})"
                         )
                         bbs_row = cursor.fetchone()
                         bbs_msgs, bbs_users = bbs_row[0], bbs_row[1]
