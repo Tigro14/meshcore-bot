@@ -6869,9 +6869,6 @@ def main():
     viewer = BotDataViewer(config_path=args.config)
     viewer.run(host=args.host, port=args.port, debug=args.debug)
 
-if __name__ == '__main__':
-    main()
-
 def _validate_clock_sync_target(raw: Any) -> tuple[bool, str, str]:
     """Validate a Clock_Sync_Admin target (node name or public key).
 
@@ -6930,3 +6927,5 @@ def _storage_text(fields: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+if __name__ == '__main__':
+    main()
