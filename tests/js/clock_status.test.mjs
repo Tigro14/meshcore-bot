@@ -14,6 +14,8 @@ class FixedDate extends Date {
 }
 const context = vm.createContext({ Date: FixedDate, document: {
     getElementById: () => container, querySelectorAll: () => [],
+    // base.html renders data-is-admin on <body>; these tests assume the admin view.
+    body: { dataset: { isAdmin: 'true' } },
 } });
 vm.runInContext(fs.readFileSync(new URL('../../modules/web_viewer/static/js/clock_drift.js', import.meta.url), 'utf8'), context);
 vm.runInContext(html.slice(start, end) + '\nglobalThis.TimeClass = TimeViewer;', context);
@@ -52,6 +54,26 @@ test('Relay B good measurement and earlier missing ACK are presented separately'
     assert.match(container.innerHTML, /bg-success/);
     assert.match(container.innerHTML, />9s</);
     assert.doesNotMatch(container.innerHTML, /3591s|>\s*Fail\s*</);
+});
+
+test('anonymous visitors get a read-only table without admin controls', () => {
+    const anonContainer = { innerHTML: '' };
+    const anon = vm.createContext({ Date: FixedDate, document: {
+        getElementById: () => anonContainer, querySelectorAll: () => [],
+        body: { dataset: { isAdmin: 'false' } },
+    } });
+    vm.runInContext(fs.readFileSync(new URL('../../modules/web_viewer/static/js/clock_drift.js', import.meta.url), 'utf8'), anon);
+    vm.runInContext(html.slice(start, end) + '\nglobalThis.TimeClass = TimeViewer;', anon);
+    const instance = Object.create(anon.TimeClass.prototype);
+    instance.escapeHtml = value => String(value);
+    instance.updateTargets([{ id: 1, target: 'ab'.repeat(32), contact_name: 'Relay A', enabled: true,
+        clock_state: 'in_sync', clock_drift_status: 'in_sync', clock_timestamp_valid: true, clock_drift: 9,
+        clock_observed_at: Date.parse('2026-11-05T11:52:11Z') / 1000, clock_source: 'message',
+        last_sync_success: true, last_sync_at: '2026-11-05T11:53:23+00:00',
+    }]);
+    assert.match(anonContainer.innerHTML, /Relay A/);
+    assert.doesNotMatch(anonContainer.innerHTML, /<th class="text-end">Actions|Auto clkreboot/);
+    assert.doesNotMatch(anonContainer.innerHTML, /toggleTarget|toggleAutoClkreboot|promptDelete|showHistory/);
 });
 
 test('clock rejection and stale measurements cannot render as success', () => {

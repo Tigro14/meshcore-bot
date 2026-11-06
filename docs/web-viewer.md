@@ -79,6 +79,24 @@ Once started, open your web browser and navigate to:
 - **Local access**: http://localhost:5005 (or your configured port)
 - **Network access**: http://YOUR_BOT_IP:5005 (if host is set to 0.0.0.0)
 
+### Public and Admin Pages
+
+When `web_viewer_password` is set, the viewer splits into an anonymous read surface and an
+admin surface. Everything not on the public allowlist redirects to `/login` (pages) or returns
+`401` (APIs).
+
+- **Readable without login**: Dashboard (`/`), Contacts, Mesh Graph, Region, Airtime, BBS
+  statistics, the Time synchronization page (`/time`, read-only: add/delete/toggle/Run Now are
+  hidden for anonymous visitors) and Infos. The read-only GET APIs these pages fetch are public
+  too (`/api/contacts`, `/api/regions`, `/api/bbs`, `/api/telemetry/occupancy*`,
+  `/api/clock-sync-targets-admin`); their payloads carry mesh-visible aggregates only — counts,
+  names, key prefixes, drift and battery badges, never channel keys, config or message bodies.
+- **Admin login required**: Real-time, Logs, the Settings dropdown (Radio, Scheduled Messages,
+  Greeter, Feeds, Region Warnings, Plugins, Config), the Multibyte monitor, the Time target
+  editor (`/time/admin`), every mutating API, per-target sync history (`GET
+  /api/clock-sync-targets-admin/<id>/history`), the Run Now action, battery history (`GET
+  /api/battery/<key>/history`) and the live Socket.IO streams.
+
 ## Reverse Proxy With Nginx Basic Auth
 
 If you expose the web viewer outside your local network, run it behind HTTPS and authentication. One option is to bind the viewer locally, then put Nginx in front with basic auth:
