@@ -3192,6 +3192,38 @@ class TestApiBbs:
         assert sum(row['sent'] for row in data['daily']) == 5
         assert sum(row['read'] for row in data['daily']) == 1
 
+    def test_legacy_keyed_rows_show_names_not_public_keys(self, mock_viewer):
+        """Rows written between the two BBS reworks hold the sender public key in
+        ``sender_id`` and the display name in ``sender_name``: top senders must show
+        the name while grouping and key prefixes stay key-based, like bbs_inbox.
+        """
+        self._reset_bbs_tables(mock_viewer)
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        with sqlite3.connect(mock_viewer.db_path, timeout=60) as conn:
+            conn.executemany(
+                'INSERT INTO bbs_messages (sender_id, sender_name, recipient_name, message,'
+                ' sent_at, read_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [
+                    ('300df507e23031b079342c7479b180fb', 'Max-H2', 'tonio t1000', 'body one', now, None),
+                    ('300df507e23031b079342c7479b180fb', 'Max-H2', 'max-tdeck', 'body two', now, None),
+                    ('21bf6f3e068faa4a06ca3644cc8cd5e3', '21BF6F3E', 'tonio t1000', 'body three', now, None),
+                ],
+            )
+            conn.commit()
+
+        with mock_viewer.app.test_client() as client:
+            response = client.get('/api/bbs')
+        assert response.status_code == 200
+        data = response.get_json()
+
+        assert [(s['name'], s['key_prefix'], s['sent_total']) for s in data['top_senders']] == [
+            ('Max-H2', '300d', 2),
+            ('21BF6F3E', '21bf', 1),
+        ]
+        # The key stays the mailbox grouping even for legacy rows: the two Max-H2
+        # messages count once per recipient, never merged with the other sender.
+        assert data['totals']['active_senders'] == 2
+
     def test_settings_come_from_config_with_command_defaults(self, mock_viewer):
         mock_viewer.config.add_section('BBS_Command')
         mock_viewer.config.set('BBS_Command', 'enabled', 'false')

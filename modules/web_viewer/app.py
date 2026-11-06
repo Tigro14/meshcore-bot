@@ -3905,8 +3905,12 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 if not bbs_tables:
                     return jsonify({**empty_payload, 'error': 'BBS tables not found'})
 
-                # One view over both tables. Legacy rows are name-keyed: they have
-                # no public-key columns, so the key fields stay NULL.
+                # One view over both tables. bbs_messages predates the pubkey rework:
+                # the oldest rows are name-keyed (sender_id holds the name, sender_name
+                # is NULL), and the rows written after BBS went key-based hold the
+                # public key in sender_id with the display name in sender_name. Map
+                # those back onto the key so grouping and key prefixes behave like
+                # bbs_inbox, and surface the stored name as the sender name.
                 union_parts = []
                 if 'bbs_inbox' in bbs_tables:
                     union_parts.append(
@@ -3915,7 +3919,9 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     )
                 if 'bbs_messages' in bbs_tables:
                     union_parts.append(
-                        "SELECT NULL AS sender_key, sender_id AS sender_name, "
+                        "SELECT CASE WHEN COALESCE(sender_name, '') = '' THEN NULL ELSE sender_id END "
+                        "AS sender_key, "
+                        "COALESCE(NULLIF(sender_name, ''), sender_id) AS sender_name, "
                         "NULL AS recipient_key, recipient_name, sent_at, read_at "
                         "FROM bbs_messages"
                     )

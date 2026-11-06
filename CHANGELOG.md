@@ -240,6 +240,12 @@ semantic versioning.
 
 ### Fixed
 
+- Web Viewer `/bbs` top senders now print the sender **name** instead of the raw public key for
+  legacy `bbs_messages` rows. Rows written after BBS went key-based hold the sender public key in
+  `sender_id` and the display name in `sender_name`, but the stats query used `sender_id` as the
+  name. Those rows now map back onto the key for grouping and the 4-character prefix, exactly like
+  `bbs_inbox` rows, while the oldest name-only rows keep showing their stored name.
+
 - The vigilance level is read from JSON. The department page Météo-France serves is filled by
   JavaScript, so the parser had nothing to read and `vigi` answered `Vert` for every department
   — verified on a live case: the Bouches-du-Rhône were in Jaune while the bot reported Vert. The
