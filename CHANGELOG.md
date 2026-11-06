@@ -244,7 +244,10 @@ semantic versioning.
   legacy `bbs_messages` rows. Rows written after BBS went key-based hold the sender public key in
   `sender_id` and the display name in `sender_name`, but the stats query used `sender_id` as the
   name. Those rows now map back onto the key for grouping and the 4-character prefix, exactly like
-  `bbs_inbox` rows, while the oldest name-only rows keep showing their stored name.
+  `bbs_inbox` rows, while the oldest name-only rows keep showing their stored name. Pending
+  recipients and top senders also resolve both sides through `complete_contact_tracking`, which
+  carries the name MeshCore currently knows for a key and wins over stored names that are stale or
+  just the 4-character key prefix (the collapsed join never inflates the message counts).
 
 - The vigilance level is read from JSON. The department page Météo-France serves is filled by
   JavaScript, so the parser had nothing to read and `vigi` answered `Vert` for every department

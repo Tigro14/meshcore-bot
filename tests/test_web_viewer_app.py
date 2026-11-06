@@ -3224,6 +3224,63 @@ class TestApiBbs:
         # messages count once per recipient, never merged with the other sender.
         assert data['totals']['active_senders'] == 2
 
+    def test_tracked_contact_names_win_over_stored_names(self, mock_viewer):
+        """complete_contact_tracking carries the name MeshCore currently knows for a
+        public key, so it replaces the name stored on the message row: rows written
+        right after BBS went key-based hold just the key prefix as sender_name, and
+        duplicate tracking rows for one key must not inflate the message counts.
+        """
+        self._reset_bbs_tables(mock_viewer)
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        with sqlite3.connect(mock_viewer.db_path, timeout=60) as conn:
+            conn.execute('DELETE FROM complete_contact_tracking')
+            conn.executemany(
+                'INSERT INTO complete_contact_tracking (public_key, name, role) VALUES (?, ?, ?)',
+                [
+                    ('21bf6f3e068faa4a06ca3644cc8cd5e3', 'Tonio Tdeck', 'Companion'),
+                    ('21bf6f3e068faa4a06ca3644cc8cd5e3', 'Tonio Tdeck', 'Mobile'),
+                    ('300df507e23031b079342c7479b180fb', 'Max-H2_(FR-Nomade)', 'Companion'),
+                ],
+            )
+            conn.executemany(
+                'INSERT INTO bbs_inbox (sender_key, sender_name, recipient_key, recipient_name,'
+                ' message, sent_at, read_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [
+                    ('300df507e23031b079342c7479b180fb', '300D',
+                     '21bf6f3e068faa4a06ca3644cc8cd5e3', '21BF6F3E', 'body one', now, None),
+                    ('21bf6f3e068faa4a06ca3644cc8cd5e3', '21BF6F3E',
+                     'ffff0000aaaabbbb', 'Carol', 'body two', now, None),
+                ],
+            )
+            # Legacy name-keyed rows have no key to look up: stored names stay.
+            conn.execute(
+                'INSERT INTO bbs_messages (sender_id, sender_name, recipient_name, message,'
+                ' sent_at, read_at) VALUES (?, ?, ?, ?, ?, ?)',
+                ('Dave', None, 'Bob', 'legacy body', now, None),
+            )
+            conn.commit()
+
+        with mock_viewer.app.test_client() as client:
+            response = client.get('/api/bbs')
+        assert response.status_code == 200
+        data = response.get_json()
+
+        # Tracked names override the key-prefix stored names on both sides, while the
+        # untracked 'Carol' mailbox and the keyless legacy 'Dave' row keep theirs.
+        assert [(s['name'], s['key_prefix'], s['sent_total']) for s in data['top_senders']] == [
+            ('Dave', '', 1),
+            ('Max-H2_(FR-Nomade)', '300d', 1),
+            ('Tonio Tdeck', '21bf', 1),
+        ]
+        assert [(r['name'], r['key_prefix'], r['pending']) for r in data['pending_recipients']] == [
+            ('Bob', '', 1),
+            ('Carol', 'ffff', 1),
+            ('Tonio Tdeck', '21bf', 1),
+        ]
+        # The two tracking rows for the 21bf key never fan out the join.
+        assert data['totals']['stored_total'] == 3
+        assert data['totals']['active_senders'] == 3
+
     def test_settings_come_from_config_with_command_defaults(self, mock_viewer):
         mock_viewer.config.add_section('BBS_Command')
         mock_viewer.config.set('BBS_Command', 'enabled', 'false')

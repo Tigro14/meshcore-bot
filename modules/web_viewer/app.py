@@ -3899,9 +3899,10 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
 
                 cursor.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' "
-                    "AND name IN ('bbs_messages', 'bbs_inbox')"
+                    "AND name IN ('bbs_messages', 'bbs_inbox', 'complete_contact_tracking')"
                 )
-                bbs_tables = {row[0] for row in cursor.fetchall()}
+                db_tables = {row[0] for row in cursor.fetchall()}
+                bbs_tables = db_tables & {'bbs_messages', 'bbs_inbox'}
                 if not bbs_tables:
                     return jsonify({**empty_payload, 'error': 'BBS tables not found'})
 
@@ -3927,6 +3928,33 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     )
                 union = " UNION ALL ".join(union_parts)
 
+                # complete_contact_tracking carries the name MeshCore currently knows
+                # for a public key; it wins over the name stored on the message row,
+                # which can be stale or just the key prefix (rows written right after
+                # BBS went key-based stored the prefix as sender_name). The tracking
+                # table has no unique constraint on public_key, so it is collapsed
+                # before the LEFT JOIN to keep the message counts exact.
+                tracked_ct = (
+                    "SELECT public_key, MAX(name) AS name FROM complete_contact_tracking "
+                    "GROUP BY public_key"
+                )
+                if 'complete_contact_tracking' in db_tables:
+                    pending_from = (
+                        f"({union}) m LEFT JOIN ({tracked_ct}) ct_r "
+                        "ON ct_r.public_key = m.recipient_key"
+                    )
+                    pending_name = "COALESCE(NULLIF(MAX(ct_r.name), ''), MAX(recipient_name))"
+                    senders_from = (
+                        f"({union}) m LEFT JOIN ({tracked_ct}) ct_s "
+                        "ON ct_s.public_key = m.sender_key"
+                    )
+                    senders_name = "COALESCE(NULLIF(MAX(ct_s.name), ''), MAX(sender_name))"
+                else:
+                    pending_from = f"({union}) m"
+                    pending_name = "MAX(recipient_name)"
+                    senders_from = f"({union}) m"
+                    senders_name = "MAX(sender_name)"
+
                 cursor.execute(f'''
                     SELECT COUNT(*) AS stored_total,
                            SUM(read_at IS NULL) AS pending,
@@ -3950,14 +3978,14 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 # A mailbox is one recipient key (or a legacy recipient name when no
                 # key column exists); key and name identities never merge.
                 cursor.execute(f'''
-                    SELECT COALESCE(recipient_key, recipient_name) AS identity,
-                           MAX(recipient_key) AS recipient_key,
-                           MAX(recipient_name) AS name,
+                    SELECT COALESCE(m.recipient_key, m.recipient_name) AS identity,
+                           MAX(m.recipient_key) AS recipient_key,
+                           {pending_name} AS name,
                            COUNT(*) AS pending,
-                           MIN(sent_at) AS oldest,
-                           MAX(sent_at) AS newest
-                    FROM ({union})
-                    WHERE read_at IS NULL
+                           MIN(m.sent_at) AS oldest,
+                           MAX(m.sent_at) AS newest
+                    FROM {pending_from}
+                    WHERE m.read_at IS NULL
                     GROUP BY identity
                     ORDER BY pending DESC, name ASC
                     LIMIT 200
@@ -3974,12 +4002,12 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 ]
 
                 cursor.execute(f'''
-                    SELECT COALESCE(sender_key, sender_name) AS identity,
-                           MAX(sender_key) AS sender_key,
-                           MAX(sender_name) AS name,
+                    SELECT COALESCE(m.sender_key, m.sender_name) AS identity,
+                           MAX(m.sender_key) AS sender_key,
+                           {senders_name} AS name,
                            COUNT(*) AS sent_total,
-                           SUM(date(sent_at) = date('now')) AS sent_today
-                    FROM ({union})
+                           SUM(date(m.sent_at) = date('now')) AS sent_today
+                    FROM {senders_from}
                     GROUP BY identity
                     ORDER BY sent_total DESC, name ASC
                     LIMIT 10
