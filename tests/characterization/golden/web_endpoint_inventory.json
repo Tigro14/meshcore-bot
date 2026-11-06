@@ -157,6 +157,28 @@
    "GET"
   ]
  },
+ "/api/bbs": {
+  "GET locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 401,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_bbs",
+  "methods": [
+   "GET"
+  ]
+ },
  "/api/cache": {
   "GET locked anon": {
    "content_type": "application/json",
@@ -1779,6 +1801,28 @@
    "x_frame_options": "SAMEORIGIN"
   },
   "endpoint": "apple_touch_icon",
+  "methods": [
+   "GET"
+  ]
+ },
+ "/bbs": {
+  "GET locked anon": {
+   "content_type": "text/html",
+   "csp_script_src": "script-src 'self' 'nonce-X'",
+   "location": "/login?next=/bbs",
+   "status": 302,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "text/html",
+   "csp_script_src": "script-src 'self' 'nonce-X'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "bbs_page",
   "methods": [
    "GET"
   ]

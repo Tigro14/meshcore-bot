@@ -18,6 +18,14 @@ semantic versioning.
   `[BBS_Command]` documents every limit plus the new `rate_limit_per_minute` and
   `notify_cooldown_seconds` keys. See `docs/command-reference.md`.
 
+- Web Viewer **`/bbs` statistics page** (`GET /api/bbs`): pending totals, the pending-recipient
+  list grouped per mailbox (a pubkey mailbox and a legacy name mailbox keep separate rows even
+  when they share a display name), top senders, pending age buckets (< 1d / 1–3d / 3–7d / ≥ 7d),
+  14-day sent/delivered activity and a read-only `[BBS_Command]` settings card, refreshed every
+  30 seconds. The API and page expose counts, names and 4-character key prefixes only — message
+  bodies never reach the browser. The Settings menu shows the entry only while the BBS command
+  is enabled. See `docs/web-viewer.md`.
+
 - Per-channel **Live Channel Messages** publication controls in Radio channel
   management and creation, disabled by default. Hidden channels remain available
   to the bot and statistics; server-side filtering covers live messages, history,

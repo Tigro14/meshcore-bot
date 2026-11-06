@@ -10,6 +10,8 @@ A web-based interface for viewing and analyzing data from your MeshCore Bot.
 - **Config panel**: Structured settings with categorized topics and database tools
 - **Plugins page**: Toggle every command and service on/off and edit their settings from the browser. Changes are validated, written to `config.ini` with comments preserved and a timestamped backup, and the bot hot-reloads command settings within a few seconds (service on/off still needs a restart). Template fields (test reply, path reply prefix, greeter messages, multitest result, MQTT weather template) have a `{ }` button that lists the placeholders they take; every one previews the template as you type against sample data, showing what the bot would send (or that it would send nothing) when the template has a mistake; the test reply and path prefix, which take filters, also list them and preview against a 2-byte, a 1-byte and a direct sample message
 - **Purging Log**: Audit trail of contact purging operations
+- **BBS Mailbox**: Statistics page for the BBS store-and-forward mailbox: pending totals,
+  the per-recipient pending list, top senders, message ages and 14-day activity
 - **Real-time Updates**: Auto-refreshes every 30 seconds
 - **Channel privacy**: Choose which monitored channels publish messages in Realtime;
   see [Channel message visibility](channel-message-visibility.md)
@@ -387,6 +389,23 @@ next hourly tick.
 - Timestamps and reasons
 - Contact names and public keys
 
+### BBS Mailbox
+- Statistics for the BBS store-and-forward mailbox (`bbs` commands), covering both the
+  pubkey-keyed `bbs_inbox` table and the legacy `bbs_messages` table until the latter ages out
+- Six summary tiles: pending messages, recipients with pending, stored today, stored total,
+  delivered, active senders
+- Pending-recipient table: one row per mailbox, grouped by public key (legacy rows by name,
+  so a key mailbox and a legacy name mailbox with the same display name stay separate),
+  with the pending count, oldest/newest timestamps and an age column
+- Pending age buckets (< 1 day, 1–3 days, 3–7 days, ≥ 7 days); a non-zero "≥ 7 days" bucket
+  means the TTL purge has not run recently
+- Top 10 senders and a 14-day sent/delivered daily series
+- Read-only `[BBS_Command]` settings card; the page auto-refreshes every 30 seconds and has
+  a manual Refresh button
+- Privacy: the page and its API expose only counts, node names and 4-character key prefixes;
+  message bodies never leave the server
+- The Settings menu shows the entry only while `[BBS_Command] enabled = true` (the default)
+
 ## API Endpoints
 
 The viewer also provides JSON API endpoints:
@@ -435,6 +454,12 @@ The viewer also provides JSON API endpoints:
   `page`, `page_size` (maximum 200), `search`, `sort`, and `direction` parameters;
   callers that omit pagination retain the legacy full-list response.
 - `GET /api/tracking` - Contact tracking data
+- `GET /api/bbs` - BBS mailbox statistics: the live `[BBS_Command]` settings, totals
+  (pending, recipients with pending, stored today/total, delivered, active senders), the
+  pending-recipient list grouped per mailbox (pubkey mailboxes and legacy name mailboxes
+  stay separate), top senders, pending age buckets and 14-day daily sent/delivered
+  activity. Counts, names and 4-character key prefixes only — never message bodies. With
+  neither BBS table present it answers zeroed totals and `error: "BBS tables not found"`.
 
 Example usage:
 ```bash

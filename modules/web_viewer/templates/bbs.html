@@ -1,0 +1,436 @@
+{% extends "base.html" %}
+
+{% block title %}BBS - MeshCore Bot Data Viewer{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12 d-flex justify-content-between align-items-center">
+        <h1>
+            <i class="fas fa-inbox"></i> BBS Mailbox Statistics
+        </h1>
+        <button class="btn btn-outline-secondary" type="button" id="bbs-refresh-btn">
+            <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+    </div>
+</div>
+
+<div id="bbs-disabled-alert" class="alert alert-warning d-none">
+    <i class="fas fa-exclamation-triangle"></i> The BBS command is disabled in the bot configuration.
+    Stored messages remain listed below.
+</div>
+
+<!-- Summary tiles -->
+<div class="row mb-4">
+    <div class="col-6 col-md-4 col-lg-2 mb-3">
+        <div class="card bbs-tile h-100">
+            <div class="card-body">
+                <div class="bbs-tile-label">Pending messages</div>
+                <div class="bbs-tile-value" id="tile-pending">—</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2 mb-3">
+        <div class="card bbs-tile h-100">
+            <div class="card-body">
+                <div class="bbs-tile-label">Recipients with pending</div>
+                <div class="bbs-tile-value" id="tile-recipients">—</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2 mb-3">
+        <div class="card bbs-tile h-100">
+            <div class="card-body">
+                <div class="bbs-tile-label">Stored today</div>
+                <div class="bbs-tile-value" id="tile-today">—</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2 mb-3">
+        <div class="card bbs-tile h-100">
+            <div class="card-body">
+                <div class="bbs-tile-label">Stored total</div>
+                <div class="bbs-tile-value" id="tile-total">—</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2 mb-3">
+        <div class="card bbs-tile h-100">
+            <div class="card-body">
+                <div class="bbs-tile-label">Read / delivered</div>
+                <div class="bbs-tile-value" id="tile-read">—</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2 mb-3">
+        <div class="card bbs-tile h-100">
+            <div class="card-body">
+                <div class="bbs-tile-label">Active senders</div>
+                <div class="bbs-tile-value" id="tile-senders">—</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pending recipients -->
+<div class="row mb-4">
+    <div class="col-lg-8 mb-3">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-users"></i> Recipients With Pending Messages</span>
+                <span class="badge bg-primary" id="pending-recipients-badge">0</span>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Recipient</th>
+                                <th>Key</th>
+                                <th>Pending</th>
+                                <th>Oldest</th>
+                                <th>Age</th>
+                                <th>Newest</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pending-recipients-body">
+                            <tr>
+                                <td colspan="6" class="loading">Loading pending recipients...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <small class="text-muted" id="pending-recipients-note"></small>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-cog"></i> BBS Settings
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tbody id="bbs-settings-body">
+                        <tr>
+                            <td colspan="2" class="loading">Loading settings...</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <hr>
+                <small class="text-muted">
+                    <i class="fas fa-user-shield"></i> This page only shows counts, node names and 4-character
+                    key prefixes. Message bodies are never sent to the browser.
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <!-- Pending age distribution -->
+    <div class="col-lg-4 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-hourglass-half"></i> Pending Message Age
+            </div>
+            <div class="card-body">
+                <div id="age-buckets">
+                    <div class="loading">Loading ages...</div>
+                </div>
+                <small class="text-muted mt-2 d-block" id="age-note"></small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top senders -->
+    <div class="col-lg-4 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-paper-plane"></i> Top Senders
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Sender</th>
+                                <th>Key</th>
+                                <th>Sent total</th>
+                                <th>Today</th>
+                            </tr>
+                        </thead>
+                        <tbody id="top-senders-body">
+                            <tr>
+                                <td colspan="4" class="loading">Loading senders...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Daily activity -->
+    <div class="col-lg-4 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="fas fa-chart-bar"></i> Daily Activity (14 days)
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Day (UTC)</th>
+                                <th>Sent</th>
+                                <th>Delivered</th>
+                            </tr>
+                        </thead>
+                        <tbody id="daily-body">
+                            <tr>
+                                <td colspan="3" class="loading">Loading activity...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ g.csp_nonce }}">
+class BBSStats {
+    constructor() {
+        this.data = null;
+        this.refreshBtn = document.getElementById('bbs-refresh-btn');
+        this.refreshBtn.addEventListener('click', () => this.load());
+        this.load();
+        this.refreshTimer = setInterval(() => this.load(), 30000);
+    }
+
+    async load() {
+        try {
+            const response = await fetch('/api/bbs', {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                this.showError(data.error || 'Failed to load BBS statistics');
+                return;
+            }
+            this.data = data;
+            this.render();
+        } catch (error) {
+            console.error('Error loading BBS statistics:', error);
+            this.showError('Failed to load BBS statistics: ' + error.message);
+        }
+    }
+
+    render() {
+        const data = this.data;
+        document.getElementById('bbs-disabled-alert').classList.toggle('d-none', data.enabled);
+        this.renderTiles(data);
+        this.renderPendingRecipients(data);
+        this.renderSettings(data);
+        this.renderAgeBuckets(data);
+        this.renderTopSenders(data);
+        this.renderDaily(data);
+    }
+
+    renderTiles(data) {
+        const totals = data.totals;
+        document.getElementById('tile-pending').textContent = totals.pending;
+        document.getElementById('tile-recipients').textContent = totals.recipients_with_pending;
+        document.getElementById('tile-today').textContent = totals.stored_today;
+        document.getElementById('tile-total').textContent = totals.stored_total;
+        document.getElementById('tile-read').textContent = totals.read_total;
+        document.getElementById('tile-senders').textContent = totals.active_senders;
+    }
+
+    renderPendingRecipients(data) {
+        const tbody = document.getElementById('pending-recipients-body');
+        const recipients = data.pending_recipients;
+        document.getElementById('pending-recipients-badge').textContent = recipients.length;
+        document.getElementById('pending-recipients-note').textContent =
+            recipients.length >= 200 ? 'Truncated to the 200 busiest mailboxes.' : '';
+        if (!recipients.length) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-muted">No pending BBS messages.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = recipients.map((row) => `
+            <tr>
+                <td class="bbs-name">${this.escapeHtml(row.name)}</td>
+                <td><code>${this.escapeHtml(row.key_prefix || '—')}</code></td>
+                <td><span class="badge bg-secondary">${row.pending}</span></td>
+                <td>${this.escapeHtml(row.oldest || '')}</td>
+                <td>${this.escapeHtml(this.formatAge(row.oldest))}</td>
+                <td>${this.escapeHtml(row.newest || '')}</td>
+            </tr>
+        `).join('');
+    }
+
+    renderSettings(data) {
+        const settings = data.settings;
+        const rows = [
+            ['Enabled', settings.enabled ? 'Yes' : 'No'],
+            ['Mailbox size per recipient', settings.max_messages_per_user === 0
+                ? 'Unlimited' : settings.max_messages_per_user],
+            ['Message age purge', settings.max_message_age_days === 0
+                ? 'Disabled' : `${settings.max_message_age_days} days`],
+            ['Daily quota per sender', settings.max_messages_per_sender_per_day === 0
+                ? 'Unlimited' : settings.max_messages_per_sender_per_day],
+            ['Commands per minute', settings.rate_limit_per_minute === 0
+                ? 'No limit' : settings.rate_limit_per_minute],
+            ['Notification cooldown', `${settings.notify_cooldown_seconds} s`]
+        ];
+        document.getElementById('bbs-settings-body').innerHTML = rows.map(
+            ([label, value]) => `<tr><td>${this.escapeHtml(label)}</td><td><strong>${this.escapeHtml(String(value))}</strong></td></tr>`
+        ).join('');
+    }
+
+    renderAgeBuckets(data) {
+        const ages = data.age_buckets;
+        const entries = [
+            ['&lt; 1 day', ages.lt_1d, 'bg-success'],
+            ['1–3 days', ages.d1_3, 'bg-info'],
+            ['3–7 days', ages.d3_7, 'bg-warning'],
+            ['&ge; 7 days', ages.gte_7d, 'bg-danger']
+        ];
+        document.getElementById('age-buckets').innerHTML = entries.map(
+            ([label, count, css]) => `
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span>${label}</span>
+                    <span class="badge ${css}">${count}</span>
+                </div>
+            `
+        ).join('');
+        document.getElementById('age-note').textContent =
+            `Pending messages older than the configured purge age are removed on the next BBS activity.
+             A non-zero ">= 7 days" bucket means the purge has not run recently.`;
+    }
+
+    renderTopSenders(data) {
+        const tbody = document.getElementById('top-senders-body');
+        const senders = data.top_senders;
+        if (!senders.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-muted">No BBS messages stored yet.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = senders.map((row) => `
+            <tr>
+                <td class="bbs-name">${this.escapeHtml(row.name)}</td>
+                <td><code>${this.escapeHtml(row.key_prefix || '—')}</code></td>
+                <td>${row.sent_total}</td>
+                <td>${row.sent_today}</td>
+            </tr>
+        `).join('');
+    }
+
+    renderDaily(data) {
+        const tbody = document.getElementById('daily-body');
+        const daily = data.daily;
+        if (!daily.length) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-muted">No BBS activity in the last 14 days.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = daily.map((row) => `
+            <tr>
+                <td>${this.escapeHtml(row.date)}</td>
+                <td>${row.sent}</td>
+                <td>${row.read}</td>
+            </tr>
+        `).join('');
+    }
+
+    formatAge(timestamp) {
+        if (!timestamp) return '';
+        const when = new Date(String(timestamp).replace(' ', 'T') + 'Z');
+        if (isNaN(when.getTime())) return '';
+        const minutes = Math.max(0, Math.floor((Date.now() - when.getTime()) / 60000));
+        if (minutes < 60) return `${minutes} min`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours} h`;
+        return `${Math.floor(hours / 24)} d`;
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    showError(message) {
+        if (window.connectionManager) {
+            window.connectionManager.showNotification(message, 'danger');
+        } else {
+            alert('Error: ' + message);
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    window.bbsStats = new BBSStats();
+});
+</script>
+
+<style>
+.bbs-tile-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted, #6c757d);
+}
+
+.bbs-tile-value {
+    font-size: 1.8rem;
+    font-weight: 600;
+}
+
+.bbs-name {
+    font-weight: 600;
+}
+
+.loading {
+    color: var(--text-muted, #6c757d);
+    font-style: italic;
+}
+
+/* Dark mode table styling with better contrast - matching greeter page */
+[data-theme="dark"] .table-striped > tbody > tr:nth-of-type(odd) > td {
+    background-color: #3a3a3a;
+}
+
+[data-theme="dark"] .table-striped > tbody > tr:nth-of-type(even) > td {
+    background-color: #2d2d2d;
+}
+
+[data-theme="dark"] .table-hover > tbody > tr:hover > td {
+    background-color: #404040 !important;
+}
+
+[data-theme="dark"] .table-dark {
+    background-color: var(--bg-tertiary);
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .table-dark th {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .table td {
+    border-color: var(--border-color);
+    color: var(--text-color) !important;
+}
+
+[data-theme="dark"] .table td small {
+    color: var(--text-muted) !important;
+}
+
+[data-theme="dark"] .table td code {
+    color: var(--text-color) !important;
+    background-color: var(--bg-tertiary) !important;
+}
+</style>
+{% endblock %}
