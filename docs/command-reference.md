@@ -164,6 +164,7 @@ bbs list
 - Reading is DM-only for privacy. Pending messages are marked read only after the full reply went out on the radio, so a failed send never silently drops them.
 - Senders are notified of pending messages when they DM the bot (unless the DM is itself a `bbs`/`s`/`send` command).
 - Limits are configured in `[BBS_Command]`: mailbox size, daily per-sender quota, commands per minute, message age purge, notification cooldown.
+- The full guide — resolution order, examples, limits, web viewer page — is in [BBS.md](BBS.md).
 
 ---
 
