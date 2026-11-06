@@ -1460,10 +1460,68 @@ class TestRoleBasedAccess:
     """Public allowlist vs fail-closed admin when web_viewer_password is set."""
 
     def test_public_pages_accessible_without_auth(self, auth_client):
-        public_pages = ["/", "/mesh", "/contacts"]
+        public_pages = ["/", "/mesh", "/contacts", "/regions", "/airtime", "/bbs", "/time", "/infos"]
         for page in public_pages:
             resp = auth_client.get(page)
             assert resp.status_code == 200, f"{page} should be accessible without auth"
+
+    def test_public_pages_in_anonymous_navbar(self, auth_client):
+        """The five newly public pages must appear in the navbar for anonymous visitors."""
+        html = auth_client.get("/").get_data(as_text=True)
+        for page in ("/regions", "/airtime", "/bbs", "/time", "/infos"):
+            assert f'href="{page}"' in html, f"{page} should be in the anonymous navbar"
+        # Admin-only entries stay hidden.
+        assert 'href="/realtime"' not in html
+        assert 'href="/logs"' not in html
+
+    def test_public_page_apis_accessible_without_auth(self, auth_client):
+        """Anonymous GETs on the APIs those pages fetch must return 200."""
+        for api in ("/api/regions", "/api/bbs", "/api/clock-sync-targets-admin"):
+            resp = auth_client.get(api)
+            assert resp.status_code == 200, f"{api} should be readable without auth"
+
+    def test_time_page_write_controls_hidden_from_anonymous(self, auth_client):
+        """The /time page renders read-only for anonymous visitors (server-gated)."""
+        html = auth_client.get("/time").get_data(as_text=True)
+        assert 'id="clock-sync-run-now-btn"' not in html
+        assert 'id="add-target-btn"' not in html
+        assert 'id="new-target-input"' not in html
+        # ...and reappears after login.
+        auth_client.post("/login", data={"password": "secret123"})
+        html = auth_client.get("/time").get_data(as_text=True)
+        assert 'id="clock-sync-run-now-btn"' in html
+        assert 'id="add-target-btn"' in html
+
+    def test_clock_sync_mutations_require_auth(self, auth_client):
+        """Making the targets list GET-public must not leak its write routes."""
+        resp = auth_client.post(
+            "/api/clock-sync-targets-admin",
+            json={"target": "deadbeef" * 4},
+            content_type="application/json",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 401
+        resp = auth_client.put(
+            "/api/clock-sync-targets-admin/1",
+            json={"enabled": False},
+            content_type="application/json",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 401
+        resp = auth_client.delete(
+            "/api/clock-sync-targets-admin/1",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 401
+        resp = auth_client.get("/api/clock-sync-targets-admin/1/history")
+        assert resp.status_code == 401
+        resp = auth_client.post(
+            "/api/admin/clock-sync-admin/run-now",
+            json={},
+            content_type="application/json",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 401
 
     def test_realtime_is_admin_only(self, auth_client):
         """The live socket is admin-only, so the page is too; the nav hides it."""
@@ -1476,7 +1534,7 @@ class TestRoleBasedAccess:
         assert 'href="/realtime"' in auth_client.get("/").get_data(as_text=True)
 
     def test_admin_pages_require_auth(self, auth_client):
-        admin_pages = ["/logs", "/config", "/plugins", "/radio", "/greeter", "/feeds", "/schedule"]
+        admin_pages = ["/logs", "/config", "/plugins", "/radio", "/greeter", "/feeds", "/schedule", "/time/admin"]
         for page in admin_pages:
             resp = auth_client.get(page, follow_redirects=False)
             assert resp.status_code == 302, f"{page} should redirect to login"

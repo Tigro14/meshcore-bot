@@ -8,6 +8,16 @@ semantic versioning.
 
 ### Added
 
+- Web viewer anonymous surface now covers **Region**, **Airtime**, **BBS statistics**, **Time
+  synchronization** (`/time`) and **Infos** in addition to Dashboard, Contacts and Mesh Graph,
+  with those entries visible in the main navbar without a login. `/time` is read-only for
+  anonymous visitors: add/delete/toggle controls and Run Now are hidden server-side, and the
+  target table drops its admin columns client-side. `GET /api/regions`, `GET /api/bbs` and
+  `GET /api/clock-sync-targets-admin` join the public allowlist — the payloads are the same
+  mesh-visible aggregates `/contacts` already publishes (counts, names, key prefixes, drift,
+  battery badges). The clock-sync write routes, per-target history, Run Now, battery history and
+  the `/time/admin` editor stay admin-only. See `docs/web-viewer.md`.
+
 - Rebuilt the **BBS** store-and-forward mailbox on `bbs_inbox` (migration 34), keyed on full public
   keys: two nodes advertising the same name no longer share a mailbox, and a queued message stays
   deliverable when the recipient renames its node. Recipients resolve in MeshCore-BBS order —

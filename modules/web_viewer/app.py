@@ -940,8 +940,12 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
 
         # Issue #240 public HTML surface. Realtime is admin-only: its live socket
         # is, so an anonymous visit would only ever show an empty page.
+        # Read-only explainers (regions, airtime, time, infos, bbs) join the
+        # public surface: every card they render is fed by the public GET APIs
+        # below, and their write controls are hidden from anonymous visitors.
         _PUBLIC_PAGE_PATHS = frozenset([
             '/', '/contacts', '/mesh',
+            '/regions', '/airtime', '/bbs', '/time', '/infos',
         ])
 
         # Anonymous-safe GET APIs: mesh-visible / aggregate data only. No channel
@@ -971,6 +975,14 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             '/api/mesh/nodes',
             '/api/mesh/edges',
             '/api/mesh/stats',
+            # /regions explainer. Public aggregates only: no settings, no per-sender data.
+            '/api/regions',
+            # /bbs stats: counts, names and key prefixes only — never message bodies.
+            '/api/bbs',
+            # GET only: the /time page renders targets with the same enrichment
+            # /contacts already publishes publicly (name, key, drift, battery).
+            # POST/PUT/DELETE and the per-target history/run-now routes stay admin.
+            '/api/clock-sync-targets-admin',
         ])
 
         # Read-only POST helpers used by public Contacts / Mesh info panels.

@@ -857,7 +857,9 @@
                             <i class="fas fa-info-circle"></i> Infos
                         </a>
                     </li>
-                    {% if bbs_enabled and (not auth_enabled or is_admin) %}
+                    {#- Ungated like the other public pages: /bbs only reads the
+                        /api/bbs stats allowlist, and the page itself is read-only. -#}
+                    {% if bbs_enabled %}
                     <li class="nav-item">
                         <a class="nav-link {{ 'active' if request.path == '/bbs' }}" href="/bbs">
                             <i class="fas fa-inbox"></i> BBS

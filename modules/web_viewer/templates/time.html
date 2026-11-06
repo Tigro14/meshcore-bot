@@ -111,14 +111,17 @@
         <div class="card h-100">
             <div class="card-header time-targets-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-broadcast-tower"></i> Clock_Sync_Admin Targets</span>
+                {% if not auth_enabled or is_admin %}
                 <button id="clock-sync-run-now-btn" class="btn btn-sm btn-outline-primary" type="button">
                     <i class="fas fa-play me-1"></i>Run Now
                 </button>
+                {% endif %}
             </div>
             <div class="card-body">
                 <div id="clock-sync-run-now-alert" class="alert d-none" role="alert"></div>
 
-                <!-- Add target -->
+                <!-- Add target (admin only; anonymous visitors get a read-only table) -->
+                {% if not auth_enabled or is_admin %}
                 <div class="mb-3" style="max-width: 500px;">
                     <div class="position-relative">
                         <div class="input-group">
@@ -130,6 +133,7 @@
                         <div id="target-suggestions" class="list-group position-absolute w-100 shadow" style="z-index: 1050; display: none;"></div>
                     </div>
                 </div>
+                {% endif %}
 
                 <!-- Targets list -->
                 <div id="clock-sync-targets-container">
@@ -520,16 +524,24 @@
             const container = document.getElementById('clock-sync-targets-container');
             if (!container) return;
 
+            // Anonymous visitors (auth enabled, no session) get a read-only table:
+            // write controls hit PUT/DELETE routes that would 401 for them anyway.
+            const isAdmin = document.body.dataset.isAdmin === 'true';
+
             const targets = Array.isArray(data) ? data : (data.targets || []);
             this.lastTargetsData = targets;
 
             if (targets.length === 0) {
-                container.innerHTML = `<div class="alert alert-info mb-0"><i class="fas fa-info-circle"></i> No targets configured. Add one above.</div>`;
+                container.innerHTML = `<div class="alert alert-info mb-0"><i class="fas fa-info-circle"></i> No targets configured.${isAdmin ? ' Add one above.' : ''}</div>`;
                 return;
             }
 
             let html = '<table class="time-targets-table table table-sm align-middle mb-0">';
-            html += '<thead><tr><th>Target</th><th>Measured drift</th><th>Clock</th><th>Battery</th><th>Auto clkreboot</th><th>Last send</th><th class="text-end">Actions</th></tr></thead><tbody>';
+            html += '<thead><tr><th>Target</th><th>Measured drift</th><th>Clock</th><th>Battery</th>'
+                + (isAdmin ? '<th>Auto clkreboot</th>' : '')
+                + '<th>Last send</th>'
+                + (isAdmin ? '<th class="text-end">Actions</th>' : '')
+                + '</tr></thead><tbody>';
             targets.forEach(t => {
                 const id = t.id;
                 const displayTarget = this.escapeHtml(t.target || 'unknown');
@@ -564,9 +576,11 @@
                     // apply to displayName.
                     const pct = t.battery_percent;
                     const pctText = (pct === undefined || pct === null) ? '' : ` / ${pct}%`;
-                    batteryHtml = `<span class="badge ${batteryClass} battery-badge" style="cursor:pointer"
-                                        data-public-key="${t.public_key}"
-                                        title="Click for 7-day history">
+                    // History modal is admin-only; anonymous badges stay plain text.
+                    const badgeAttrs = isAdmin
+                        ? ` style="cursor:pointer" data-public-key="${t.public_key}" title="Click for 7-day history"`
+                        : '';
+                    batteryHtml = `<span class="badge ${batteryClass} battery-badge"${badgeAttrs}>
                                      <i class="fas fa-battery-half me-1"></i>${t.battery_voltage.toFixed(2)}V${pctText}
                                    </span>`;
                 }
@@ -582,23 +596,19 @@
                 const displayName = contactName || displayTarget;
                 const autoClkrebootChecked = t.auto_clkreboot_enabled ? 'checked' : '';
 
-                html += `<tr>
-                    <td class="time-target-name" data-label="Relais">
-                        <a href="#" class="text-decoration-none" onclick="document.querySelector('#TimeViewer').showHistory(${id}, '${displayName.replace(/'/g, "\\'")}')" title="View sync history">
+                const nameLink = isAdmin
+                    ? `<a href="#" class="text-decoration-none" onclick="document.querySelector('#TimeViewer').showHistory(${id}, '${displayName.replace(/'/g, "\\'")}')" title="View sync history">
                             <strong>${displayName}</strong>
-                        </a>
-                        ${contactName ? `<br><code class="small">${displayTarget.substring(0, 16)}...</code>` : ''}
-                    </td>
-                    <td class="time-target-drift" data-label="Measured drift">${driftHtml}</td>
-                    <td data-label="Clock">${syncBadge}</td>
-                    <td data-label="Battery">${batteryHtml}</td>
+                        </a>`
+                    : `<strong>${displayName}</strong>`;
+                const autoCell = isAdmin ? `
                     <td data-label="Auto clkreboot">
                         <div class="form-check form-switch mb-0" title="If this target replies 'clock cannot go backwards' (its clock is ahead of real time -- a normal sync can never fix that), automatically clkreboot it then resync it">
                             <input class="form-check-input" type="checkbox" role="switch" aria-label="Auto clkreboot" ${autoClkrebootChecked}
                                 onchange="document.querySelector('#TimeViewer').toggleAutoClkreboot(${id}, this.checked)">
                         </div>
-                    </td>
-                    <td class="text-muted small" data-label="Last send">${lastSync}</td>
+                    </td>` : '';
+                const actionsCell = isAdmin ? `
                     <td class="time-target-actions text-end" data-label="Actions">
                         <div class="d-flex gap-1 justify-content-end">
                             <button class="btn btn-sm ${toggleClass}" title="${toggleTitle}" onclick="document.querySelector('#TimeViewer').toggleTarget(${id}, ${enabled})">
@@ -608,7 +618,19 @@
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
+                    </td>` : '';
+
+                html += `<tr>
+                    <td class="time-target-name" data-label="Relais">
+                        ${nameLink}
+                        ${contactName ? `<br><code class="small">${displayTarget.substring(0, 16)}...</code>` : ''}
                     </td>
+                    <td class="time-target-drift" data-label="Measured drift">${driftHtml}</td>
+                    <td data-label="Clock">${syncBadge}</td>
+                    <td data-label="Battery">${batteryHtml}</td>
+                    ${autoCell}
+                    <td class="text-muted small" data-label="Last send">${lastSync}</td>
+                    ${actionsCell}
                 </tr>`;
             });
             html += '</tbody></table>';
@@ -617,6 +639,7 @@
         }
 
         setupBatteryBadges() {
+            if (document.body.dataset.isAdmin !== 'true') return;
             document.querySelectorAll('.battery-badge').forEach(badge => {
                 if (badge.dataset.setup === 'true') return;
                 badge.dataset.setup = 'true';
