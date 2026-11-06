@@ -8,6 +8,17 @@ semantic versioning.
 
 ### Added
 
+- BBS recipients now get **private staged notifications**: one aggregate DM on
+  arrival, one at +24h if still unread, and a final notice at +73h naming the purge
+  age — always a single DM per recipient carrying the unread count, never one DM per
+  stored message. The 24h/73h stages are swept by a scheduler job every
+  `notify_check_minutes` minutes (default 30) and stamped per message in `bbs_inbox`
+  (migration 35) only after the DM actually went out on the radio: a stage is sent
+  at most once per message, survives bot restarts and retries unreachable recipients
+  on the next sweep. New `[BBS_Command]` keys: `notify_on_arrival`,
+  `notify_reminder_hours`, `notify_final_hours`, `notify_check_minutes` (a stage
+  hour of 0 turns that stage off; both at 0 removes the sweep job). See `docs/BBS.md`.
+
 - Web viewer anonymous surface now covers **Region**, **Airtime**, **BBS statistics**, **Time
   synchronization** (`/time`) and **Infos** in addition to Dashboard, Contacts and Mesh Graph,
   with those entries visible in the main navbar without a login. `/time` is read-only for
@@ -178,6 +189,14 @@ semantic versioning.
   `docs/web-viewer.md`.
 
 ### Changed
+
+- The `{bbs_messages_today}`, `{bbs_pending_messages}` and `{bbs_users_with_pending}`
+  scheduled-message placeholders are gone: `_get_mesh_info` no longer collects BBS
+  stats and `_has_mesh_info_placeholders` no longer recognises the keys. They were
+  never substituted anyway — `format_keyword_response_with_placeholders` never wired
+  them in, so a `#bot:` announcement using them broadcast the literal braces to the
+  channel (confirmed in the production journal). The public BBS announcement they fed
+  is replaced by the private staged notifications above.
 
 - `bbs r` marks messages read only after the whole reply went out on the radio; a failed send now
   leaves the mailbox unread so `bbs r` can be retried instead of silently dropping the messages.

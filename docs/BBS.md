@@ -15,6 +15,9 @@ rooms, no public posts and no search over stored messages.
 - Reading is **DM-only** for privacy.
 - Every limit (mailbox size, sender quota, rate limit) is keyed on public keys, not
   display names.
+- Recipients are notified **privately by DM**: on arrival, again after 24h if still
+  unread, then a final notice at 73h before the age purge — always aggregated into
+  one DM carrying the unread count, never one DM per stored message.
 
 ## Commands
 
@@ -119,6 +122,31 @@ it about pending messages — unless the DM was itself a BBS command (`bbs`, `s`
 
 Two reminders to the same node are spaced by `notify_cooldown_seconds`.
 
+### Private recipient notifications (arrival, +24h, +73h)
+
+Beyond the inbound reminder above, recipients are notified proactively — always by
+private DM, always **aggregated** into a single DM carrying the unread count:
+
+| Stage | When | Wording |
+|---|---|---|
+| 1 — arrival | right after a message is stored (`notify_on_arrival`) | `📬 New BBS message: you have 1 pending. Send 'bbs r' to read.` |
+| 2 — reminder | still unread after `notify_reminder_hours` (24h) | `📬 BBS reminder: you still have 2 unread message(s). Send 'bbs r' to read.` |
+| 3 — final notice | still unread after `notify_final_hours` (73h) | `📬 BBS final notice: your 2 unread message(s) are deleted after 7 days. Send 'bbs r' now.` |
+
+- Stage 1 fires inside `bbs s` itself and shares `notify_cooldown_seconds` with the
+  inbound reminder above, so a burst of stored messages never becomes a burst of
+  radio DMs; a message swallowed by the cooldown is still covered by the 24h
+  reminder.
+- Stages 2 and 3 are swept by a scheduler job every `notify_check_minutes` minutes.
+  Each stage is stamped per message in the database (migration 35) **only after the
+  DM actually went out on the radio**: a stage is never repeated for the same
+  message, it survives bot restarts, and an unreachable recipient is retried on the
+  next sweep.
+- A reminder counts the recipient's whole unstamped mailbox, so messages that
+  arrived after the oldest one crossed the threshold ride along in the same DM.
+- Set `notify_reminder_hours` or `notify_final_hours` to `0` to drop that stage;
+  both at `0` removes the sweep job entirely.
+
 ### Typical rejections
 
 | Answer | Why |
@@ -152,6 +180,10 @@ and nothing is marked read — a failed send never silently drops messages.
 | `max_messages_per_sender_per_day` | `20` | Messages one sender may store per UTC day (0 = unlimited) |
 | `rate_limit_per_minute` | `10` | Sliding 60-second window of BBS commands per user (0 = no limit); applies to recipient lookups and sends |
 | `notify_cooldown_seconds` | `300` | Minimum spacing between two inbox reminders to the same node (in-memory; resets on restart) |
+| `notify_on_arrival` | `true` | Send the arrival DM to the recipient right after a successful store |
+| `notify_reminder_hours` | `24` | Unread messages older than this get one aggregate reminder DM (0 = stage off) |
+| `notify_final_hours` | `73` | Unread older than this get the final notice, timed before the age purge (0 = stage off) |
+| `notify_check_minutes` | `30` | Minutes between two scheduler sweeps of the reminder/final-notice stages |
 
 Hard-coded internals: shortlist TTL **5 minutes**, shortlist size **max 5**, read
 response chunking threshold **150 UTF-8 bytes**, minimum key prefix length **4 hex
@@ -174,6 +206,16 @@ max_messages_per_sender_per_day = 20
 rate_limit_per_minute = 10
 # Minimum seconds between two inbox reminders to the same user
 notify_cooldown_seconds = 300
+# Private notification DMs to the recipient (aggregated: one DM with the
+# unread count, never one DM per stored message)
+notify_on_arrival = true
+# Re-notify after this many hours still unread (0 = no reminder stage)
+notify_reminder_hours = 24
+# Final notice after this many hours still unread, timed before the age
+# purge so the recipient can still read the message (0 = no final notice)
+notify_final_hours = 73
+# Minutes between two scheduler sweeps of the reminder/final-notice stages
+notify_check_minutes = 30
 # channels =
 ```
 
@@ -183,6 +225,9 @@ command settings without a restart.
 ## Migration and the legacy table
 
 - Migration 34 created `bbs_inbox`; all new messages land there.
+- Migration 35 added `reminder_sent_at` and `final_notice_sent_at` to `bbs_inbox`:
+  per-message stamps for the +24h reminder and +73h final-notice stages, so a
+  stage is sent at most once per message and survives bot restarts.
 - The old name-keyed `bbs_messages` table is kept **read-only**: `bbs r`, `bbs list`
   and `bbs whoami` still count and serve its unread rows so nobody loses queued
   mail, and the age purge empties it over time. Nothing is ever written to it again.

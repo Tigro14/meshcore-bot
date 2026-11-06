@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from meshcore.events import Event, EventDispatcher, EventType
 
+from modules.commands.bbs_command import DEFAULT_NOTIFY_CHECK_MINUTES
 from modules.scheduled_message_cron import parse_schedule_key
 from modules.scheduler import MessageScheduler
 
@@ -2680,92 +2681,136 @@ class TestDeviceModeSchedulerJobs:
 
 
 # ---------------------------------------------------------------------------
-# TestGetMeshInfoBBSStats
+# TestGetMeshInfoNoBBSStats
 # ---------------------------------------------------------------------------
 
 
-class TestGetMeshInfoBBSStats:
-    """Tests for the BBS stats keys populated by _get_mesh_info()."""
+class TestGetMeshInfoNoBBSStats:
+    """_get_mesh_info() must NOT carry BBS stats keys.
 
-    def _make_scheduler_with_bbs_db(self, messages_today=3, pending=5, users_with_pending=2):
-        """Return a scheduler whose DB mock returns realistic BBS stats."""
-        import sqlite3
-        from contextlib import contextmanager
+    The public BBS announcement (and its {bbs_*} scheduler placeholders) was
+    replaced by private per-recipient notifications handled by
+    BBSCommand.run_pending_notification_job.
+    """
 
-        conn = sqlite3.connect(":memory:")
-        conn.execute(
-            """CREATE TABLE bbs_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sender_id TEXT NOT NULL,
-                sender_name TEXT,
-                recipient_name TEXT NOT NULL,
-                message TEXT NOT NULL,
-                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                read_at TIMESTAMP
-            )"""
-        )
-        # Insert rows for today
-        for i in range(messages_today):
-            conn.execute(
-                "INSERT INTO bbs_messages (sender_id, sender_name, recipient_name, message) "
-                "VALUES (?, ?, ?, ?)",
-                (f"sid{i}", f"Sender{i}", f"user{i % users_with_pending}", f"msg{i}"),
-            )
-        conn.commit()
-
-        db = MagicMock()
-
-        @contextmanager
-        def _conn_ctx():
-            yield conn
-
-        db.connection = _conn_ctx
-
-        scheduler = _make_scheduler()
-        del scheduler.bot.repeater_manager
-        scheduler.bot.db_manager = db
-        return scheduler, conn
-
-    def test_bbs_keys_present_in_result(self):
+    def test_bbs_keys_absent_from_result(self):
         scheduler = _make_scheduler()
         del scheduler.bot.repeater_manager
         result = asyncio.run(scheduler._get_mesh_info())
-        assert "bbs_messages_today" in result
-        assert "bbs_pending_messages" in result
-        assert "bbs_users_with_pending" in result
+        for key in ("bbs_messages_today", "bbs_pending_messages", "bbs_users_with_pending"):
+            assert key not in result
 
-    def test_bbs_messages_today_counts_todays_rows(self):
-        scheduler, _ = self._make_scheduler_with_bbs_db(messages_today=4, pending=4, users_with_pending=2)
-        result = asyncio.run(scheduler._get_mesh_info())
-        assert result["bbs_messages_today"] == 4
-
-    def test_bbs_pending_messages_counts_unread(self):
-        scheduler, conn = self._make_scheduler_with_bbs_db(messages_today=3, pending=3, users_with_pending=2)
-        # Mark one as read
-        conn.execute("UPDATE bbs_messages SET read_at = CURRENT_TIMESTAMP WHERE id = 1")
-        conn.commit()
-        result = asyncio.run(scheduler._get_mesh_info())
-        assert result["bbs_pending_messages"] == 2
-
-    def test_bbs_users_with_pending_counts_distinct_recipients(self):
-        scheduler, _ = self._make_scheduler_with_bbs_db(messages_today=4, pending=4, users_with_pending=2)
-        result = asyncio.run(scheduler._get_mesh_info())
-        # 4 messages spread across 2 recipients (user0, user1)
-        assert result["bbs_users_with_pending"] == 2
-
-    def test_bbs_stats_zero_when_table_absent(self):
-        """When bbs_messages table does not exist, BBS stats default to 0."""
+    def test_has_mesh_info_placeholders_rejects_bbs_keys(self):
         scheduler = _make_scheduler()
-        del scheduler.bot.repeater_manager
-        # Default db mock cursor returns None for fetchone → table not found
-        result = asyncio.run(scheduler._get_mesh_info())
-        assert result["bbs_messages_today"] == 0
-        assert result["bbs_pending_messages"] == 0
-        assert result["bbs_users_with_pending"] == 0
-
-    def test_has_mesh_info_placeholders_detects_bbs_keys(self):
-        scheduler = _make_scheduler()
-        assert scheduler._has_mesh_info_placeholders("{bbs_messages_today}") is True
-        assert scheduler._has_mesh_info_placeholders("{bbs_pending_messages}") is True
-        assert scheduler._has_mesh_info_placeholders("{bbs_users_with_pending}") is True
+        assert scheduler._has_mesh_info_placeholders("{bbs_messages_today}") is False
+        assert scheduler._has_mesh_info_placeholders("{bbs_pending_messages}") is False
+        assert scheduler._has_mesh_info_placeholders("{bbs_users_with_pending}") is False
+        # Non-BBS placeholders keep working.
+        assert scheduler._has_mesh_info_placeholders("{total_contacts}") is True
         assert scheduler._has_mesh_info_placeholders("Hello world") is False
+
+
+# ---------------------------------------------------------------------------
+# TestSetupBBSNotificationJob
+# ---------------------------------------------------------------------------
+
+
+class TestSetupBBSNotificationJob:
+    """Tests for _setup_bbs_notification_job() — the periodic sweep behind the
+    private BBS reminder (24h) and final-notice (73h) stages."""
+
+    def _setup_and_call(self, scheduler):
+        scheduler.setup_scheduled_messages()
+
+    def _teardown(self, scheduler):
+        if scheduler._apscheduler is not None:
+            try:
+                scheduler._apscheduler.shutdown(wait=False)
+            except Exception:
+                pass
+
+    def test_job_registered_with_defaults_when_no_section(self, scheduler):
+        """Absent [BBS_Command]: registered, matching BBSCommand's own enabled-by-default."""
+        self._setup_and_call(scheduler)
+        job = scheduler._apscheduler.get_job("bbs_pending_notifications")
+        assert job is not None
+        assert job.trigger.interval == datetime.timedelta(minutes=DEFAULT_NOTIFY_CHECK_MINUTES)
+        self._teardown(scheduler)
+
+    def test_job_registered_when_explicitly_enabled(self, scheduler):
+        scheduler.bot.config.add_section("BBS_Command")
+        scheduler.bot.config.set("BBS_Command", "enabled", "true")
+        self._setup_and_call(scheduler)
+        job = scheduler._apscheduler.get_job("bbs_pending_notifications")
+        assert job is not None
+        self._teardown(scheduler)
+
+    def test_job_not_registered_when_bbs_disabled(self, scheduler):
+        scheduler.bot.config.add_section("BBS_Command")
+        scheduler.bot.config.set("BBS_Command", "enabled", "false")
+        self._setup_and_call(scheduler)
+        assert scheduler._apscheduler.get_job("bbs_pending_notifications") is None
+        self._teardown(scheduler)
+
+    def test_job_not_registered_when_both_stages_zero(self, scheduler):
+        scheduler.bot.config.add_section("BBS_Command")
+        scheduler.bot.config.set("BBS_Command", "notify_reminder_hours", "0")
+        scheduler.bot.config.set("BBS_Command", "notify_final_hours", "0")
+        self._setup_and_call(scheduler)
+        assert scheduler._apscheduler.get_job("bbs_pending_notifications") is None
+        self._teardown(scheduler)
+
+    def test_job_registered_when_only_one_stage_enabled(self, scheduler):
+        scheduler.bot.config.add_section("BBS_Command")
+        scheduler.bot.config.set("BBS_Command", "notify_reminder_hours", "0")
+        scheduler.bot.config.set("BBS_Command", "notify_final_hours", "73")
+        self._setup_and_call(scheduler)
+        assert scheduler._apscheduler.get_job("bbs_pending_notifications") is not None
+        self._teardown(scheduler)
+
+    def test_job_honours_custom_check_minutes(self, scheduler):
+        scheduler.bot.config.add_section("BBS_Command")
+        scheduler.bot.config.set("BBS_Command", "notify_check_minutes", "15")
+        self._setup_and_call(scheduler)
+        job = scheduler._apscheduler.get_job("bbs_pending_notifications")
+        assert job is not None
+        assert job.trigger.interval == datetime.timedelta(minutes=15)
+        self._teardown(scheduler)
+
+
+# ---------------------------------------------------------------------------
+# TestBBSNotificationJobDelegation
+# ---------------------------------------------------------------------------
+
+
+class TestBBSNotificationJobDelegation:
+    """Tests for _run_bbs_notification_job_async() — guard clauses and the
+    delegation to BBSCommand.run_pending_notification_job."""
+
+    def test_sweep_skipped_when_not_connected(self, scheduler):
+        scheduler.bot.connected = False
+        result = asyncio.run(scheduler._run_bbs_notification_job_async())
+        assert result == {"skipped": True, "reason": "not_connected"}
+
+    def test_sweep_skipped_when_meshcore_missing(self, scheduler):
+        scheduler.bot.connected = True
+        scheduler.bot.meshcore = None
+        result = asyncio.run(scheduler._run_bbs_notification_job_async())
+        assert result == {"skipped": True, "reason": "not_connected"}
+
+    def test_sweep_skipped_when_command_not_loaded(self, scheduler):
+        scheduler.bot.connected = True
+        scheduler.bot.meshcore = Mock()
+        scheduler.bot.command_manager.commands = {}
+        result = asyncio.run(scheduler._run_bbs_notification_job_async())
+        assert result == {"skipped": True, "reason": "command_not_loaded"}
+
+    def test_sweep_delegates_to_command(self, scheduler):
+        scheduler.bot.connected = True
+        scheduler.bot.meshcore = Mock()
+        command = Mock()
+        command.run_pending_notification_job = AsyncMock(return_value={"sent": 2, "failed": 1})
+        scheduler.bot.command_manager.commands = {"bbs": command}
+        result = asyncio.run(scheduler._run_bbs_notification_job_async())
+        assert result == {"sent": 2, "failed": 1}
+        command.run_pending_notification_job.assert_awaited_once()

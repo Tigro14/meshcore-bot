@@ -22,10 +22,16 @@ from typing import Any, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from meshcore.events import EventType
 
 from .clock_observations import latest_clock_samples, observation_window, parse_timestamp, utc_iso
 from .clock_reply import ClockReplyWatch
+from .commands.bbs_command import (
+    DEFAULT_FINAL_NOTICE_HOURS,
+    DEFAULT_NOTIFY_CHECK_MINUTES,
+    DEFAULT_REMINDER_HOURS,
+)
 from .flood_scope import scope_key_hex
 from .maintenance import MaintenanceRunner, read_smtp_settings, send_smtp_message
 from .models import CHANNEL_REGIONAL_FLOOD_SCOPE_BODY_OVERHEAD, channel_body_limit, self_info_name
@@ -204,6 +210,7 @@ class MessageScheduler:
 
         self._setup_clock_sync_admin_job(tz)
         self._setup_battery_monitor_job(tz)
+        self._setup_bbs_notification_job()
         self._apscheduler.start()
         self.logger.info(f"APScheduler started with {len(self.scheduled_messages)} scheduled message(s)")
 
@@ -312,6 +319,88 @@ class MessageScheduler:
             parsed.display_label,
             len(targets),
         )
+
+    def _setup_bbs_notification_job(self) -> None:
+        """Register the periodic sweep behind the BBS private notifications.
+
+        Stage 1 (arrival) fires inside ``bbs s`` itself and needs no job; the
+        24h reminder and 73h final-notice stages (migration 35 stage columns,
+        see ``BBSCommand.run_pending_notification_job``) need one sweep per
+        interval.  IntervalTrigger rather than cron on purpose: the sweep is
+        only a staleness check, wall-clock alignment would buy nothing and a
+        cron would delay the first sweep after a restart.
+
+        Enabled with the BBS command (absent section = enabled, matching
+        ``BBSCommand``'s own default); ``notify_reminder_hours = 0`` and
+        ``notify_final_hours = 0`` disable the job entirely.  The arrival
+        stage is gated by ``notify_on_arrival`` in the command itself.
+        """
+        if self._apscheduler is None:
+            return
+        section = "BBS_Command"
+        defaults: dict[str, Any] = {
+            "enabled": True,
+            "notify_reminder_hours": DEFAULT_REMINDER_HOURS,
+            "notify_final_hours": DEFAULT_FINAL_NOTICE_HOURS,
+            "notify_check_minutes": DEFAULT_NOTIFY_CHECK_MINUTES,
+        }
+
+        def _cfg(key: str) -> Any:
+            if not self.bot.config.has_section(section):
+                return defaults[key]
+            fallback = defaults[key]
+            if isinstance(fallback, bool):
+                return self.bot.config.getboolean(section, key, fallback=fallback)
+            return self.bot.config.getint(section, key, fallback=fallback)
+
+        if not _cfg("enabled"):
+            self.logger.info("BBS notifications disabled (BBS_Command.enabled = false)")
+            return
+
+        reminder_hours = max(0, _cfg("notify_reminder_hours"))
+        final_hours = max(0, _cfg("notify_final_hours"))
+        if reminder_hours <= 0 and final_hours <= 0:
+            self.logger.info("BBS notification job not registered (both stages disabled)")
+            return
+
+        check_minutes = max(1, _cfg("notify_check_minutes"))
+        self._apscheduler.add_job(
+            self.run_bbs_notification_job_sync,
+            IntervalTrigger(minutes=check_minutes),
+            id="bbs_pending_notifications",
+            replace_existing=True,
+        )
+        self.logger.info(
+            "Scheduled BBS notification sweep: every %d minute(s) (reminder %dh, final notice %dh)",
+            check_minutes,
+            reminder_hours,
+            final_hours,
+        )
+
+    def run_bbs_notification_job_sync(self) -> None:
+        """APScheduler sync wrapper for the BBS unread-message notification sweep."""
+        self._run_async_on_main_loop(self._run_bbs_notification_job_async(), timeout=120.0)
+
+    async def _run_bbs_notification_job_async(self) -> dict[str, Any]:
+        """Delegate the staged unread-message DMs to the BBS command itself.
+
+        The command owns mailbox access, notification wording and the stage
+        bookkeeping; the scheduler only supplies the cadence.
+        """
+        if not self.bot.connected or not getattr(self.bot, "meshcore", None):
+            self.logger.debug("BBS notification sweep skipped — bot/radio not connected")
+            return {"skipped": True, "reason": "not_connected"}
+        command = self.bot.command_manager.commands.get("bbs")
+        if command is None or not hasattr(command, "run_pending_notification_job"):
+            self.logger.debug("BBS notification sweep skipped — bbs command not loaded")
+            return {"skipped": True, "reason": "command_not_loaded"}
+        summary = await command.run_pending_notification_job()
+        self.logger.info(
+            "BBS notification sweep: %d notification(s) sent, %d failed",
+            summary.get("sent", 0),
+            summary.get("failed", 0),
+        )
+        return summary
 
     @staticmethod
     def _parse_clock_sync_admin_targets(raw_targets: str) -> list[str]:
@@ -1258,9 +1347,6 @@ class MessageScheduler:
             'total_companions_30d': 0,
             'total_roomservers_30d': 0,
             'total_sensors_30d': 0,
-            'bbs_messages_today': 0,
-            'bbs_pending_messages': 0,
-            'bbs_users_with_pending': 0,
         }
 
         try:
@@ -1381,46 +1467,6 @@ class MessageScheduler:
             except Exception as e:
                 self.logger.debug(f"Error getting new device counts or 30-day activity: {e}")
 
-            # Collect BBS statistics (new pubkey-keyed table plus legacy table)
-            try:
-                with self.bot.db_manager.connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT name FROM sqlite_master "
-                        "WHERE type='table' AND name IN ('bbs_messages', 'bbs_inbox')"
-                    )
-                    bbs_tables = {row[0] for row in cursor.fetchall()}
-                    if bbs_tables:
-                        union_parts = []
-                        if "bbs_inbox" in bbs_tables:
-                            union_parts.append(
-                                "SELECT sent_at, read_at, recipient_key AS recipient "
-                                "FROM bbs_inbox"
-                            )
-                        if "bbs_messages" in bbs_tables:
-                            union_parts.append(
-                                "SELECT sent_at, read_at, recipient_name AS recipient "
-                                "FROM bbs_messages"
-                            )
-                        union = " UNION ALL ".join(union_parts)
-
-                        cursor.execute(
-                            f"SELECT COUNT(*) FROM ({union}) WHERE date(sent_at) = date('now')"
-                        )
-                        info['bbs_messages_today'] = cursor.fetchone()[0] or 0
-
-                        cursor.execute(
-                            f"SELECT COUNT(*) FROM ({union}) WHERE read_at IS NULL"
-                        )
-                        info['bbs_pending_messages'] = cursor.fetchone()[0] or 0
-
-                        cursor.execute(
-                            f"SELECT COUNT(DISTINCT recipient) FROM ({union}) WHERE read_at IS NULL"
-                        )
-                        info['bbs_users_with_pending'] = cursor.fetchone()[0] or 0
-            except Exception as e:
-                self.logger.debug(f"Error getting BBS stats: {e}")
-
         except Exception as e:
             self.logger.debug(f"Error getting mesh info: {e}")
 
@@ -1510,7 +1556,6 @@ class MessageScheduler:
             '{new_companions_7d}', '{new_repeaters_7d}', '{new_roomservers_7d}', '{new_sensors_7d}',
             '{total_contacts_30d}', '{total_repeaters_30d}', '{total_companions_30d}',
             '{total_roomservers_30d}', '{total_sensors_30d}',
-            '{bbs_messages_today}', '{bbs_pending_messages}', '{bbs_users_with_pending}',
             # Legacy placeholders for backward compatibility
             '{repeaters}', '{companions}'
         ]
