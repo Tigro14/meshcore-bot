@@ -3082,17 +3082,17 @@ class TestBbsWebPage:
         assert 'BBS Mailbox Statistics' in response.get_data(as_text=True)
 
     def test_nav_shows_bbs_link_by_default(self, viewer_with_db):
-        """BBSCommand enables itself when [BBS_Command] is absent, so so does the nav item."""
+        """BBSCommand enables itself when [BBS_Command] is absent, so so does the main-nav link."""
         with viewer_with_db.app.test_client() as client:
             response = client.get('/')
-        assert 'BBS Mailbox' in response.get_data(as_text=True)
+        assert 'href="/bbs"' in response.get_data(as_text=True)
 
     def test_nav_hides_bbs_link_when_bbs_disabled(self, viewer_with_db):
         viewer_with_db.config.add_section('BBS_Command')
         viewer_with_db.config.set('BBS_Command', 'enabled', 'false')
         with viewer_with_db.app.test_client() as client:
             response = client.get('/')
-        assert 'BBS Mailbox' not in response.get_data(as_text=True)
+        assert 'href="/bbs"' not in response.get_data(as_text=True)
 
 
 class TestApiBbs:

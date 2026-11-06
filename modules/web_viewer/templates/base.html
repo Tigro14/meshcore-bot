@@ -857,6 +857,13 @@
                             <i class="fas fa-info-circle"></i> Infos
                         </a>
                     </li>
+                    {% if bbs_enabled and (not auth_enabled or is_admin) %}
+                    <li class="nav-item">
+                        <a class="nav-link {{ 'active' if request.path == '/bbs' }}" href="/bbs">
+                            <i class="fas fa-inbox"></i> BBS
+                        </a>
+                    </li>
+                    {% endif %}
                     {% if not auth_enabled or is_admin %}
                     <li class="nav-item">
                         <a class="nav-link {{ 'active' if request.path == '/logs' }}" href="/logs">
@@ -866,7 +873,7 @@
 
                     {#- Configuration pages live behind one gear so the bar stays about
                         what the mesh is doing, not how the bot is set up. -#}
-                    {% set settings_paths = ['/radio', '/schedule', '/greeter', '/bbs', '/feeds', '/region-warnings', '/plugins', '/config'] %}
+                    {% set settings_paths = ['/radio', '/schedule', '/greeter', '/feeds', '/region-warnings', '/plugins', '/config'] %}
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle {{ 'active' if request.path in settings_paths }}"
                            href="#" id="settingsDropdown" role="button"
@@ -888,13 +895,6 @@
                             <li>
                                 <a class="dropdown-item {{ 'active' if request.path == '/greeter' }}" href="/greeter">
                                     <i class="fas fa-hand-sparkles fa-fw me-2"></i>Greeter
-                                </a>
-                            </li>
-                            {% endif %}
-                            {% if bbs_enabled %}
-                            <li>
-                                <a class="dropdown-item {{ 'active' if request.path == '/bbs' }}" href="/bbs">
-                                    <i class="fas fa-inbox fa-fw me-2"></i>BBS Mailbox
                                 </a>
                             </li>
                             {% endif %}

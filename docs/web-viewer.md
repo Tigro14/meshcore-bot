@@ -404,7 +404,9 @@ next hourly tick.
   a manual Refresh button
 - Privacy: the page and its API expose only counts, node names and 4-character key prefixes;
   message bodies never leave the server
-- The Settings menu shows the entry only while `[BBS_Command] enabled = true` (the default)
+- The main navbar shows the entry (after Infos) only while `[BBS_Command] enabled = true`
+  (the default); it is a statistics page, not a settings page, so it does not sit in the
+  Settings dropdown
 
 ## API Endpoints
 

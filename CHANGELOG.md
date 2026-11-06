@@ -23,8 +23,8 @@ semantic versioning.
   when they share a display name), top senders, pending age buckets (< 1d / 1–3d / 3–7d / ≥ 7d),
   14-day sent/delivered activity and a read-only `[BBS_Command]` settings card, refreshed every
   30 seconds. The API and page expose counts, names and 4-character key prefixes only — message
-  bodies never reach the browser. The Settings menu shows the entry only while the BBS command
-  is enabled. See `docs/web-viewer.md`.
+  bodies never reach the browser. The main navbar shows the entry only while the BBS command
+  is enabled (it is a statistics page, not a settings page). See `docs/web-viewer.md`.
 
 - Per-channel **Live Channel Messages** publication controls in Radio channel
   management and creation, disabled by default. Hidden channels remain available
