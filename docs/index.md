@@ -30,6 +30,7 @@ Documentation for the MeshCore bot: setup, configuration, commands, and services
 | Document | Description |
 |----------|-------------|
 | [Repeater Commands](repeater-commands.md) | Repeater management DM commands |
+| [BBS Mailbox](BBS.md) | Store-and-forward private messaging between mesh nodes |
 | [Feed Management](FEEDS.md) | RSS/REST feeds and posting to channels |
 | [Web Viewer](web-viewer.md) | Web-based data viewer and API |
 | [Custom command website](command-reference-website.md) | Generate an HTML command reference for your users |
