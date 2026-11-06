@@ -1140,6 +1140,21 @@ def _m0034_bbs_inbox_table(cursor: sqlite3.Cursor) -> None:
     )
 
 
+def _m0035_bbs_inbox_notification_stages(cursor: sqlite3.Cursor) -> None:
+    """bbs_inbox: per-stage private-notification timestamps.
+
+    The BBS notifies recipients privately in three stages: on arrival (fired
+    inside 'bbs s', no column needed), at ``notify_reminder_hours`` (default
+    24h) and at ``notify_final_hours`` (default 73h, before the age purge).
+    Each stage column is stamped once per unread row after its DM actually
+    went out on the radio, so a stage is never re-sent to the same message
+    and survives bot restarts; messages stored after a reminder got sent
+    carry NULL and get their own reminder when they age past the threshold.
+    """
+    _add_column(cursor, "bbs_inbox", "reminder_sent_at", "TIMESTAMP")
+    _add_column(cursor, "bbs_inbox", "final_notice_sent_at", "TIMESTAMP")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -1181,6 +1196,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (32, "channel occupancy buckets and sender share", _m0032_channel_occupancy_tables),
     (33, "per-channel web message visibility", _m0033_channel_web_visibility),
     (34, "bbs_inbox table", _m0034_bbs_inbox_table),
+    (35, "bbs_inbox: reminder_sent_at, final_notice_sent_at", _m0035_bbs_inbox_notification_stages),
 ]
 
 

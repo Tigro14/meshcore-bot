@@ -9,10 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import pytest
 
 from modules.commands.bbs_command import (
+    DEFAULT_FINAL_NOTICE_HOURS,
+    DEFAULT_REMINDER_HOURS,
     NOTIFICATION_COOLDOWN_SECONDS,
     BBSCommand,
 )
-from modules.db_migrations import _m0034_bbs_inbox_table
+from modules.db_migrations import (
+    _m0034_bbs_inbox_table,
+    _m0035_bbs_inbox_notification_stages,
+)
 from tests.conftest import mock_message
 
 # ---------------------------------------------------------------------------
@@ -48,8 +53,9 @@ def _make_db_manager(
     """Create a mock db_manager backed by an in-memory SQLite database."""
     conn = _create_tracked_connection()
     if with_bbs_inbox:
-        # Use the real migration so the test schema can never drift from prod.
+        # Use the real migrations so the test schema can never drift from prod.
         _m0034_bbs_inbox_table(conn.cursor())
+        _m0035_bbs_inbox_notification_stages(conn.cursor())
     if with_legacy:
         conn.execute(
             """
@@ -111,6 +117,9 @@ def _make_bot(
     max_messages: int = 5,
     max_per_day: int = 20,
     rate_limit: int = 10,
+    notify_on_arrival: bool = True,
+    reminder_hours: int = DEFAULT_REMINDER_HOURS,
+    final_hours: int = DEFAULT_FINAL_NOTICE_HOURS,
 ) -> MagicMock:
     """Create a minimal mock bot for BBS command tests."""
     bot = MagicMock()
@@ -128,6 +137,9 @@ def _make_bot(
     config.set("BBS_Command", "max_message_age_days", "7")
     config.set("BBS_Command", "max_messages_per_sender_per_day", str(max_per_day))
     config.set("BBS_Command", "rate_limit_per_minute", str(rate_limit))
+    config.set("BBS_Command", "notify_on_arrival", str(notify_on_arrival).lower())
+    config.set("BBS_Command", "notify_reminder_hours", str(reminder_hours))
+    config.set("BBS_Command", "notify_final_hours", str(final_hours))
     bot.config = config
     bot.translator = MagicMock()
     bot.translator.translate = Mock(side_effect=lambda key, **kw: key)
@@ -135,6 +147,8 @@ def _make_bot(
     bot.command_manager = MagicMock()
     bot.command_manager.monitor_channels = ["general"]
     bot.command_manager.send_response = AsyncMock(return_value=True)
+    # Proactive recipient DMs (arrival / 24h / 73h stages) go through send_dm.
+    bot.command_manager.send_dm = AsyncMock(return_value=True)
     bot.db_manager = _make_db_manager()
     return bot
 
@@ -975,6 +989,220 @@ class TestBBSInboxNotification:
         cmd = BBSCommand(bot)
         msg = mock_message("bbs r", is_dm=True, sender_id="Bob")
         assert cmd.can_execute(msg) is False
+
+
+# ---------------------------------------------------------------------------
+# Unit tests — stage 1: arrival notification (private DM to the recipient)
+# ---------------------------------------------------------------------------
+
+
+class TestBBSArrivalNotification:
+    def setup_method(self):
+        self.bot = _make_bot()
+        self.cmd = BBSCommand(self.bot)
+        self.bot.command_manager.send_response = AsyncMock(return_value=True)
+        self.bot.command_manager.send_dm = AsyncMock(return_value=True)
+        _add_contact(self.bot.db_manager, "Alice", public_key="a1a1a1a1")
+        _add_contact(self.bot.db_manager, "Bob", public_key="b2b2b2b2")
+
+    @pytest.mark.asyncio
+    async def test_execute_send_notifies_recipient_by_dm(self):
+        msg = mock_message("s Alice Hello!", is_dm=True, sender_id="Bob", sender_pubkey="b2b2b2b2")
+        await self.cmd.execute(msg)
+        self.bot.command_manager.send_dm.assert_awaited_once()
+        args = self.bot.command_manager.send_dm.call_args[0]
+        assert args[0] == "a1a1a1a1"  # the recipient's key, not the sender's
+        assert "1 pending" in args[1]
+        assert "bbs r" in args[1]
+        assert self.bot.command_manager.send_dm.call_args[1].get("skip_user_rate_limit") is True
+
+    @pytest.mark.asyncio
+    async def test_arrival_dm_is_aggregated_per_recipient(self):
+        for i in range(3):
+            self.cmd._store_message("a1a1", "A", "b2b2b2b2", "Bob", f"m{i}")
+        await self.cmd._notify_recipient_arrival("b2b2b2b2", "Bob")
+        self.bot.command_manager.send_dm.assert_awaited_once()
+        assert "3 pending" in self.bot.command_manager.send_dm.call_args[0][1]
+
+    @pytest.mark.asyncio
+    async def test_arrival_notification_disabled_by_config(self):
+        bot = _make_bot(notify_on_arrival=False)
+        cmd = BBSCommand(bot)
+        cmd._store_message("a1a1", "A", "b2b2b2b2", "Bob", "hi")
+        await cmd._notify_recipient_arrival("b2b2b2b2", "Bob")
+        bot.command_manager.send_dm.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_arrival_cooldown_absorbs_burst(self):
+        self.cmd._store_message("a1a1", "A", "b2b2b2b2", "Bob", "hi")
+        await self.cmd._notify_recipient_arrival("b2b2b2b2", "Bob")
+        await self.cmd._notify_recipient_arrival("b2b2b2b2", "Bob")
+        assert self.bot.command_manager.send_dm.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_arrival_dm_is_not_locked_by_cooldown(self):
+        self.bot.command_manager.send_dm = AsyncMock(return_value=False)
+        self.cmd._store_message("a1a1", "A", "b2b2b2b2", "Bob", "hi")
+        await self.cmd._notify_recipient_arrival("b2b2b2b2", "Bob")
+        await self.cmd._notify_recipient_arrival("b2b2b2b2", "Bob")
+        # Both attempts happen: a failed send must not consume the cooldown.
+        assert self.bot.command_manager.send_dm.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_recipient_key_sends_nothing(self):
+        self.cmd._store_message("a1a1", "A", "", "Nokey", "hi")
+        await self.cmd._notify_recipient_arrival("", "Nokey")
+        self.bot.command_manager.send_dm.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_failed_store_sends_no_notification(self):
+        bot = _make_bot(max_messages=1)
+        cmd = BBSCommand(bot)
+        bot.command_manager.send_response = AsyncMock(return_value=True)
+        _add_contact(bot.db_manager, "Alice", public_key="a1a1a1a1")
+        await cmd.execute(mock_message("s Alice one", is_dm=True, sender_id="Bob", sender_pubkey="b2b2b2b2"))
+        assert bot.command_manager.send_dm.await_count == 1
+        await cmd.execute(mock_message("s Alice two", is_dm=True, sender_id="Bob", sender_pubkey="b2b2b2b2"))
+        # Mailbox full → store refused → no second arrival DM.
+        assert bot.command_manager.send_dm.await_count == 1
+        assert "mailbox full" in _last_response(bot)
+
+
+# ---------------------------------------------------------------------------
+# Unit tests — stages 2 & 3: scheduler-driven reminder (24h) and final notice (73h)
+# ---------------------------------------------------------------------------
+
+
+class TestBBSStagedNotifications:
+    def setup_method(self):
+        self.bot = _make_bot()
+        self.cmd = BBSCommand(self.bot)
+        self.bot.command_manager.send_dm = AsyncMock(return_value=True)
+
+    def _stamps(self, column: str, recipient_key: str = "b2b2b2b2") -> list:
+        """Stage-column values for every row of *recipient_key*."""
+        with self.bot.db_manager.connection() as conn:
+            rows = conn.execute(
+                f"SELECT {column} FROM bbs_inbox WHERE recipient_key = ?", (recipient_key,)
+            ).fetchall()
+        return [row[0] for row in rows]
+
+    def _dm_texts(self) -> list[str]:
+        return [call[0][1] for call in self.bot.command_manager.send_dm.call_args_list]
+
+    @pytest.mark.asyncio
+    async def test_reminder_after_24h(self):
+        _insert_inbox_message(self.bot.db_manager, "a1a1", "b2b2b2b2", "old", sent_at=_old_ts(2))
+        summary = await self.cmd.run_pending_notification_job()
+        assert summary == {"sent": 1, "failed": 0}
+        text = self._dm_texts()[0]
+        assert "1 unread" in text
+        assert "bbs r" in text
+        assert all(self._stamps("reminder_sent_at"))
+        assert all(s is None for s in self._stamps("final_notice_sent_at"))
+
+    @pytest.mark.asyncio
+    async def test_recent_messages_not_reminded(self):
+        _insert_inbox_message(self.bot.db_manager, "a1a1", "b2b2b2b2", "fresh")
+        summary = await self.cmd.run_pending_notification_job()
+        assert summary == {"sent": 0, "failed": 0}
+        self.bot.command_manager.send_dm.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_reminder_counts_whole_mailbox_and_stamps_it(self):
+        _insert_inbox_message(self.bot.db_manager, "a1a1", "b2b2b2b2", "old", sent_at=_old_ts(2))
+        _insert_inbox_message(self.bot.db_manager, "a1a1", "b2b2b2b2", "joined recently")
+        await self.cmd.run_pending_notification_job()
+        assert "2 unread" in self._dm_texts()[0]
+        # Both rows carry the stamp: one aggregate DM per recipient, not per message.
+        assert all(self._stamps("reminder_sent_at"))
+
+    @pytest.mark.asyncio
+    async def test_reminder_not_repeated_for_stamped_rows(self):
+        _insert_inbox_message(self.bot.db_manager, "a1a1", "b2b2b2b2", "old", sent_at=_old_ts(2))
+        await self.cmd.run_pending_notification_job()
+        second = await self.cmd.run_pending_notification_job()
+        assert second == {"sent": 0, "failed": 0}
+        assert self.bot.command_manager.send_dm.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_message_stored_after_a_reminder_gets_its_own_reminder(self):
+        _insert_inbox_message(self.bot.db_manager, "a1a1", "b2b2b2b2", "old", sent_at=_old_ts(2))
+        await self.cmd.run_pending_notification_job()
+        # New arrival (already aged past 24h when stored, e.g. backlog import).
+        _insert_inbox_message(self.bot.db_manager, "c3c3", "b2b2b2b2", "new old", sent_at=_old_ts(2))
+        await self.cmd.run_pending_notification_job()
+        assert self.bot.command_manager.send_dm.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_final_notice_after_73h_names_the_purge_age(self):
+        _insert_inbox_message(self.bot.db_manager, "a1a1", "b2b2b2b2", "ancient", sent_at=_old_ts(4))
+        summary = await self.cmd.run_pending_notification_job()
+        assert summary == {"sent": 2, "failed": 0}  # reminder stage and final stage both due
+        texts = self._dm_texts()
+        assert any("unread" in t for t in texts)
+        final = [t for t in texts if "final notice" in t]
+        assert final
+        assert "deleted after 7 days" in final[0]
+        assert all(self._stamps("reminder_sent_at"))
+        assert all(self._stamps("final_notice_sent_at"))
+
+    @pytest.mark.asyncio
+    async def test_final_stage_disabled_by_zero_hours(self):
+        bot = _make_bot(final_hours=0)
+        cmd = BBSCommand(bot)
+        bot.command_manager.send_dm = AsyncMock(return_value=True)
+        _insert_inbox_message(bot.db_manager, "a1a1", "b2b2b2b2", "old", sent_at=_old_ts(4))
+        await cmd.run_pending_notification_job()
+        assert bot.command_manager.send_dm.await_count == 1  # reminder only
+        assert all(s is None for s in self._stamps("final_notice_sent_at"))
+
+    @pytest.mark.asyncio
+    async def test_reminder_stage_disabled_by_zero_hours(self):
+        bot = _make_bot(reminder_hours=0)
+        cmd = BBSCommand(bot)
+        bot.command_manager.send_dm = AsyncMock(return_value=True)
+        _insert_inbox_message(bot.db_manager, "a1a1", "b2b2b2b2", "old", sent_at=_old_ts(2))
+        summary = await cmd.run_pending_notification_job()
+        assert summary == {"sent": 0, "failed": 0}
+        bot.command_manager.send_dm.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_failed_dm_leaves_the_stage_unset_for_retry(self):
+        self.bot.command_manager.send_dm = AsyncMock(return_value=False)
+        _insert_inbox_message(self.bot.db_manager, "a1a1", "b2b2b2b2", "old", sent_at=_old_ts(2))
+        summary = await self.cmd.run_pending_notification_job()
+        assert summary == {"sent": 0, "failed": 1}
+        assert all(s is None for s in self._stamps("reminder_sent_at"))
+        # Next sweep retries once the radio is reachable again.
+        self.bot.command_manager.send_dm = AsyncMock(return_value=True)
+        summary = await self.cmd.run_pending_notification_job()
+        assert summary == {"sent": 1, "failed": 0}
+
+    @pytest.mark.asyncio
+    async def test_send_dm_exception_counts_as_failure(self):
+        self.bot.command_manager.send_dm = AsyncMock(side_effect=RuntimeError("radio down"))
+        _insert_inbox_message(self.bot.db_manager, "a1a1", "b2b2b2b2", "old", sent_at=_old_ts(2))
+        summary = await self.cmd.run_pending_notification_job()
+        assert summary == {"sent": 0, "failed": 1}
+        assert all(s is None for s in self._stamps("reminder_sent_at"))
+
+    @pytest.mark.asyncio
+    async def test_read_messages_are_not_reminded(self):
+        _insert_inbox_message(self.bot.db_manager, "a1a1", "b2b2b2b2", "old", sent_at=_old_ts(2))
+        self.cmd._mark_messages_read("b2b2b2b2", "Bob")
+        summary = await self.cmd.run_pending_notification_job()
+        assert summary == {"sent": 0, "failed": 0}
+        self.bot.command_manager.send_dm.assert_not_awaited()
+
+    def test_stage_helpers_reject_unknown_columns(self):
+        # Column names are interpolated into SQL: only the two known stages pass.
+        assert self.cmd._due_notification_recipients("read_at", 24) == []
+        assert self.cmd._mark_notification_stage("b2b2b2b2", "message") == 0
+
+    def test_stage_hours_defaults(self):
+        assert self.cmd.notify_reminder_hours == DEFAULT_REMINDER_HOURS
+        assert self.cmd.notify_final_hours == DEFAULT_FINAL_NOTICE_HOURS
 
 
 # ---------------------------------------------------------------------------

@@ -390,25 +390,40 @@ class TestFloorEnforcedDuringSetup:
             sched.setup_scheduled_messages()
         return sched, fake_scheduler
 
+    @staticmethod
+    def _message_job_calls(apsched):
+        """add_job calls for [Scheduled_Messages] entries only.
+
+        setup_scheduled_messages() also registers default-on housekeeping jobs
+        (the BBS notification sweep); a raw add_job count conflates them with
+        the scheduled messages under test.  Scheduled-message job ids carry the
+        ``schedmsg_`` prefix.
+        """
+        return [
+            c
+            for c in apsched.add_job.call_args_list
+            if str(c.kwargs.get("id", "")).startswith("schedmsg_")
+        ]
+
     def test_too_frequent_command_schedule_is_not_added(self):
         sched, apsched = self._run_setup({"*/5 * * * *": "Public:{cmd:wx Seattle}"})
-        assert apsched.add_job.call_count == 0
+        assert len(self._message_job_calls(apsched)) == 0
         assert sched.scheduled_messages == {}
         assert sched.logger.error.called
 
     def test_uneven_cron_with_tight_gap_is_not_added(self):
         _, apsched = self._run_setup({"0,1 * * * *": "Public:{cmd:wx Seattle}"})
-        assert apsched.add_job.call_count == 0
+        assert len(self._message_job_calls(apsched)) == 0
 
     def test_schedule_at_the_floor_is_added(self):
         sched, apsched = self._run_setup({"*/15 * * * *": "Public:{cmd:wx Seattle}"})
-        assert apsched.add_job.call_count == 1
+        assert len(self._message_job_calls(apsched)) == 1
         assert sched.scheduled_messages
 
     def test_frequent_schedule_without_placeholder_is_unaffected(self):
         """The floor applies to command placeholders, not to plain scheduled text."""
         _, apsched = self._run_setup({"*/5 * * * *": "Public:static message"})
-        assert apsched.add_job.call_count == 1
+        assert len(self._message_job_calls(apsched)) == 1
 
 
 @pytest.mark.unit

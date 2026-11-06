@@ -163,7 +163,8 @@ bbs list
 - Recipients are resolved in order: exact name, then public-key prefix (for hexadecimal tokens), then partial name match.
 - Reading is DM-only for privacy. Pending messages are marked read only after the full reply went out on the radio, so a failed send never silently drops them.
 - Senders are notified of pending messages when they DM the bot (unless the DM is itself a `bbs`/`s`/`send` command).
-- Limits are configured in `[BBS_Command]`: mailbox size, daily per-sender quota, commands per minute, message age purge, notification cooldown.
+- Recipients get private notification DMs: on arrival, again at +24h and a final notice at +73h if still unread — always one aggregate DM per recipient, never one per message.
+- Limits are configured in `[BBS_Command]`: mailbox size, daily per-sender quota, commands per minute, message age purge, notification cooldown, notification stages (`notify_on_arrival`, `notify_reminder_hours`, `notify_final_hours`, `notify_check_minutes`).
 - The full guide — resolution order, examples, limits, web viewer page — is in [BBS.md](BBS.md).
 
 ---

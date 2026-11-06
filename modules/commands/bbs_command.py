@@ -36,6 +36,17 @@ Reading commits the read marks only after every reply chunk went out on the
 radio (two-phase delivery), so a failed send never silently drops messages.
 The legacy name-keyed ``bbs_messages`` table is still served by ``bbs r``
 and ``bbs list`` until its age purge empties it.
+
+Private recipient notifications, aggregated per recipient (one DM carrying
+the unread count, never one DM per stored message):
+
+  * on arrival      — right after a successful store (``notify_on_arrival``)
+  * +24h unread     — reminder stage (``notify_reminder_hours``, swept by a
+                      scheduler job, migration 35 stage columns)
+  * +73h unread     — final notice naming the purge age (``notify_final_hours``)
+
+Stage DMs are only stamped in the database after they actually went out, so
+an unreachable recipient is retried on the next sweep.
 """
 
 import re
@@ -49,6 +60,16 @@ from .base_command import BaseCommand
 
 # Default seconds to wait before sending another inbox notification to the same user.
 NOTIFICATION_COOLDOWN_SECONDS = 300
+
+# Default unread-message age (hours) for the stage-2 private reminder DM.
+DEFAULT_REMINDER_HOURS = 24
+
+# Default unread-message age (hours) for the stage-3 final notice, timed to
+# leave the recipient a clear warning window before the 7-day age purge.
+DEFAULT_FINAL_NOTICE_HOURS = 73
+
+# Default minutes between two sweeps of the scheduler notification job.
+DEFAULT_NOTIFY_CHECK_MINUTES = 30
 
 # Maximum UTF-8 byte length for a single BBS read response before it is chunked into per-message lines.
 _MAX_SINGLE_MESSAGE_BYTES = 150
@@ -122,6 +143,22 @@ class BBSCommand(BaseCommand):
         )
         self.notify_cooldown_seconds: float = self.get_config_value(
             "BBS_Command", "notify_cooldown_seconds", fallback=NOTIFICATION_COOLDOWN_SECONDS, value_type="float"
+        )
+        # Private recipient notifications (stages 1-3, aggregated per recipient)
+        self.notify_on_arrival: bool = self.get_config_value(
+            "BBS_Command", "notify_on_arrival", fallback=True, value_type="bool"
+        )
+        self.notify_reminder_hours: int = max(
+            0,
+            self.get_config_value(
+                "BBS_Command", "notify_reminder_hours", fallback=DEFAULT_REMINDER_HOURS, value_type="int"
+            ),
+        )
+        self.notify_final_hours: int = max(
+            0,
+            self.get_config_value(
+                "BBS_Command", "notify_final_hours", fallback=DEFAULT_FINAL_NOTICE_HOURS, value_type="int"
+            ),
         )
         # In-memory cooldown: sender key -> last notification timestamp
         self._notification_cooldowns: dict[str, float] = {}
@@ -297,6 +334,7 @@ class BBSCommand(BaseCommand):
         status = self._store_message(sender_key, sender_name, recipient_key, recipient_name, rest)
         if status == "ok":
             await self.send_response(message, f"Message stored for {recipient_name}.")
+            await self._notify_recipient_arrival(recipient_key, recipient_name)
         elif status == "full":
             await self.send_response(
                 message,
@@ -463,6 +501,164 @@ class BBSCommand(BaseCommand):
         """Return True if the message dispatches to a BBS subcommand itself."""
         first = content_lower.split(None, 1)[0] if content_lower else ""
         return first in ("bbs", "s", "send")
+
+    # ------------------------------------------------------------------
+    # Staged private notifications (DMs to the recipient, aggregated)
+    # ------------------------------------------------------------------
+
+    async def _notify_recipient_arrival(self, recipient_key: str, recipient_name: str) -> None:
+        """Stage 1: DM the recipient right after a message is stored.
+
+        Aggregated: one DM carrying the recipient's total unread count, not
+        one per stored message.  ``_notification_cooldowns`` (shared with the
+        inbound-DM inbox reminder) keeps a burst of messages from turning into
+        a burst of radio DMs; a message swallowed by the cooldown is still
+        covered by the 24h reminder stage.  A failed notification never
+        affects the store itself.
+        """
+        if not self.notify_on_arrival or not recipient_key:
+            return
+        now = time.time()
+        if now - self._notification_cooldowns.get(recipient_key, 0.0) < self.notify_cooldown_seconds:
+            return
+        count = self._get_pending_count(recipient_key, recipient_name)
+        if count <= 0:
+            return
+        try:
+            sent = await self.bot.command_manager.send_dm(
+                recipient_key, self._arrival_text(count), skip_user_rate_limit=True
+            )
+        except Exception as e:
+            self.logger.error(f"Error sending BBS arrival notification: {e}")
+            return
+        if sent:
+            self._notification_cooldowns[recipient_key] = now
+        else:
+            self.logger.info(
+                f"BBS arrival notification not sent for {recipient_name} "
+                f"(recipient not reachable as a contact)"
+            )
+
+    async def run_pending_notification_job(self) -> dict[str, Any]:
+        """Stages 2 and 3: sweep the unread inbox and send age-based DMs.
+
+        Called periodically by the scheduler (see
+        ``MessageScheduler._setup_bbs_notification_job``).  For each stage —
+        ``notify_reminder_hours`` (default 24h) and ``notify_final_hours``
+        (default 73h, wording names the purge age) — recipients holding at
+        least one unread message older than the stage threshold get one
+        aggregate DM, and the stage column is stamped only on rows whose DM
+        actually went out.  A recipient whose DM failed is retried on the
+        next sweep; after ``max_message_age_days`` the purge wins and the
+        stage is moot.
+
+        Returns a summary dict: {'sent': int, 'failed': int}.
+        """
+        summary: dict[str, Any] = {"sent": 0, "failed": 0}
+        stages = (
+            ("reminder_sent_at", self.notify_reminder_hours, self._reminder_text),
+            ("final_notice_sent_at", self.notify_final_hours, self._final_notice_text),
+        )
+        for stage_column, hours, text_fn in stages:
+            if hours <= 0:
+                continue
+            for recipient_key, recipient_name, count in self._due_notification_recipients(stage_column, hours):
+                try:
+                    sent = await self.bot.command_manager.send_dm(
+                        recipient_key, text_fn(count), skip_user_rate_limit=True
+                    )
+                except Exception as e:
+                    self.logger.error(f"Error sending BBS {stage_column} notice: {e}")
+                    summary["failed"] += 1
+                    continue
+                if not sent:
+                    summary["failed"] += 1
+                    self.logger.info(
+                        f"BBS {stage_column} notice not sent for {recipient_name} "
+                        f"(recipient not reachable as a contact)"
+                    )
+                    continue
+                self._mark_notification_stage(recipient_key, stage_column)
+                summary["sent"] += 1
+                self.logger.info(
+                    f"BBS {stage_column} notice sent for {recipient_name} ({count} unread)"
+                )
+        return summary
+
+    def _arrival_text(self, count: int) -> str:
+        """Stage 1 DM body."""
+        return (
+            f"\U0001f4ec New BBS message: you have {count} pending. "
+            "Send 'bbs r' to read."
+        )
+
+    def _reminder_text(self, count: int) -> str:
+        """Stage 2 (24h) DM body."""
+        return (
+            f"\U0001f4ec BBS reminder: you still have {count} unread message(s). "
+            "Send 'bbs r' to read."
+        )
+
+    def _final_notice_text(self, count: int) -> str:
+        """Stage 3 (73h) DM body — names the age purge so it reads as final."""
+        return (
+            f"\U0001f4ec BBS final notice: your {count} unread message(s) are deleted "
+            f"after {self.max_message_age_days} days. Send 'bbs r' now."
+        )
+
+    def _due_notification_recipients(
+        self, stage_column: str, hours: int
+    ) -> list[tuple[str, str, int]]:
+        """Recipients due for a *stage_column* DM: (key, name, unread_count).
+
+        A recipient is due when at least one of their unstamped unread rows
+        has aged past *hours*; the returned count is every unstamped unread
+        row for that recipient, so the DM text and ``_mark_notification_stage``
+        cover exactly the same set — including younger messages that joined
+        the mailbox since the oldest crossed the threshold.  Newly stored
+        rows carry a NULL stage column and age into a later sweep on their
+        own.
+        """
+        if hours <= 0 or stage_column not in ("reminder_sent_at", "final_notice_sent_at"):
+            return []
+        try:
+            with self.bot.db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"SELECT recipient_key, MAX(recipient_name), COUNT(*) "
+                    f"FROM bbs_inbox "
+                    f"WHERE read_at IS NULL AND {stage_column} IS NULL "
+                    f"GROUP BY recipient_key "
+                    f"HAVING SUM(CASE WHEN sent_at <= datetime('now', ?) THEN 1 ELSE 0 END) > 0",
+                    (f"-{int(hours)} hours",),
+                )
+                return [(row[0], row[1] or row[0], row[2]) for row in cursor.fetchall()]
+        except Exception as e:
+            self.logger.error(f"Error querying BBS notification stages: {e}")
+            return []
+
+    def _mark_notification_stage(self, recipient_key: str, stage_column: str) -> int:
+        """Stamp *stage_column* on this recipient's still-unread rows.
+
+        Only unread rows lacking the stamp are touched, so the DM matches
+        what the sweep counted and rows already stamped are left alone.
+        Returns the number of rows updated.
+        """
+        if stage_column not in ("reminder_sent_at", "final_notice_sent_at"):
+            return 0
+        try:
+            with self.bot.db_manager.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE bbs_inbox SET {stage_column} = CURRENT_TIMESTAMP "
+                    f"WHERE recipient_key = ? AND read_at IS NULL AND {stage_column} IS NULL",
+                    (recipient_key,),
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            self.logger.error(f"Error stamping BBS notification stage: {e}")
+            return 0
 
     # ------------------------------------------------------------------
     # Per-user sliding rate limit

@@ -1894,6 +1894,16 @@ max_messages_per_sender_per_day = 20
 rate_limit_per_minute = 10
 # Minimum seconds between two inbox reminders to the same user
 notify_cooldown_seconds = 300
+# Private notification DMs to the recipient (aggregated: one DM with the
+# unread count, never one DM per stored message)
+notify_on_arrival = true
+# Re-notify after this many hours still unread (0 = no reminder stage)
+notify_reminder_hours = 24
+# Final notice after this many hours still unread, timed before the age
+# purge so the recipient can still read the message (0 = no final notice)
+notify_final_hours = 73
+# Minutes between two scheduler sweeps of the reminder/final-notice stages
+notify_check_minutes = 30
 # channels =
 [Cmd_Command]
 enabled = true
