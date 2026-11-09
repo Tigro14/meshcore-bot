@@ -138,16 +138,18 @@ class VigilanceCache:
         tz: Any,
         *,
         phenomenon_names: dict[str, str] | None = None,
+        department_label: str | None = None,
     ) -> str:
+        label = department_label or f"Dept {code}"
         record = self.get(code)
         if record is None:
-            return f"Vigilance non actualisable - Dept {code}. Aucun bulletin conservé. Situation actuelle inconnue."
+            return f"Vigilance non actualisable - {label}. Aucun bulletin conservé. Situation actuelle inconnue."
         info = record["info"]
         status = self.status(code, now)
         expired = status == "expired"
         title = {"expired": "Bulletin périmé", "old": "Bulletin ancien"}.get(status, "Bulletin non actualisé")
         issued = datetime.fromtimestamp(publication_time(info), tz).strftime("%d/%m/%Y à %H:%M")
-        lines = [f"{title} - Dept {code}", f"Dernier niveau connu : {info['color'].lower()} ({issued})."]
+        lines = [f"{title} - {label}", f"Dernier niveau connu : {info['color'].lower()} ({issued})."]
         for item in info.get("phenomena", []):
             name = (phenomenon_names or {}).get(item["id"], "Phénomène " + item["id"])
             lines.append(f"{name} : {item['color'].lower()}.")

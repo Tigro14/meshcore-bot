@@ -287,7 +287,7 @@ async def test_vigi_answers_offline_from_the_shared_persistent_cache(command_moc
         patch("modules.commands.vigilance_command.fetch_vigilance", side_effect=OSError("offline")),
         patch("modules.commands.vigilance_command.time.time", return_value=clock),
     ):
-        assert await command.execute(mock_message("vigi", is_dm=True))
+        assert await command.execute(mock_message("vigi 29", is_dm=True))
     reply = command.send_response.await_args.args[1]
     assert "Dept 29" in reply and "Dernier niveau connu : orange" in reply
     assert ("périmé" if expired else "non actualisé") in reply

@@ -12,10 +12,13 @@ from ..service_plugins.vigilance_service import (
     _PHENOMENON_NAMES,
     _REQUEST_DELAY_SECONDS,
     fetch_vigilance,
+    fetch_vigilance_multi,
     normalize_department,
+    parse_departments,
 )
 from ..utils import get_config_timezone
-from ..vigilance_cache import VigilanceCache, usable
+from ..vigilance_alert_policy import COLORS, fingerprint
+from ..vigilance_cache import VigilanceCache, publication_time
 from .base_command import BaseCommand
 
 
@@ -40,7 +43,7 @@ class VigilanceCommand(BaseCommand):
     parameters = [
         {
             "name": "department",
-            "description": "French department number (optional; defaults to the first configured dept or 75)",
+            "description": "French department number (optional; checks all configured departments when omitted)",
         }
     ]
 
@@ -58,61 +61,106 @@ class VigilanceCommand(BaseCommand):
         self.bulletin_cache = VigilanceCache(getattr(bot, 'db_manager', None), self.logger)
 
     async def execute(self, message: MeshMessage) -> bool:
-        """Execute the vigilance command.
-
-        Fetches current Météo-France vigilance for a department and sends the status.
-
-        Args:
-            message: The message that triggered the command.
-
-        Returns:
-            bool: True if executed successfully, False otherwise.
-        """
-        dept = ''
+        """Check the requested department, or every monitored department by default."""
         try:
-            # Parse department from arguments, fall back to config or default
             _trigger, args = self.split_trigger_and_args(message.content)
-            dept = self._parse_department(args)
+            departments = self._requested_departments(args)
             api_key = str(self.get_config_value("Vigilance_Service", "api_key", fallback="")).strip()
             delay = float(self.get_config_value(
                 "Vigilance_Service", "request_delay", fallback=_REQUEST_DELAY_SECONDS,
                 value_type="float",
             ))
 
-            # Fetch vigilance data in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            vigilance_data = await loop.run_in_executor(
-                None, lambda: fetch_vigilance(dept, api_key, delay=delay)
-            )
-            if self.offline_cache:
-                if not usable(vigilance_data, time.time()) or not self.bulletin_cache.put(
-                    dept, vigilance_data, time.time()
-                ):
-                    raise ValueError('Bulletin non actuel')
+            def fetch():
+                if len(departments) == 1:
+                    code = departments[0]
+                    return {code: fetch_vigilance(code, api_key, delay=delay)}
+                return fetch_vigilance_multi(departments, api_key, delay=delay)
 
-            # Format response
-            response = self._format_response(dept, vigilance_data)
-            return await self.send_response(message, response)
+            try:
+                infos = await asyncio.get_running_loop().run_in_executor(None, fetch)
+            except Exception as e:
+                if not self.offline_cache:
+                    raise
+                self.logger.warning('Vigilance update unavailable: %s', type(e).__name__)
+                infos = {}
+
+            now = time.time()
+            current = {}
+            missing = []
+            for code in departments:
+                data = infos.get(code)
+                if (not isinstance(data, dict) or data.get('color') not in COLORS
+                        or (self.offline_cache and not self.bulletin_cache.put(code, data, now))):
+                    missing.append(code)
+                else:
+                    current[code] = data
+
+            replies = []
+            if current:
+                if len(departments) == 1:
+                    replies.append(self._format_response(departments[0], current[departments[0]]))
+                else:
+                    replies.append(self._format_current_departments(current))
+            if missing:
+                if self.offline_cache:
+                    replies.extend(self._historical_departments(missing, now))
+                else:
+                    replies.append(f"Vigilance non actualisable - Depts {'/'.join(sorted(missing))}.")
+            return await self.send_response(message, '\n\n'.join(replies))
 
         except Exception as e:
-            if self.offline_cache and dept:
-                self.logger.warning('Vigilance update unavailable: %s', type(e).__name__)
-                tz = get_config_timezone(self.bot.config, self.logger)[0]
-                reply = self.bulletin_cache.historical_reply(
-                    dept, time.time(), tz, phenomenon_names=_PHENOMENON_NAMES,
-                )
-                return await self.send_response(message, reply)
             error_msg = f"⚠️ Erreur vigilance: {str(e)}"
             await self.send_response(message, error_msg)
             return False
+
+    def _requested_departments(self, args: str) -> list[str]:
+        if args.strip():
+            return [self._parse_department(args)]
+        configured = str(self.get_config_value('Vigilance_Service', 'department', fallback='75'))
+        return list(dict.fromkeys(parse_departments(configured))) or ['75']
+
+    def _format_current_departments(self, infos: dict) -> str:
+        """Combine identical current levels and risks without truncating other departments."""
+        groups: dict[str, list[str]] = {}
+        for code, info in infos.items():
+            groups.setdefault(fingerprint(info), []).append(code)
+        priority = {'Rouge': 0, 'Orange': 1, 'Jaune': 2, 'Vert': 3}
+        replies = []
+        for codes in sorted(groups.values(), key=lambda group: priority[infos[group[0]]['color']]):
+            data = infos[codes[0]]
+            color = data['color']
+            emoji = {'Vert': '✅', 'Jaune': '⚠️', 'Orange': '🟠', 'Rouge': '🔴'}[color]
+            lines = [f"{emoji} Vigilance {'/'.join(sorted(codes))} : {color}"]
+            for item in data.get('phenomena', []):
+                name = _PHENOMENON_NAMES.get(item['id'], 'Phénomène ' + item['id'])
+                lines.append(f"{name} : {item['color'].lower()}")
+            replies.append('\n'.join(lines))
+        return '\n'.join(replies)
+
+    def _historical_departments(self, codes: list[str], now: float) -> list[str]:
+        """Keep historical and current information separate, including their dates."""
+        groups: dict[tuple, list[str]] = {}
+        for code in codes:
+            record = self.bulletin_cache.get(code)
+            key = ('missing',) if record is None else (
+                self.bulletin_cache.status(code, now), fingerprint(record['info']),
+                publication_time(record['info']), record['info'].get('valid_until'),
+            )
+            groups.setdefault(key, []).append(code)
+        tz = get_config_timezone(self.bot.config, self.logger)[0]
+        return [self.bulletin_cache.historical_reply(
+            group[0], now, tz, phenomenon_names=_PHENOMENON_NAMES,
+            department_label=f"{'Depts' if len(group) > 1 else 'Dept'} {'/'.join(sorted(group))}",
+        ) for group in groups.values()]
 
     def _parse_department(self, args: str) -> str:
         """Parse department code from the arguments after the trigger keyword.
 
         Accepts the numeric codes (``95``) and the Corsican ones (``2a``/``2b``),
         which Météo-France writes as ``2A``/``2B``. Falls back to the configured
-        department, then '75'. When the configuration lists several, the first one is
-        used: answering for all of them at once would not fit the RF budget.
+        department, then '75'. This single-department parser also handles invalid
+        explicit arguments; the default multi-department query uses _requested_departments.
 
         Args:
             args: Argument text (e.g. "25" for "vigi 25")
@@ -174,7 +222,7 @@ class VigilanceCommand(BaseCommand):
             "Get Météo-France weather vigilance status.\n"
             "Usage: vigi [department_number]\n"
             "Examples:\n"
-            "  vigi        — uses the configured department (the first when several)\n"
+            "  vigi        — checks all configured departments\n"
             "  vigi 75     — Paris\n"
             "  vigi 95     — Val-d'Oise\n"
             "  vigi 2A     — Corse-du-Sud\n"

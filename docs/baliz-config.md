@@ -20,15 +20,14 @@ tandis que sa fonction interne reste accessible à l'assistant.
 
 ## Vigilance météo
 
-Le département par défaut de Baliz est le **Finistère (29)** : `vigi` sans
-argument demande la vigilance du Finistère. Un autre département peut toujours
-être précisé, par exemple `vigi 22`.
+`vigi` sans argument vérifie les **quatre départements bretons (22, 29, 35, 56)**.
+Les niveaux et phénomènes identiques sont regroupés dans la réponse. Un département
+peut toujours être demandé séparément, par exemple `vigi 29` ou `vigi 22`.
 
 Le profil active la surveillance horaire des départements `29,22,35,56` dans
 `[Vigilance_Service]`. Les niveaux jaune, orange et rouge sont publiés dans
 `#bretagne` à leur apparition ou évolution, puis rappelés après 24 heures sans
 changement. Le retour au vert est annoncé une fois après une vigilance diffusée.
-Le Finistère reste en tête de liste pour conserver le défaut de `vigi`.
 Voir le [fonctionnement du service](vigilance-service.md#change-driven-alerts).
 
 ## Identité et fonctionnement conservés
@@ -138,7 +137,7 @@ branche `dev` de Tigro dans GitHub ni publier la configuration privée du serveu
 
 Le profil surveille `29,22,35,56` toutes les heures et publie sur `#bretagne` dès le
 jaune, aux changements, puis en rappel après 24 h si la situation persiste. Le retour
-au vert clôt l'alerte. Le 29 reste en premier pour la commande `vigi` sans argument.
+au vert clôt l'alerte. `vigi` sans argument vérifie toute cette liste.
 
 `offline_cache = true` conserve les bulletins complets et datés. Une indisponibilité
 de la source est signalée une fois ; les réponses hors ligne sont explicitement

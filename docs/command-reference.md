@@ -338,7 +338,8 @@ When no location is given, uses the sender's companion location if known, then t
 
 ### `vigi` or `vigilance`
 
-Current Météo-France weather vigilance for a French department (France only). The level comes
+Current Météo-France weather vigilance for the configured French departments, or one explicit
+department (France only). The level comes
 from JSON, never from the page markup, which JavaScript fills: the site's own endpoint when
 `[Vigilance_Service] api_key` is empty, the
 [DonneesPubliquesVigilance](https://portail-api.meteofrance.fr/web/fr/api/DonneesPubliquesVigilance)
@@ -364,16 +365,21 @@ provides one, for example:
 🟠 Vigilance Dept 25: Orange
 Orages
 ```
-Levels: ✅ Vert, ⚠️ Jaune, 🟠 Orange, 🔴 Rouge. The answer is capped at 180 characters so a
-single mesh transmission carries it.
+Levels: ✅ Vert, ⚠️ Jaune, 🟠 Orange, 🔴 Rouge. An explicit-department answer is capped at
+180 characters. The default query groups identical levels and phenomena, showing all active
+phenomena and their levels. The command manager handles splitting if the full reply needs it.
 
 **Configuration:** the department comes from `[Vigilance_Service]` (`department`, default
 `75`, comma-separated for several), the same section used by the
 [Vigilance Météo-France Service](vigilance-service.md) that posts proactive Orange/Rouge
-alerts. With several departments configured, `vigi` without an argument answers for the first
-one: a reply naming all of them would not fit the RF budget. The lookup is paced by
-`[Vigilance_Service] request_delay` (default 2 s) between its page fetch and its endpoint call.
+alerts. With several departments configured, `vigi` without an argument checks all of them.
+For Baliz this means 22, 29, 35 and 56. `vigi 29` checks only Finistère.
+The lookup is paced by `[Vigilance_Service] request_delay` (default 2 s) between requests,
+sharing the page/session for a multi-department check.
 The command has no own section, so the two cannot disagree.
+
+With `offline_cache = true`, unavailable or stale results are reported separately using
+dated historical bulletins. They are never grouped with current results or treated as green.
 
 **Note:** `alert` and `alerte` are not keywords of this command — they belong to
 [`alert <location>`](command-reference.md#alert-location-all).

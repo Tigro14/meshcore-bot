@@ -93,8 +93,8 @@ comments.
   404; a name typed in config (`department = Val-d'Oise`) is folded to its slug.
 - **Several departments**: `department` accepts a comma-separated list. By default, one alert per
   department that is at an alert level, and the throttle is per department, so an alert sent
-  for one does not hold the others back. `vigi` without an argument answers for the first
-  department of the list, because answering for all of them would not fit the RF budget.
+  for one does not hold the others back. `vigi` without an argument checks the whole
+  configured list and groups identical levels and phenomena into compact replies.
   Request budget per poll: with a key the national product covers the whole list in one
   request; without one the page is fetched once (the `mfsession` cookie is a session cookie, so
   the same token answers for every department) and one request per department follows — a list
@@ -156,8 +156,8 @@ cooldowns are skipped for these automated sends; bot and channel limits remain i
 No LLM is involved. Failed downloads leave the last announced state intact.
 
 Baliz's Brittany profile uses departments `29,22,35,56`, hourly checks, levels
-`Jaune,Orange,Rouge` and channel `#bretagne`, with a 24-hour reminder. `29` stays
-first so `vigi` without arguments continues to answer for Finistère.
+`Jaune,Orange,Rouge` and channel `#bretagne`, with a 24-hour reminder. `vigi` without
+arguments checks all four; `vigi 29` requests Finistère only.
 
 ## Unavailable updates and cached bulletins
 
@@ -177,6 +177,8 @@ cannot replace a newer one. Missing or expired data cannot become a current bull
 - Offline `vigi` answers show the last known level and phenomena, publication/validity
   dates, and “Situation actuelle inconnue.” They are labelled “Bulletin non actualisé”,
   “Bulletin périmé” or “Bulletin ancien”; no saved green level is presented as current.
+  Default multi-department queries group cached answers only when their levels, risks,
+  publication dates and validity ends match. Current and historical answers stay separate.
 - Cached data never triggers normal alerts, daily reminders or a return to green.
   Fresh valid data resumes the normal policy and produces one recovery notice.
 - Availability notices are acknowledged only after a successful send. Their persistent
