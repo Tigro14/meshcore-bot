@@ -2844,6 +2844,14 @@ alert_throttle = 3600
 # Default: Orange,Rouge (only alert on elevated vigilance)
 alert_levels = Orange,Rouge
 
+# Optional change-driven policy. On first non-green vigilance or any change of
+# color/phenomena, send immediately after detection; repeat unchanged alerts only
+# after reminder_interval seconds. A return to green closes a previously sent alert
+# once. Last successfully transmitted alerts survive restarts in bot_metadata.
+# When false, the existing alert_throttle behavior above is retained.
+notify_on_change = false
+reminder_interval = 86400
+
 # When true, alerts go only to Discord/Telegram webhooks, not the mesh channel.
 # Default: false
 silence_mesh_output = false

@@ -24,9 +24,12 @@ Le département par défaut de Baliz est le **Finistère (29)** : `vigi` sans
 argument demande la vigilance du Finistère. Un autre département peut toujours
 être précisé, par exemple `vigi 22`.
 
-Le profil public conserve ce choix dans `[Vigilance_Service]` avec
-`department = 29` et `enabled = false`. Les alertes automatiques restent
-désactivées ; la consultation ponctuelle avec `vigi` reste disponible.
+Le profil active la surveillance horaire des départements `29,22,35,56` dans
+`[Vigilance_Service]`. Les niveaux jaune, orange et rouge sont publiés dans
+`#bretagne` à leur apparition ou évolution, puis rappelés après 24 heures sans
+changement. Le retour au vert est annoncé une fois après une vigilance diffusée.
+Le Finistère reste en tête de liste pour conserver le défaut de `vigi`.
+Voir le [fonctionnement du service](vigilance-service.md#change-driven-alerts).
 
 ## Identité et fonctionnement conservés
 

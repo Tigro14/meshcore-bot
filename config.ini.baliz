@@ -689,5 +689,11 @@ coding_rate = 5
 preamble_symbols = 8
 
 [Vigilance_Service]
-enabled = false
-department = 29
+enabled = true
+department = 29,22,35,56
+channel = #bretagne
+poll_interval = 3600000
+alert_levels = Jaune,Orange,Rouge
+notify_on_change = true
+reminder_interval = 86400
+silence_mesh_output = false

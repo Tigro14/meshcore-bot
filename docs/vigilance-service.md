@@ -62,6 +62,8 @@ comments.
 | `request_delay` | Pause between two requests of the same poll, in seconds | `2` |
 | `alert_throttle` | Minimum seconds between successive alerts | `3600` (1 h) |
 | `alert_levels` | Comma-separated levels that trigger an alert (`Vert,Jaune,Orange,Rouge`) | `Orange,Rouge` |
+| `notify_on_change` | Announce changes, daily reminders and the return to green; persist successfully sent alerts | `false` |
+| `reminder_interval` | Seconds before repeating an unchanged active vigilance in change mode | `86400` (24 h) |
 | `flood_scope` | Optional regional TC_FLOOD scope, e.g. `#west` | inherits `[Channels]` |
 | `silence_mesh_output` | Send only to Discord/Telegram, not to the mesh channel | `false` |
 | `discord_webhook_urls` | Optional comma-separated webhook URLs | — |
@@ -79,10 +81,10 @@ comments.
   `timelaps.domain_ids` block; one call covers every department, so a 60 req/min key is enough
   for the default 8 h poll even with a list of departments, and it is the only source for the
   overseas departments.
-- **Page parsing** (last resort, when the endpoint cannot be authenticated): the color is read
-  from `data-color`/`data-level` attributes first, then alert CSS classes (legend/menu blocks
-  are skipped), then compound class prefixes such as `vigilance-rouge`, then meta tags, then
-  active-alert text such as `vigilance rouge en cours`. Pages with no alert resolve to `Vert`.
+- **Incomplete data**: a missing session cookie, unknown color, wrong department or missing
+  publication date is an error, never evidence of a green level. The JavaScript page markup
+  is not a fallback for the structured bulletin. Expired data with a supplied validity end
+  is ignored by the monitor and cannot close an active vigilance.
 - **Department slugs**: every department resolves to its page slug, which is the department
   name (`95` → `val-d-oise`, `25` → `doubs`, `2A` → `corse-du-sud`). The site has no page for
   a bare number, so an unmapped number is refused with a clear error instead of fetching a
@@ -122,10 +124,34 @@ The page link is appended for Discord/Telegram (the mesh post stays short).
 
 - The keyless path is the site's own endpoint, not a published API: the path, the cookie and the
   ROT-13 form of the token can change without warning. If the page does not set the cookie, the
-  service falls back to the markup and reports `Vert`. An overseas department cannot be answered
+  check fails without changing the previous alert state. An overseas department cannot be answered
   without a key, so an overseas code listed in `department` is named in the start-up warning and
   left out of the poll until a key is set. At start the service logs a warning when no key is
   configured.
-- Alerts are not persisted across restarts: after a restart, an elevated level triggers a
-  new alert on the next poll.
+- In legacy mode (`notify_on_change = false`), the throttle remains in memory. In change mode,
+  the last successfully transmitted alert is stored in `bot_metadata`, independently for
+  each destination channel/scope and department. A restart does not repeat it immediately.
 - The bot must have internet access for this service and for `vigi`.
+
+## Change-driven alerts
+
+Set `notify_on_change = true` to enable this policy:
+
+- A green department remains silent when no alert was previously transmitted.
+- The first configured non-green level generates an alert on the next check.
+- A change of overall color or of the active phenomena and their levels generates an
+  update on that check, even if `alert_throttle` has not elapsed.
+- An unchanged active vigilance is repeated after `reminder_interval` seconds since the
+  last successful transmission. A new bulletin timestamp alone is not a change.
+- A return to green closes a previously transmitted non-green alert once.
+- Failed radio sends do not move the stored state or reminder deadline and can be retried
+  on the next check. Radio transmission success is not an acknowledgement from every receiver.
+
+The existing command manager handles radio pacing and message splitting. Human-command
+cooldowns are skipped for these automated sends; bot and channel limits remain in force.
+No LLM is involved. Failed downloads leave the last announced state intact; this does not
+implement an offline bulletin cache or broadcast stale data as current information.
+
+Baliz's Brittany profile uses departments `29,22,35,56`, hourly checks, levels
+`Jaune,Orange,Rouge` and channel `#bretagne`, with a 24-hour reminder. `29` stays
+first so `vigi` without arguments continues to answer for Finistère.
