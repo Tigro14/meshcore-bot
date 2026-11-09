@@ -5,13 +5,17 @@ Provides current weather vigilance status for a French department
 """
 
 import asyncio
+import time
 
 from ..models import MeshMessage
 from ..service_plugins.vigilance_service import (
+    _PHENOMENON_NAMES,
     _REQUEST_DELAY_SECONDS,
     fetch_vigilance,
     normalize_department,
 )
+from ..utils import get_config_timezone
+from ..vigilance_cache import VigilanceCache, usable
 from .base_command import BaseCommand
 
 
@@ -43,6 +47,16 @@ class VigilanceCommand(BaseCommand):
     # No settings_schema: the department is owned by [Vigilance_Service], so the
     # command and the monitor cannot end up configured with two different values.
 
+    def __init__(self, bot):
+        super().__init__(bot)
+        self.offline_cache = self.get_config_value(
+            'Vigilance_Service', 'offline_cache', fallback=False, value_type='bool',
+        )
+        # The command must reach its cache instead of being rejected by the
+        # command manager's Internet pre-check.
+        self.requires_internet = not self.offline_cache
+        self.bulletin_cache = VigilanceCache(getattr(bot, 'db_manager', None), self.logger)
+
     async def execute(self, message: MeshMessage) -> bool:
         """Execute the vigilance command.
 
@@ -54,6 +68,7 @@ class VigilanceCommand(BaseCommand):
         Returns:
             bool: True if executed successfully, False otherwise.
         """
+        dept = ''
         try:
             # Parse department from arguments, fall back to config or default
             _trigger, args = self.split_trigger_and_args(message.content)
@@ -69,12 +84,24 @@ class VigilanceCommand(BaseCommand):
             vigilance_data = await loop.run_in_executor(
                 None, lambda: fetch_vigilance(dept, api_key, delay=delay)
             )
+            if self.offline_cache:
+                if not usable(vigilance_data, time.time()) or not self.bulletin_cache.put(
+                    dept, vigilance_data, time.time()
+                ):
+                    raise ValueError('Bulletin non actuel')
 
             # Format response
             response = self._format_response(dept, vigilance_data)
             return await self.send_response(message, response)
 
         except Exception as e:
+            if self.offline_cache and dept:
+                self.logger.warning('Vigilance update unavailable: %s', type(e).__name__)
+                tz = get_config_timezone(self.bot.config, self.logger)[0]
+                reply = self.bulletin_cache.historical_reply(
+                    dept, time.time(), tz, phenomenon_names=_PHENOMENON_NAMES,
+                )
+                return await self.send_response(message, reply)
             error_msg = f"⚠️ Erreur vigilance: {str(e)}"
             await self.send_response(message, error_msg)
             return False

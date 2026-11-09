@@ -134,6 +134,21 @@ Le fichier générique `config.ini.example` reste désactivé par défaut. L'act
 concerne le profil `config.ini.baliz`, sur la branche `baliz`, sans intégrer la
 branche `dev` de Tigro dans GitHub ni publier la configuration privée du serveur.
 
+## Vigilance en Bretagne
+
+Le profil surveille `29,22,35,56` toutes les heures et publie sur `#bretagne` dès le
+jaune, aux changements, puis en rappel après 24 h si la situation persiste. Le retour
+au vert clôt l'alerte. Le 29 reste en premier pour la commande `vigi` sans argument.
+
+`offline_cache = true` conserve les bulletins complets et datés. Une indisponibilité
+de la source est signalée une fois ; les réponses hors ligne sont explicitement
+historiques et ne déclenchent aucune nouvelle alerte météo. Le passage à un bulletin
+périmé et le rétablissement des mises à jour sont également signalés une fois.
+
+`group_similar_alerts = true` réunit les départements dont une alerte est due et dont
+les niveaux et phénomènes sont identiques. Le délai de rappel reste propre à chaque
+département. Ces options sont désactivées dans l'exemple générique de Tigro.
+
 ## Utilisation
 
 Sauvegarder le fichier actif avant de copier le profil à son emplacement.

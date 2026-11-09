@@ -2852,6 +2852,15 @@ alert_levels = Orange,Rouge
 notify_on_change = false
 reminder_interval = 86400
 
+# Keep complete bulletins for explicitly historical offline answers to vigi.
+# The monitor announces failed updates once, then recovery (and cache expiry).
+# Cached information is never used to clear or update a live vigilance.
+offline_cache = false
+
+# In change mode, combine due departments with identical levels and phenomena.
+# Each department retains its own sent state and reminder deadline.
+group_similar_alerts = false
+
 # When true, alerts go only to Discord/Telegram webhooks, not the mesh channel.
 # Default: false
 silence_mesh_output = false

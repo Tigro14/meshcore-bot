@@ -64,6 +64,8 @@ comments.
 | `alert_levels` | Comma-separated levels that trigger an alert (`Vert,Jaune,Orange,Rouge`) | `Orange,Rouge` |
 | `notify_on_change` | Announce changes, daily reminders and the return to green; persist successfully sent alerts | `false` |
 | `reminder_interval` | Seconds before repeating an unchanged active vigilance in change mode | `86400` (24 h) |
+| `offline_cache` | Persist complete bulletins; report failed updates once and answer offline `vigi` queries with dated historical information | `false` |
+| `group_similar_alerts` | In change mode, combine departments due an alert with identical colors and phenomena | `false` |
 | `flood_scope` | Optional regional TC_FLOOD scope, e.g. `#west` | inherits `[Channels]` |
 | `silence_mesh_output` | Send only to Discord/Telegram, not to the mesh channel | `false` |
 | `discord_webhook_urls` | Optional comma-separated webhook URLs | — |
@@ -89,7 +91,7 @@ comments.
   name (`95` → `val-d-oise`, `25` → `doubs`, `2A` → `corse-du-sud`). The site has no page for
   a bare number, so an unmapped number is refused with a clear error instead of fetching a
   404; a name typed in config (`department = Val-d'Oise`) is folded to its slug.
-- **Several departments**: `department` accepts a comma-separated list. One alert per
+- **Several departments**: `department` accepts a comma-separated list. By default, one alert per
   department that is at an alert level, and the throttle is per department, so an alert sent
   for one does not hold the others back. `vigi` without an argument answers for the first
   department of the list, because answering for all of them would not fit the RF budget.
@@ -107,7 +109,8 @@ comments.
 - **Retries**: transient network errors (connection reset, timeouts, remote disconnects)
   are retried up to 3 times with exponential backoff and jitter; a failed poll is logged and
   the loop continues.
-- **Mesh size**: the alert is kept compact (≤ 180 chars) so a single transmission carries it.
+- **Mesh size**: legacy alerts are kept compact (≤ 180 chars). Change-mode messages use
+  the command manager's byte-aware splitting and radio pacing when needed.
 
 **Example alert:**
 ```
@@ -131,7 +134,8 @@ The page link is appended for Discord/Telegram (the mesh post stays short).
 - In legacy mode (`notify_on_change = false`), the throttle remains in memory. In change mode,
   the last successfully transmitted alert is stored in `bot_metadata`, independently for
   each destination channel/scope and department. A restart does not repeat it immediately.
-- The bot must have internet access for this service and for `vigi`.
+- Current vigilance requires internet access. With `offline_cache = true`, `vigi` can
+  return the last saved bulletin as historical information while updates are unavailable.
 
 ## Change-driven alerts
 
@@ -149,9 +153,51 @@ Set `notify_on_change = true` to enable this policy:
 
 The existing command manager handles radio pacing and message splitting. Human-command
 cooldowns are skipped for these automated sends; bot and channel limits remain in force.
-No LLM is involved. Failed downloads leave the last announced state intact; this does not
-implement an offline bulletin cache or broadcast stale data as current information.
+No LLM is involved. Failed downloads leave the last announced state intact.
 
 Baliz's Brittany profile uses departments `29,22,35,56`, hourly checks, levels
 `Jaune,Orange,Rouge` and channel `#bretagne`, with a 24-hour reminder. `29` stays
 first so `vigi` without arguments continues to answer for Finistère.
+
+## Unavailable updates and cached bulletins
+
+Set `offline_cache = true` to keep the complete source JSON, normalized phenomena,
+publication date, validity end when supplied, and retrieval time in `bot_metadata`.
+The monitor and `vigi` share this cache; it survives a restart. Session cookies, tokens
+and request headers are not stored in it. A bulletin with an older publication date
+cannot replace a newer one. Missing or expired data cannot become a current bulletin.
+
+- A failed update produces one compact notice naming the affected departments. A source
+  failure is reported as “Vigilance non actualisable”; it does not imply the whole internet
+  connection is down. Partial success still allows alerts for the other departments.
+- Identical failures remain silent, including after restart. If a saved bulletin expires
+  during an outage, one further notice marks it as expired. Without a supplied validity
+  end, information older than 24 hours is marked as old, rather than given an invented
+  official expiration time.
+- Offline `vigi` answers show the last known level and phenomena, publication/validity
+  dates, and “Situation actuelle inconnue.” They are labelled “Bulletin non actualisé”,
+  “Bulletin périmé” or “Bulletin ancien”; no saved green level is presented as current.
+- Cached data never triggers normal alerts, daily reminders or a return to green.
+  Fresh valid data resumes the normal policy and produces one recovery notice.
+- Availability notices are acknowledged only after a successful send. Their persistent
+  state is separate from the per-department weather alert state and scoped to the destination.
+
+The full bulletin is retained locally; radio answers remain concise. Checks keep their
+configured interval, including during an outage. No additional LLM call is made.
+
+## Grouping similar alerts
+
+Set `group_similar_alerts = true` with `notify_on_change = true`. Departments are grouped
+only when an alert is due for each of them and their overall level and complete set of
+active phenomenon IDs/levels match. Different risks or different phenomenon levels stay
+separate. Red groups are transmitted before orange and yellow groups.
+
+Each department retains its own last successful transmission and reminder deadline.
+A failed grouped send advances none of its members. New alerts mixed with reminders are
+not labelled as a reminder for the whole group. Fresh returns to green can be combined.
+
+Example: `🟠 Vigilance ORANGE - Depts 22/29/56` followed by the shared phenomenon levels.
+The source URLs remain available to external notifications, without adding them to radio posts.
+
+Baliz enables both options for Brittany. The other settings, including hourly checks and
+24-hour reminders, are unchanged.

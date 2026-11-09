@@ -27,13 +27,16 @@ import re
 import socket
 import time
 import unicodedata
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from modules.vigilance_alert_policy import VigilanceAlertPolicy
+from modules.utils import get_config_timezone
+from modules.vigilance_alert_policy import VigilanceAlertPolicy, fingerprint
+from modules.vigilance_cache import AvailabilityNotices, VigilanceCache
 
 from .base_service import BaseServicePlugin
 
@@ -395,13 +398,18 @@ def _product_entry(department: str, product: dict[str, Any]) -> dict[str, Any]:
         if _read_color(p.get('phenomenon_max_color_id')) != 'Vert'
     ]
 
-    return {
+    result = {
         'color': color,
         'summary': _api_summary(color, active),
         'bulletin_date': _parse_api_datetime(product.get('update_time')),
         'url': _page_url(code),
         'phenomena': _phenomena(active),
+        'issued_at': _parse_api_datetime(product.get('update_time')).replace(tzinfo=timezone.utc).timestamp(),
+        'bulletin': deepcopy(product),
     }
+    if period.get('end_validity_time'):
+        result['valid_until'] = _parse_api_datetime(period['end_validity_time']).replace(tzinfo=timezone.utc).timestamp()
+    return result
 
 
 def fetch_vigilance_api(department: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
@@ -467,6 +475,8 @@ def fetch_vigilance_site_api(
         'bulletin_date': datetime.fromtimestamp(int(stamp)),
         'url': url,
         'phenomena': _phenomena(active),
+        'issued_at': int(stamp),
+        'bulletin': deepcopy(data),
     }
     if data.get('end_validity_time') is not None:
         until = data['end_validity_time']
@@ -501,15 +511,14 @@ def fetch_vigilance_multi(
     """
     Fetch current vigilance data for several French departments from Météo-France.
 
-    Sources, in order: the official product when ``api_key`` is set, then the JSON
-    endpoint the site's JavaScript calls, then the page markup, which carries no level
-    and reports Vert.
+    Uses the official product when ``api_key`` is set, otherwise the JSON endpoint
+    the site's JavaScript calls. Page markup is not a fallback for structured data.
 
     With a key the product is national, so one request answers the whole list. Without one,
     the page is fetched once: the ``mfsession`` cookie it sets is a session cookie, so the
     same token answers for every department and only one request per department follows,
-    which is one request per department instead of two. With no cookie there is nothing to
-    authenticate with, so each department falls back to its own page.
+    which is one request per department instead of two. A missing session cookie makes
+    the fetch fail without inventing a vigilance level.
 
     ``delay`` is the pause between two requests of the same poll: the page fetch is not
     preceded by one, and every request after it is. So a list of N costs N+1 requests and N
@@ -661,6 +670,16 @@ class VigilanceService(BaseServicePlugin):
             "help": "Repeat an unchanged active vigilance after this interval in change mode.",
         },
         {
+            "key": "offline_cache", "label": "Keep bulletins for offline use", "type": "bool",
+            "default": False,
+            "help": "Keep complete bulletins locally. Announce failed updates once and label cached vigi answers as historical.",
+        },
+        {
+            "key": "group_similar_alerts", "label": "Group similar alerts", "type": "bool",
+            "default": False,
+            "help": "In change mode, group departments due an alert with the same color and phenomena.",
+        },
+        {
             "key": "silence_mesh_output",
             "label": "Silence mesh output",
             "type": "bool",
@@ -700,6 +719,13 @@ class VigilanceService(BaseServicePlugin):
             self.get_mesh_flood_scope(),
             reminder_seconds=max(3600, self.bot.config.getint(section, 'reminder_interval', fallback=86400)),
         )
+        self.offline_cache = self.bot.config.getboolean(section, 'offline_cache', fallback=False)
+        self.group_similar_alerts = self.bot.config.getboolean(section, 'group_similar_alerts', fallback=False)
+        self.bulletin_cache = VigilanceCache(getattr(self.bot, 'db_manager', None), self.logger)
+        self.availability = AvailabilityNotices(
+            getattr(self.bot, 'db_manager', None), self.logger, self.alert_policy.namespace,
+        )
+        self.display_tz = get_config_timezone(self.bot.config, self.logger)[0]
 
         # Runtime state, one entry per department: a level or a throttle held for one
         # department must not be read as the state of another.
@@ -711,10 +737,11 @@ class VigilanceService(BaseServicePlugin):
 
         self.logger.info(
             "Vigilance service initialized: depts=%s channel=%s interval=%.0fs throttle=%ds "
-            "levels=%s delay=%.1fs change_mode=%s reminder=%ds",
+            "levels=%s delay=%.1fs change_mode=%s reminder=%ds offline_cache=%s group_similar=%s",
             ', '.join(self.departments), self.channel, self.poll_interval_seconds,
             self.alert_throttle, ', '.join(self.alert_levels), self.request_delay,
             self.notify_on_change, self.alert_policy.reminder_seconds,
+            self.offline_cache, self.group_similar_alerts,
         )
         if not self.api_key:
             self.logger.warning(
@@ -766,21 +793,30 @@ class VigilanceService(BaseServicePlugin):
                 break
 
     async def _check_and_alert(self) -> None:
-        """Fetch the levels and send one alert per department that warrants one."""
+        """Fetch current bulletins, transmit due alerts and report unavailable updates."""
         if not self.departments:
             return
 
         loop = asyncio.get_event_loop()
         infos = await loop.run_in_executor(None, self._fetch_with_retry)
         if not infos:
+            if self.offline_cache:
+                await self._notify_availability(self.departments)
             return
 
+        pending = []
+        available = set()
         for code, info in infos.items():
+            if code not in self.departments:
+                continue
             if info.get('color') not in _COLOR_IDS.values() or (
                 info.get('valid_until') is not None and info['valid_until'] <= time.time()
             ):
                 self.logger.warning('Ignoring invalid or expired vigilance data for dept %s', code)
                 continue
+            if self.offline_cache and not self.bulletin_cache.put(code, info, time.time()):
+                continue
+            available.add(code)
             color = info['color']
             previous = self._last_color.get(code)
 
@@ -796,6 +832,9 @@ class VigilanceService(BaseServicePlugin):
             if self.notify_on_change:
                 reason = self.alert_policy.reason(code, info, self.alert_levels, time.time())
                 if reason:
+                    if self.group_similar_alerts:
+                        pending.append((code, info, reason))
+                        continue
                     message = self._format_change_message(code, info, reason)
                     if await self._send_alert(message, info):
                         self.alert_policy.record_sent(code, info, time.time())
@@ -807,6 +846,59 @@ class VigilanceService(BaseServicePlugin):
                 if await self._send_alert(message, info):
                     self._last_alert_time[code] = time.monotonic()
                     self.logger.info("Vigilance alert sent for dept %s: %s", code, color)
+
+        if pending:
+            await self._send_grouped_alerts(pending)
+        if self.offline_cache:
+            await self._notify_availability([code for code in self.departments if code not in available])
+
+    async def _send_grouped_alerts(self, pending: list[tuple[str, dict[str, Any], str]]) -> None:
+        groups: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
+        for event in pending:
+            key = 'clear' if event[2] == 'clear' else fingerprint(event[1])
+            groups.setdefault(key, []).append(event)
+        priority = {'Rouge': 0, 'Orange': 1, 'Jaune': 2, 'Vert': 3}
+        for events in sorted(groups.values(), key=lambda g: priority[g[0][1]['color']]):
+            codes = sorted(event[0] for event in events)
+            reason = ('clear' if events[0][1]['color'] == 'Vert' else
+                      'reminder' if all(e[2] == 'reminder' for e in events) else 'change')
+            info = dict(events[0][1])
+            info['url'] = '\n'.join(sorted({e[1]['url'] for e in events if e[1].get('url')}))
+            message = self._format_change_message('/'.join(codes), info, reason,
+                                                  label='Depts' if len(codes) > 1 else 'Dept')
+            if await self._send_alert(message, info):
+                for code, data, _ in events:
+                    self.alert_policy.record_sent(code, data, time.time())
+                self.logger.info('Vigilance group transmitted for depts %s: %s', ','.join(codes), info['color'])
+            else:
+                self.logger.warning('Vigilance group not transmitted for depts %s; state retained', ','.join(codes))
+
+    async def _notify_availability(self, missing: list[str]) -> None:
+        now = time.time()
+        statuses = {code: self.bulletin_cache.status(code, now) for code in sorted(missing)}
+        if not self.availability.due(statuses):
+            return
+        if not missing:
+            message = 'Actualisation de la vigilance rétablie.'
+        else:
+            lines = [f"Vigilance non actualisable - Depts {'/'.join(sorted(missing))}."]
+            expired = [code for code, status in statuses.items() if status == 'expired']
+            if expired:
+                lines.append(f"Bulletins périmés : {'/'.join(expired)}.")
+            old = [code for code, status in statuses.items() if status == 'old']
+            if old:
+                lines.append(f"Bulletins anciens : {'/'.join(old)}.")
+            records = [self.bulletin_cache.get(code) for code in missing]
+            if all(record is not None for record in records):
+                oldest = min(record['fetched_at'] for record in records if record is not None)
+                date = datetime.fromtimestamp(oldest, self.display_tz).strftime('%d/%m à %H:%M')
+                lines.append(f'Dernière récupération : {date}.')
+            elif not any(records):
+                lines.append('Aucun bulletin conservé.')
+            lines.append('Situation actuelle inconnue.')
+            message = '\n'.join(lines)
+        if await self._send_alert(message, {}):
+            self.availability.record_sent(statuses)
 
     def _fetch_with_retry(self) -> Optional[dict[str, dict[str, Any]]]:
         """Fetch the levels with exponential-backoff retries (called in executor)."""
@@ -898,13 +990,13 @@ class VigilanceService(BaseServicePlugin):
             result = result[:177] + '...'
         return result
 
-    def _format_change_message(self, code: str, info: dict[str, Any], reason: str) -> str:
+    def _format_change_message(self, code: str, info: dict[str, Any], reason: str, *, label: str = 'Dept') -> str:
         if reason == 'clear':
-            return f'✅ Fin de vigilance - Dept {code} : retour au vert.'
+            return f'✅ Fin de vigilance - {label} {code} : retour au vert.'
         color = info['color']
         emoji = {'Jaune': '⚠️', 'Orange': '🟠', 'Rouge': '🔴'}[color]
         prefix = 'Rappel : ' if reason == 'reminder' else ''
-        lines = [f'{emoji} {prefix}Vigilance {color.upper()} - Dept {code}']
+        lines = [f'{emoji} {prefix}Vigilance {color.upper()} - {label} {code}']
         for item in info.get('phenomena', []):
             name = _PHENOMENON_NAMES.get(item['id'], 'Phénomène ' + item['id'])
             lines.append(f"{name} : {item['color'].lower()}")
