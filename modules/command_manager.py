@@ -11,6 +11,7 @@ import math
 import random
 import re
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -75,6 +76,17 @@ _LINK_PATTERN = re.compile(
 from .plugin_loader import PluginLoader
 from .security_utils import sanitize_name, validate_safe_path
 from .utils import check_internet_connectivity_async, decode_escape_sequences, format_keyword_response_with_placeholders
+
+
+@dataclass
+class _CommandReply:
+    manager: Any
+    message: MeshMessage
+    command_id: str
+    parts: list[str]
+
+
+_command_reply: ContextVar[_CommandReply | None] = ContextVar('command_reply', default=None)
 
 
 def _call_with_optional_user_id(method: Any, user_id: str | None) -> Any:
@@ -1889,6 +1901,8 @@ class CommandManager:
                 message.capture_sink.append(content)
                 return True
 
+            command_id = self._capture_reply(message, [content], command_id)
+
             # Store the response content for web viewer capture
             if hasattr(self, '_last_response'):
                 self._last_response = content
@@ -1917,6 +1931,16 @@ class CommandManager:
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")
             return False
+
+    def _capture_reply(self, message: MeshMessage, parts: list[str], command_id: str | None = None) -> str | None:
+        """Bind prepared replies to this invocation before waiting for radio delivery."""
+        capture = _command_reply.get()
+        if capture is not None and capture.manager is self and capture.message is message:
+            if not capture.parts and command_id:
+                capture.command_id = command_id
+            capture.parts.extend(parts)
+            return command_id or capture.command_id
+        return command_id
 
     @staticmethod
     def split_text_into_chunks(text: str, max_len: int) -> list[str]:
@@ -2105,6 +2129,8 @@ class CommandManager:
             message.capture_sink.extend(chunk for chunk in chunks if chunk)
             return True
 
+        command_id = self._capture_reply(message, chunks)
+
         rate_limit_key = self.get_rate_limit_key(message)
         if message.is_dm:
             sleep_time = self._chunk_spacing_seconds()
@@ -2116,6 +2142,7 @@ class CommandManager:
                 success = await self.send_dm(
                     message.sender_pubkey or message.sender_id or "",
                     chunk,
+                    command_id=command_id,
                     skip_user_rate_limit=skip,
                     rate_limit_key=rate_limit_key,
                     delivery_report=message.dm_delivery,
@@ -2132,6 +2159,7 @@ class CommandManager:
         return await self.send_channel_messages_chunked(
             message.channel or "",
             chunks,
+            command_id=command_id,
             skip_user_rate_limit=skip_user_rate_limit_first,
             rate_limit_key=rate_limit_key,
             scope=getattr(message, 'reply_scope', None),
@@ -2442,6 +2470,8 @@ class CommandManager:
                         self.record_command_stat(message, command_name, True)
                         return
 
+                capture = _CommandReply(self, message, f'{command_name}_{message.sender_id}_{time.time_ns()}', [])
+                capture_token = _command_reply.set(capture)
                 try:
                     # Record execution time for cooldown tracking
                     if hasattr(command, '_record_execution') and callable(command._record_execution):
@@ -2456,11 +2486,11 @@ class CommandManager:
                     # Determine if a response was sent by checking response tracking
                     response_sent = False
                     response = None
-                    if hasattr(command, 'last_response') and command.last_response:
-                        response = command.last_response
+                    if capture.parts:
+                        response = '\n'.join(capture.parts)
                         response_sent = True
-                    elif hasattr(self, '_last_response') and self._last_response:
-                        response = self._last_response
+                    elif isinstance(getattr(command, 'last_response', None), str) and command.last_response:
+                        response = command.last_response
                         response_sent = True
 
                     # Record command execution in stats database
@@ -2473,22 +2503,27 @@ class CommandManager:
                             if response is None:
                                 response = "Command executed"
 
-                            # Generate command_id for repeat tracking
-                            command_id = f"{command_name}_{message.sender_id}_{int(time.time())}"
+                            # Reuse the identity assigned before execution and radio waits.
+                            command_id = capture.command_id
 
-                            # Try to find matching transmission by content and timestamp
-                            if (hasattr(self.bot, 'transmission_tracker') and
+                            # Compatibility for plugins that only expose last_response;
+                            # normal replies already carry their exact identity on send.
+                            if (not capture.parts and hasattr(self.bot, 'transmission_tracker') and
                                 self.bot.transmission_tracker and
                                 response):
                                 # Search for recent transmission with matching content
                                 current_time = time.time()
+                                targets = ({message.sender_id, message.sender_pubkey} if message.is_dm
+                                           else {message.channel})
+                                message_type = 'dm' if message.is_dm else 'channel'
                                 matched = False
                                 for timestamp_key in range(int(current_time - 10), int(current_time + 1)):
                                     if timestamp_key in self.bot.transmission_tracker.pending_transmissions:
                                         for record in self.bot.transmission_tracker.pending_transmissions[timestamp_key]:
                                             # Match by exact content and recent timestamp to avoid false positives
                                             # Using substring matching (e.g., "ok" in "outlook") would cause incorrect correlations
-                                            if record.content == response and \
+                                            if record.content == response and record.target in targets and \
+                                               record.message_type == message_type and \
                                                abs(record.timestamp - current_time) < 10:
                                                 record.command_id = command_id
                                                 self.logger.debug(f"Linked command {command_id} to transmission: {record.message_type} to {record.target}")
@@ -2501,7 +2536,8 @@ class CommandManager:
                                 if not matched:
                                     for _packet_hash, record in self.bot.transmission_tracker.confirmed_transmissions.items():
                                         # Match by exact content and recent timestamp to avoid false positives
-                                        if record.content == response and \
+                                        if record.content == response and record.target in targets and \
+                                           record.message_type == message_type and \
                                            abs(record.timestamp - current_time) < 10:
                                             record.command_id = command_id
                                             self.logger.debug(f"Linked command {command_id} to confirmed transmission: {record.message_type} to {record.target}")
@@ -2527,12 +2563,14 @@ class CommandManager:
                     # Capture failed command for web viewer
                     if viewer := self._viewer_bridge():
                         try:
-                            command_id = f"{command_name}_{message.sender_id}_{int(time.time())}"
+                            command_id = capture.command_id
                             viewer.capture_command(
                                 message, command_name, f"Error: {e}", False, command_id
                             )
                         except Exception as capture_error:
                             self.logger.debug(f"Failed to capture failed command data: {capture_error}")
+                finally:
+                    _command_reply.reset(capture_token)
                 return
 
     def _check_internet_cached(self) -> bool:

@@ -103,6 +103,21 @@ def test_inactive_documentary_service_is_reported_as_inactive():
     assert 'pas active actuellement' in answer_source(dispatcher,'wiki',mock_message())
 
 
+def test_model_question_reads_the_initialized_model_without_exposing_endpoints():
+    command=SimpleNamespace(service=SimpleNamespace(model='qwen3.5:2b-q4_K_M',endpoint='private-endpoint'))
+    dispatcher=SimpleNamespace(_command=lambda _:command,_allowed=lambda *a,**k:True,record_function=Mock())
+    reply=answer_source(dispatcher,'assistant',mock_message())
+    assert reply=='Le modèle configuré pour Baliz est qwen3.5:2b-q4_K_M.'
+    assert 'private-endpoint' not in reply
+
+
+@pytest.mark.parametrize('model',[None,'', 'x'*200, 'model\nprivate'])
+def test_unavailable_or_invalid_model_names_are_not_invented(model):
+    command=SimpleNamespace(service=SimpleNamespace(model=model))
+    dispatcher=SimpleNamespace(_command=lambda _:command,_allowed=lambda *a,**k:True,record_function=Mock())
+    assert answer_source(dispatcher,'assistant',mock_message())==SOURCES['assistant'].text
+
+
 @pytest.mark.parametrize('route,operation,reply',[(Route.LLM,'chat','Bonjour !'),(Route.WIKI,'lookup','Réglage documenté.')])
 async def test_conversation_and_documentation_get_no_provenance_context(command_mock_bot,route,operation,reply):
     commands,_sent=setup_bot(command_mock_bot)
