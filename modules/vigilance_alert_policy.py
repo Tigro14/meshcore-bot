@@ -17,7 +17,10 @@ def fingerprint(info: dict[str, Any]) -> str:
         details: Any = ' '.join(str(info.get('summary', '')).split())
     else:
         details = sorted((str(item['id']), item['color']) for item in phenomena)
-    raw = json.dumps([info['color'], details], ensure_ascii=True, sort_keys=True)
+    values = [info['color'], details]
+    if info.get('period_date'):
+        values.extend([info['period_date'], info.get('windows', [])])
+    raw = json.dumps(values, ensure_ascii=True, sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()
 
 

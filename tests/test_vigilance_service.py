@@ -337,8 +337,8 @@ class TestFetchVigilanceSources:
         assert entries["95"]["color"] == "Orange"
         assert entries["13"]["color"] == "Jaune"
 
-    def test_a_list_without_a_cookie_stops_before_reading_other_pages(self):
-        """No structured bulletin is available, so no department is called green."""
+    def test_a_list_without_a_cookie_tries_other_departments_without_inventing_green(self):
+        """A broken page must not prevent another department from providing a session."""
         page_95 = Mock(status_code=200)
         page_95.cookies = {}
         page_95.content = ORANGE_HTML.encode("utf-8")
@@ -350,7 +350,7 @@ class TestFetchVigilanceSources:
         ) as get:
             with pytest.raises(ValueError, match="accès au bulletin"):
                 fetch_vigilance_multi(["95", "25"], "")
-        assert get.call_count == 1
+        assert get.call_count == 2
 
     def test_empty_list_raises(self):
         with patch("modules.service_plugins.vigilance_service.requests.get") as get:

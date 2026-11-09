@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from modules.vigilance_alert_policy import COLORS
+from modules.vigilance_periods import day_label, risk_lines, split_key
 
 MAX_UNDATED_VALIDITY_AGE = 86400
 
@@ -64,6 +65,7 @@ class VigilanceCache:
             if isinstance(raw, str) and raw:
                 candidate = json.loads(raw)
                 info = candidate["info"]
+                _, day = split_key(code)
                 if (
                     candidate.get("version") != 1
                     or candidate.get("department") != code
@@ -71,6 +73,7 @@ class VigilanceCache:
                     or type(candidate.get("fetched_at")) not in (int, float)
                     or not math.isfinite(candidate["fetched_at"])
                     or candidate["fetched_at"] <= 0
+                    or (day is not None and info.get('period_date') != day)
                 ):
                     raise ValueError("Invalid cached bulletin")
                 issued = publication_time(info)
@@ -93,6 +96,9 @@ class VigilanceCache:
         return deepcopy(record) if record is not None else None
 
     def put(self, code: str, info: dict[str, Any], now: float) -> bool:
+        _, day = split_key(code)
+        if day is not None and info.get('period_date') != day:
+            return False
         if not usable(info, now):
             return False
         previous = self.get(code)
@@ -140,7 +146,10 @@ class VigilanceCache:
         phenomenon_names: dict[str, str] | None = None,
         department_label: str | None = None,
     ) -> str:
-        label = department_label or f"Dept {code}"
+        department, day = split_key(code)
+        label = department_label or f"Dept {department}"
+        if day is not None:
+            label += ' - ' + day_label(day, now)
         record = self.get(code)
         if record is None:
             return f"Vigilance non actualisable - {label}. Aucun bulletin conservé. Situation actuelle inconnue."
@@ -150,9 +159,7 @@ class VigilanceCache:
         title = {"expired": "Bulletin périmé", "old": "Bulletin ancien"}.get(status, "Bulletin non actualisé")
         issued = datetime.fromtimestamp(publication_time(info), tz).strftime("%d/%m/%Y à %H:%M")
         lines = [f"{title} - {label}", f"Dernier niveau connu : {info['color'].lower()} ({issued})."]
-        for item in info.get("phenomena", []):
-            name = (phenomenon_names or {}).get(item["id"], "Phénomène " + item["id"])
-            lines.append(f"{name} : {item['color'].lower()}.")
+        lines.extend(risk_lines(info, phenomenon_names or {}))
         until = info.get("valid_until")
         if type(until) in (int, float):
             end = datetime.fromtimestamp(until, tz).strftime("%d/%m/%Y à %H:%M")

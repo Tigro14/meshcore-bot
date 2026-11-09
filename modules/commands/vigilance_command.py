@@ -19,6 +19,7 @@ from ..service_plugins.vigilance_service import (
 from ..utils import get_config_timezone
 from ..vigilance_alert_policy import COLORS, fingerprint
 from ..vigilance_cache import VigilanceCache, publication_time
+from ..vigilance_periods import calendar_days, day_label, department_label, flatten, period_key, risk_lines, split_key
 from .base_command import BaseCommand
 
 
@@ -59,6 +60,9 @@ class VigilanceCommand(BaseCommand):
         # command manager's Internet pre-check.
         self.requires_internet = not self.offline_cache
         self.bulletin_cache = VigilanceCache(getattr(bot, 'db_manager', None), self.logger)
+        self.include_tomorrow = self.get_config_value(
+            'Vigilance_Service', 'include_tomorrow', fallback=False, value_type='bool',
+        )
 
     async def execute(self, message: MeshMessage) -> bool:
         """Check the requested department, or every monitored department by default."""
@@ -72,10 +76,11 @@ class VigilanceCommand(BaseCommand):
             ))
 
             def fetch():
-                if len(departments) == 1:
+                if len(departments) == 1 and not self.include_tomorrow:
                     code = departments[0]
                     return {code: fetch_vigilance(code, api_key, delay=delay)}
-                return fetch_vigilance_multi(departments, api_key, delay=delay)
+                options = {'include_tomorrow': True} if self.include_tomorrow else {}
+                return fetch_vigilance_multi(departments, api_key, delay=delay, **options)
 
             try:
                 infos = await asyncio.get_running_loop().run_in_executor(None, fetch)
@@ -86,9 +91,12 @@ class VigilanceCommand(BaseCommand):
                 infos = {}
 
             now = time.time()
+            expected = ([period_key(code, day) for code in departments for day in calendar_days(now)]
+                        if self.include_tomorrow else departments)
+            infos = flatten(infos, self.include_tomorrow)
             current = {}
             missing = []
-            for code in departments:
+            for code in expected:
                 data = infos.get(code)
                 if (not isinstance(data, dict) or data.get('color') not in COLORS
                         or (self.offline_cache and not self.bulletin_cache.put(code, data, now))):
@@ -98,7 +106,7 @@ class VigilanceCommand(BaseCommand):
 
             replies = []
             if current:
-                if len(departments) == 1:
+                if len(departments) == 1 and not self.include_tomorrow:
                     replies.append(self._format_response(departments[0], current[departments[0]]))
                 else:
                     replies.append(self._format_current_departments(current))
@@ -106,7 +114,7 @@ class VigilanceCommand(BaseCommand):
                 if self.offline_cache:
                     replies.extend(self._historical_departments(missing, now))
                 else:
-                    replies.append(f"Vigilance non actualisable - Depts {'/'.join(sorted(missing))}.")
+                    replies.append(f"Vigilance non actualisable - Depts {department_label(sorted(missing), now)}.")
             return await self.send_response(message, '\n\n'.join(replies))
 
         except Exception as e:
@@ -131,10 +139,10 @@ class VigilanceCommand(BaseCommand):
             data = infos[codes[0]]
             color = data['color']
             emoji = {'Vert': '✅', 'Jaune': '⚠️', 'Orange': '🟠', 'Rouge': '🔴'}[color]
-            lines = [f"{emoji} Vigilance {'/'.join(sorted(codes))} : {color}"]
-            for item in data.get('phenomena', []):
-                name = _PHENOMENON_NAMES.get(item['id'], 'Phénomène ' + item['id'])
-                lines.append(f"{name} : {item['color'].lower()}")
+            department_codes = '/'.join(sorted(split_key(code)[0] for code in codes))
+            period = ' - ' + day_label(data['period_date'], time.time()) if data.get('period_date') else ''
+            lines = [f"{emoji} Vigilance {department_codes}{period} : {color}"]
+            lines.extend(risk_lines(data, _PHENOMENON_NAMES))
             replies.append('\n'.join(lines))
         return '\n'.join(replies)
 
@@ -143,7 +151,7 @@ class VigilanceCommand(BaseCommand):
         groups: dict[tuple, list[str]] = {}
         for code in codes:
             record = self.bulletin_cache.get(code)
-            key = ('missing',) if record is None else (
+            key = ('missing', split_key(code)[1]) if record is None else (
                 self.bulletin_cache.status(code, now), fingerprint(record['info']),
                 publication_time(record['info']), record['info'].get('valid_until'),
             )
@@ -151,7 +159,7 @@ class VigilanceCommand(BaseCommand):
         tz = get_config_timezone(self.bot.config, self.logger)[0]
         return [self.bulletin_cache.historical_reply(
             group[0], now, tz, phenomenon_names=_PHENOMENON_NAMES,
-            department_label=f"{'Depts' if len(group) > 1 else 'Dept'} {'/'.join(sorted(group))}",
+            department_label=f"{'Depts' if len(group) > 1 else 'Dept'} {'/'.join(sorted(split_key(code)[0] for code in group))}",
         ) for group in groups.values()]
 
     def _parse_department(self, args: str) -> str:

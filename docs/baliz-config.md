@@ -23,6 +23,10 @@ tandis que sa fonction interne reste accessible à l'assistant.
 `vigi` sans argument vérifie les **quatre départements bretons (22, 29, 35, 56)**.
 Les niveaux et phénomènes identiques sont regroupés dans la réponse. Un département
 peut toujours être demandé séparément, par exemple `vigi 29` ou `vigi 22`.
+`include_tomorrow = true` distingue les bulletins d'aujourd'hui et de demain, avec
+leurs dates et les horaires officiels disponibles. L'échec d'un département ou
+d'une journée laisse les autres s'actualiser. Les caches et alertes restent séparés
+par date ; un retour au vert aujourd'hui ne clôt pas une alerte de demain.
 
 Le profil active la surveillance horaire des départements `29,22,35,56` dans
 `[Vigilance_Service]`. Les niveaux jaune, orange et rouge sont publiés dans

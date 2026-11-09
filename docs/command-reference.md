@@ -380,6 +380,9 @@ The command has no own section, so the two cannot disagree.
 
 With `offline_cache = true`, unavailable or stale results are reported separately using
 dated historical bulletins. They are never grouped with current results or treated as green.
+Baliz enables `include_tomorrow = true`: both `vigi` and an explicit `vigi 29` distinguish
+today and tomorrow, name their dates and show official phenomenon time windows when available.
+An unavailable department/day does not discard the other successful results.
 
 **Note:** `alert` and `alerte` are not keywords of this command — they belong to
 [`alert <location>`](command-reference.md#alert-location-all).

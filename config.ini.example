@@ -2861,6 +2861,9 @@ offline_cache = false
 # Each department retains its own sent state and reminder deadline.
 group_similar_alerts = false
 
+# Keep today's and tomorrow's official bulletins and time windows separately.
+include_tomorrow = false
+
 # When true, alerts go only to Discord/Telegram webhooks, not the mesh channel.
 # Default: false
 silence_mesh_output = false

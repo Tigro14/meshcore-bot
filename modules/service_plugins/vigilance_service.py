@@ -22,6 +22,7 @@ import asyncio
 import codecs
 import contextlib
 import http.client
+import logging
 import random
 import re
 import socket
@@ -37,6 +38,17 @@ from bs4 import BeautifulSoup, Tag
 from modules.utils import get_config_timezone
 from modules.vigilance_alert_policy import VigilanceAlertPolicy, fingerprint
 from modules.vigilance_cache import AvailabilityNotices, VigilanceCache
+from modules.vigilance_periods import (
+    PARIS,
+    attach_period,
+    calendar_days,
+    day_label,
+    department_label,
+    flatten,
+    period_key,
+    risk_lines,
+    split_key,
+)
 
 from .base_service import BaseServicePlugin
 
@@ -374,7 +386,7 @@ def _fetch_product(api_key: str, timeout: int) -> dict[str, Any]:
     return payload.get('product') or {}
 
 
-def _product_entry(department: str, product: dict[str, Any]) -> dict[str, Any]:
+def _product_entry(department: str, product: dict[str, Any], *, echeance: str | None = None) -> dict[str, Any]:
     """Read one department out of the national product.
 
     Raises:
@@ -383,6 +395,8 @@ def _product_entry(department: str, product: dict[str, Any]) -> dict[str, Any]:
     code = normalize_department(department)
     domain = None
     for period in product.get('periods') or []:
+        if echeance is not None and period.get('echeance') not in ({'J', 'J0'} if echeance == 'J0' else {'J1'}):
+            continue
         for item in (period.get('timelaps') or {}).get('domain_ids') or []:
             if str(item.get('domain_id', '')).upper() == code:
                 domain = item
@@ -409,6 +423,9 @@ def _product_entry(department: str, product: dict[str, Any]) -> dict[str, Any]:
     }
     if period.get('end_validity_time'):
         result['valid_until'] = _parse_api_datetime(period['end_validity_time']).replace(tzinfo=timezone.utc).timestamp()
+    if echeance is not None:
+        day = calendar_days(time.time())[0 if echeance == 'J0' else 1]
+        return attach_period(result, day, domain.get('phenomenon_items') or [])
     return result
 
 
@@ -431,7 +448,8 @@ def _session_token(page_response: requests.Response) -> str:
 
 
 def fetch_vigilance_site_api(
-    department: str, token: str, url: str, timeout: int = 10, delay: float = 0.0
+    department: str, token: str, url: str, timeout: int = 10, delay: float = 0.0,
+    *, echeance: str | None = None,
 ) -> dict[str, Any]:
     """
     Read the level for a department from the JSON endpoint the site itself calls.
@@ -445,7 +463,7 @@ def fetch_vigilance_site_api(
         time.sleep(delay)
     response = requests.get(
         f'{_VIGILANCE_API_V3}/warning/full',
-        params={'domain': department},
+        params={'domain': department, **({'echeance': echeance, 'formatDate': 'timestamp'} if echeance else {})},
         headers={**_VIGILANCE_HEADERS, 'Authorization': f'Bearer {token}'},
         timeout=timeout,
     )
@@ -455,16 +473,20 @@ def fetch_vigilance_site_api(
     if str(data.get('domain_id', '')).upper() != normalize_department(department):
         raise ValueError('Données de vigilance indisponibles : département incorrect')
     color = _read_color(data.get('color_max'))
-    active: list[dict[str, Any]] = []
+    maxima: dict[str, int] = {}
+    for item in data.get('phenomenons_items') or []:
+        value = item.get('phenomenon_max_color_id')
+        _read_color(value)
+        maxima[str(item['phenomenon_id'])] = int(value)
     for item in data.get('timelaps') or []:
         colors = []
         for timestep in item.get('timelaps_items') or []:
             _read_color(timestep.get('color_id'))
             colors.append(int(timestep['color_id']))
-        active.append({
-            'phenomenon_id': str(item.get('phenomenon_id', '')),
-            'phenomenon_max_color_id': max(colors) if colors else 1,
-        })
+        identifier = str(item.get('phenomenon_id', ''))
+        maxima[identifier] = max([maxima.get(identifier, 1), *colors])
+    active: list[dict[str, Any]] = [{'phenomenon_id': identifier, 'phenomenon_max_color_id': color_id}
+                                    for identifier, color_id in maxima.items()]
 
     stamp = data.get('update_time')
     if isinstance(stamp, bool) or not str(stamp).isdigit() or int(stamp) <= 0:
@@ -483,6 +505,9 @@ def fetch_vigilance_site_api(
         if isinstance(until, bool) or not str(until).isdigit() or int(until) <= int(stamp):
             raise ValueError('Données de vigilance indisponibles : validité du bulletin incorrecte')
         result['valid_until'] = int(until)
+    if echeance is not None:
+        day = calendar_days(time.time())[0 if echeance == 'J0' else 1]
+        return attach_period(result, day, data.get('timelaps') or [])
     return result
 
 
@@ -506,7 +531,8 @@ def _page_entry(response: requests.Response, url: str) -> dict[str, Any]:
 
 
 def fetch_vigilance_multi(
-    codes: list[str], api_key: str = '', timeout: int = 10, delay: float = 0.0
+    codes: list[str], api_key: str = '', timeout: int = 10, delay: float = 0.0,
+    *, include_tomorrow: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """
     Fetch current vigilance data for several French departments from Météo-France.
@@ -525,36 +551,56 @@ def fetch_vigilance_multi(
     pauses.
 
     Returns code -> dict, each entry with keys: color, summary, bulletin_date, url.
-    Raises ValueError for an empty list, for an unknown department, or for an overseas
-    department without a key, and requests.exceptions.RequestException on network errors.
+    With include_tomorrow, entries contain independently dated J0/J1 periods and
+    official phenomenon windows. A failure affects only its department/period.
+    Other successful entries are returned; if all fail, the last error is raised.
+    A failed session page is retried using another configured department page.
     """
     codes = [normalize_department(code) for code in codes]
     if not codes:
         raise ValueError("No department to check")
 
-    if api_key:
-        product = _fetch_product(api_key, timeout)
-        return {code: _product_entry(code, product) for code in codes}
+    product = _fetch_product(api_key, timeout) if api_key else None
+    token = ''
+    last_error: Exception = ValueError('Données de vigilance indisponibles : accès au bulletin non obtenu')
+    if not api_key:
+        for index, code in enumerate(codes):
+            try:
+                response = _spaced_page(_page_url(code), timeout, delay if index else 0)
+                response.raise_for_status()
+                token = _session_token(response)
+                if token:
+                    break
+                raise ValueError('Données de vigilance indisponibles : accès au bulletin non obtenu')
+            except Exception as error:
+                last_error = error
+        if not token:
+            raise last_error
 
-    response = requests.get(_page_url(codes[0]), headers=_VIGILANCE_HEADERS, timeout=timeout)
-    response.raise_for_status()
-    token = _session_token(response)
-    if not token:
-        # The page is rendered by JavaScript. Its empty markup must never clear
-        # an alert just because the structured endpoint cannot be authenticated.
-        raise ValueError('Données de vigilance indisponibles : accès au bulletin non obtenu')
-
+    logger = logging.getLogger(__name__)
     entries: dict[str, dict[str, Any]] = {}
     for code in codes:
-        url = _page_url(code)
-        if len(code) != 2:
-            # Overseas department: the site's endpoint has no block for it, only the
-            # official product does, and that one needs a key.
-            raise ValueError(
-                f"Department {code} is overseas, so its level needs [Vigilance_Service] api_key"
-            )
-        entries[code] = fetch_vigilance_site_api(code, token, url, timeout, delay)
-
+        periods = []
+        for echeance in (['J0', 'J1'] if include_tomorrow else [None]):
+            try:
+                if product is not None:
+                    entry = _product_entry(code, product, echeance=echeance)
+                else:
+                    if len(code) != 2:
+                        raise ValueError(f"Department {code} is overseas, so its level needs [Vigilance_Service] api_key")
+                    options = {'echeance': echeance} if echeance is not None else {}
+                    entry = fetch_vigilance_site_api(code, token, _page_url(code), timeout, delay, **options)
+                if include_tomorrow:
+                    periods.append(entry)
+                else:
+                    entries[code] = entry
+            except Exception as error:
+                last_error = error
+                logger.warning('Vigilance fetch unavailable for dept %s period %s: %s', code, echeance or 'current', type(error).__name__)
+        if periods:
+            entries[code] = {'periods': periods}
+    if not entries:
+        raise last_error
     return entries
 
 
@@ -675,6 +721,11 @@ class VigilanceService(BaseServicePlugin):
             "help": "Keep complete bulletins locally. Announce failed updates once and label cached vigi answers as historical.",
         },
         {
+            "key": "include_tomorrow", "label": "Monitor today and tomorrow", "type": "bool",
+            "default": False,
+            "help": "Keep dated vigilance periods and official phenomenon time windows separately.",
+        },
+        {
             "key": "group_similar_alerts", "label": "Group similar alerts", "type": "bool",
             "default": False,
             "help": "In change mode, group departments due an alert with the same color and phenomena.",
@@ -699,7 +750,7 @@ class VigilanceService(BaseServicePlugin):
         # poll rather than fetched for a 404.
         overseas = [code for code in codes if len(code) != 2]
         self.departments: list[str] = codes if self.api_key else [c for c in codes if len(c) == 2]
-        # `vigi` with no argument answers for this one, so the reply stays inside the RF budget.
+        # Compatibility attribute for plugins reading the first configured department.
         self.department: str = self.departments[0] if self.departments else ''
         self.channel: str = self.bot.config.get(section, 'channel', fallback='#general').strip()
         poll_ms = self.bot.config.getint(section, 'poll_interval', fallback=28800000)
@@ -721,6 +772,7 @@ class VigilanceService(BaseServicePlugin):
         )
         self.offline_cache = self.bot.config.getboolean(section, 'offline_cache', fallback=False)
         self.group_similar_alerts = self.bot.config.getboolean(section, 'group_similar_alerts', fallback=False)
+        self.include_tomorrow = self.bot.config.getboolean(section, 'include_tomorrow', fallback=False)
         self.bulletin_cache = VigilanceCache(getattr(self.bot, 'db_manager', None), self.logger)
         self.availability = AvailabilityNotices(
             getattr(self.bot, 'db_manager', None), self.logger, self.alert_policy.namespace,
@@ -737,11 +789,11 @@ class VigilanceService(BaseServicePlugin):
 
         self.logger.info(
             "Vigilance service initialized: depts=%s channel=%s interval=%.0fs throttle=%ds "
-            "levels=%s delay=%.1fs change_mode=%s reminder=%ds offline_cache=%s group_similar=%s",
+            "levels=%s delay=%.1fs change_mode=%s reminder=%ds offline_cache=%s group_similar=%s tomorrow=%s",
             ', '.join(self.departments), self.channel, self.poll_interval_seconds,
             self.alert_throttle, ', '.join(self.alert_levels), self.request_delay,
             self.notify_on_change, self.alert_policy.reminder_seconds,
-            self.offline_cache, self.group_similar_alerts,
+            self.offline_cache, self.group_similar_alerts, self.include_tomorrow,
         )
         if not self.api_key:
             self.logger.warning(
@@ -801,13 +853,13 @@ class VigilanceService(BaseServicePlugin):
         infos = await loop.run_in_executor(None, self._fetch_with_retry)
         if not infos:
             if self.offline_cache:
-                await self._notify_availability(self.departments)
+                await self._notify_availability(self._expected_periods())
             return
 
         pending = []
         available = set()
-        for code, info in infos.items():
-            if code not in self.departments:
+        for code, info in flatten(infos, self.include_tomorrow).items():
+            if split_key(code)[0] not in self.departments:
                 continue
             if info.get('color') not in _COLOR_IDS.values() or (
                 info.get('valid_until') is not None and info['valid_until'] <= time.time()
@@ -850,16 +902,27 @@ class VigilanceService(BaseServicePlugin):
         if pending:
             await self._send_grouped_alerts(pending)
         if self.offline_cache:
-            await self._notify_availability([code for code in self.departments if code not in available])
+            await self._notify_availability([code for code in self._expected_periods() if code not in available])
+
+    def _expected_periods(self) -> list[str]:
+        if not self.include_tomorrow:
+            return self.departments
+        now = time.time()
+        today, tomorrow = calendar_days(now)
+        # The next day's map normally appears with the 06:00 bulletin. Before
+        # then, an as-yet unpublished J1 alone is not evidence of an outage.
+        future = datetime.fromtimestamp(now, PARIS).hour >= 6
+        return [period_key(code, day) for code in self.departments for day in (today, tomorrow)
+                if day == today or future or self.bulletin_cache.get(period_key(code, day)) is not None]
 
     async def _send_grouped_alerts(self, pending: list[tuple[str, dict[str, Any], str]]) -> None:
         groups: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
         for event in pending:
-            key = 'clear' if event[2] == 'clear' else fingerprint(event[1])
+            key = 'clear:' + str(event[1].get('period_date', '')) if event[2] == 'clear' else fingerprint(event[1])
             groups.setdefault(key, []).append(event)
         priority = {'Rouge': 0, 'Orange': 1, 'Jaune': 2, 'Vert': 3}
         for events in sorted(groups.values(), key=lambda g: priority[g[0][1]['color']]):
-            codes = sorted(event[0] for event in events)
+            codes = sorted(split_key(event[0])[0] for event in events)
             reason = ('clear' if events[0][1]['color'] == 'Vert' else
                       'reminder' if all(e[2] == 'reminder' for e in events) else 'change')
             info = dict(events[0][1])
@@ -881,13 +944,13 @@ class VigilanceService(BaseServicePlugin):
         if not missing:
             message = 'Actualisation de la vigilance rétablie.'
         else:
-            lines = [f"Vigilance non actualisable - Depts {'/'.join(sorted(missing))}."]
+            lines = [f"Vigilance non actualisable - Depts {department_label(sorted(missing), now)}."]
             expired = [code for code, status in statuses.items() if status == 'expired']
             if expired:
-                lines.append(f"Bulletins périmés : {'/'.join(expired)}.")
+                lines.append(f"Bulletins périmés : {department_label(expired, now)}.")
             old = [code for code, status in statuses.items() if status == 'old']
             if old:
-                lines.append(f"Bulletins anciens : {'/'.join(old)}.")
+                lines.append(f"Bulletins anciens : {department_label(old, now)}.")
             records = [self.bulletin_cache.get(code) for code in missing]
             if all(record is not None for record in records):
                 oldest = min(record['fetched_at'] for record in records if record is not None)
@@ -915,9 +978,8 @@ class VigilanceService(BaseServicePlugin):
 
         for attempt in range(max_retries):
             try:
-                data = fetch_vigilance_multi(
-                    self.departments, self.api_key, delay=self.request_delay
-                )
+                options = {'include_tomorrow': True} if self.include_tomorrow else {}
+                data = fetch_vigilance_multi(self.departments, self.api_key, delay=self.request_delay, **options)
                 if attempt > 0:
                     self.logger.info(
                         "Vigilance fetched after %d attempt(s)", attempt + 1
@@ -925,7 +987,7 @@ class VigilanceService(BaseServicePlugin):
                 else:
                     self.logger.debug(
                         "Vigilance check %s",
-                        ', '.join(f"{code} {entry['color']}" for code, entry in data.items()),
+                        ', '.join(f"{code} {entry['color']}" for code, entry in flatten(data, self.include_tomorrow).items()),
                     )
                 return data
             except transient_errors as e:
@@ -976,6 +1038,8 @@ class VigilanceService(BaseServicePlugin):
 
     def _format_message(self, code: str, info: dict[str, Any]) -> str:
         """Format a compact LoRa-friendly alert message (≤ 180 chars) for one department."""
+        if info.get('period_date'):
+            return self._format_change_message(code, info, 'new')
         color = info['color']
         emoji = {'Vert': '✅', 'Jaune': '⚠️', 'Orange': '🟠', 'Rouge': '🔴'}.get(color, '🌦️')
         lines = [f"{emoji} VIGILANCE {color.upper()}", f"Dept {code}"]
@@ -991,15 +1055,15 @@ class VigilanceService(BaseServicePlugin):
         return result
 
     def _format_change_message(self, code: str, info: dict[str, Any], reason: str, *, label: str = 'Dept') -> str:
+        code = split_key(code)[0]
+        suffix = ' - ' + day_label(info['period_date'], time.time()) if info.get('period_date') else ''
         if reason == 'clear':
-            return f'✅ Fin de vigilance - {label} {code} : retour au vert.'
+            return f'✅ Fin de vigilance - {label} {code}{suffix} : retour au vert.'
         color = info['color']
         emoji = {'Jaune': '⚠️', 'Orange': '🟠', 'Rouge': '🔴'}[color]
         prefix = 'Rappel : ' if reason == 'reminder' else ''
-        lines = [f'{emoji} {prefix}Vigilance {color.upper()} - {label} {code}']
-        for item in info.get('phenomena', []):
-            name = _PHENOMENON_NAMES.get(item['id'], 'Phénomène ' + item['id'])
-            lines.append(f"{name} : {item['color'].lower()}")
+        lines = [f'{emoji} {prefix}Vigilance {color.upper()} - {label} {code}{suffix}']
+        lines.extend(risk_lines(info, _PHENOMENON_NAMES))
         return '\n'.join(lines)
 
     async def _send_alert(self, message: str, info: dict[str, Any]) -> bool:

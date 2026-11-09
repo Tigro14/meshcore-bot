@@ -66,6 +66,7 @@ comments.
 | `reminder_interval` | Seconds before repeating an unchanged active vigilance in change mode | `86400` (24 h) |
 | `offline_cache` | Persist complete bulletins; report failed updates once and answer offline `vigi` queries with dated historical information | `false` |
 | `group_similar_alerts` | In change mode, combine departments due an alert with identical colors and phenomena | `false` |
+| `include_tomorrow` | Read and track dated bulletins for today and tomorrow, with official phenomenon time windows | `false` |
 | `flood_scope` | Optional regional TC_FLOOD scope, e.g. `#west` | inherits `[Channels]` |
 | `silence_mesh_output` | Send only to Discord/Telegram, not to the mesh channel | `false` |
 | `discord_webhook_urls` | Optional comma-separated webhook URLs | — |
@@ -203,3 +204,31 @@ The source URLs remain available to external notifications, without adding them 
 
 Baliz enables both options for Brittany. The other settings, including hourly checks and
 24-hour reminders, are unchanged.
+
+## Today, tomorrow and partial failures
+
+Baliz also enables `include_tomorrow = true`. The monitor and `vigi` read J0 and J1
+separately, using `echeance=J0`/`J1` on the site's structured endpoint or the matching
+`J`/`J0` and `J1` periods in the official national product. Source validity must match
+the requested calendar date; a missing tomorrow bulletin is never replaced by today's.
+
+The display names the date and today/tomorrow in Europe/Paris time. Official time
+windows are shown when supplied; no hours are invented for phenomena without a
+timeline. Day boundaries follow daylight saving time. Alerts with different dates
+or time windows are not combined. A changed window can generate an update.
+
+Sent state and cached bulletins are stored per destination, department and absolute
+date. Tomorrow's alert stays active if today's level returns to green. At midnight,
+the saved forecast becomes today's information for its original date, never the new
+tomorrow. Cached answers remain historical whenever updates are unavailable.
+
+Failures are isolated per department and date. Remaining valid bulletins still update
+the cache and can produce alerts. If the first department page cannot provide a
+session, another configured page is tried. Without any successful entry, the usual
+fetch error/retry handling applies. In early hours before the usual 06:00 publication,
+an unpublished next-day bulletin alone does not produce a radio outage notice; a
+previously cached next-day bulletin or a failed current-day update still does.
+
+With four departments and no API key, one session page plus eight paced JSON requests
+normally cover the two days. With an API key, one national download covers both days.
+Polling and radio reminder intervals remain unchanged. No LLM is involved.
