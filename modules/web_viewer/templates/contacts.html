@@ -2940,6 +2940,15 @@ class ModernContactsManager {
         });
     }
 
+    formatBatteryTimestamp(timestamp) {
+        if (typeof timestamp !== 'string' || !timestamp.trim()) return '-';
+        // Battery observation dates without an explicit offset are stored in UTC.
+        let text = timestamp.trim().replace(' ', 'T');
+        if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(text)) text += 'Z';
+        const date = new Date(text);
+        return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
+    }
+
     async showBatteryHistory(userId) {
         const contact = this.filteredData.find(c => c.user_id === userId);
         const username = contact ? (contact.username || 'Unknown') : 'Unknown';
@@ -2988,7 +2997,7 @@ class ModernContactsManager {
             new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: points.map(p => this.formatTimestamp(p.observed_at)),
+                    labels: points.map(p => this.formatBatteryTimestamp(p.observed_at)),
                     datasets: [{
                         label: 'Tension (V)',
                         data: points.map(p => p.voltage),

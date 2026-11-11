@@ -240,6 +240,10 @@ semantic versioning.
 
 ### Fixed
 
+- Battery history charts now load Chart.js on the Time page and use plain local
+  date labels on both Time and Contacts. UTC observation timestamps are converted
+  consistently, without HTML markup or relative times on the chart axis.
+
 - The vigilance level is read from JSON. The department page Météo-France serves is filled by
   JavaScript, so the parser had nothing to read and `vigi` answered `Vert` for every department
   — verified on a live case: the Bouches-du-Rhône were in Jaune while the bot reported Vert. The
