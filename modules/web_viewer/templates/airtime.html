@@ -126,11 +126,11 @@
                 </div>
             </div>
             <div id="ocWindows"></div>
-            <small class="form-text text-muted d-block mt-2" id="ocDisabled" style="display:none">
+            <small class="form-text text-muted mt-2" id="ocDisabled" style="display:none">
                 Recording is off. Set <code>enabled = true</code> under
                 <code>[Channel_Occupancy]</code> in config.ini; nothing is recorded until then.
             </small>
-            <small class="form-text text-muted d-block mt-2" id="ocSnapshotNote" style="display:none">
+            <small class="form-text text-muted mt-2" id="ocSnapshotNote" style="display:none">
                 What is on screen was written while recording was on; the setting is off now.
                 The age above says how long ago that was.
             </small>
@@ -180,7 +180,7 @@
 
     <section class="card mb-4" aria-labelledby="oc-analysis-title">
         <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <h2 class="h5 mb-0" id="oc-analysis-title">Occupation et attribution passives</h2>
+            <h2 class="h5 mb-0" id="oc-analysis-title">Trafic observable depuis Baliz</h2>
             <select id="oc-analysis-window" class="form-select form-select-sm" style="width:auto" aria-label="Période de l’analyse passive">
                 <option value="1h">Dernière heure</option>
                 <option value="24h" selected>Dernières 24 heures</option>
@@ -190,42 +190,49 @@
         <div class="card-body">
             <div id="oc-analysis-error" class="text-danger" role="status"></div>
             <div class="row g-3 mb-3">
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Occupation entendue</div><div class="oc-figure" id="oc-analysis-rx">—</div></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Par rapport au repère de 10 %</div><div class="oc-figure" id="oc-analysis-reference">—</div></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Paquets reçus</div><div class="oc-figure" id="oc-analysis-packets">—</div></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Airtime sans auteur identifié</div><div class="oc-figure" id="oc-analysis-unknown">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Occupation RX locale</div><div class="oc-figure" id="oc-analysis-rx">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Paquets distincts</div><div class="oc-figure" id="oc-analysis-packets">—</div><small class="text-muted" id="oc-analysis-packet-detail"></small></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Coût radio reconstitué</div><div class="oc-figure" id="oc-analysis-cost">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Paquets sans auteur identifié</div><div class="oc-figure" id="oc-analysis-unknown">—</div></div>
             </div>
             <p id="oc-analysis-coverage" class="small text-muted mb-2"></p>
-            <p class="small text-muted mb-0">Réceptions locales et émissions déduites des chemins. Les trames sont comptées en entier, sans leur contenu. Le repère de 10 % concerne chaque émetteur ; il ne constitue pas un plafond collectif du réseau.</p>
+            <p class="small text-muted mb-0">Le coût radio additionne les émissions reconstituées à l’origine et sur les chemins reçus. Il ne mesure pas l’occupation de tout le réseau.</p>
         </div>
     </section>
     <div class="card mb-4">
-        <div class="card-header"><h2 class="h5 mb-0">Trafic reçu par auteur</h2></div>
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <h2 class="h5 mb-0">Auteurs des paquets reçus</h2>
+            <select id="oc-author-sort" class="form-select form-select-sm" style="width:auto" aria-label="Classement des auteurs">
+                <option value="distinct_packets">Paquets distincts</option><option value="reconstructed_radio_airtime_ms">Coût radio reconstitué</option>
+            </select>
+        </div>
         <div class="card-body">
             <div class="table-responsive"><table class="table table-hover align-middle mb-0">
-                <thead><tr><th>Nœud</th><th>Airtime RX</th><th>Part du RX</th><th>Messages</th><th>Annonces</th><th>Autres</th><th>Paquets reçus</th></tr></thead>
+                <thead><tr><th>Nœud</th><th>Paquets distincts</th><th>Messages</th><th>Annonces</th><th>Autres</th><th>Coût radio reconstitué</th></tr></thead>
                 <tbody id="oc-authors"></tbody>
             </table></div>
-            <p class="small text-muted mt-2 mb-0">Auteurs identifiables, copies reçues comprises. Un auteur inconnu reste non attribué. Affichage des 50 premiers auteurs.</p>
+            <p class="small text-muted mt-2 mb-0" id="oc-author-coverage"></p>
         </div>
     </div>
     <div class="card mb-4">
         <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
-            <h2 class="h5 mb-0">Émissions estimées des répéteurs</h2>
+            <h2 class="h5 mb-0">Répéteurs dans les chemins reçus</h2>
             <div class="d-flex flex-wrap gap-2">
                 <input id="oc-relay-filter" class="form-control form-control-sm" style="width:auto" placeholder="Chercher un répéteur…" aria-label="Chercher un répéteur">
                 <select id="oc-relay-sort" class="form-select form-select-sm" style="width:auto" aria-label="Classement des répéteurs">
-                    <option value="airtime_ms">Airtime sur la période</option><option value="last_hour_percent">Dernière heure</option><option value="peak_hour_percent">Pic sur 1 h</option>
+                    <option value="path_packets">Participation aux chemins</option><option value="airtime_ms">Temps d’émission reconstitué</option><option value="change_percent">Évolution observée</option><option value="last_hour_percent">DC sur 1 h</option><option value="peak_hour_percent">Pic DC sur 1 h</option>
                 </select>
             </div>
         </div>
         <div class="card-body">
             <div class="table-responsive"><table class="table table-hover align-middle mb-0">
-                <thead><tr><th>Répéteur</th><th>Entendu directement</th><th>Déduit des chemins</th><th>Total sur la période</th><th>Dernière heure</th><th>Pic sur 1 h</th><th>Émissions</th></tr></thead>
+                <thead><tr><th>Répéteur</th><th>Participation</th><th>Émission reconstituée</th><th>Évolution observée</th><th>DC sur 1 h</th><th>Pic DC sur 1 h</th><th>Émissions</th></tr></thead>
                 <tbody id="oc-repeaters"></tbody>
             </table></div>
             <p class="small text-muted mt-2 mb-0" id="oc-analysis-quality"></p>
-            <p class="small text-muted mb-0">Pourcentage d’émission estimé, à comparer au repère de 10 %. Les émissions qui n’arrivent pas à Baliz manquent : un résultat faible ne garantit pas la conformité. Les routes directes et TRACE ne servent pas à reconstruire les retransmissions.</p>
+            <p class="small text-muted mb-2">La participation compte les paquets distincts dont le chemin contient ce relais. Les branches qui n’atteignent pas Baliz restent invisibles.</p>
+            <p class="small text-muted mb-2" id="oc-comparison-note"></p>
+            <p class="small text-muted mb-0">Le DC est estimé par émetteur, sur une heure, avec un repère de 10 %. Une écoute partielle ne permet pas de conclure à sa conformité.</p>
         </div>
     </div>
 </div>
@@ -259,6 +266,7 @@
             const redraw = () => { if (this.lastAnalysisData) this.renderAnalysis(this.lastAnalysisData); };
             el('oc-relay-filter').addEventListener('input', redraw);
             el('oc-relay-sort').addEventListener('change', redraw);
+            el('oc-author-sort').addEventListener('change', redraw);
             el('oc-analysis-window').addEventListener('change', () => this.loadAnalysis());
             el('oc-window').addEventListener('change', (e) => {
                 this.days = parseInt(e.target.value, 10) || 7;
@@ -395,7 +403,6 @@
             const datasets = [
                 { label: 'rx %', data: rxPoints, borderColor: style.getPropertyValue('--oc-rx').trim(), pointRadius: 2, spanGaps: false },
                 { label: 'tx %', data: txPoints, borderColor: style.getPropertyValue('--oc-tx').trim(), pointRadius: 2, spanGaps: false },
-                { label: 'Repère 10 % (par émetteur)', data: [{x:data.start_time, y:10}, {x:data.end_time, y:10}], borderColor: '#b7791f', borderDash: [6, 5], pointRadius: 0 },
             ];
 
             if (this.chart) {
@@ -413,7 +420,7 @@
                             type: 'linear',
                             ticks: { callback: (value) => new Date(value * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit' }) },
                         },
-                        y: { title: { display: true, text: 'occupancy %' }, beginAtZero: true },
+                        y: { title: { display: true, text: 'Temps d’antenne local (%)' }, beginAtZero: true },
                     },
                 },
             });
@@ -439,28 +446,43 @@
             this.lastAnalysisData = data;
             const number = value => Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
             const pct = value => value === null || value === undefined ? 'N/D' : number(value) + ' %';
-            const duration = value => formatSeconds(Number(value || 0) / 1000);
+            const duration = value => value === null || value === undefined ? 'N/D' : formatSeconds(Number(value) / 1000);
             const local = data.local;
+            const traffic = data.traffic;
             el('oc-analysis-rx').textContent = pct(local.rx_percent);
-            el('oc-analysis-reference').textContent = pct(local.reference_budget_used_percent);
-            el('oc-analysis-packets').textContent = number(local.rx_packets);
-            el('oc-analysis-unknown').textContent = local.rx_airtime_ms ? pct(local.unattributed_author_airtime_ms / local.rx_airtime_ms * 100) : 'N/D';
+            el('oc-analysis-packets').textContent = number(traffic.distinct_packets);
+            el('oc-analysis-packet-detail').textContent = number(local.rx_packets) + ' réceptions · ' + number(traffic.additional_received_copies) + ' copies supplémentaires';
+            el('oc-analysis-cost').textContent = duration(traffic.reconstructed_radio_airtime_ms);
+            el('oc-analysis-unknown').textContent = traffic.distinct_packets ? pct(traffic.unattributed_author_packets / traffic.distinct_packets * 100) : 'N/D';
             const date = timestamp => new Date(timestamp * 1000).toLocaleString('fr-FR');
             el('oc-analysis-coverage').textContent = data.coverage.first_observation_at
                 ? 'Observations du ' + date(data.coverage.first_observation_at) + ' au ' + date(data.coverage.last_observation_at) + '. Moyenne sur ' + formatSeconds(data.coverage.available_seconds) + ' d’historique disponible. Couverture partielle.' + (data.coverage.truncated ? ' Limite de traitement atteinte.' : '')
                 : 'Aucune observation exploitable sur cette période. Cela ne signifie pas une absence de trafic.';
-            const authors = data.authors.slice(0, 50).map(author => '<tr><td>' + escapeHtml(author.name) + '</td><td>' + duration(author.rx_airtime_ms) + '</td><td>' + pct(author.rx_airtime_ms / local.rx_airtime_ms * 100) + '</td>'
-                + ['messages', 'adverts', 'other'].map(kind => '<td>' + duration(author.categories[kind].airtime_ms) + '</td>').join('')
-                + '<td>' + number(author.received_packets) + '</td></tr>');
-            if (local.unattributed_author_airtime_ms) authors.push('<tr class="text-muted"><td>Auteur non identifiable</td><td>' + duration(local.unattributed_author_airtime_ms) + '</td><td>' + pct(local.unattributed_author_airtime_ms / local.rx_airtime_ms * 100) + '</td><td colspan="4">Attribution non disponible</td></tr>');
-            el('oc-authors').innerHTML = authors.join('') || '<tr><td colspan="7" class="text-muted">Aucune observation.</td></tr>';
+            const authorSort = el('oc-author-sort').value || 'distinct_packets';
+            const authorRow = author => '<tr><td>' + escapeHtml(author.name) + '</td><td>' + number(author.distinct_packets) + '</td>'
+                + ['messages', 'adverts', 'other'].map(kind => '<td>' + number(author.categories[kind].distinct_packets) + '</td>').join('')
+                + '<td>' + duration(author.reconstructed_radio_airtime_ms)
+                + (author.cost_reconstructed_packets < author.distinct_packets ? '<small class="d-block text-muted">' + number(author.cost_reconstructed_packets) + ' / ' + number(author.distinct_packets) + ' paquets reconstitués</small>' : '') + '</td></tr>';
+            const authors = data.authors.slice().sort((left, right) =>
+                Number(right[authorSort] ?? -Infinity) - Number(left[authorSort] ?? -Infinity)).slice(0, 50).map(authorRow);
+            if (traffic.unknown_author.distinct_packets) authors.push(authorRow(traffic.unknown_author));
+            el('oc-authors').innerHTML = authors.join('') || '<tr><td colspan="6" class="text-muted">Aucune observation.</td></tr>';
+            el('oc-author-coverage').textContent = 'Chaque paquet d’origine est compté une fois, même reçu par plusieurs chemins. ' + number(traffic.cost_reconstructed_packets) + ' / ' + number(traffic.distinct_packets) + ' paquets permettent une reconstitution du coût radio. Affichage des 50 premiers auteurs.';
             const query = el('oc-relay-filter').value.trim().toLocaleLowerCase();
-            const sortKey = el('oc-relay-sort').value || 'airtime_ms';
+            const sortKey = el('oc-relay-sort').value || 'path_packets';
+            const sortValue = node => sortKey === 'change_percent' ? node.trend.change_percent : node[sortKey];
             const repeaters = data.repeaters.filter(node => node.name.toLocaleLowerCase().includes(query))
-                .sort((left, right) => Number(right[sortKey] || 0) - Number(left[sortKey] || 0));
-            el('oc-repeaters').innerHTML = repeaters.map(node => '<tr><td>' + escapeHtml(node.name) + '</td><td>' + duration(node.direct_airtime_ms) + '</td><td>' + duration(node.inferred_airtime_ms) + '</td><td>' + duration(node.airtime_ms) + '</td><td class="' + (node.last_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.last_hour_percent) + '</td><td class="' + (node.peak_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.peak_hour_percent) + '</td><td>' + number(node.packets) + '</td></tr>').join('') || '<tr><td colspan="7" class="text-muted">Aucune émission attribuable.</td></tr>';
+                .sort((left, right) => Number(sortValue(right) ?? -Infinity) - Number(sortValue(left) ?? -Infinity));
+            const trend = node => node.trend.change_percent === null ? 'N/D' : (node.trend.change_percent > 0 ? '+' : '') + pct(node.trend.change_percent);
+            el('oc-repeaters').innerHTML = repeaters.map(node => '<tr><td>' + escapeHtml(node.name) + '</td><td>' + pct(node.participation_percent)
+                + '<small class="d-block text-muted text-nowrap">' + number(node.path_packets) + ' / ' + number(node.path_packets_total) + ' paquets</small></td>'
+                + '<td title="' + escapeHtml('Entendu : ' + duration(node.direct_airtime_ms) + ' · Déduit : ' + duration(node.inferred_airtime_ms)) + '">' + duration(node.airtime_ms) + '</td>'
+                + '<td>' + trend(node) + '</td><td class="' + (node.last_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.last_hour_percent) + '</td><td class="' + (node.peak_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.peak_hour_percent) + '</td><td>' + number(node.packets) + '</td></tr>').join('') || '<tr><td colspan="7" class="text-muted">Aucune émission attribuable.</td></tr>';
             const quality = data.quality;
             el('oc-analysis-quality').textContent = number(quality.ambiguous_hops) + ' passages ambigus · ' + number(quality.unknown_hops) + ' non identifiés · ' + number(quality.collapsed_inferred_copies) + ' copies déduites regroupées.';
+            el('oc-comparison-note').textContent = data.comparison.status === 'available_partial_observations'
+                ? 'Évolution du temps d’émission reconstitué par rapport à la période précédente, du ' + date(data.comparison.previous_start_time) + ' au ' + date(data.comparison.previous_end_time) + '. Les deux périodes restent partiellement observées.'
+                : 'Évolution : historique comparable insuffisant. N/D ne signifie pas une absence de trafic.';
         }
     }
 

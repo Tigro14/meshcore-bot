@@ -617,25 +617,65 @@ chmod +x restart_viewer.sh
 
 ### Passive airtime attribution
 
-The existing **Airtime** page includes local received occupancy, received traffic
-by identifiable author (messages/adverts/other), and repeater emission estimates.
+The existing **Airtime** page includes local received occupancy, distinct original
+packets by identifiable author (messages/adverts/other), reconstructed radio cost,
+and relay participation in received flood paths. Local RX/TX has no 10% reference
+line or collective duty-cycle budget. The 10% comparison belongs to each emitter.
 Contacts shows `DC ≈ … % · 1 h` for the last rolling hour, or `N/D` when no
 emission can be attributed. Discovery filters do not change that one-hour window.
 
 `GET /api/telemetry/occupancy/analysis?window=1h|24h|7d` exposes a versioned JSON
 read model for future assistant tools: `schema_version`, Unix-second period bounds,
-`units`, `method`, `coverage`, `local`, `quality`, `authors`, `repeaters`, and
+`units`, `method`, `coverage`, `local`, `traffic`, `quality`, `authors`, `repeaters`, `comparison`, and
 `limitations`. Airtime values use milliseconds; percentages are ordinary 0–100
 percentages, not fractions. Local RX averages use the available wall-clock span
 inside the requested window (coverage.available_seconds), not missing days before
 recording started; requested_window_rx_percent keeps the whole-window equivalent.
 Capture uptime remains unknown rather than treating gaps as observed silence. Each repeater includes direct/inferred airtime,
 last-hour and peak rolling-hour estimates, and `compliance: "unknown"`.
-`method.version: 2` uses exact `(t-3600, t]` windows at event timestamps, without
+`method.version: 3` uses exact `(t-3600, t]` windows at event timestamps, without
 minute buckets (`peak_resolution_seconds: null`). The peak also considers the
 hour ending at the selected period's start, using retained lookbehind events.
 `peak_hour_ending_at` identifies the first endpoint reaching that maximum.
 The 10% reference is a comparison assumption, not a per-band legal assessment.
+
+`traffic.distinct_packets` deduplicates payload fingerprints across all selected
+receptions, including repeated delivery attempts and alternate routes. Received
+copies remain in `local.rx_packets`, `traffic.received_packets` and the legacy
+author `received_packets`/`rx_airtime_ms` fields. Categories expose separate
+`distinct_packets` counts; legacy `packets`/`airtime_ms` remain receipt-based.
+Authors are ranked by distinct packets, with reconstructed cost as a secondary
+key. An identity established for one copy applies to its strong fingerprint;
+conflicting identities remain unknown for that entire original packet.
+
+`traffic.reconstructed_radio_airtime_ms` sums source and relay emission groups
+supported by selected receptions, including unidentifiable path stages. Source
+airtime is not counted again when that source is also a known repeater. Shared
+path prefixes are grouped with the same causal method as per-node estimates.
+`origin_airtime_ms`, `relay_airtime_ms` and `unresolved_relay_airtime_ms` make the
+composition explicit. Authors and categories expose reconstructed costs too.
+Unknown-author packets have a separate `traffic.unknown_author` aggregate.
+`cost_reconstructed_packets` states how many original packets support the cost;
+DIRECT/TRACE traffic has no invented path reconstruction (`null` if unavailable).
+This cumulative cost can cover simultaneous transmissions in different places;
+it is not the occupancy percentage of a shared global channel. Cost is grouped
+by reception period; per-node DC uses reconstructed emission timestamps instead.
+
+Each repeater exposes `path_packets`, `path_packets_total`, `participation_percent`
+and `trend`. Participation counts each original packet once per relay and divides
+by all distinct flood packets with a nonempty received path, including paths
+with unknown stages. A source's presence in an advert does not by itself count
+as participation in its relay path. A single packet can involve several relays,
+so participation percentages need not sum to 100. Winning paths do not reveal
+every flood branch, and a repeater's proximity cannot supply a correction factor.
+
+`comparison` describes the immediately preceding equal-duration period. When
+retained history covers both periods and processing is not truncated, per-node
+`trend.change_percent` compares reconstructed emission airtime to that node's
+previous estimate. The boundary belongs only to the current reception period.
+Absent previous observations stay `null`, never zero or infinite growth.
+Capture uptime remains unknown, so even available trends compare partial
+observations and cannot establish a change in the network's actual total load.
 
 Only decoded RF frame metadata is retained in the attribution tables. Frames are
 modelled in full, including headers and path bytes. Flood path stages are grouped

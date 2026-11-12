@@ -127,3 +127,10 @@ class TestPassiveAirtimeAPI:
         body = viewer.app.test_client().get('/airtime').data.decode()
         assert 'oc-authors' in body and 'oc-repeaters' in body
         assert 'oc-analysis-window' in body
+
+    def test_global_airtime_is_not_compared_to_a_node_duty_cycle(self, viewer):
+        body = viewer.app.test_client().get('/airtime').data.decode()
+        assert 'oc-analysis-reference' not in body
+        assert 'Repère 10 % (par émetteur)' not in body
+        assert 'Paquets distincts' in body and 'Participation' in body
+        assert 'Coût radio reconstitué' in body

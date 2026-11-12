@@ -18,7 +18,7 @@ from typing import Any
 from modules.channel_occupancy import lora_airtime_ms
 
 SCHEMA_VERSION = 1
-METHOD_VERSION = 2
+METHOD_VERSION = 3
 DEDUP_SECONDS = 60
 MAX_ROWS = 100000
 WINDOWS = {'1h': 3600, '24h': 86400, '7d': 604800}
@@ -221,8 +221,8 @@ def duty_summary(events: list[tuple[float, float, bool]], start: float, end: flo
             'last_observed_at': max(at for at, _, _ in selected)}
 
 
-def _reconstruct_emissions(evidence: list[tuple[float, float, bool, float]],
-                           *, count_since: float = -math.inf) -> tuple[list[tuple[float, float, bool]], int]:
+def _reconstruct_groups(evidence: list[tuple[float, float, bool, float]],
+                        *, count_since: float = -math.inf) -> tuple[list[dict[str, Any]], int]:
     """Match compatible observations of one relay/path, without swallowing later TX.
 
     Evidence is (received_at, hop_airtime_ms, direct, downstream_airtime_seconds).
@@ -240,22 +240,92 @@ def _reconstruct_emissions(evidence: list[tuple[float, float, bool, float]],
     collapsed = 0
     for at, ms, direct, downstream_seconds in sorted(evidence):
         if direct:
-            groups.append({'lower': at, 'upper': at, 'ms': ms, 'direct': True})
+            groups.append({'lower': at, 'upper': at, 'ms': ms, 'direct': True,
+                           'observed_in_period': at >= count_since})
             continue
         latest = at-downstream_seconds
         earliest = latest-DEDUP_SECONDS
         match = next((group for group in reversed(groups)
                       if max(group['lower'], earliest) <= min(group['upper'], latest)), None)
         if match is None:
-            groups.append({'lower': earliest, 'upper': latest, 'ms': ms, 'direct': False})
+            groups.append({'lower': earliest, 'upper': latest, 'ms': ms, 'direct': False,
+                           'observed_in_period': at >= count_since})
         else:
             match['lower'] = max(match['lower'], earliest)
             match['upper'] = min(match['upper'], latest)
+            match['observed_in_period'] |= at >= count_since
             collapsed += int(at >= count_since)
+    return groups, collapsed
+
+
+def _reconstruct_emissions(evidence: list[tuple[float, float, bool, float]],
+                           *, count_since: float = -math.inf) -> tuple[list[tuple[float, float, bool]], int]:
+    groups, collapsed = _reconstruct_groups(evidence, count_since=count_since)
     return [(group['upper'], group['ms'], group['direct']) for group in groups], collapsed
 
 
-def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: str = '24h') -> dict:
+def _traffic_summary(packets: dict[str, dict], costs: dict[str, dict], contacts: Contacts) -> tuple[dict, list]:
+    """One original packet per fingerprint, independent of received-copy multiplicity.
+
+    Radio cost sums reconstructed source + relay emission groups supported by
+    selected receptions. Unknown hop identities still have a modelled wire length;
+    their cost is counted and explicitly marked unresolved, never assigned a node.
+    Direct routing/TRACE cannot supply that reconstruction and remain unavailable.
+    """
+    def empty_author(identity: dict) -> dict:
+        return {**identity, 'distinct_packets': 0, 'received_packets': 0, 'rx_airtime_ms': 0.0,
+                'reconstructed_radio_airtime_ms': None, 'cost_reconstructed_packets': 0,
+                'identification_methods': [], 'categories': {
+                    kind: {'distinct_packets': 0, 'packets': 0, 'airtime_ms': 0.0,
+                           'reconstructed_radio_airtime_ms': None} for kind in ('messages', 'adverts', 'other')}}
+
+    authors: dict[str, dict] = {}
+    unknown = empty_author({'public_key': None, 'name': 'Auteur non identifiable', 'role': 'unknown'})
+    traffic: dict[str, Any] = {
+        'distinct_packets': len(packets), 'received_packets': 0, 'additional_received_copies': 0,
+        'identified_author_packets': 0, 'unattributed_author_packets': 0,
+        'reconstructed_radio_airtime_ms': None, 'origin_airtime_ms': 0.0, 'relay_airtime_ms': 0.0,
+        'unresolved_relay_airtime_ms': 0.0, 'cost_reconstructed_packets': 0,
+        'cost_unreconstructed_packets': 0, 'path_packets': 0, 'identifiable_path_packets': 0,
+        'categories': {kind: {'distinct_packets': 0} for kind in ('messages', 'adverts', 'other')},
+    }
+    for fingerprint, packet in packets.items():
+        author = packet['author_key']
+        item = authors.setdefault(author, empty_author(contacts.identity(author))) if author else unknown
+        category = _category(packet['kind'])
+        item['distinct_packets'] += 1
+        item['received_packets'] += packet['received_packets']
+        item['rx_airtime_ms'] += packet['rx_airtime_ms']
+        for method in packet['identification_methods']:
+            if method not in item['identification_methods']:
+                item['identification_methods'].append(method)
+        item['categories'][category]['distinct_packets'] += 1
+        item['categories'][category]['packets'] += packet['received_packets']
+        item['categories'][category]['airtime_ms'] += packet['rx_airtime_ms']
+        traffic['received_packets'] += packet['received_packets']
+        traffic['categories'][category]['distinct_packets'] += 1
+        cost = costs.get(fingerprint)
+        if cost:
+            total = cost['origin_airtime_ms'] + cost['relay_airtime_ms']
+            item['reconstructed_radio_airtime_ms'] = (item['reconstructed_radio_airtime_ms'] or 0.0) + total
+            item['cost_reconstructed_packets'] += 1
+            cat = item['categories'][category]
+            cat['reconstructed_radio_airtime_ms'] = (cat['reconstructed_radio_airtime_ms'] or 0.0) + total
+            traffic['reconstructed_radio_airtime_ms'] = (traffic['reconstructed_radio_airtime_ms'] or 0.0) + total
+            traffic['cost_reconstructed_packets'] += 1
+            for key in ('origin_airtime_ms', 'relay_airtime_ms', 'unresolved_relay_airtime_ms'):
+                traffic[key] += cost[key]
+    traffic['additional_received_copies'] = traffic['received_packets'] - len(packets)
+    traffic['unattributed_author_packets'] = unknown['distinct_packets']
+    traffic['identified_author_packets'] = len(packets) - unknown['distinct_packets']
+    traffic['cost_unreconstructed_packets'] = len(packets) - traffic['cost_reconstructed_packets']
+    traffic['unknown_author'] = unknown
+    return traffic, sorted(authors.values(), key=lambda item: (
+        item['distinct_packets'], item['reconstructed_radio_airtime_ms'] or 0.0), reverse=True)
+
+
+def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: str = '24h',
+                 _comparison: bool = True, _end_exclusive: bool = False) -> dict:
     now = time.time() if now is None else now
     seconds = WINDOWS.get(window, 86400)
     start = now-seconds
@@ -268,12 +338,16 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                    'branch_dedup_seconds': DEDUP_SECONDS, 'branch_dedup': 'causal_path_intervals',
                    'inferred_time': 'latest_compatible_upstream_time',
                    'peak_window': 'event_timestamps', 'peak_resolution_seconds': None,
-                   'reference_percent': REFERENCE_PERCENT, 'compliance': 'not_determined',
+                   'traffic_identity': 'payload_fingerprint', 'duty_reference_scope': 'per_transmitter',
+                   'traffic_cost_basis': 'emission_groups_supported_by_selected_receptions',
+                   'participation_denominator': 'distinct_flood_packets_with_nonempty_received_path',
+                   'compliance': 'not_determined',
                    'rx_denominator': 'available_wall_clock_span', 'modulation_profiles': []},
         'limitations': ['local_receiver_only', 'unheard_transmissions_not_counted',
                         'known_prefix_uniqueness_not_identity_proof', 'same_path_retries_may_be_merged_when_inferred',
                         'unobserved_forwarding_delay_is_assumed', 'inferred_transmission_time_is_estimated',
-                        'no_direct_route_or_trace_inference', 'historical_modulation_assumed_during_backfill'],
+                        'no_direct_route_or_trace_inference', 'historical_modulation_assumed_during_backfill',
+                        'winning_paths_do_not_describe_all_flood_branches', 'radio_cost_is_not_global_channel_occupancy'],
         'coverage': {'first_observation_at': None, 'last_observation_at': None,
                      'missing_intervals_are_unknown': True, 'truncated': False,
                      'capture_uptime_known': False, 'effective_start_time': start,
@@ -281,7 +355,11 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
         'local': {'rx_airtime_ms': 0.0, 'rx_packets': 0, 'rx_percent': None,
                   'unattributed_author_airtime_ms': 0.0, 'unattributed_author_packets': 0},
         'quality': {'ambiguous_hops': 0, 'unknown_hops': 0, 'excluded_route_packets': 0,
-                    'collapsed_inferred_copies': 0}, 'authors': [], 'repeaters': []}
+                    'collapsed_inferred_copies': 0}, 'authors': [], 'repeaters': [],
+        'comparison': {'status': 'insufficient_history', 'previous_start_time': start-seconds,
+                       'previous_end_time': start, 'window_seconds': seconds,
+                       'capture_uptime_known': False, 'interpretation': 'observed_traffic_only'}}
+    report['traffic'], _ = _traffic_summary({}, {}, contacts)
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='airtime_observations'").fetchone():
         return report
     retained_from = conn.execute('SELECT MIN(observed_at) FROM airtime_observations').fetchone()[0]
@@ -289,7 +367,8 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
         report['coverage']['effective_start_time'] = max(start, retained_from)
         report['coverage']['available_seconds'] = max(1.0, now-max(start, retained_from))
     columns = 'observed_at,fingerprint,packet_hash,route,payload_type,frame_bytes,payload_bytes,path_json,bytes_per_hop,airtime_ms,modulation_json,author_key'
-    rows = conn.execute(f'SELECT {columns} FROM airtime_observations WHERE observed_at>=? AND observed_at<=? '
+    end_operator = '<' if _end_exclusive else '<='
+    rows = conn.execute(f'SELECT {columns} FROM airtime_observations WHERE observed_at>=? AND observed_at{end_operator}? '
                         'ORDER BY observed_at DESC,source_id DESC LIMIT ?', (start-3600-DEDUP_SECONDS, now, MAX_ROWS+1)).fetchall()
     report['coverage']['truncated'] = len(rows) > MAX_ROWS
     rows = rows[:MAX_ROWS][::-1]
@@ -300,15 +379,30 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
         key = contacts.author(key, name)
         if key:
             links[packet_hash].append((at, key))
-    authors: dict[str, dict] = {}
+    # A strong fingerprint lets later copies identify the same original packet,
+    # but conflicting identities stay unknown rather than being split into authors.
+    author_keys: dict[str, set[str]] = defaultdict(set)
+    author_methods: dict[str, set[str]] = defaultdict(set)
+    for at, fingerprint, packet_hash, _, _, _, _, _, _, _, _, author in rows:
+        if author:
+            author_keys[fingerprint].add(author)
+            author_methods[fingerprint].add('advertisement_public_key')
+        elif packet_hash:
+            author_candidates = {key for when, key in links.get(packet_hash, []) if abs(at-when) <= DEDUP_SECONDS}
+            author_keys[fingerprint].update(author_candidates)
+            if author_candidates:
+                author_methods[fingerprint].add('correlated_decoded_message')
+    resolved_authors = {fp: next(iter(keys)) if len(keys) == 1 else None for fp, keys in author_keys.items()}
+    packets: dict[str, dict] = {}
+    path_packets: set[str] = set()
+    identified_path_packets: set[str] = set()
+    participation: dict[str, set[str]] = defaultdict(set)
     # Different wire formats / radio profiles cannot be the same physical TX.
     evidence: dict[tuple, list[tuple[float, float, bool, float]]] = defaultdict(list)
+    targets: dict[tuple, str | None] = {}
     for at, fingerprint, packet_hash, route, kind, frame_bytes, payload_bytes, path_json, bph, ms, modulation_json, author in rows:
         path = json.loads(path_json)
-        author_method = 'advertisement_public_key' if author else 'correlated_decoded_message'
-        if not author and packet_hash:
-            author_candidates = {key for when, key in links.get(packet_hash, []) if abs(at-when) <= DEDUP_SECONDS}
-            author = next(iter(author_candidates)) if len(author_candidates) == 1 else None
+        author = resolved_authors.get(fingerprint)
         if at >= start:
             local = report['local']
             profile = json.loads(modulation_json)
@@ -319,17 +413,12 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
             if report['coverage']['first_observation_at'] is None:
                 report['coverage']['first_observation_at'] = at
             report['coverage']['last_observation_at'] = at
-            if author:
-                item = authors.setdefault(author, {**contacts.identity(author), 'rx_airtime_ms': 0.0,
-                                                   'received_packets': 0, 'identification_methods': [], 'categories': {
-                                                       k: {'airtime_ms': 0.0, 'packets': 0} for k in ('messages','adverts','other')}})
-                if author_method not in item['identification_methods']:
-                    item['identification_methods'].append(author_method)
-                item['rx_airtime_ms'] += ms
-                item['received_packets'] += 1
-                item['categories'][_category(kind)]['airtime_ms'] += ms
-                item['categories'][_category(kind)]['packets'] += 1
-            else:
+            packet = packets.setdefault(fingerprint, {'author_key': author, 'kind': kind,
+                'received_packets': 0, 'rx_airtime_ms': 0.0,
+                'identification_methods': sorted(author_methods[fingerprint]) if author else []})
+            packet['received_packets'] += 1
+            packet['rx_airtime_ms'] += ms
+            if not author:
                 local['unattributed_author_airtime_ms'] += ms
                 local['unattributed_author_packets'] += 1
         if route not in ('FLOOD', 'TRANSPORT_FLOOD') or kind == 'TRACE':
@@ -345,38 +434,78 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
         downstream_ms = [0.0] * len(stage_ms)
         for count in range(len(path)-1, -1, -1):
             downstream_ms[count] = downstream_ms[count+1] + stage_ms[count+1]
-        candidates = []
-        if author and contacts.relay(author):
-            candidates.append((author, (), len(path) == 0, 0))
+        candidates: list[tuple[str | None, tuple[str, ...], bool, int]] = [
+            (author if author and contacts.relay(author) else None, (), len(path) == 0, 0)]
+        if path and at >= start:
+            path_packets.add(fingerprint)
         for index, prefix in enumerate(path):
             key, status = contacts.resolve(prefix)
             if not key or not contacts.relay(key):
                 if at >= start:
                     report['quality']['ambiguous_hops' if status == 'ambiguous' else 'unknown_hops'] += 1
-                continue
+                key = None
+            elif at >= start:
+                participation[key].add(fingerprint)
+                identified_path_packets.add(fingerprint)
             candidates.append((key, tuple(path[:index+1]), index == len(path)-1, (index+1)*bph))
         for key, chain, direct, path_bytes in candidates:
             stage = path_bytes//bph
             hop_ms = ms if direct else stage_ms[stage]
-            identity = (fingerprint, key, chain, route, bph, modulation_json)
+            identity = (fingerprint, chain, route, bph, modulation_json)
+            targets[identity] = key
             evidence[identity].append((at, hop_ms, direct, downstream_ms[stage]/1000))
     events: dict[str, list[tuple[float, float, bool]]] = defaultdict(list)
-    for (_, key, *_), observations in evidence.items():
-        reconstructed, collapsed = _reconstruct_emissions(observations, count_since=start)
-        events[key].extend(reconstructed)
-        report['quality']['collapsed_inferred_copies'] += collapsed
-    report['authors'] = sorted(authors.values(), key=lambda item: item['rx_airtime_ms'], reverse=True)
+    costs: dict[str, dict] = {}
+    for identity, observations in evidence.items():
+        fingerprint, chain, *_ = identity
+        groups, collapsed = _reconstruct_groups(observations, count_since=start)
+        key = targets[identity]
+        if key:
+            events[key].extend((group['upper'], group['ms'], group['direct']) for group in groups)
+            report['quality']['collapsed_inferred_copies'] += collapsed
+        for group in groups:
+            if group['observed_in_period']:
+                cost = costs.setdefault(fingerprint, {'origin_airtime_ms': 0.0, 'relay_airtime_ms': 0.0,
+                                                       'unresolved_relay_airtime_ms': 0.0})
+                cost['relay_airtime_ms' if chain else 'origin_airtime_ms'] += group['ms']
+                if chain and not key:
+                    cost['unresolved_relay_airtime_ms'] += group['ms']
+    report['traffic'], report['authors'] = _traffic_summary(packets, costs, contacts)
+    report['traffic']['path_packets'] = len(path_packets)
+    report['traffic']['identifiable_path_packets'] = len(identified_path_packets)
     for key, relay_events in events.items():
         duty = duty_summary(relay_events, start, now)
         if duty['packets']:
             report['repeaters'].append({**contacts.identity(key), **duty,
+                                        'path_packets': len(participation[key]),
+                                        'path_packets_total': len(path_packets),
+                                        'participation_percent': round(len(participation[key])/len(path_packets)*100, 6) if path_packets else None,
+                                        'trend': {'status': 'insufficient_history', 'change_percent': None,
+                                                  'previous_airtime_ms': None},
                                         'identification': 'unique_among_known_nodes', 'hardware_tx_counter': False})
-    report['repeaters'].sort(key=lambda item: item['airtime_ms'], reverse=True)
+    report['repeaters'].sort(key=lambda item: (item['path_packets'], item['airtime_ms']), reverse=True)
     local = report['local']
     if local['rx_packets']:
         local['requested_window_rx_percent'] = round(local['rx_airtime_ms']/1000/seconds*100, 6)
         local['rx_percent'] = round(local['rx_airtime_ms']/1000/report['coverage']['available_seconds']*100, 6)
-        local['reference_budget_used_percent'] = round(local['rx_percent']/REFERENCE_PERCENT*100, 4)
+    if _comparison and retained_from is not None and retained_from <= start-seconds:
+        if report['coverage']['truncated']:
+            report['comparison']['status'] = 'truncated'
+        else:
+            previous = build_report(conn, now=start, window=window, _comparison=False, _end_exclusive=True)
+            if previous['coverage']['truncated']:
+                report['comparison']['status'] = 'truncated'
+            else:
+                report['comparison']['status'] = 'available_partial_observations'
+                previous_nodes = {node['public_key']: node for node in previous['repeaters']}
+                for node in report['repeaters']:
+                    before = previous_nodes.get(node['public_key'])
+                    node['trend'] = {'status': 'no_previous_observation', 'change_percent': None,
+                                     'previous_airtime_ms': None}
+                    if before and before['airtime_ms'] > 0:
+                        node['trend'] = {'status': 'partial_observations',
+                            'change_percent': round((node['airtime_ms']/before['airtime_ms']-1)*100, 3),
+                            'previous_airtime_ms': before['airtime_ms']}
     return report
 
 

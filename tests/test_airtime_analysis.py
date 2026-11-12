@@ -308,7 +308,128 @@ def test_event_sweep_matches_brute_force_with_fractional_times_and_duplicates():
 def test_report_describes_refined_method_without_changing_schema(conn):
     r = report(conn)
     assert r['schema_version'] == 1
-    assert r['method']['version'] == 2
+    assert r['method']['version'] == 3
     assert r['method']['branch_dedup'] == 'causal_path_intervals'
     assert r['method']['peak_window'] == 'event_timestamps'
     assert r['method']['peak_resolution_seconds'] is None
+
+
+def test_original_packet_count_and_radio_cost_deduplicate_shared_branches(conn):
+    insert(conn, 1, packet(('aabb',)), NOW-120)
+    insert(conn, 2, packet(('aabb','bbcc')), NOW-110)
+    insert(conn, 3, packet(('aabb','ccdd')), NOW-100)
+    insert(conn, 4, {'packet_hash':'0123456789abcdef','sender':'User'}, NOW-110, kind='message')
+    r = report(conn)
+    traffic, author = r['traffic'], r['authors'][0]
+    assert traffic['distinct_packets'] == author['distinct_packets'] == 1
+    assert traffic['received_packets'] == author['received_packets'] == 3
+    assert traffic['additional_received_copies'] == 2
+    assert author['categories']['messages']['distinct_packets'] == 1
+    expected = sum(lora_airtime_ms(n, **MOD) for n in [42,44,46,46])
+    assert traffic['reconstructed_radio_airtime_ms'] == pytest.approx(expected)
+    assert author['reconstructed_radio_airtime_ms'] == pytest.approx(expected)
+    assert traffic['cost_reconstructed_packets'] == 1
+
+
+def test_participation_counts_distinct_original_packets_even_with_received_copies(conn):
+    # Two sources converge on C. Repeated receipts do not increase participation.
+    insert(conn, 1, packet(('aabb','ccdd')), NOW-120)
+    insert(conn, 2, packet(('aabb','ccdd')), NOW-110)
+    insert(conn, 3, packet(('bbcc','ccdd'), payload='ab'*40), NOW-100)
+    r = report(conn)
+    nodes = {node['public_key']:node for node in r['repeaters']}
+    assert r['traffic']['path_packets'] == 2
+    assert nodes[C]['path_packets'] == 2 and nodes[C]['participation_percent'] == 100
+    assert nodes[A]['path_packets'] == nodes[B]['path_packets'] == 1
+    assert nodes[A]['participation_percent'] == nodes[B]['participation_percent'] == 50
+    assert nodes[C]['packets'] == 3  # Distinct directly received emission attempts.
+
+
+def test_unknown_hop_cost_is_retained_without_guessing_its_identity(conn):
+    insert(conn, 1, packet(('eeee','bbcc')))
+    r = report(conn)
+    assert {node['public_key'] for node in r['repeaters']} == {B}
+    assert r['quality']['unknown_hops'] == 1
+    assert r['traffic']['unresolved_relay_airtime_ms'] == lora_airtime_ms(44, **MOD)
+    assert r['traffic']['reconstructed_radio_airtime_ms'] == pytest.approx(
+        sum(lora_airtime_ms(n, **MOD) for n in [42,44,46]))
+    assert r['traffic']['unknown_author']['distinct_packets'] == 1
+
+
+def test_advert_origin_repeater_is_not_charged_twice_in_radio_cost(conn):
+    insert(conn, 1, packet(('bbcc','ccdd'), payload=A+'00'*68, kind='ADVERT'))
+    r = report(conn)
+    assert r['traffic']['reconstructed_radio_airtime_ms'] == pytest.approx(
+        sum(node['airtime_ms'] for node in r['repeaters']))
+    assert r['authors'][0]['distinct_packets'] == 1
+    assert r['authors'][0]['categories']['adverts']['distinct_packets'] == 1
+
+
+def test_route_instructions_are_packets_but_have_no_invented_radio_cost(conn):
+    insert(conn, 1, packet(route='DIRECT'))
+    insert(conn, 2, {'packet_hash':'0123456789abcdef','sender':'User'}, kind='message')
+    r = report(conn)
+    assert r['traffic']['distinct_packets'] == 1
+    assert r['traffic']['reconstructed_radio_airtime_ms'] is None
+    assert r['traffic']['cost_unreconstructed_packets'] == 1
+    assert r['authors'][0]['reconstructed_radio_airtime_ms'] is None
+    assert r['traffic']['path_packets'] == 0
+
+
+def test_authorship_from_one_copy_applies_to_other_copies_of_same_fingerprint(conn):
+    insert(conn, 1, packet(), NOW-200)
+    insert(conn, 2, packet(('ccdd',)), NOW-20)
+    insert(conn, 3, {'packet_hash':'0123456789abcdef','sender':'User'}, NOW-20, kind='message')
+    r = report(conn)
+    assert len(r['authors']) == 1
+    assert r['authors'][0]['distinct_packets'] == 1
+    assert r['authors'][0]['received_packets'] == 2
+    assert r['traffic']['unattributed_author_packets'] == 0
+    assert r['local']['unattributed_author_airtime_ms'] == 0
+
+
+def test_conflicting_copy_authorship_remains_one_unknown_original_packet(conn):
+    insert(conn, 1, packet(), NOW-200)
+    insert(conn, 2, {'packet_hash':'0123456789abcdef','sender':'User'}, NOW-200, kind='message')
+    insert(conn, 3, packet(('ccdd',)), NOW-20)
+    insert(conn, 4, {'packet_hash':'0123456789abcdef','sender':'Relay A'}, NOW-20, kind='message')
+    r = report(conn)
+    assert r['authors'] == []
+    assert r['traffic']['unattributed_author_packets'] == 1
+    assert r['traffic']['unknown_author']['received_packets'] == 2
+
+
+def test_global_rx_has_no_per_transmitter_budget_comparison(conn):
+    insert(conn, 1, packet())
+    r = report(conn)
+    assert 'reference_budget_used_percent' not in r['local']
+    assert 'reference_percent' not in r['method']
+    assert r['method']['duty_reference_scope'] == 'per_transmitter'
+    assert all(node['reference_percent'] == 10.0 for node in r['repeaters'])
+
+
+def test_trend_uses_equal_previous_period_without_counting_boundary_twice(conn):
+    insert(conn, 1, packet(route='DIRECT', payload='ef'*40), NOW-10800)  # Retained history.
+    insert(conn, 2, packet(('aabb',)), NOW-5400)
+    insert(conn, 3, packet(('aabb',)), NOW-3600)  # In current period only.
+    insert(conn, 4, packet(('aabb',)), NOW-100)
+    r = report(conn)
+    node = next(node for node in r['repeaters'] if node['public_key'] == A)
+    assert r['comparison']['status'] == 'available_partial_observations'
+    assert node['trend']['change_percent'] == 100
+    assert node['trend']['previous_airtime_ms'] == pytest.approx(node['airtime_ms']/2)
+
+
+def test_trend_missing_previous_node_is_unknown_not_a_zero_baseline(conn):
+    insert(conn, 1, packet(route='DIRECT'), NOW-10800)
+    insert(conn, 2, packet(('bbcc',)), NOW-100)
+    node = report(conn)['repeaters'][0]
+    assert node['trend']['status'] == 'no_previous_observation'
+    assert node['trend']['change_percent'] is None
+
+
+def test_trend_with_short_history_is_not_extrapolated(conn):
+    insert(conn, 1, packet(), NOW-100)
+    r = report(conn)
+    assert r['comparison']['status'] == 'insufficient_history'
+    assert all(node['trend']['change_percent'] is None for node in r['repeaters'])
