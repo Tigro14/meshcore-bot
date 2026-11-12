@@ -85,17 +85,21 @@ When `web_viewer_password` is set, the viewer splits into an anonymous read surf
 admin surface. Everything not on the public allowlist redirects to `/login` (pages) or returns
 `401` (APIs).
 
-- **Readable without login**: Dashboard (`/`), Contacts, Mesh Graph, Region, Airtime, BBS
-  statistics, the Time synchronization page (`/time`, read-only: add/delete/toggle/Run Now are
-  hidden for anonymous visitors) and Infos. The read-only GET APIs these pages fetch are public
-  too (`/api/contacts`, `/api/regions`, `/api/bbs`, `/api/telemetry/occupancy*`,
-  `/api/clock-sync-targets-admin`); their payloads carry mesh-visible aggregates only — counts,
-  names, key prefixes, drift and battery badges, never channel keys, config or message bodies.
-- **Admin login required**: Real-time, Logs, the Settings dropdown (Radio, Scheduled Messages,
+- **Readable without login**: Dashboard (`/`), Contacts, Mesh Graph, Real-time, Region,
+  Airtime, BBS statistics, the Time synchronization page (`/time`, read-only:
+  add/delete/toggle/Run Now are hidden for anonymous visitors) and Infos. The read-only GET
+  APIs these pages fetch are public too (`/api/contacts`, `/api/regions`, `/api/bbs`,
+  `/api/telemetry/occupancy*`, `/api/clock-sync-targets-admin`, `/api/packets/by-hash/<hash>`);
+  their payloads carry mesh-visible data only — counts, names, key prefixes, drift and battery
+  badges, packet ciphertext with radio metadata, never channel keys, config or unpublished
+  message bodies.
+- **Admin login required**: Logs, the Settings dropdown (Radio, Scheduled Messages,
   Greeter, Feeds, Region Warnings, Plugins, Config), the Multibyte monitor, the Time target
   editor (`/time/admin`), every mutating API, per-target sync history (`GET
   /api/clock-sync-targets-admin/<id>/history`), the Run Now action, battery history (`GET
-  /api/battery/<key>/history`) and the live Socket.IO streams.
+  /api/battery/<key>/history`) and the live Socket.IO log stream. Real-time's live traffic
+  streams are open to anonymous sockets but filtered per channel: unpublished messages,
+  hidden-channel commands and private bot replies reach admin sessions only.
 
 ## Reverse Proxy With Nginx Basic Auth
 
@@ -277,7 +281,11 @@ window; older days stay frozen at the value recorded then.
 
 ### Real-time
 
-One tape of what the bot's radio is hearing, newest first. It needs an admin session when `web_viewer_password` is set, because it shows decrypted channel traffic.
+One tape of what the bot's radio is hearing, newest first. It is readable without login.
+What anonymous visitors see is bounded by the same consent rules as every other public
+surface: messages and commands only on channels marked publishable, private bot replies
+and hidden-channel commands reserved to admin sessions, and packets as ciphertext plus
+radio metadata — never server-side plaintext.
 
 - **Receiver strip.** Whether the bot is listening (or reconnecting, or the radio is offline or not responding), when it last heard a packet, packets per minute, and a bar per 30 seconds for the last 10 minutes. Time before the page saw its first packet is drawn as a hairline, not as quiet.
 - **One row per transmission.** A packet, the message decrypted from it and a command it triggered share one row, joined by packet hash. The bot's reply hangs under the command with how many times a repeater was heard echoing it back; those echoes don't get rows of their own. A packet heard several times is one row with a count, and opening it lists every reception with its SNR, RSSI, hops and path. Where no hash ties a command to its message (rows stored before the hashes existed), they are joined only when sender, channel and text match exactly within 20 seconds.

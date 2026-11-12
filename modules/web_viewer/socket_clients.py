@@ -53,15 +53,12 @@ class SocketClientsMixin:
                     self.logger.warning("Connect event received but client_id is None")
                     return False
 
-                # Reject unauthenticated SocketIO connections when auth is enabled.
-                # Live packet/message/log streams stay admin-only — they can carry
-                # decrypted channel traffic and operator logs (deviation from #240).
-                if self.web_viewer_password and not session.get('authenticated_admin'):
-                    self.logger.warning(f"Rejected unauthenticated SocketIO connection from {client_id}")
-                    with suppress(Exception):
-                        disconnect()
-                    return False
-
+                # Issue #240 reopen: the Real-time traffic tape is anonymous-readable.
+                # Live command/packet/message streams honor the per-channel consent
+                # policy (and packets carry ciphertext, never server-side plaintext);
+                # the log stream and the private bot replies stay admin-only.
+                # Without a configured password the viewer is fully open (legacy mode).
+                is_admin = bool(not self.web_viewer_password or session.get('authenticated_admin'))
                 self.logger.info(f"Client connected: {client_id}")
 
                 with self._clients_lock:
@@ -77,6 +74,7 @@ class SocketClientsMixin:
                     # Track client
                     self.connected_clients[client_id] = {
                         'admin_login_id': session.get('admin_login_id'),
+                        'admin': is_admin,
                         'connected_at': time.time(),
                         'last_activity': time.time(),
                         'subscribed_commands': False,
@@ -121,7 +119,11 @@ class SocketClientsMixin:
                 self.logger.debug(f"Client {client_id} subscribed to commands")
                 # Replay recent command history so the page isn't blank on load (BUG-023 fix)
                 try:
-                    self._replay_packet_stream("type = 'command'", lambda _type: 'command_data')
+                    self._replay_packet_stream(
+                        "type = 'command'",
+                        lambda _type: 'command_data',
+                        admin=self._client_is_admin(client_id),
+                    )
                 except Exception as e:
                     self.logger.warning(f"Error replaying command history: {e}", exc_info=True)
             except Exception as e:
@@ -138,6 +140,7 @@ class SocketClientsMixin:
                     self._replay_packet_stream(
                         "type IN ('packet','command','routing')",
                         lambda _type: 'command_data' if _type == 'command' else 'packet_data',
+                        admin=self._client_is_admin(client_id),
                     )
                 except Exception as e:
                     self.logger.warning(f"Error replaying packet history: {e}", exc_info=True)
@@ -172,6 +175,14 @@ class SocketClientsMixin:
             """Handle live log stream subscription — also sends last 200 log lines to the new subscriber."""
             try:
                 client_id = self._mark_subscribed('subscribed_logs')
+                # The log stream carries operator log lines: admin-only, unlike
+                # the consent-filtered traffic streams the Realtime page reads.
+                if not self._client_is_admin(client_id):
+                    self.logger.warning(f"Rejected anonymous log subscription from {client_id}")
+                    with suppress(Exception):
+                        emit('error', {'message': 'Log stream requires admin authentication'})
+                        disconnect()
+                    return
                 self.logger.debug(f"Client {client_id} subscribed to logs")
                 # Send recent log history so the page isn't blank on load
                 log_file = ''
@@ -226,11 +237,18 @@ class SocketClientsMixin:
                 self.connected_clients[client_id][flag] = True
         return client_id
 
-    def _replay_packet_stream(self, where: str, event_for_type) -> None:
+    def _client_is_admin(self, client_id) -> bool:
+        """Whether a tracked Socket.IO client was opened with an admin session."""
+        with self._clients_lock:
+            info = self.connected_clients.get(client_id)
+        return bool(info and info.get('admin', True))
+
+    def _replay_packet_stream(self, where: str, event_for_type, admin: bool = True) -> None:
         """Emit the newest 50 packet_stream rows matching *where* to the requesting client, oldest first.
 
         ``event_for_type`` maps a row's type to its event name; rows whose data
-        does not parse are skipped.
+        does not parse are skipped. ``admin`` selects the policy tier: private
+        bot replies are replayed only to admin clients.
         """
         with closing(sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)) as _conn:
             _conn.row_factory = sqlite3.Row
@@ -252,7 +270,7 @@ class SocketClientsMixin:
                 event = event_for_type(row['type'])
                 if event == 'packet_data':
                     data = encrypted_packet_view(data)
-                elif not self._can_publish_channel_data(data, command=event == 'command_data'):
+                elif not self._can_publish_channel_data(data, command=event == 'command_data', admin=admin):
                     continue
                 emit(event, data)
             except (json.JSONDecodeError, KeyError, TypeError):

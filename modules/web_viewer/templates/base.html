@@ -747,7 +747,7 @@
     {% block extra_css %}{% endblock %}
 </head>
 
-<body data-is-admin="{{ 'true' if (not auth_enabled or is_admin) else 'false' }}">
+<body data-is-admin="{{ 'true' if (not auth_enabled or is_admin) else 'false' }}" data-live-socket="{{ 'true' if request.path == '/realtime' else 'false' }}">
     <a class="skip-link" href="#main-content">Skip to content</a>
     <script nonce="{{ g.csp_nonce }}">
         // Font Awesome draws its glyphs as CSS content, which screen readers
@@ -809,13 +809,13 @@
                             <i class="fas fa-tachometer-alt"></i> Dashboard
                         </a>
                     </li>
-                    {% if not auth_enabled or is_admin %}
+                    {#- Ungated: Realtime is on the anonymous read surface; its
+                        streams carry consent-filtered traffic only. -#}
                     <li class="nav-item">
                         <a class="nav-link {{ 'active' if request.path == '/realtime' }}" href="/realtime">
                             <i class="fas fa-broadcast-tower"></i> Real-time
                         </a>
                     </li>
-                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link {{ 'active' if request.path == '/contacts' }}" href="/contacts">
                             <i class="fas fa-users"></i> Contacts
@@ -1386,9 +1386,13 @@
                 this.lastActivity = null;
                 this.pingInterval = null;
 
-                // Live Socket.IO stays admin-only when a password is configured
-                // (packet/message streams can include private mesh traffic).
-                if (IS_ADMIN) {
+                // The shared socket feeds live traffic streams. Admin sessions
+                // always connect; anonymous sessions connect only on pages whose
+                // streams are consent-filtered (/realtime). Server-side tiering
+                // is authoritative: the anonymous tier never receives private
+                // replies, unpublished-channel traffic, or the log stream.
+                const liveSocket = IS_ADMIN || document.body.dataset.liveSocket === 'true';
+                if (liveSocket) {
                     this.initializeSocket();
                     this.startPingInterval();
                 } else {

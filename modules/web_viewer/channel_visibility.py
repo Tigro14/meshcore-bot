@@ -54,11 +54,12 @@ def message_identity(conn, name):
     return next(iter(candidates)) if len(candidates) == 1 else None
 
 
-def can_publish(conn, data, *, command=False):
+def can_publish(conn, data, *, command=False, admin=False):
     if not isinstance(data, dict):
         return False
-    if command and (data.get("is_dm") is True or data.get("channel") in (None, "DM", "Direct Message")):
-        # The existing admin command monitor still handles private bot replies.
+    if admin and command and (data.get("is_dm") is True or data.get("channel") in (None, "DM", "Direct Message")):
+        # Private bot replies stay on the admin command monitor; anonymous
+        # viewers never receive them (admin=False is fail-closed).
         return True
     if data.get("is_dm"):
         return False

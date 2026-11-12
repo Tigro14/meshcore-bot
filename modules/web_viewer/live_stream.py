@@ -43,30 +43,47 @@ class LiveStreamMixin:
                 if client_info.get(flag, False)
             ]
 
-    def _can_publish_channel_data(self, data, *, command=False):
+    def _tiered_subscribed_clients(self, flag: str) -> tuple[list, list]:
+        """(admin_sids, anonymous_sids) of connected clients with ``flag`` set."""
+        with self._clients_lock:
+            admins, anonymous = [], []
+            for client_id, client_info in self.connected_clients.items():
+                if not client_info.get(flag, False):
+                    continue
+                (admins if client_info.get('admin', True) else anonymous).append(client_id)
+            return admins, anonymous
+
+    def _can_publish_channel_data(self, data, *, command=False, admin=True):
         """Whether this row may leave the server to a browser.
 
         Consent is per channel and stored by name plus key; anything without a
         stored identity (legacy history, DMs) stays on the server.
+        ``admin=True`` keeps the legacy exception that lets private bot replies
+        reach the admin command monitor; anonymous viewers never get it.
         """
         try:
             with closing(self._get_db_connection()) as conn:
-                return can_publish(conn, data, command=command)
+                return can_publish(conn, data, command=command, admin=admin)
         except Exception:
             self.logger.warning('Channel visibility unavailable; withholding web message')
             return False
 
     def _handle_command_data(self, command_data):
         """Handle incoming command data from bot"""
-        if not self._can_publish_channel_data(command_data, command=True):
+        admin_clients, anonymous_clients = self._tiered_subscribed_clients('subscribed_commands')
+        if not admin_clients and not anonymous_clients:
+            return
+        if self._can_publish_channel_data(command_data, command=True, admin=False):
+            targets = admin_clients + anonymous_clients
+        elif self._can_publish_channel_data(command_data, command=True, admin=True):
+            # Private bot replies and unstamped commands: admin sockets only.
+            targets = admin_clients
+        else:
             return
         try:
-            # Broadcast to subscribed clients
-            subscribed_clients = self._subscribed_clients('subscribed_commands')
-
-            if subscribed_clients:
-                self.socketio.emit('command_data', command_data, room=None)
-                self.logger.debug(f"Broadcasted command data to {len(subscribed_clients)} clients")
+            for client_id in targets:
+                self.socketio.emit('command_data', command_data, to=client_id)
+            self.logger.debug(f"Broadcasted command data to {len(targets)} clients")
         except Exception as e:
             self.logger.error(f"Error handling command data: {e}")
 
@@ -74,11 +91,12 @@ class LiveStreamMixin:
         """Handle incoming packet data from bot"""
         packet_data = encrypted_packet_view(packet_data)
         try:
-            # Broadcast to subscribed clients
+            # Emit per subscriber so unconnected pages never receive the feed
             subscribed_clients = self._subscribed_clients('subscribed_packets')
 
+            for client_id in subscribed_clients:
+                self.socketio.emit('packet_data', packet_data, to=client_id)
             if subscribed_clients:
-                self.socketio.emit('packet_data', packet_data, room=None)
                 self.logger.debug(f"Broadcasted packet data to {len(subscribed_clients)} clients")
         except Exception as e:
             self.logger.error(f"Error handling packet data: {e}")

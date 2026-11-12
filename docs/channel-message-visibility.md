@@ -53,11 +53,12 @@ stored messages are not erased or rewritten, and retention settings are unchange
 - `POST /radio/api/channels`: channel creation, with publication disabled unless
   `live_messages_visible` is explicitly `true`.
 
-The legacy channel-creation endpoint cannot enable publication. Management routes
-keep the viewer's authentication and CSRF protections. If authentication is
+The legacy channel-creation endpoint cannot enable publication. Management routes keep the viewer's authentication and CSRF protections. If authentication is
 provided by a reverse proxy, protect `/radio/` as well as the Radio page itself.
-The existing admin-only Socket.IO behavior when a viewer password is configured
-is preserved.
+Anonymous Socket.IO clients may subscribe to the Realtime traffic streams, but every row on
+them passes this policy first: unpublished messages and hidden-channel commands stay on the
+server, private bot replies reach admin sessions only, and the Socket.IO log stream remains
+admin-only.
 
 Migration 25 adds `channel_web_visibility`; no configuration-file setting or
 existing migration is changed.

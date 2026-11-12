@@ -938,13 +938,16 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             '/api/stream_data',
         ])
 
-        # Issue #240 public HTML surface. Realtime is admin-only: its live socket
-        # is, so an anonymous visit would only ever show an empty page.
+        # Issue #240 public HTML surface. Realtime joins the public surface: its
+        # live socket now admits anonymous clients, and every stream it reads is
+        # consent-filtered — messages and commands only for channels the operator
+        # published, packets as ciphertext plus radio metadata (never server-side
+        # plaintext). The log stream stays admin-only.
         # Read-only explainers (regions, airtime, time, infos, bbs) join the
         # public surface: every card they render is fed by the public GET APIs
         # below, and their write controls are hidden from anonymous visitors.
         _PUBLIC_PAGE_PATHS = frozenset([
-            '/', '/contacts', '/mesh',
+            '/', '/contacts', '/mesh', '/realtime',
             '/regions', '/airtime', '/bbs', '/time', '/infos',
         ])
 
@@ -984,6 +987,12 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             # POST/PUT/DELETE and the per-target history/run-now routes stay admin.
             '/api/clock-sync-targets-admin',
         ])
+
+        # Read-only GET helpers with a parameterized path, matched by prefix.
+        # /api/packets/by-hash/<hash> is Realtime's late packet lookup; its
+        # payload is passed through encrypted_packet_view, like the socket's
+        # packet stream: ciphertext and radio metadata, never plaintext.
+        _PUBLIC_API_GET_PREFIXES = ('/api/packets/by-hash/',)
 
         # Read-only POST helpers used by public Contacts / Mesh info panels.
         _PUBLIC_API_POST_PATHS = frozenset([
@@ -1025,6 +1034,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             # body, so they are as safe as the GET they shadow.
             if request.method in ('GET', 'HEAD', 'OPTIONS') and (
                 path in _PUBLIC_PAGE_PATHS or path in _PUBLIC_API_GET_PATHS
+                or path.startswith(_PUBLIC_API_GET_PREFIXES)
             ):
                 return
             if request.method in ('POST', 'OPTIONS') and path in _PUBLIC_API_POST_PATHS:
@@ -3244,8 +3254,11 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             far less for packets than for messages. The hash is only inside the
             row's JSON, so ``near`` (the message's epoch time) bounds the scan to
             the timestamp index. Rows come back marked as replayed, like the
-            socket replay's.
+            socket replay's. The route is anonymous-readable, so each row passes
+            through ``encrypted_packet_view`` exactly like the socket's packets.
             """
+            from modules.web_viewer.channel_visibility import encrypted_packet_view
+
             if not PACKET_HASH_RE.fullmatch(packet_hash):
                 return jsonify({'error': 'Invalid packet hash'}), 400
             try:
@@ -3275,7 +3288,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 if isinstance(data, dict):
                     data['stream_ts'] = row['timestamp']
                     data['replayed'] = True
-                    packets.append(data)
+                    packets.append(encrypted_packet_view(data))
             return jsonify({'packets': packets})
 
         # ── Export ──────────────────────────────────────────────────────────
