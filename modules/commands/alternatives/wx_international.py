@@ -1040,10 +1040,17 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             parts.append(f"{int(temperature)}°")
             speed = value('wind_speed_10m')
             direction = value('wind_direction_10m')
+            # Hourly lines keep their wind bare: a unit on every line would
+            # push whole hours out of the message, and the reply's other
+            # lines already show the unit.
             if speed is not None and direction is not None:
                 parts.append(f"{self._without_arrow(self._degrees_to_direction(direction))}{int(speed)}")
             lines.append(" ".join(parts))
         return self._pack_hourly_lines(lines, max_length)
+
+    def _wind_unit_label(self) -> str:
+        """The configured wind_speed_unit as the catalog spells it: mph, km/h, m/s, kn."""
+        return self.translate(f'services.weather_service.wind_speed_units.{self.wind_speed_unit}')
 
     def _open_meteo_current(self, data: dict, max_length: int, temp_symbol: str) -> Optional[str]:
         """Current conditions for the default gwx reply, with extra conditions when they fit.
@@ -1103,12 +1110,15 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             feels_str = self.translate('commands.gwx.feels_like', value=feels_like, unit=temp_symbol)
             weather += f" {feels_str}"
 
-        # Add wind info (always show if >= 3 mph, show gusts if significant)
+        # Add wind info (always show if >= 3 mph, show gusts if significant).
+        # Every wind number carries its unit: a bare "⬆️N9G22" left the unit,
+        # and the 9 itself, to be guessed.
         if wind_speed is not None and wind_speed >= 3:
-            weather += f" {wind_direction}{wind_speed}"
+            wind_unit = self._wind_unit_label()
+            weather += f" {wind_direction}{wind_speed} {wind_unit}"
             if wind_gusts is not None and wind_gusts > wind_speed + 3:
-                gust_str = self.translate('commands.gwx.gust', value=wind_gusts)
-                weather += gust_str
+                gust_str = self.translate('commands.gwx.gust', value=wind_gusts, unit=wind_unit)
+                weather += f" {gust_str}"
 
         # Add humidity
         if humidity is not None:
@@ -1301,11 +1311,12 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             if len(daily.get('wind_speed_10m_max', [])) > 1:
                 wind_speed = int(daily['wind_speed_10m_max'][1])
                 if wind_speed >= 3:
-                    wind_info = f" {wind_speed}"
+                    wind_unit = self._wind_unit_label()
+                    wind_info = f" {wind_speed} {wind_unit}"
                     if len(daily.get('wind_gusts_10m_max', [])) > 1:
                         wind_gusts = int(daily['wind_gusts_10m_max'][1])
                         if wind_gusts > wind_speed + 3:
-                            gust_info = self.translate('commands.gwx.gust', value=wind_gusts)
+                            gust_info = f" {self.translate('commands.gwx.gust', value=wind_gusts, unit=wind_unit)}"
 
             # Get precipitation probability and amount
             precip_info = ""

@@ -267,7 +267,7 @@
       "visibility_km": "👁️{value}км",
       "pressure": "📊{value}гПа",
       "pressure_mmhg": "📊{value} мм рт. ст.",
-      "gust": "G{value}",
+      "gust": "G{value} {unit}",
       "day_abbrev": {
         "Monday": "Пн",
         "Tuesday": "Вт",

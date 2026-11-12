@@ -346,6 +346,7 @@
         "Sunday": "Di"
       },
       "feels_like": "(ressenti {value}{unit})",
+      "gust": "raf. {value} {unit}",
       "hourly_not_available": "Prévisions horaires non disponibles",
       "source_option_not_available": "Non disponible pour cette source météo",
       "mqtt_forecast_not_supported": "Les prévisions étendues ne sont pas disponibles pour les sources météo MQTT",

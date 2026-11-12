@@ -279,7 +279,7 @@
       "visibility_km": "👁️{value}km",
       "pressure": "📊{value}hPa",
       "pressure_mmhg": "📊{value}mmHg",
-      "gust": "G{value}",
+      "gust": "G{value} {unit}",
       "day_abbrev": {
         "Monday": "M",
         "Tuesday": "T",
