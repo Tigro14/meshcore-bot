@@ -782,7 +782,11 @@ class WeatherService(BaseServicePlugin):
                         data = fetched
                         store_open_meteo_payload(self.logger, db_manager, params, data)
                     else:
-                        self.logger.warning(f"Error fetching weather from Open-Meteo: HTTP {response.status_code}")
+                        self.logger.warning(
+                            "Error fetching weather from Open-Meteo: HTTP "
+                            f"{response.status_code} - "
+                            f"{(response.text if isinstance(response.text, str) else '')[:180]}"
+                        )
                         retryable = response.status_code in TRANSIENT_FORECAST_HTTP_STATUSES
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     self.logger.warning(f"Timeout/connection error fetching weather: {e}")

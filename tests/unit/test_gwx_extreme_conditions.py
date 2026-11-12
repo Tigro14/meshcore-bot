@@ -51,11 +51,15 @@ def _data(cmd, **current):
 def _run(cmd, data, forecast_type="default", ok=True):
     response = Mock(ok=ok, status_code=503 if not ok else 200)
     response.json.return_value = data
-    with patch(f"{MODULE}.requests.get", return_value=response) as get:
+    with patch(f"{MODULE}.requests.get", return_value=response) as get, patch(f"{MODULE}.time.sleep"):
         result = cmd._get_weather_for_location_sync(
             "Test City", forecast_type=forecast_type, num_days=2, message=Mock()
         )
-    get.assert_called_once()
+    if ok:
+        get.assert_called_once()
+    else:
+        # A 503 is retried once before giving up (see tests/unit/test_openmeteo_cache.py).
+        assert get.call_count == 2
     assert get.call_args.kwargs["params"]["temperature_unit"] == cmd.temperature_unit
     assert get.call_args.kwargs["params"]["wind_speed_unit"] == cmd.wind_speed_unit
     cmd.logger.error.assert_not_called()
