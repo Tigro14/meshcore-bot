@@ -4,6 +4,10 @@
    [
     "error",
     "Error fetching Open-Meteo weather: edge connection lost"
+   ],
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
    ]
   ],
   "params": {
@@ -18,14 +22,18 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-default-http": {
   "logs": [
    [
     "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
+   ],
+   [
+    "warning",
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -40,7 +48,7 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-default-json": {
@@ -87,6 +95,10 @@
    [
     "error",
     "Error fetching Open-Meteo weather: edge timeout"
+   ],
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ]
   ],
   "params": {
@@ -101,11 +113,15 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-multiday-connection": {
   "logs": [
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
+   ],
    [
     "error",
     "Error fetching Open-Meteo weather: edge connection lost"
@@ -123,14 +139,18 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-multiday-http": {
   "logs": [
    [
     "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
+   ],
+   [
+    "warning",
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -145,7 +165,7 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-multiday-json": {
@@ -192,6 +212,10 @@
    [
     "error",
     "Error fetching Open-Meteo weather: edge timeout"
+   ],
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ]
   ],
   "params": {
@@ -206,11 +230,15 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-tomorrow-connection": {
   "logs": [
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
+   ],
    [
     "error",
     "Error fetching Open-Meteo weather: edge connection lost"
@@ -228,14 +256,18 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-tomorrow-http": {
   "logs": [
    [
     "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
+   ],
+   [
+    "warning",
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -250,7 +282,7 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-tomorrow-json": {
@@ -297,6 +329,10 @@
    [
     "error",
     "Error fetching Open-Meteo weather: edge timeout"
+   ],
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ]
   ],
   "params": {
@@ -311,11 +347,15 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-default-connection": {
   "logs": [
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
+   ],
    [
     "error",
     "Error fetching Open-Meteo weather: edge connection lost"
@@ -334,14 +374,18 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-default-http": {
   "logs": [
    [
     "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
+   ],
+   [
+    "warning",
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -357,7 +401,7 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-default-json": {
@@ -406,6 +450,10 @@
    [
     "error",
     "Error fetching Open-Meteo weather: edge timeout"
+   ],
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ]
   ],
   "params": {
@@ -421,11 +469,15 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-multiday-connection": {
   "logs": [
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
+   ],
    [
     "error",
     "Error fetching Open-Meteo weather: edge connection lost"
@@ -444,14 +496,18 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-multiday-http": {
   "logs": [
    [
     "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
+   ],
+   [
+    "warning",
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -467,7 +523,7 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-multiday-json": {
@@ -516,6 +572,10 @@
    [
     "error",
     "Error fetching Open-Meteo weather: edge timeout"
+   ],
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ]
   ],
   "params": {
@@ -531,11 +591,15 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-tomorrow-connection": {
   "logs": [
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
+   ],
    [
     "error",
     "Error fetching Open-Meteo weather: edge connection lost"
@@ -554,14 +618,18 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-tomorrow-http": {
   "logs": [
    [
     "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
+   ],
+   [
+    "warning",
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -577,7 +645,7 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-tomorrow-json": {
@@ -626,6 +694,10 @@
    [
     "error",
     "Error fetching Open-Meteo weather: edge timeout"
+   ],
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ]
   ],
   "params": {
@@ -641,11 +713,15 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-default-connection": {
   "logs": [
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
+   ],
    [
     "error",
     "Error fetching Open-Meteo weather: edge connection lost"
@@ -664,14 +740,18 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-default-http": {
   "logs": [
    [
     "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
+   ],
+   [
+    "warning",
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -687,7 +767,7 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-default-json": {
@@ -736,6 +816,10 @@
    [
     "error",
     "Error fetching Open-Meteo weather: edge timeout"
+   ],
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ]
   ],
   "params": {
@@ -751,11 +835,15 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-multiday-connection": {
   "logs": [
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
+   ],
    [
     "error",
     "Error fetching Open-Meteo weather: edge connection lost"
@@ -774,14 +862,18 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-multiday-http": {
   "logs": [
    [
     "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
+   ],
+   [
+    "warning",
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -797,7 +889,7 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-multiday-json": {
@@ -846,6 +938,10 @@
    [
     "error",
     "Error fetching Open-Meteo weather: edge timeout"
+   ],
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ]
   ],
   "params": {
@@ -861,11 +957,15 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-tomorrow-connection": {
   "logs": [
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
+   ],
    [
     "error",
     "Error fetching Open-Meteo weather: edge connection lost"
@@ -884,14 +984,18 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-tomorrow-http": {
   "logs": [
    [
     "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
+   ],
+   [
+    "warning",
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -907,7 +1011,7 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-tomorrow-json": {
@@ -956,6 +1060,10 @@
    [
     "error",
     "Error fetching Open-Meteo weather: edge timeout"
+   ],
+   [
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ]
   ],
   "params": {
@@ -971,7 +1079,7 @@
    "timezone": "auto",
    "wind_speed_unit": "mph"
   },
-  "requests": 1,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  }
 }

@@ -209,8 +209,9 @@ def _payload():
     }
 
 
-def _response(payload, ok=True):
-    return Mock(ok=ok, status_code=200 if ok else 503, json=Mock(return_value=payload))
+def _response(payload, ok=True, status=None, text=''):
+    return Mock(ok=ok, status_code=200 if ok else (503 if status is None else status),
+                text=text, json=Mock(return_value=payload))
 
 
 def _gwx(weather=None):
@@ -226,7 +227,8 @@ def _gwx(weather=None):
 
 
 def _call(cmd, get_mock, lat, lon, **kwargs):
-    with patch(f"{MODULE}.requests.get", get_mock):
+    # The fetch hardening retries with a short backoff; tests must not actually sleep.
+    with patch(f"{MODULE}.requests.get", get_mock), patch(f"{MODULE}.time.sleep"):
         return cmd.get_open_meteo_weather(lat, lon, **kwargs)
 
 
@@ -253,8 +255,9 @@ def test_api_failure_falls_back_to_cached_data():
 
     failing = Mock(side_effect=requests.exceptions.ConnectionError("boom"))
     text = _call(cmd, failing, *PARIS)
-    # ...it fails, and the day's cached response answers instead of an error.
-    assert failing.call_count == 1
+    # ...it fails (with one network retry), and the day's cached response
+    # answers instead of an error.
+    assert failing.call_count == 2
     assert text != "commands.gwx.error_fetching"
     # Same request key for Paris coordinates rounded to ~100 m.
     assert cmd.db_manager.cached_count() == 1
@@ -285,6 +288,56 @@ def test_expired_fresh_window_fetches_again():
     text = _call(cmd, get, *PARIS)
     assert get.call_count == 1
     assert text != "commands.gwx.error_fetching"
+
+
+def test_timeout_recovers_on_the_retry():
+    cmd = _gwx()
+    cmd.db_manager = FakeDB()
+    get = Mock(side_effect=[requests.exceptions.Timeout("slow"), _response(_payload())])
+    text = _call(cmd, get, *PARIS)
+    assert get.call_count == 2  # one backoff retry, not a give-up
+    assert text != "commands.gwx.error_fetching"
+    assert cmd.db_manager.cached_count() == 1  # the recovered payload is cached
+
+
+def test_503_recovers_on_the_retry():
+    cmd = _gwx()
+    cmd.db_manager = FakeDB()
+    get = Mock(side_effect=[_response({}, ok=False), _response(_payload())])
+    text = _call(cmd, get, *PARIS)
+    assert get.call_count == 2
+    assert text != "commands.gwx.error_fetching"
+
+
+def test_400_retries_once_without_the_model():
+    cmd = _gwx({"weather_model": "meteofrance_arome_france_hd"})
+    cmd.db_manager = FakeDB()
+    bad = _response({}, ok=False, status=400,
+                    text='{"reason":"No data is available for this location","error":true}')
+    get = Mock(side_effect=[bad, _response(_payload())])
+    text = _call(cmd, get, 35.68, 139.69)  # Tokyo: Météo-France refuses the point
+    assert get.call_args_list[0].kwargs['params']['models'] == 'meteofrance_arome_france_hd'
+    assert 'models' not in get.call_args_list[1].kwargs['params']
+    assert text != "commands.gwx.error_fetching"
+
+
+def test_stripping_the_model_is_not_repeated():
+    cmd = _gwx()
+    cmd.db_manager = FakeDB()
+    bad = _response({}, ok=False, status=400, text='nope')
+    text = _call(cmd, Mock(return_value=bad), *PARIS)
+    assert text == "commands.gwx.error_fetching"  # the request is tried twice, not more
+
+
+def test_http_error_body_reason_is_logged():
+    cmd = _gwx()
+    cmd.db_manager = FakeDB()
+    bad = _response({}, ok=False, status=400,
+                    text='{"reason":"No data is available for this location","error":true}')
+    _call(cmd, Mock(return_value=bad), *PARIS)
+    logged = " ".join(str(call.args[0]) for call in cmd.logger.warning.call_args_list)
+    assert "400" in logged
+    assert "No data is available for this location" in logged
 
 
 def test_hourly_cache_has_the_short_window():

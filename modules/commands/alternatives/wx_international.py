@@ -7,6 +7,7 @@ Provides worldwide weather information using Open-Meteo API
 import asyncio
 import math
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Any, Optional, Union
 
@@ -856,6 +857,55 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         )
         return weather
 
+    _OPEN_METEO_RETRY_BACKOFF_SECONDS = 2
+
+    def _fetch_open_meteo_payload(self, api_url: str, params: dict) -> Optional[dict]:
+        """One Open-Meteo payload, retried and model-degraded where that helps.
+
+        A network error or 5xx/429 gets one retry after a short backoff (this
+        fetch already runs on a worker thread, so sleeping is off the event
+        loop). A 4xx against an explicit ``models`` value — Météo-France
+        refusing a point outside its domain, or a model that does not carry
+        one of the requested variables — gets one retry with the model
+        dropped, letting Open-Meteo pick its own best_match. 4xx bodies name
+        Open-Meteo's own reason ("No data is available for this location", …),
+        so the body is logged next to the status code instead of the bare
+        status alone.
+        """
+        network_retry_done = False
+        model_retry_done = 'models' not in params
+        model_dropped = False
+        request_params = dict(params)
+        while True:
+            try:
+                response = requests.get(api_url, params=request_params, timeout=self.url_timeout)
+            except Exception as e:
+                self.logger.error(f"Error fetching Open-Meteo weather: {e}")
+                if network_retry_done:
+                    return None
+                network_retry_done = True
+                time.sleep(self._OPEN_METEO_RETRY_BACKOFF_SECONDS)
+                continue
+            if response.ok:
+                data = response.json()
+                if model_dropped:
+                    self.logger.info("Open-Meteo answered after the configured model was dropped")
+                return data
+            self.logger.warning(
+                f"Error fetching weather from Open-Meteo: HTTP {response.status_code} - "
+                f"{(response.text if isinstance(response.text, str) else '')[:180]}"
+            )
+            if not model_retry_done and response.status_code < 500:
+                request_params = {k: v for k, v in params.items() if k != 'models'}
+                model_retry_done = True
+                model_dropped = True
+                continue
+            if not network_retry_done and (response.status_code >= 500 or response.status_code == 429):
+                network_retry_done = True
+                time.sleep(self._OPEN_METEO_RETRY_BACKOFF_SECONDS)
+                continue
+            return None
+
     def _get_open_meteo_weather_with_conditions(self, lat: float, lon: float, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, location_prefix_len: int = 0, country_code: str = None) -> tuple[str, dict]:
         """Return the reply and current conditions from the same Open-Meteo request."""
         # Get max message length dynamically, then subtract location prefix length
@@ -910,22 +960,14 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
                 data = cached_data
 
             if data is None:
-                try:
-                    response = requests.get(api_url, params=params, timeout=self.url_timeout)
-                except Exception as e:
-                    self.logger.error(f"Error fetching Open-Meteo weather: {e}")
-                    response = None
-                if response is not None and response.ok:
-                    data = response.json()
+                data = self._fetch_open_meteo_payload(api_url, params)
+                if data is not None:
                     store_open_meteo_payload(self.logger, self.db_manager, params, data)
+                elif cached_data is not None and open_meteo_cache_is_usable(cached_data, cached_age, OPEN_METEO_CACHE_MAX_AGE_HOURS):
+                    self.logger.warning(f"Serving Open-Meteo forecast from cache ({cached_age:.1f} h old) after the API failed")
+                    data = cached_data
                 else:
-                    if response is not None:
-                        self.logger.warning(f"Error fetching weather from Open-Meteo: {response.status_code}")
-                    if cached_data is not None and open_meteo_cache_is_usable(cached_data, cached_age, OPEN_METEO_CACHE_MAX_AGE_HOURS):
-                        self.logger.warning(f"Serving Open-Meteo forecast from cache ({cached_age:.1f} h old) after the API failed")
-                        data = cached_data
-                    else:
-                        return self.translate('commands.gwx.error_fetching'), {}
+                    return self.translate('commands.gwx.error_fetching'), {}
 
             if forecast_type == "tomorrow":
                 return self.format_tomorrow_forecast(data, max_length), {}
