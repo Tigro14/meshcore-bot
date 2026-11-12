@@ -185,6 +185,10 @@
 </div>
 {% endblock %}
 
+{% block page_libs %}
+<script src="{{ url_for('static', filename='vendor/chart.js/chart.umd.js') }}"></script>
+{% endblock %}
+
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/clock_drift.js') }}"></script>
 <script>
@@ -672,7 +676,7 @@
                 new Chart(ctx, {
                     type: 'line',
                     data: {
-                        labels: points.map(p => this.formatTimestamp(p.observed_at)),
+                        labels: points.map(p => this.formatBatteryTimestamp(p.observed_at)),
                         datasets: [{
                             label: 'Voltage (V)',
                             data: points.map(p => p.voltage),
@@ -693,6 +697,11 @@
             } catch (err) {
                 content.innerHTML = `<div class="text-danger text-center">${this.escapeHtml(err.message)}</div>`;
             }
+        }
+
+        formatBatteryTimestamp(timestamp) {
+            const date = this.timestampDate(timestamp);
+            return date ? date.toLocaleString() : '-';
         }
 
         clockStatusBadge(state) {
