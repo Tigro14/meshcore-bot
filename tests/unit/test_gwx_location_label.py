@@ -1,7 +1,9 @@
 """gwx names the place in its reply only when that adds information, as wx does."""
 
+import asyncio
 import configparser
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -10,8 +12,10 @@ from modules.commands.alternatives.wx_international import GlobalWxCommand
 MODULE = "modules.commands.alternatives.wx_international"
 
 
-def _gwx(default_country="US", default_state="", always=None):
+def _gwx(default_country="US", default_state="", always=None, default_city=None):
     weather = {"default_country": default_country, "default_state": default_state}
+    if default_city is not None:
+        weather["default_city"] = default_city
     if always is not None:
         weather["always_show_location"] = str(always).lower()
     config = configparser.ConfigParser()
@@ -29,9 +33,11 @@ def _gwx(default_country="US", default_state="", always=None):
     return cmd
 
 
-def _reply(cmd, location, address):
+def _reply(cmd, location, address, default_location=False):
     cmd.geocode_location = Mock(return_value=(1.0, 2.0, address, None))
-    return cmd._get_weather_for_location_sync(location, message=None)
+    return cmd._get_weather_for_location_sync(
+        location, message=None, default_location=default_location
+    )
 
 
 PARIS = {"city": "Paris", "country_code": "fr"}
@@ -118,3 +124,48 @@ def test_a_named_place_comes_out_of_the_budget():
     cmd = _gwx("US", "WA", always=True)
     _reply(cmd, "Seattle", SEATTLE)
     assert cmd._get_open_meteo_weather_with_conditions.call_args.kwargs["location_prefix_len"] == len("Seattle, WA: ")
+
+
+def test_a_bare_request_names_the_default_city():
+    # A sender who typed no place cannot infer the bot's default from "Ce soir: …".
+    cmd = _gwx("FR", default_city="Paris")
+    assert _reply(cmd, "Paris, FR", PARIS, default_location=True) == "Paris, FR: Clear 20°C"
+
+
+def test_a_named_default_city_comes_out_of_the_budget():
+    cmd = _gwx("FR", default_city="Paris")
+    _reply(cmd, "Paris, FR", PARIS, default_location=True)
+    assert cmd._get_open_meteo_weather_with_conditions.call_args.kwargs["location_prefix_len"] == len("Paris, FR: ")
+
+
+def test_a_default_city_without_address_details_is_still_named():
+    # The typed query itself labels the reply when the geocode kept no address.
+    cmd = _gwx("FR", default_city="Paris")
+    assert _reply(cmd, "Paris, FR", None, default_location=True) == "Paris, FR: Clear 20°C"
+
+
+def test_a_typed_default_region_query_stays_unnamed():
+    # The sender named the place themselves; only the fallback has to say it.
+    cmd = _gwx("FR", default_city="Paris")
+    assert _reply(cmd, "Paris, FR", PARIS) == "Clear 20°C"
+
+
+@pytest.mark.parametrize(("content", "fallback", "location", "named"), [
+    ("gwx", ("Paris, FR", False), "Paris, FR", True),
+    ("gwx 5d", ("Paris, FR", False), "Paris, FR", True),  # an option alone still falls back
+    ("gwx", ("48.85640,2.35140", True), "48.85640,2.35140", False),  # the sender's position
+    ("gwx Lyon", None, "Lyon", False),
+])
+def test_only_the_default_city_fallback_asks_for_the_label(content, fallback, location, named):
+    cmd = _gwx("FR", default_city="Paris")
+    cmd._no_location_fallback = AsyncMock(return_value=fallback)
+    cmd.get_weather_for_location = AsyncMock(return_value="ok")
+    cmd._send_weather_reply = AsyncMock(return_value=True)
+    cmd.record_execution = Mock()
+    message = SimpleNamespace(content=content, sender_id="u1", sender_pubkey="pk", channel="general", is_dm=False)
+    asyncio.run(cmd.execute(message))
+    call = cmd.get_weather_for_location.await_args
+    assert call.args[0] == location
+    assert call.kwargs["default_location"] is named
+    if fallback is None:
+        cmd._no_location_fallback.assert_not_awaited()
