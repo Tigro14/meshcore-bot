@@ -31,9 +31,16 @@ from ...utils import (  # noqa: F401  format_temperature_high_low and get_nomina
 from ...weather_common import (
     _ARROWS_8,
     _COMPASS_16,
+    OPEN_METEO_CACHE_FRESH_HOURS,
+    OPEN_METEO_CACHE_MAX_AGE_HOURS,
+    OPEN_METEO_HOURLY_FRESH_HOURS,
     WeatherCommandMixin,
     load_open_meteo_model,
     load_open_meteo_units,
+    open_meteo_cache_is_usable,
+    read_open_meteo_cache,
+    select_open_meteo_model,
+    store_open_meteo_payload,
 )
 from ..base_command import BaseCommand
 
@@ -508,14 +515,17 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         # Get weather forecast from Open-Meteo based on type
         # Pass location_prefix_len so weather formatting can account for it
         current = {}
+        # The geocoded country decides the automatic Météo-France model selection
+        # when the request covers France.
+        country_code = (address_info or {}).get('country_code') or None
         if forecast_type == "tomorrow":
-            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="tomorrow", message=message, location_prefix_len=location_prefix_len)
+            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="tomorrow", message=message, location_prefix_len=location_prefix_len, country_code=country_code)
         elif forecast_type == "multiday":
-            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="multiday", num_days=num_days, message=message, location_prefix_len=location_prefix_len)
+            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="multiday", num_days=num_days, message=message, location_prefix_len=location_prefix_len, country_code=country_code)
         elif forecast_type == "hourly":
-            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="hourly", message=message, location_prefix_len=location_prefix_len)
+            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="hourly", message=message, location_prefix_len=location_prefix_len, country_code=country_code)
         else:
-            weather_text, current = self._get_open_meteo_weather_with_conditions(lat, lon, message=message, location_prefix_len=location_prefix_len)
+            weather_text, current = self._get_open_meteo_weather_with_conditions(lat, lon, message=message, location_prefix_len=location_prefix_len, country_code=country_code)
 
         # Check if it's an error (translated error message)
         error_fetching = self.translate('commands.gwx.error_fetching')
@@ -825,7 +835,7 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         }
         return state_map.get(state, state)
 
-    def get_open_meteo_weather(self, lat: float, lon: float, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, location_prefix_len: int = 0) -> str:
+    def get_open_meteo_weather(self, lat: float, lon: float, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, location_prefix_len: int = 0, country_code: str = None) -> str:
         """Get weather forecast from Open-Meteo API.
 
         Args:
@@ -835,16 +845,18 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             num_days: Number of days for multiday forecast (2–16).
             message: The MeshMessage for dynamic length calculation.
             location_prefix_len: Length of location prefix (e.g., "City, CC: ") that will be added later.
+            country_code: Geocoded country code ("fr"), when known; it decides the
+                automatic Météo-France model selection for France.
 
         Returns:
             str: Formatted weather string or error message.
         """
         weather, _ = self._get_open_meteo_weather_with_conditions(
-            lat, lon, forecast_type, num_days, message, location_prefix_len
+            lat, lon, forecast_type, num_days, message, location_prefix_len, country_code
         )
         return weather
 
-    def _get_open_meteo_weather_with_conditions(self, lat: float, lon: float, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, location_prefix_len: int = 0) -> tuple[str, dict]:
+    def _get_open_meteo_weather_with_conditions(self, lat: float, lon: float, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, location_prefix_len: int = 0, country_code: str = None) -> tuple[str, dict]:
         """Return the reply and current conditions from the same Open-Meteo request."""
         # Get max message length dynamically, then subtract location prefix length
         max_length = self.get_max_message_length(message) if message else 130
@@ -875,18 +887,45 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
                 'timezone': 'auto',
                 'forecast_days': forecast_days
             }
-            if self.weather_model:
-                params['models'] = self.weather_model
+            model = select_open_meteo_model(
+                self.weather_model,
+                latitude=lat,
+                longitude=lon,
+                forecast_days=forecast_days,
+                country_code=country_code,
+            )
+            if model:
+                params['models'] = model
             if forecast_type == "hourly":
                 params['hourly'] += ',precipitation_probability,is_day'
 
-            response = requests.get(api_url, params=params, timeout=self.url_timeout)
+            # A response cached within the fresh window answers the identical request
+            # without touching the API; when the API fails, any same-day response
+            # inside the fallback window is served instead of an error.
+            cached_data, cached_age = read_open_meteo_cache(self.logger, self.db_manager, params)
+            fresh_limit = OPEN_METEO_HOURLY_FRESH_HOURS if forecast_type == "hourly" else OPEN_METEO_CACHE_FRESH_HOURS
+            data = None
+            if cached_data is not None and open_meteo_cache_is_usable(cached_data, cached_age, fresh_limit):
+                self.logger.debug(f"Serving Open-Meteo forecast from cache ({cached_age:.1f} h old)")
+                data = cached_data
 
-            if not response.ok:
-                self.logger.warning(f"Error fetching weather from Open-Meteo: {response.status_code}")
-                return self.translate('commands.gwx.error_fetching'), {}
-
-            data = response.json()
+            if data is None:
+                try:
+                    response = requests.get(api_url, params=params, timeout=self.url_timeout)
+                except Exception as e:
+                    self.logger.error(f"Error fetching Open-Meteo weather: {e}")
+                    response = None
+                if response is not None and response.ok:
+                    data = response.json()
+                    store_open_meteo_payload(self.logger, self.db_manager, params, data)
+                else:
+                    if response is not None:
+                        self.logger.warning(f"Error fetching weather from Open-Meteo: {response.status_code}")
+                    if cached_data is not None and open_meteo_cache_is_usable(cached_data, cached_age, OPEN_METEO_CACHE_MAX_AGE_HOURS):
+                        self.logger.warning(f"Serving Open-Meteo forecast from cache ({cached_age:.1f} h old) after the API failed")
+                        data = cached_data
+                    else:
+                        return self.translate('commands.gwx.error_fetching'), {}
 
             if forecast_type == "tomorrow":
                 return self.format_tomorrow_forecast(data, max_length), {}
