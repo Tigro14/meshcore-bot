@@ -105,3 +105,25 @@ class TestAirtimePage:
         error_path = body.split("async loadLive()")[1].split("catch (err) {", 1)[1]
         assert "ocDisabled" in error_path
         assert "ocSnapshotNote" in error_path
+
+
+class TestPassiveAirtimeAPI:
+    def test_versioned_metadata_read_model_and_unknown_not_zero(self, viewer):
+        response = viewer.app.test_client().get('/api/telemetry/occupancy/analysis?window=1h')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['schema_version'] == 1
+        assert data['window_seconds'] == 3600
+        assert data['local']['rx_percent'] is None
+        assert data['method']['compliance'] == 'not_determined'
+        assert data['repeaters'] == []
+        assert 'content' not in data
+
+    def test_window_validation(self, viewer):
+        response = viewer.app.test_client().get('/api/telemetry/occupancy/analysis?window=all')
+        assert response.status_code == 400
+
+    def test_existing_airtime_page_contains_both_attribution_views(self, viewer):
+        body = viewer.app.test_client().get('/airtime').data.decode()
+        assert 'oc-authors' in body and 'oc-repeaters' in body
+        assert 'oc-analysis-window' in body

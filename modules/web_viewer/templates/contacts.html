@@ -1215,6 +1215,7 @@ class ModernContactsManager {
                                 <div class="d-flex align-items-center min-w-0">${this.formatHops(contact)}</div>
                                 <div class="d-flex align-items-center gap-1"><span class="text-muted small">Bytes/hop:</span>${this.formatPathBytes(contact)}</div>
                                 ${this.formatPathEncodingBadge(contact)}
+                                ${this.formatDutyCycle(contact)}
                                 </div>
                                 <div class="small"><span class="contacts-num">${(Number(contact.advert_count) || 0).toLocaleString()}</span> <span class="text-muted">adverts</span></div>
                             </div>
@@ -1279,7 +1280,7 @@ class ModernContactsManager {
                 <td class="contacts-location-cell">${this.formatLocation(contact)}</td>
                 <td>${this.formatDistance(contact)}</td>
                 <td>${this.formatSignal(contact)}</td>
-                <td><div class="d-flex flex-column align-items-start gap-1">${this.formatHops(contact)}${this.formatPathEncodingBadge(contact)}${this.formatBattery(contact)}</div></td>
+                <td><div class="d-flex flex-column align-items-start gap-1">${this.formatHops(contact)}${this.formatPathEncodingBadge(contact)}${this.formatBattery(contact)}${this.formatDutyCycle(contact)}</div></td>
                 <td>${this.formatPathBytes(contact)}</td>
                 <td>${this.formatTimestamp(contact.first_heard)}</td>
                 <td>${this.formatTimeAgo(contact.last_seen)}</td>
@@ -2911,6 +2912,17 @@ class ModernContactsManager {
 
     formatDrift(seconds) {
         return globalThis.MeshClockBadges.full(seconds);
+    }
+
+    formatDutyCycle(contact) {
+        const duty = contact.airtime_duty;
+        if (!duty) return '';
+        const value = duty.estimated_percent;
+        const known = value !== null && value !== undefined && Number.isFinite(Number(value));
+        const label = known ? `DC ≈ ${Number(value).toLocaleString('fr-FR', {maximumFractionDigits: 3})} % · 1 h` : 'DC N/D · 1 h';
+        const color = known && Number(value) >= 10 ? 'bg-danger' : 'bg-secondary';
+        const title = known ? 'Émission estimée sur la dernière heure à partir des chemins reçus. Référence : 10 %. Trafic partiel ; ne prouve pas la conformité.' : 'Aucune émission attribuable sur la dernière heure. Cela ne signifie pas que ce relais est silencieux.';
+        return `<span class="badge ${color}" title="${this.escapeAttribute(title)}">${label}</span>`;
     }
 
     formatBattery(contact) {

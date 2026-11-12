@@ -110,6 +110,8 @@ class CleanupSchedulerMixin:
             for table, column, days in (
                 ('occupancy_samples', 'bucket_ts', self._config_int('Data_Retention', 'occupancy_samples_retention_days', 30)),
                 ('occupancy_senders', 'last_seen', self._config_int('Data_Retention', 'occupancy_senders_retention_days', 90)),
+                ('airtime_observations', 'observed_at', self._config_int('Data_Retention', 'occupancy_samples_retention_days', 30)),
+                ('airtime_author_links', 'observed_at', self._config_int('Data_Retention', 'occupancy_samples_retention_days', 30)),
             ):
                 if table not in existing:
                     continue

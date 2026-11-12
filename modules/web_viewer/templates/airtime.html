@@ -178,30 +178,54 @@
         </div>
     </div>
 
-    <!-- Sender share -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h2 class="h5 mb-0"><i class="fas fa-users me-2"></i>Senders by airtime</h2>
+    <section class="card mb-4" aria-labelledby="oc-analysis-title">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <h2 class="h5 mb-0" id="oc-analysis-title">Occupation et attribution passives</h2>
+            <select id="oc-analysis-window" class="form-select form-select-sm" style="width:auto" aria-label="Période de l’analyse passive">
+                <option value="1h">Dernière heure</option>
+                <option value="24h" selected>Dernières 24 heures</option>
+                <option value="7d">7 derniers jours</option>
+            </select>
         </div>
         <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Sender</th>
-                            <th>Airtime</th>
-                            <th>Packets</th>
-                            <th>Last seen</th>
-                        </tr>
-                    </thead>
-                    <tbody id="oc-senders"></tbody>
-                </table>
+            <div id="oc-analysis-error" class="text-danger" role="status"></div>
+            <div class="row g-3 mb-3">
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Occupation entendue</div><div class="oc-figure" id="oc-analysis-rx">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Par rapport au repère de 10 %</div><div class="oc-figure" id="oc-analysis-reference">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Paquets reçus</div><div class="oc-figure" id="oc-analysis-packets">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Airtime sans auteur identifié</div><div class="oc-figure" id="oc-analysis-unknown">—</div></div>
             </div>
-            <p class="small text-muted mt-2 mb-0">
-                Ranked by airtime, not by packet count: a talker sending many small packets can
-                cost more than one sending a long message. Senders show once a packet is recorded,
-                so this reflects the retention window, not all time.
-            </p>
+            <p id="oc-analysis-coverage" class="small text-muted mb-2"></p>
+            <p class="small text-muted mb-0">Réceptions locales et émissions déduites des chemins. Les trames sont comptées en entier, sans leur contenu. Le repère de 10 % concerne chaque émetteur ; il ne constitue pas un plafond collectif du réseau.</p>
+        </div>
+    </section>
+    <div class="card mb-4">
+        <div class="card-header"><h2 class="h5 mb-0">Trafic reçu par auteur</h2></div>
+        <div class="card-body">
+            <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+                <thead><tr><th>Nœud</th><th>Airtime RX</th><th>Part du RX</th><th>Messages</th><th>Annonces</th><th>Autres</th><th>Paquets reçus</th></tr></thead>
+                <tbody id="oc-authors"></tbody>
+            </table></div>
+            <p class="small text-muted mt-2 mb-0">Auteurs identifiables, copies reçues comprises. Un auteur inconnu reste non attribué. Affichage des 50 premiers auteurs.</p>
+        </div>
+    </div>
+    <div class="card mb-4">
+        <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <h2 class="h5 mb-0">Émissions estimées des répéteurs</h2>
+            <div class="d-flex flex-wrap gap-2">
+                <input id="oc-relay-filter" class="form-control form-control-sm" style="width:auto" placeholder="Chercher un répéteur…" aria-label="Chercher un répéteur">
+                <select id="oc-relay-sort" class="form-select form-select-sm" style="width:auto" aria-label="Classement des répéteurs">
+                    <option value="airtime_ms">Airtime sur la période</option><option value="last_hour_percent">Dernière heure</option><option value="peak_hour_percent">Pic sur 1 h</option>
+                </select>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+                <thead><tr><th>Répéteur</th><th>Entendu directement</th><th>Déduit des chemins</th><th>Total sur la période</th><th>Dernière heure</th><th>Pic sur 1 h</th><th>Émissions</th></tr></thead>
+                <tbody id="oc-repeaters"></tbody>
+            </table></div>
+            <p class="small text-muted mt-2 mb-0" id="oc-analysis-quality"></p>
+            <p class="small text-muted mb-0">Pourcentage d’émission estimé, à comparer au repère de 10 %. Les émissions qui n’arrivent pas à Baliz manquent : un résultat faible ne garantit pas la conformité. Les routes directes et TRACE ne servent pas à reconstruire les retransmissions.</p>
         </div>
     </div>
 </div>
@@ -231,6 +255,11 @@
         constructor() {
             this.days = parseInt(el('oc-window').value, 10) || 7;
             this.chart = null;
+            this.analysisSequence = 0;
+            const redraw = () => { if (this.lastAnalysisData) this.renderAnalysis(this.lastAnalysisData); };
+            el('oc-relay-filter').addEventListener('input', redraw);
+            el('oc-relay-sort').addEventListener('change', redraw);
+            el('oc-analysis-window').addEventListener('change', () => this.loadAnalysis());
             el('oc-window').addEventListener('change', (e) => {
                 this.days = parseInt(e.target.value, 10) || 7;
                 this.load();
@@ -238,11 +267,11 @@
             el('ocRefreshBtn').addEventListener('click', () => this.load());
             this.load();
             // The "right now" panel is only worth reading if it stays current.
-            setInterval(() => this.loadLive(), 30000);
+            setInterval(() => { this.loadLive(); this.loadAnalysis(); }, 30000);
         }
 
         async load() {
-            await Promise.all([this.loadLive(), this.loadHistory()]);
+            await Promise.all([this.loadLive(), this.loadHistory(), this.loadAnalysis()]);
         }
 
         async loadLive() {
@@ -253,7 +282,6 @@
                 if (!resp.ok) throw new Error('Request failed (' + resp.status + ')');
                 const data = await resp.json();
                 this.renderLive(data);
-                this.renderSenders(data.top_senders || []);
             } catch (err) {
                 // A failed request is not evidence that recording is off, so the claim from
                 // the last response has to be retracted here: otherwise the page goes on
@@ -367,6 +395,7 @@
             const datasets = [
                 { label: 'rx %', data: rxPoints, borderColor: style.getPropertyValue('--oc-rx').trim(), pointRadius: 2, spanGaps: false },
                 { label: 'tx %', data: txPoints, borderColor: style.getPropertyValue('--oc-tx').trim(), pointRadius: 2, spanGaps: false },
+                { label: 'Repère 10 % (par émetteur)', data: [{x:data.start_time, y:10}, {x:data.end_time, y:10}], borderColor: '#b7791f', borderDash: [6, 5], pointRadius: 0 },
             ];
 
             if (this.chart) {
@@ -390,18 +419,48 @@
             });
         }
 
-        renderSenders(rows) {
-            const host = el('oc-senders');
-            if (!rows.length) {
-                host.innerHTML = '<tr><td colspan="4" class="oc-empty">No sender recorded yet.</td></tr>';
-                return;
+        async loadAnalysis() {
+            const sequence = ++this.analysisSequence;
+            try {
+                const window = el('oc-analysis-window').value;
+                const response = await fetch('/api/telemetry/occupancy/analysis?window=' + encodeURIComponent(window));
+                if (!response.ok) throw new Error('Analyse indisponible (' + response.status + ')');
+                const data = await response.json();
+                if (sequence !== this.analysisSequence) return;
+                el('oc-analysis-error').textContent = '';
+                this.renderAnalysis(data);
+            } catch (error) {
+                if (sequence !== this.analysisSequence) return;
+                el('oc-analysis-error').textContent = error.message + '. Les valeurs précédentes ne sont pas actualisées.';
             }
-            host.innerHTML = rows.map((row) => '<tr>'
-                + '<td><code>' + escapeHtml(row.sender) + '</code></td>'
-                + '<td>' + escapeHtml(row.airtime_ms.toFixed(1)) + ' ms</td>'
-                + '<td>' + escapeHtml(row.packets) + '</td>'
-                + '<td>' + escapeHtml(new Date(row.last_seen * 1000).toLocaleString()) + '</td>'
-                + '</tr>').join('');
+        }
+
+        renderAnalysis(data) {
+            this.lastAnalysisData = data;
+            const number = value => Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+            const pct = value => value === null || value === undefined ? 'N/D' : number(value) + ' %';
+            const duration = value => formatSeconds(Number(value || 0) / 1000);
+            const local = data.local;
+            el('oc-analysis-rx').textContent = pct(local.rx_percent);
+            el('oc-analysis-reference').textContent = pct(local.reference_budget_used_percent);
+            el('oc-analysis-packets').textContent = number(local.rx_packets);
+            el('oc-analysis-unknown').textContent = local.rx_airtime_ms ? pct(local.unattributed_author_airtime_ms / local.rx_airtime_ms * 100) : 'N/D';
+            const date = timestamp => new Date(timestamp * 1000).toLocaleString('fr-FR');
+            el('oc-analysis-coverage').textContent = data.coverage.first_observation_at
+                ? 'Observations du ' + date(data.coverage.first_observation_at) + ' au ' + date(data.coverage.last_observation_at) + '. Moyenne sur ' + formatSeconds(data.coverage.available_seconds) + ' d’historique disponible. Couverture partielle.' + (data.coverage.truncated ? ' Limite de traitement atteinte.' : '')
+                : 'Aucune observation exploitable sur cette période. Cela ne signifie pas une absence de trafic.';
+            const authors = data.authors.slice(0, 50).map(author => '<tr><td>' + escapeHtml(author.name) + '</td><td>' + duration(author.rx_airtime_ms) + '</td><td>' + pct(author.rx_airtime_ms / local.rx_airtime_ms * 100) + '</td>'
+                + ['messages', 'adverts', 'other'].map(kind => '<td>' + duration(author.categories[kind].airtime_ms) + '</td>').join('')
+                + '<td>' + number(author.received_packets) + '</td></tr>');
+            if (local.unattributed_author_airtime_ms) authors.push('<tr class="text-muted"><td>Auteur non identifiable</td><td>' + duration(local.unattributed_author_airtime_ms) + '</td><td>' + pct(local.unattributed_author_airtime_ms / local.rx_airtime_ms * 100) + '</td><td colspan="4">Attribution non disponible</td></tr>');
+            el('oc-authors').innerHTML = authors.join('') || '<tr><td colspan="7" class="text-muted">Aucune observation.</td></tr>';
+            const query = el('oc-relay-filter').value.trim().toLocaleLowerCase();
+            const sortKey = el('oc-relay-sort').value || 'airtime_ms';
+            const repeaters = data.repeaters.filter(node => node.name.toLocaleLowerCase().includes(query))
+                .sort((left, right) => Number(right[sortKey] || 0) - Number(left[sortKey] || 0));
+            el('oc-repeaters').innerHTML = repeaters.map(node => '<tr><td>' + escapeHtml(node.name) + '</td><td>' + duration(node.direct_airtime_ms) + '</td><td>' + duration(node.inferred_airtime_ms) + '</td><td>' + duration(node.airtime_ms) + '</td><td class="' + (node.last_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.last_hour_percent) + '</td><td class="' + (node.peak_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.peak_hour_percent) + '</td><td>' + number(node.packets) + '</td></tr>').join('') || '<tr><td colspan="7" class="text-muted">Aucune émission attribuable.</td></tr>';
+            const quality = data.quality;
+            el('oc-analysis-quality').textContent = number(quality.ambiguous_hops) + ' passages ambigus · ' + number(quality.unknown_hops) + ' non identifiés · ' + number(quality.collapsed_inferred_copies) + ' copies déduites regroupées.';
         }
     }
 

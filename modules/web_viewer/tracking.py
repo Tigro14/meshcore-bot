@@ -30,6 +30,7 @@ class ContactTrackingMixin:
     _get_latest_clock_drift_samples: Any
     config: Any
     logger: Any
+    airtime_reader: Any
 
     def _get_tracking_data(
         self,
@@ -258,6 +259,24 @@ class ContactTrackingMixin:
                                              'all': entry['advert_count'] or 0}
                     if since != 'all':
                         entry['advert_count'] = windows.get(since, 0)
+
+                # Always a rolling hour, independently of the contact discovery filter.
+                # A small value is partial evidence, never a compliance verdict.
+                reader = getattr(self, 'airtime_reader', None)
+                if reader is not None:
+                    airtime = reader.read(conn, '1h')
+                    by_key = {node['public_key']: node for node in airtime['repeaters']}
+                    for entry in tracking:
+                        if str(entry.get('role') or '').lower() in ('repeater', 'roomserver', 'room server'):
+                            estimate = by_key.get(entry['user_id'].lower())
+                            entry['airtime_duty'] = {
+                                'schema_version': airtime['schema_version'], 'window_seconds': 3600,
+                                'start_time': airtime['start_time'], 'end_time': airtime['end_time'],
+                                'estimated_percent': estimate['last_hour_percent'] if estimate else None,
+                                'reference_percent': 10.0, 'compliance': 'unknown',
+                                'status': estimate['status'] if estimate else 'no_attributed_observation',
+                                'method': 'passive_flood_path_reconstruction',
+                            }
 
                 # Get server statistics for daily tracking using direct database queries
                 server_stats: dict[str, Any] = {}

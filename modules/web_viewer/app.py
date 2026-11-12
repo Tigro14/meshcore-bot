@@ -391,6 +391,8 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         # packet_stream would report a different number than the writer, because the
         # writer's window is a rolling monotonic window, not a table scan.
         self.occupancy = ChannelOccupancy(self.config, self.logger)
+        from modules.airtime_analysis import AirtimeReader
+        self.airtime_reader = AirtimeReader()
 
         # Configure CORS for SocketIO — default to same-origin (no cross-origin)
         cors_raw = self.config.get('Web_Viewer', 'cors_allowed_origins', fallback='').strip()
@@ -972,6 +974,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             # visible on /api/contacts, nothing private.
             '/api/telemetry/occupancy',
             '/api/telemetry/occupancy/history',
+            '/api/telemetry/occupancy/analysis',
             '/api/contacts',
             '/api/contact-detail',
             '/mesh-entry-points',
@@ -2626,6 +2629,20 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             else:
                 response = jsonify(payload)
             response.headers['Cache-Control'] = 'private, max-age=30'
+            return response
+
+        @self.app.route('/api/telemetry/occupancy/analysis')
+        @self._api_errors('Error reading passive airtime analysis')
+        def api_airtime_analysis():
+            """Versioned metadata-only estimates for the existing UI and future tools."""
+            from modules.airtime_analysis import WINDOWS
+            window = request.args.get('window', '24h')
+            if window not in WINDOWS:
+                return jsonify({'error': 'window must be 1h, 24h or 7d'}), 400
+            with self._with_db_connection() as conn:
+                payload = self.airtime_reader.read(conn, window)
+            response = jsonify(payload)
+            response.headers['Cache-Control'] = 'private, max-age=15'
             return response
 
         @self.app.route('/api/telemetry/occupancy/history')

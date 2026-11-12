@@ -614,3 +614,41 @@ chmod +x restart_viewer.sh
 - Export functionality
 - Additional authentication options
 - Mobile-responsive design improvements
+
+### Passive airtime attribution
+
+The existing **Airtime** page includes local received occupancy, received traffic
+by identifiable author (messages/adverts/other), and repeater emission estimates.
+Contacts shows `DC ≈ … % · 1 h` for the last rolling hour, or `N/D` when no
+emission can be attributed. Discovery filters do not change that one-hour window.
+
+`GET /api/telemetry/occupancy/analysis?window=1h|24h|7d` exposes a versioned JSON
+read model for future assistant tools: `schema_version`, Unix-second period bounds,
+`units`, `method`, `coverage`, `local`, `quality`, `authors`, `repeaters`, and
+`limitations`. Airtime values use milliseconds; percentages are ordinary 0–100
+percentages, not fractions. Local RX averages use the available wall-clock span
+inside the requested window (coverage.available_seconds), not missing days before
+recording started; requested_window_rx_percent keeps the whole-window equivalent.
+Capture uptime remains unknown rather than treating gaps as observed silence. Each repeater includes direct/inferred airtime,
+last-hour and peak rolling-hour estimates, and `compliance: "unknown"`.
+The 10% reference is a comparison assumption, not a per-band legal assessment.
+
+Only decoded RF frame metadata is retained in the attribution tables. Frames are
+modelled in full, including headers and path bytes. Flood path stages are grouped
+by payload fingerprint and common path prefix within 60 seconds. Direct receptions
+supersede the inferred copy of the same transmission; repeated direct receptions
+remain separate. Inferred same-path retries may be merged. Direct routing paths
+and TRACE instructions/SNR bytes are never treated as completed flood history.
+Short prefixes are attributed only when unique among known nodes. Unresolved and
+ambiguous hops, and received airtime without an identifiable author, remain explicit.
+Correlated message metadata can supply an author; message bodies and channel keys
+are never copied to these tables or exposed by this API.
+
+The writer incrementally imports retained RF rows and saves per-observation
+modulation. Initial historical backfill assumes the current modulation; old rows
+without full frame metadata cannot be reconstructed. The new tables follow the
+existing occupancy-sample retention setting. This is a partial, passive estimate:
+unheard traffic, receiver outages, collisions and ambiguous identities prevent a
+compliance verdict. The existing TX counter remains an estimate of the bot's
+send requests and is not a hardware transmitter counter. No additional radio
+requests are made, and no assistant routing is enabled by this change.

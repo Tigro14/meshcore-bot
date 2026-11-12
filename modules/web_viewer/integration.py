@@ -544,6 +544,9 @@ class BotIntegration:
             return
         try:
             occupancy.flush(conn)
+            from modules.airtime_analysis import ingest_stream
+            ingest_stream(conn, occupancy.modulation())
+            conn.commit()
         except Exception as e:
             self.bot.logger.warning("occupancy: flush failed: %s", e)
 
@@ -565,6 +568,7 @@ class BotIntegration:
         except Exception:
             supported = False
         self._occupancy_tables_supported = supported
+        return supported
 
     @staticmethod
     def _packet_dims_from_data(packet_data: dict) -> tuple:
@@ -695,6 +699,7 @@ class BotIntegration:
                 'channel_visibility_id': self._channel_visibility_identity(message),
                 'timestamp': time.time(),
                 'sender': getattr(message, 'sender_id', ''),
+                'sender_pubkey': (message.sender_pubkey if isinstance(getattr(message, 'sender_pubkey', None), str) else None),
                 'channel': getattr(message, 'channel', ''),
                 'content': self._on_air_content(message),
                 'snr': str(getattr(message, 'snr', '')),
