@@ -715,6 +715,35 @@ class TestGeocodeCitySync:
                 )
         assert lat is not None
 
+    def test_fr_city_skips_us_major_cities(self, mock_bot):
+        # The default-city query is "Paris, FR"; "FR" must parse as France, not
+        # as a state — otherwise "Paris" goes through the US major-city list
+        # and geocodes to Paris, TX.
+        from modules.utils import geocode_city_sync
+        mock_loc = _make_location(48.85, 2.35)
+        with patch("modules.utils.rate_limited_nominatim_geocode_sync", return_value=mock_loc) as geo:
+            with patch("modules.utils.rate_limited_nominatim_reverse_sync", return_value=None):
+                lat, lon, addr = geocode_city_sync(
+                    mock_bot, "Paris, FR", default_state="", default_country="FR"
+                )
+        assert lat == 48.85
+        assert "Paris, France" in str(geo.call_args)
+        assert "Paris, TX" not in str(geo.call_args)
+
+    def test_fr_city_skips_us_major_cities_without_pycountry(self, mock_bot):
+        # Same through the base wheel (no [geo] extra) that production may run.
+        from modules.utils import geocode_city_sync
+        mock_loc = _make_location(48.85, 2.35)
+        with patch("modules.utils.PYCOUNTRY_AVAILABLE", False):
+            with patch("modules.utils.rate_limited_nominatim_geocode_sync", return_value=mock_loc) as geo:
+                with patch("modules.utils.rate_limited_nominatim_reverse_sync", return_value=None):
+                    lat, lon, addr = geocode_city_sync(
+                        mock_bot, "Paris, FR", default_state="", default_country="FR"
+                    )
+        assert lat == 48.85
+        assert "Paris, France" in str(geo.call_args)
+        assert "Paris, TX" not in str(geo.call_args)
+
 
 # ---------------------------------------------------------------------------
 # check_internet_connectivity_async
