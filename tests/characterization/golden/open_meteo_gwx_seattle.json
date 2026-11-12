@@ -411,7 +411,7 @@
    "wind_speed_unit": "mph"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:67°F <common.temp_low_label>:51°F 8<commands.gwx.gust[('value', 12)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:67°F <common.temp_low_label>:51°F 8 <services.weather_service.wind_speed_units.mph> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.mph>'), ('value', 12)]>"
  },
  "tomorrow-night": {
   "logs": [],
@@ -429,6 +429,6 @@
    "wind_speed_unit": "mph"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:67°F <common.temp_low_label>:51°F 8<commands.gwx.gust[('value', 12)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:67°F <common.temp_low_label>:51°F 8 <services.weather_service.wind_speed_units.mph> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.mph>'), ('value', 12)]>"
  }
 }

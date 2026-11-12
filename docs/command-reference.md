@@ -259,6 +259,8 @@ gwx Reykjavik 10d
 
 **Units** follow `[Weather] temperature_unit`, `wind_speed_unit` and `precipitation_unit`.
 
+**Wind** shows as an arrow, a compass letter and the speed in the configured unit, plus gusts when they are markedly stronger than the sustained speed, labeled in the catalog language: `G` in English, `raf.` in French (`⬆️N9 mph`, `⬆️N9 km/h raf. 22 km/h`). `hourly` lines keep bare numbers so that more hours fit in the message.
+
 **The place is named** in the reply when it adds information: a city in another country than `[Weather] default_country` (in the US, another state than `default_state`, or any US city when `default_state` is not set), a position a place was found for, or the default city the bot fell back to. A typed city in the bot's own region and ZIP codes are not named. `[Weather] always_show_location = true` names every place a lookup finds, as for `wx`.
 
 **Custom sources:** a `custom.wxsim.<name>` or `custom.mqtt_weather.<name>` key in `[Weather]` answers `wx <name>` and `gwx <name>` from that station. WXSIM sources answer current conditions, `tomorrow` and `Nd`; MQTT sources answer current conditions only. Options a source cannot answer (`hourly` and `alerts` for both) reply that they are not available instead of sending the current conditions.

@@ -88,7 +88,7 @@
    "wind_speed_unit": "mph"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tonight>: 🌙<commands.gwx.weather_descriptions.0> 84°F ⬅️<common.wind_directions.WSW>4 <commands.gwx.humidity[('value', 32)]> | <common.temp_high_label>:93°F <common.temp_low_label>:69°F"
+  "text": "<commands.gwx.periods.tonight>: 🌙<commands.gwx.weather_descriptions.0> 84°F ⬅️<common.wind_directions.WSW>4 <services.weather_service.wind_speed_units.mph> <commands.gwx.humidity[('value', 32)]> | <common.temp_high_label>:93°F <common.temp_low_label>:69°F"
  },
  "model-omitted-default-timeout": {
   "logs": [
@@ -322,7 +322,7 @@
    "wind_speed_unit": "mph"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☀️<commands.gwx.weather_descriptions.0> <common.temp_high_label>:95°F <common.temp_low_label>:70°F 14<commands.gwx.gust[('value', 22)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☀️<commands.gwx.weather_descriptions.0> <common.temp_high_label>:95°F <common.temp_low_label>:70°F 14 <services.weather_service.wind_speed_units.mph> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.mph>'), ('value', 22)]>"
  },
  "model-omitted-tomorrow-timeout": {
   "logs": [
@@ -443,7 +443,7 @@
    "wind_speed_unit": "mph"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tonight>: 🌙<commands.gwx.weather_descriptions.0> 84°F ⬅️<common.wind_directions.WSW>4 <commands.gwx.humidity[('value', 32)]> | <common.temp_high_label>:93°F <common.temp_low_label>:69°F"
+  "text": "<commands.gwx.periods.tonight>: 🌙<commands.gwx.weather_descriptions.0> 84°F ⬅️<common.wind_directions.WSW>4 <services.weather_service.wind_speed_units.mph> <commands.gwx.humidity[('value', 32)]> | <common.temp_high_label>:93°F <common.temp_low_label>:69°F"
  },
  "model-override-default-timeout": {
   "logs": [
@@ -687,7 +687,7 @@
    "wind_speed_unit": "mph"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☀️<commands.gwx.weather_descriptions.0> <common.temp_high_label>:95°F <common.temp_low_label>:70°F 14<commands.gwx.gust[('value', 22)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☀️<commands.gwx.weather_descriptions.0> <common.temp_high_label>:95°F <common.temp_low_label>:70°F 14 <services.weather_service.wind_speed_units.mph> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.mph>'), ('value', 22)]>"
  },
  "model-override-tomorrow-timeout": {
   "logs": [
@@ -809,7 +809,7 @@
    "wind_speed_unit": "mph"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tonight>: 🌙<commands.gwx.weather_descriptions.0> 84°F ⬅️<common.wind_directions.WSW>4 <commands.gwx.humidity[('value', 32)]> | <common.temp_high_label>:93°F <common.temp_low_label>:69°F"
+  "text": "<commands.gwx.periods.tonight>: 🌙<commands.gwx.weather_descriptions.0> 84°F ⬅️<common.wind_directions.WSW>4 <services.weather_service.wind_speed_units.mph> <commands.gwx.humidity[('value', 32)]> | <common.temp_high_label>:93°F <common.temp_low_label>:69°F"
  },
  "no-override-default-timeout": {
   "logs": [
@@ -1053,7 +1053,7 @@
    "wind_speed_unit": "mph"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☀️<commands.gwx.weather_descriptions.0> <common.temp_high_label>:95°F <common.temp_low_label>:70°F 14<commands.gwx.gust[('value', 22)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☀️<commands.gwx.weather_descriptions.0> <common.temp_high_label>:95°F <common.temp_low_label>:70°F 14 <services.weather_service.wind_speed_units.mph> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.mph>'), ('value', 22)]>"
  },
  "no-override-tomorrow-timeout": {
   "logs": [

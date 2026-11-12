@@ -411,7 +411,7 @@
    "wind_speed_unit": "ms"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: 🌧️<commands.gwx.weather_descriptions.61> <common.temp_high_label>:10°C <common.temp_low_label>:7°C 7<commands.gwx.gust[('value', 14)]> 🌦️100% 9.70mm"
+  "text": "<commands.gwx.periods.tomorrow>: 🌧️<commands.gwx.weather_descriptions.61> <common.temp_high_label>:10°C <common.temp_low_label>:7°C 7 <services.weather_service.wind_speed_units.ms> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.ms>'), ('value', 14)]> 🌦️100% 9.70mm"
  },
  "tomorrow-night": {
   "logs": [],
@@ -429,6 +429,6 @@
    "wind_speed_unit": "ms"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: 🌧️<commands.gwx.weather_descriptions.61> <common.temp_high_label>:10°C <common.temp_low_label>:7°C 7<commands.gwx.gust[('value', 14)]> 🌦️100% 9.70mm"
+  "text": "<commands.gwx.periods.tomorrow>: 🌧️<commands.gwx.weather_descriptions.61> <common.temp_high_label>:10°C <common.temp_low_label>:7°C 7 <services.weather_service.wind_speed_units.ms> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.ms>'), ('value', 14)]> 🌦️100% 9.70mm"
  }
 }

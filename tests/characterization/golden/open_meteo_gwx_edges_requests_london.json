@@ -88,7 +88,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5<commands.gwx.gust[('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
+  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
  },
  "model-omitted-default-timeout": {
   "logs": [
@@ -322,7 +322,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9<commands.gwx.gust[('value', 19)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 19)]>"
  },
  "model-omitted-tomorrow-timeout": {
   "logs": [
@@ -443,7 +443,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5<commands.gwx.gust[('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
+  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
  },
  "model-override-default-timeout": {
   "logs": [
@@ -687,7 +687,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9<commands.gwx.gust[('value', 19)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 19)]>"
  },
  "model-override-tomorrow-timeout": {
   "logs": [
@@ -809,7 +809,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5<commands.gwx.gust[('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
+  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
  },
  "no-override-default-timeout": {
   "logs": [
@@ -1053,7 +1053,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9<commands.gwx.gust[('value', 19)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 19)]>"
  },
  "no-override-tomorrow-timeout": {
   "logs": [
