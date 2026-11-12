@@ -18,6 +18,7 @@ from typing import Any
 from modules.channel_occupancy import lora_airtime_ms
 
 SCHEMA_VERSION = 1
+METHOD_VERSION = 2
 DEDUP_SECONDS = 60
 MAX_ROWS = 100000
 WINDOWS = {'1h': 3600, '24h': 86400, '7d': 604800}
@@ -179,38 +180,79 @@ def _category(packet_type: str) -> str:
 
 
 def duty_summary(events: list[tuple[float, float, bool]], start: float, end: float) -> dict:
-    """Rolling-hour maximum at minute precision; missing observation is never compliance."""
+    """Exact (t-3600, t] windows over event timestamps, including the left lookbehind.
+
+    Direct events use reception times; inferred event times remain estimates.
+    There is no minute bucketing and missing observation is never compliance.
+    """
     selected = [event for event in events if start <= event[0] <= end]
     if not selected:
         return {'estimated_percent': None, 'last_hour_percent': None, 'peak_hour_percent': None,
+                'peak_hour_ending_at': None,
                 'airtime_ms': 0.0, 'direct_airtime_ms': 0.0, 'inferred_airtime_ms': 0.0,
                 'packets': 0, 'reference_percent': REFERENCE_PERCENT, 'compliance': 'unknown',
                 'status': 'no_attributed_observation'}
     total = sum(event[1] for event in selected)
-    hourly: dict[int, float] = defaultdict(float)
-    for at, ms, _ in events:
-        if start-3600 <= at <= end:
-            hourly[int(at//60)] += ms
+    ordered = sorted((at, ms) for at, ms, _ in events if start-3600 < at <= end)
+    # A peak can already exist at the start, before the next selected event.
+    peak = sum(ms for at, ms in ordered if at <= start)
+    peak_at = start
     rolling = 0.0
-    peak = 0.0
-    for minute in range(int(start//60), int(end//60)+1):
-        rolling += hourly.get(minute, 0.0)
-        if minute == int(start//60):
-            rolling += sum(hourly.get(i, 0.0) for i in range(minute-59, minute))
-        else:
-            rolling -= hourly.get(minute-60, 0.0)
-        peak = max(peak, rolling)
-    last = sum(ms for at, ms, _ in events if end-3600 < at <= end)
+    left = 0
+    for right, (at, ms) in enumerate(ordered):
+        rolling += ms
+        while left <= right and ordered[left][0] <= at-3600:
+            rolling -= ordered[left][1]
+            left += 1
+        if at >= start and rolling > peak:
+            peak = rolling
+            peak_at = at
+    last = sum(ms for at, ms in ordered if end-3600 < at)
     peak_percent = peak/3600000*100
     return {'estimated_percent': round(total/max(1,end-start)/1000*100, 6),
             'last_hour_percent': round(last/3600000*100, 6),
-            'peak_hour_percent': round(peak_percent, 6), 'airtime_ms': round(total, 3),
+            'peak_hour_percent': round(peak_percent, 6), 'peak_hour_ending_at': peak_at,
+            'airtime_ms': round(total, 3),
             'direct_airtime_ms': round(sum(ms for _, ms, direct in selected if direct), 3),
             'inferred_airtime_ms': round(sum(ms for _, ms, direct in selected if not direct), 3),
             'packets': len(selected), 'reference_percent': REFERENCE_PERCENT, 'compliance': 'unknown',
             'status': 'reference_reached_in_estimate' if peak_percent >= REFERENCE_PERCENT else 'partial_estimate',
             'first_observed_at': min(at for at, _, _ in selected),
             'last_observed_at': max(at for at, _, _ in selected)}
+
+
+def _reconstruct_emissions(evidence: list[tuple[float, float, bool, float]],
+                           *, count_since: float = -math.inf) -> tuple[list[tuple[float, float, bool]], int]:
+    """Match compatible observations of one relay/path, without swallowing later TX.
+
+    Evidence is (received_at, hop_airtime_ms, direct, downstream_airtime_seconds).
+    A downstream copy cannot predate its upstream transmission plus the airtime
+    of the remaining hops. For an inferred event, intersect those causal intervals
+    with a 60-second allowance for unobserved forwarding delays. That allowance
+    is a modelling assumption, not a known firmware delay limit.
+
+    Every directly received emission is retained. A downstream observation can
+    match at most one compatible group; two direct anchors never merge. A later
+    direct reception cannot retrospectively absorb an earlier downstream copy.
+    Unresolved retries at intermediate hops can still remain merged.
+    """
+    groups: list[dict[str, Any]] = []
+    collapsed = 0
+    for at, ms, direct, downstream_seconds in sorted(evidence):
+        if direct:
+            groups.append({'lower': at, 'upper': at, 'ms': ms, 'direct': True})
+            continue
+        latest = at-downstream_seconds
+        earliest = latest-DEDUP_SECONDS
+        match = next((group for group in reversed(groups)
+                      if max(group['lower'], earliest) <= min(group['upper'], latest)), None)
+        if match is None:
+            groups.append({'lower': earliest, 'upper': latest, 'ms': ms, 'direct': False})
+        else:
+            match['lower'] = max(match['lower'], earliest)
+            match['upper'] = min(match['upper'], latest)
+            collapsed += int(at >= count_since)
+    return [(group['upper'], group['ms'], group['direct']) for group in groups], collapsed
 
 
 def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: str = '24h') -> dict:
@@ -222,12 +264,15 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
         'schema_version': SCHEMA_VERSION, 'generated_at': now, 'window': window,
         'start_time': start, 'end_time': now, 'window_seconds': seconds,
         'units': {'airtime': 'milliseconds', 'timestamp': 'unix_seconds', 'percent': '0_to_100'},
-        'method': {'airtime': 'lora_full_frame_model', 'relay': 'flood_path_reconstruction',
-                   'branch_dedup_seconds': DEDUP_SECONDS, 'peak_resolution_seconds': 60,
+        'method': {'version': METHOD_VERSION, 'airtime': 'lora_full_frame_model', 'relay': 'flood_path_reconstruction',
+                   'branch_dedup_seconds': DEDUP_SECONDS, 'branch_dedup': 'causal_path_intervals',
+                   'inferred_time': 'latest_compatible_upstream_time',
+                   'peak_window': 'event_timestamps', 'peak_resolution_seconds': None,
                    'reference_percent': REFERENCE_PERCENT, 'compliance': 'not_determined',
                    'rx_denominator': 'available_wall_clock_span', 'modulation_profiles': []},
         'limitations': ['local_receiver_only', 'unheard_transmissions_not_counted',
                         'known_prefix_uniqueness_not_identity_proof', 'same_path_retries_may_be_merged_when_inferred',
+                        'unobserved_forwarding_delay_is_assumed', 'inferred_transmission_time_is_estimated',
                         'no_direct_route_or_trace_inference', 'historical_modulation_assumed_during_backfill'],
         'coverage': {'first_observation_at': None, 'last_observation_at': None,
                      'missing_intervals_are_unknown': True, 'truncated': False,
@@ -256,9 +301,8 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
         if key:
             links[packet_hash].append((at, key))
     authors: dict[str, dict] = {}
-    # One group is one evidenced outgoing frame. Direct receptions take precedence
-    # over the inferred copy; distinct direct receptions are retained as emissions.
-    groups: dict[tuple, list[dict]] = defaultdict(list)
+    # Different wire formats / radio profiles cannot be the same physical TX.
+    evidence: dict[tuple, list[tuple[float, float, bool, float]]] = defaultdict(list)
     for at, fingerprint, packet_hash, route, kind, frame_bytes, payload_bytes, path_json, bph, ms, modulation_json, author in rows:
         path = json.loads(path_json)
         author_method = 'advertisement_public_key' if author else 'correlated_decoded_message'
@@ -293,6 +337,14 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                 report['quality']['excluded_route_packets'] += 1
             continue
         modulation = json.loads(modulation_json)
+        # Reception is timestamped at the end of the frame. An upstream RX-end
+        # precedes it by at least the complete airtime of every downstream frame.
+        base_size = 2 + (4 if route.startswith('TRANSPORT_') else 0) + payload_bytes
+        stage_ms = [lora_airtime_ms(base_size+count*bph, **modulation)
+                    for count in range(len(path)+1)]
+        downstream_ms = [0.0] * len(stage_ms)
+        for count in range(len(path)-1, -1, -1):
+            downstream_ms[count] = downstream_ms[count+1] + stage_ms[count+1]
         candidates = []
         if author and contacts.relay(author):
             candidates.append((author, (), len(path) == 0, 0))
@@ -304,25 +356,18 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                 continue
             candidates.append((key, tuple(path[:index+1]), index == len(path)-1, (index+1)*bph))
         for key, chain, direct, path_bytes in candidates:
-            size = 2 + (4 if route.startswith('TRANSPORT_') else 0) + payload_bytes + path_bytes
-            hop_ms = ms if direct else lora_airtime_ms(size, **modulation)
-            identity = (fingerprint, key, chain)
-            previous = groups[identity]
-            group = previous[-1] if previous and at-previous[-1]['at'] <= DEDUP_SECONDS else None
-            if group is None:
-                group = {'at': at, 'inferred_ms': hop_ms, 'direct': []}
-                previous.append(group)
-            elif not direct and at >= start:
-                report['quality']['collapsed_inferred_copies'] += 1
-            if direct:
-                group['direct'].append((at, hop_ms, True))
-    events: dict[str, list] = defaultdict(list)
-    for (_, key, _), matches in groups.items():
-        for group in matches:
-            events[key].extend(group['direct'] or [(group['at'], group['inferred_ms'], False)])
+            stage = path_bytes//bph
+            hop_ms = ms if direct else stage_ms[stage]
+            identity = (fingerprint, key, chain, route, bph, modulation_json)
+            evidence[identity].append((at, hop_ms, direct, downstream_ms[stage]/1000))
+    events: dict[str, list[tuple[float, float, bool]]] = defaultdict(list)
+    for (_, key, *_), observations in evidence.items():
+        reconstructed, collapsed = _reconstruct_emissions(observations, count_since=start)
+        events[key].extend(reconstructed)
+        report['quality']['collapsed_inferred_copies'] += collapsed
     report['authors'] = sorted(authors.values(), key=lambda item: item['rx_airtime_ms'], reverse=True)
-    for key, observations in events.items():
-        duty = duty_summary(observations, start, now)
+    for key, relay_events in events.items():
+        duty = duty_summary(relay_events, start, now)
         if duty['packets']:
             report['repeaters'].append({**contacts.identity(key), **duty,
                                         'identification': 'unique_among_known_nodes', 'hardware_tx_counter': False})

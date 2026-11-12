@@ -1,10 +1,12 @@
 import json
+import random
 import sqlite3
 
 import pytest
 
 from modules.airtime_analysis import (
     AirtimeReader,
+    _reconstruct_emissions,
     build_report,
     create_tables,
     duty_summary,
@@ -193,3 +195,120 @@ def test_partial_history_does_not_dilute_rx_over_unrecorded_days(conn):
     assert r['coverage']['available_seconds'] == 7200
     assert r['local']['rx_percent'] == pytest.approx(r['local']['rx_airtime_ms']/7200000*100, abs=1e-6)
     assert r['local']['requested_window_rx_percent'] < r['local']['rx_percent']
+
+
+def test_later_direct_emission_does_not_erase_earlier_downstream_evidence(conn):
+    insert(conn, 1, packet(('aabb', 'bbcc')), NOW-120)
+    insert(conn, 2, packet(('aabb',)), NOW-110)
+    relays = {x['public_key']: x for x in report(conn)['repeaters']}
+    # A transmission received after the descendant cannot have caused it.
+    assert relays[A]['packets'] == 2
+    assert relays[A]['direct_airtime_ms'] > 0
+    assert relays[A]['inferred_airtime_ms'] > 0
+
+
+def test_downstream_copy_requires_enough_time_to_transmit_complete_next_frame(conn):
+    insert(conn, 1, packet(('aabb',)), NOW-120)
+    insert(conn, 2, packet(('aabb', 'bbcc')), NOW-120+0.0001)
+    relays = {x['public_key']: x for x in report(conn)['repeaters']}
+    assert relays[A]['packets'] == 2
+
+
+def test_one_downstream_copy_does_not_add_to_two_direct_anchors(conn):
+    insert(conn, 1, packet(('aabb',)), NOW-120)
+    insert(conn, 2, packet(('aabb',)), NOW-110)
+    insert(conn, 3, packet(('aabb', 'bbcc')), NOW-100)
+    r = report(conn)
+    relays = {x['public_key']: x for x in r['repeaters']}
+    assert relays[A]['packets'] == 2
+    assert relays[A]['inferred_airtime_ms'] == 0
+    assert r['quality']['collapsed_inferred_copies'] == 1
+
+
+def test_wire_format_and_modulation_are_part_of_emission_identity(conn):
+    insert(conn, 1, packet(), NOW-120)
+    ingest_stream(conn, MOD)
+    insert(conn, 2, packet(), NOW-110)
+    ingest_stream(conn, {**MOD, 'sf':10})
+    insert(conn, 3, packet(route='TRANSPORT_FLOOD'), NOW-100)
+    r = report(conn)
+    assert next(x for x in r['repeaters'] if x['public_key'] == A)['packets'] == 3
+
+
+def test_longer_path_uses_airtime_corrected_delay_not_a_fixed_reception_bucket():
+    emissions, collapsed = _reconstruct_emissions([
+        (100.0, 1000.0, True, 0.0),
+        (169.0, 1000.0, False, 10.0),
+    ])
+    assert emissions == [(100.0, 1000.0, True)]
+    assert collapsed == 1
+
+
+def test_inferred_branches_need_a_common_possible_transmission_time():
+    emissions, _ = _reconstruct_emissions([
+        (100.0, 1000.0, False, 1.0),   # possible RX-end: [39,99]
+        (101.0, 1000.0, False, 71.0),  # possible RX-end: [-30,30]
+    ])
+    assert len(emissions) == 2
+
+
+def test_group_intersection_does_not_extend_forever_with_each_new_branch():
+    emissions, _ = _reconstruct_emissions([
+        (100.0, 1000.0, False, 1.0),
+        (150.0, 1000.0, False, 1.0),
+        (200.0, 1000.0, False, 1.0),
+    ])
+    assert len(emissions) == 2
+
+
+def test_collapsed_copy_quality_only_counts_selected_period():
+    _, collapsed = _reconstruct_emissions([
+        (100.0, 1000.0, True, 0.0),
+        (110.0, 1000.0, False, 1.0),
+        (120.0, 1000.0, False, 1.0),
+    ], count_since=115.0)
+    assert collapsed == 1
+
+
+def test_exact_hour_includes_events_straddling_minute_buckets():
+    # 3599.5 seconds apart, but sixty minute-bucket indexes apart.
+    events = [(60.1, 100000.0, True), (3659.6, 200000.0, True)]
+    d = duty_summary(events, 0.0, 4000.0)
+    assert d['peak_hour_percent'] == pytest.approx(300/3600*100, abs=1e-6)
+    assert d['peak_hour_ending_at'] == 3659.6
+
+
+def test_exact_hour_excludes_event_exactly_one_hour_old():
+    d = duty_summary([(60.25, 100000.0, True), (3660.25, 200000.0, True)], 0.0, 4000.0)
+    assert d['peak_hour_percent'] == pytest.approx(200/3600*100, abs=1e-6)
+
+
+def test_peak_at_period_start_includes_lookbehind_before_next_event():
+    events = [(500.25, 200000.0, True), (5500.5, 100000.0, True)]
+    d = duty_summary(events, 4000.0, 6000.0)
+    assert d['peak_hour_percent'] == pytest.approx(200/3600*100, abs=1e-6)
+    assert d['peak_hour_ending_at'] == 4000.0
+    assert d['last_hour_percent'] == pytest.approx(100/3600*100, abs=1e-6)
+
+
+def test_event_sweep_matches_brute_force_with_fractional_times_and_duplicates():
+    rng = random.Random(3659)
+    for _ in range(25):
+        start, end = 3600.25, 10800.75
+        events = [(rng.randrange(11000)+rng.choice([0.0,0.25,0.75]),
+                   rng.uniform(1, 10000), True) for _ in range(60)]
+        events.extend([(start, 100.0, True), (end, 200.0, True), (end, 300.0, False)])
+        rng.shuffle(events)
+        check_at = [start] + [at for at, _, _ in events if start <= at <= end]
+        expected = max(sum(ms for at, ms, _ in events if when-3600 < at <= when) for when in check_at)
+        d = duty_summary(events, start, end)
+        assert d['peak_hour_percent'] == pytest.approx(expected/3600000*100, abs=1e-6)
+
+
+def test_report_describes_refined_method_without_changing_schema(conn):
+    r = report(conn)
+    assert r['schema_version'] == 1
+    assert r['method']['version'] == 2
+    assert r['method']['branch_dedup'] == 'causal_path_intervals'
+    assert r['method']['peak_window'] == 'event_timestamps'
+    assert r['method']['peak_resolution_seconds'] is None

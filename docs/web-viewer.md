@@ -631,13 +631,26 @@ inside the requested window (coverage.available_seconds), not missing days befor
 recording started; requested_window_rx_percent keeps the whole-window equivalent.
 Capture uptime remains unknown rather than treating gaps as observed silence. Each repeater includes direct/inferred airtime,
 last-hour and peak rolling-hour estimates, and `compliance: "unknown"`.
+`method.version: 2` uses exact `(t-3600, t]` windows at event timestamps, without
+minute buckets (`peak_resolution_seconds: null`). The peak also considers the
+hour ending at the selected period's start, using retained lookbehind events.
+`peak_hour_ending_at` identifies the first endpoint reaching that maximum.
 The 10% reference is a comparison assumption, not a per-band legal assessment.
 
 Only decoded RF frame metadata is retained in the attribution tables. Frames are
 modelled in full, including headers and path bytes. Flood path stages are grouped
-by payload fingerprint and common path prefix within 60 seconds. Direct receptions
-supersede the inferred copy of the same transmission; repeated direct receptions
-remain separate. Inferred same-path retries may be merged. Direct routing paths
+by payload fingerprint, common path prefix, wire route, hash width and modulation.
+For each downstream copy, the full airtime of the remaining hops supplies the
+minimum propagation time. Compatible copies must share a possible upstream
+transmission time, allowing 60 additional seconds for unobserved forwarding
+delays. This allowance is a modelling assumption, not a firmware delay limit.
+Each directly received emission remains separate and can explain a later copy
+only if that minimum propagation time has elapsed. A later direct reception
+cannot absorb earlier downstream evidence. Each copy matches at most one group;
+the group's possible-time interval narrows rather than sliding with every copy.
+Inferred event timestamps use the latest common possible upstream RX-end time;
+their actual time remains uncertain despite exact rolling-window calculations.
+Inferred same-path retries may still be merged. Direct routing paths
 and TRACE instructions/SNR bytes are never treated as completed flood history.
 Short prefixes are attributed only when unique among known nodes. Unresolved and
 ambiguous hops, and received airtime without an identifiable author, remain explicit.
