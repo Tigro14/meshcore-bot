@@ -113,6 +113,164 @@ def test_standalone_installer_separates_code_and_private_state():
     assert "Refusing to restart a potentially partial code tree" in installer
 
 
+_OPTIONAL_PACKAGES_HELPERS_START = "install_profanity_packages() {"
+_OPTIONAL_PACKAGES_HELPERS_END = "# Virtualenv-only fast path"
+
+
+def _run_installer_optional_packages(
+    tmp_path: Path,
+    *,
+    stdin: str = "",
+    label: str = "run",
+    install_extras: str = "false",
+    no_extras: str = "false",
+    venv_updated_in_place: str = "false",
+    geocoding_importable: bool = False,
+) -> tuple[str, list[str]]:
+    """Run the installer's optional-package helper against a stubbed venv python.
+
+    The stub records every `pip install` it is given and reports the geocoding
+    import as present or missing, so the prompt/flag branches can be checked
+    without installing anything.  Returns the printed output and the recorded
+    pip commands.
+    """
+    installer = (REPO_ROOT / "install-service.sh").read_text(encoding="utf-8")
+    helpers = installer[
+        installer.index(_OPTIONAL_PACKAGES_HELPERS_START) : installer.index(_OPTIONAL_PACKAGES_HELPERS_END)
+    ]
+    workdir = tmp_path / label
+    workdir.mkdir(parents=True)
+    script = workdir / "helpers.sh"
+    script.write_text(helpers, encoding="utf-8")
+
+    fake_python = workdir / "venv" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text(
+        "#!/bin/bash\n"
+        'if [ "$1" = "-c" ]; then exit "${GEO_IMPORT_RC:-1}"; fi\n'
+        'printf "%s\\n" "$*" >> "$PIP_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    pip_log = workdir / "pip.log"
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            """
+            set -e
+            print_info() { echo "info: $1"; }
+            print_success() { echo "success: $1"; }
+            print_warning() { echo "warning: $1"; }
+            ask_yes_no() {
+                local response
+                echo "prompt: $1"
+                read -r response || response=""
+                response="${response:-${2:-n}}"
+                case "$response" in
+                    [Yy]|[Yy][Ee][Ss]) return 0 ;;
+                    *)                return 1 ;;
+                esac
+            }
+            VENV_PYTHON="$1/venv/bin/python"
+            # shellcheck disable=SC1091
+            source "$2"
+            apply_optional_packages
+            """,
+            "optional-packages-test",
+            str(workdir),
+            str(script),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        input=stdin,
+        env={
+            **os.environ,
+            "PIP_LOG": str(pip_log),
+            "GEO_IMPORT_RC": "0" if geocoding_importable else "1",
+            "INSTALL_EXTRAS": install_extras,
+            "NO_EXTRAS": no_extras,
+            "VENV_UPDATED_IN_PLACE": venv_updated_in_place,
+        },
+    )
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    commands = pip_log.read_text(encoding="utf-8").splitlines() if pip_log.exists() else []
+    return result.stdout, commands
+
+
+def test_standalone_installer_installs_geocoding_extras_by_default():
+    installer = (REPO_ROOT / "install-service.sh").read_text(encoding="utf-8")
+
+    # The interactive prompt offers the geocoding extras with a yes default; the
+    # profanity filter, which rewrites relayed messages, stays opt-in.
+    geo_prompt = next(
+        line for line in installer.splitlines() if 'ask_yes_no "Install geocoding extras' in line
+    )
+    assert geo_prompt.rstrip().endswith('"y"; then')
+    profanity_prompt = next(
+        line for line in installer.splitlines() if 'ask_yes_no "Install profanity filter' in line
+    )
+    assert profanity_prompt.rstrip().endswith('"n"; then')
+
+    # An unattended run can still opt out of every optional package, and the
+    # virtualenv-only fast path uses the same helper instead of skipping it.
+    assert "--no-extras)" in installer
+    fast_path = installer[
+        installer.index('update_venv_in_place "$INSTALL_DIR/venv" "$REQUIREMENTS_SRC" || exit 1') :
+    ]
+    fast_path = fast_path[: fast_path.index('print_section "Step 1: Setting Up Service User"')]
+    assert "apply_optional_packages" in fast_path
+    assert "VENV_UPDATED_IN_PLACE=true" in fast_path
+
+
+def test_installer_geocoding_extras_default_to_yes_and_profanity_to_no(tmp_path: Path) -> None:
+    # Empty stdin: EOF makes every prompt fall back to its default, which is what
+    # an unattended or piped install sees.
+    output, commands = _run_installer_optional_packages(tmp_path)
+    assert "Install geocoding extras?" in output
+    assert any("pycountry>=23.12.0 us>=2.0.0" in command for command in commands)
+    assert not any("better-profanity" in command for command in commands)
+
+
+def test_installer_honours_declining_the_geocoding_extras(tmp_path: Path) -> None:
+    output, commands = _run_installer_optional_packages(tmp_path, stdin="n\ny\n")
+    assert "Skipping geocoding extras" in output
+    assert not any("pycountry" in command for command in commands)
+    assert any("better-profanity>=0.7.0 unidecode>=1.3.0" in command for command in commands)
+
+
+def test_installer_in_place_update_tops_up_missing_geocoding_extras(tmp_path: Path) -> None:
+    # --update-venv never re-prompts, but an environment predating the geocoding
+    # default still gets them: without pycountry a "City, FR" query resolves to
+    # the US major-city list (Paris, Texas).
+    output, commands = _run_installer_optional_packages(tmp_path, venv_updated_in_place="true")
+    assert "Install geocoding extras?" not in output
+    assert any("pycountry>=23.12.0 us>=2.0.0" in command for command in commands)
+
+
+def test_installer_in_place_update_keeps_installed_geocoding_extras(tmp_path: Path) -> None:
+    output, commands = _run_installer_optional_packages(
+        tmp_path, venv_updated_in_place="true", geocoding_importable=True
+    )
+    assert "Geocoding extras already present" in output
+    assert commands == []
+
+
+def test_installer_extras_flags_skip_prompting(tmp_path: Path) -> None:
+    output, commands = _run_installer_optional_packages(
+        tmp_path, label="install", install_extras="true"
+    )
+    assert "Install geocoding extras?" not in output
+    assert any("pycountry>=23.12.0 us>=2.0.0" in command for command in commands)
+    assert any("better-profanity>=0.7.0 unidecode>=1.3.0" in command for command in commands)
+
+    output, commands = _run_installer_optional_packages(tmp_path, label="skip", no_extras="true")
+    assert "--no-extras" in output
+    assert commands == []
+
+
 def _run_armv7_pip_args(
     machine: str, requirements: Path, extra_bash: str = ""
 ) -> subprocess.CompletedProcess[str]:
