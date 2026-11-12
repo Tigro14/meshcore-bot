@@ -1067,10 +1067,16 @@ prefix_best_do_not_suggest =
 weather_provider = noaa
 
 # Open-Meteo model selection (used by gwx and Weather_Service when provider is openmeteo)
-# Leave unset to default to "best_match"
+# Leave unset to default to "best_match"; forecasts of metropolitan France then use the
+# Météo-France "meteofrance_arome_france" model automatically for 2-day-or-shorter forecasts
+# (any explicit model here always wins, and longer multi-day forecasts stay on the default).
 # Supported model names: https://open-meteo.com/en/docs
 # Set to an empty value (weather_model =) to omit model selection and let Open-Meteo auto-select
 #weather_model =
+
+# Open-Meteo responses are cached for 8 hours (1 hour for "gwx hourly") and reused for the
+# same request while fresh; on an API failure the day's cached response (up to 24 h old) is
+# served instead of an error.
 
 # Default city name for empty "wx" / "gwx" commands when companion location is unavailable
 # Use English city names (examples: Seattle or Seattle, WA)

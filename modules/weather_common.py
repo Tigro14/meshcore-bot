@@ -9,9 +9,10 @@ command sets ``translation_ns`` to its own catalog namespace.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union
 
 from .clients.mqtt_weather import (
@@ -41,6 +42,152 @@ def load_open_meteo_model(config: Any, logger: Any) -> Optional[str]:
         logger.warning(f"Invalid weather_model '{model}', using 'best_match'")
         return 'best_match'
     return model
+
+
+# Open-Meteo model selection and response cache shared by gwx and Weather_Service.
+
+OPEN_METEO_FRANCE_MODEL = 'meteofrance_arome_france'
+# AROME only publishes about two days, so longer requests stay on the configured model.
+OPEN_METEO_FRANCE_MODEL_MAX_FORECAST_DAYS = 2
+# Cached responses answer identical requests for this long before the API is asked again.
+OPEN_METEO_CACHE_FRESH_HOURS = 8.0
+# Hourly replies name the hours after the payload's own "now"; reusing an older one
+# would list hours that have already passed, so their fresh window is much shorter.
+OPEN_METEO_HOURLY_FRESH_HOURS = 1.0
+# Row lifetime in the cache, and the oldest response the failure fallback may serve.
+OPEN_METEO_CACHE_MAX_AGE_HOURS = 24.0
+OPEN_METEO_CACHE_TYPE = 'openmeteo_weather'
+
+# Rough bounding box of metropolitan France (Corsica inside, every overseas department
+# outside). The Météo-France models answer 400 outside their domain, so a geocoded "FR"
+# that is actually Guadeloupe or Réunion must not get the France model; neighbouring
+# countries inside the box are harmless because AROME covers and forecasts them.
+_METRO_FRANCE_BOUNDS = (41.2, 51.3, -6.2, 9.7)  # lat_min, lat_max, lon_min, lon_max
+
+
+def is_metro_france(latitude: Any, longitude: Any) -> bool:
+    """Whether these coordinates fall in the metropolitan-France box."""
+    try:
+        lat, lon = float(latitude), float(longitude)
+    except (TypeError, ValueError):
+        return False
+    lat_min, lat_max, lon_min, lon_max = _METRO_FRANCE_BOUNDS
+    return lat_min <= lat <= lat_max and lon_min <= lon <= lon_max
+
+
+def select_open_meteo_model(
+    configured_model: Optional[str],
+    *,
+    latitude: Any,
+    longitude: Any,
+    forecast_days: int,
+    country_code: Optional[str] = None,
+) -> Optional[str]:
+    """Pick the Open-Meteo ``models`` value for one request.
+
+    An explicit [Weather] weather_model other than ``best_match`` always wins.
+    Otherwise a location that looks like metropolitan France (geocoded country code
+    ``FR`` inside the metropolitan box, or no country information at all and
+    coordinates inside the box) gets the Météo-France AROME model for forecasts of
+    two days or less; everything else keeps the configured default.
+    """
+    if configured_model and configured_model != 'best_match':
+        return configured_model
+    country = (country_code or '').strip().lower()
+    if country and country != 'fr':
+        return configured_model
+    if forecast_days <= OPEN_METEO_FRANCE_MODEL_MAX_FORECAST_DAYS and is_metro_france(latitude, longitude):
+        return OPEN_METEO_FRANCE_MODEL
+    return configured_model
+
+
+def open_meteo_cache_key(params: dict) -> str:
+    """Cache key for one Open-Meteo request; coordinates rounded to ~100 m."""
+    lat: Any = params.get('latitude')
+    lon: Any = params.get('longitude')
+    try:
+        lat = round(float(lat), 3)
+        lon = round(float(lon), 3)
+    except (TypeError, ValueError):
+        pass
+    parts = (
+        lat, lon,
+        params.get('models', ''),
+        params.get('temperature_unit', ''),
+        params.get('wind_speed_unit', ''),
+        params.get('precipitation_unit', ''),
+        params.get('forecast_days', ''),
+        params.get('current', ''),
+        params.get('daily', ''),
+        params.get('hourly', ''),
+    )
+    digest = hashlib.sha256('|'.join(str(part) for part in parts).encode('utf-8')).hexdigest()[:20]
+    return f"openmeteo:{digest}"
+
+
+def read_open_meteo_cache(
+    logger: Any, db_manager: Any, params: dict
+) -> tuple[Optional[dict], Optional[float]]:
+    """Cached Open-Meteo response for the same request: ``(data, age_hours)`` or ``(None, None)``."""
+    if db_manager is None:
+        return None, None
+    try:
+        entry = db_manager.get_cached_json(open_meteo_cache_key(params), OPEN_METEO_CACHE_TYPE)
+    except Exception as e:
+        logger.debug(f"Open-Meteo cache read failed: {e}")
+        return None, None
+    if not isinstance(entry, dict):
+        return None, None
+    data = entry.get('data')
+    fetched_at = entry.get('fetched_at')
+    if not isinstance(data, dict) or not isinstance(fetched_at, str):
+        return None, None
+    try:
+        fetched = datetime.fromisoformat(fetched_at)
+    except ValueError:
+        return None, None
+    if fetched.tzinfo is None:
+        fetched = fetched.replace(tzinfo=timezone.utc)
+    age_hours = (datetime.now(timezone.utc) - fetched).total_seconds() / 3600.0
+    if age_hours < 0:
+        return None, None
+    return data, age_hours
+
+
+def open_meteo_cache_is_usable(data: dict, age_hours: Optional[float], max_age_hours: float) -> bool:
+    """Whether a cached response may answer instead of a fresh forecast.
+
+    It must be at most ``max_age_hours`` old and still describe the location's
+    current local day: a payload cached yesterday would label yesterday's
+    temperatures as today.
+    """
+    if age_hours is None or age_hours > max_age_hours:
+        return False
+    offset = data.get('utc_offset_seconds')
+    reference = (data.get('current') or {}).get('time') or ((data.get('daily') or {}).get('time') or [None])[0]
+    if offset is None or not reference:
+        return False
+    try:
+        cached_day = datetime.fromisoformat(str(reference)[:10]).date()
+        local_now = datetime.now(timezone.utc) + timedelta(seconds=int(offset))
+    except (ValueError, TypeError):
+        return False
+    return cached_day == local_now.date()
+
+
+def store_open_meteo_payload(logger: Any, db_manager: Any, params: dict, data: dict) -> None:
+    """Cache a successful Open-Meteo response, stamped with its fetch time."""
+    if db_manager is None or not isinstance(data, dict):
+        return
+    try:
+        db_manager.cache_json(
+            open_meteo_cache_key(params),
+            {'fetched_at': datetime.now(timezone.utc).isoformat(timespec='seconds'), 'data': data},
+            OPEN_METEO_CACHE_TYPE,
+            cache_hours=int(OPEN_METEO_CACHE_MAX_AGE_HOURS),
+        )
+    except Exception as e:
+        logger.debug(f"Open-Meteo cache write failed: {e}")
 
 
 def load_open_meteo_units(config: Any, logger: Any) -> tuple[str, str, str]:
