@@ -550,6 +550,32 @@ except ImportError:
     US_AVAILABLE = False
 
 
+# ISO 3166-1 alpha-2 → country name, used only when pycountry is not installed
+# (the [geo] extra is optional). Without it a bare "FR" from a default_country
+# or a "City, FR" query would fall through to the US-state rules and a city
+# like Paris would resolve through the US major-city list (Paris, TX).
+# Ambiguous codes where the US state reading matters (CA, WA, OR, IN, GA, ID,
+# OH) stay out of this table: the US-state check runs before this fallback.
+_ISO2_FALLBACK = {
+    "AD": "Andorra", "AL": "Albania", "AR": "Argentina", "AT": "Austria",
+    "AU": "Australia", "BA": "Bosnia and Herzegovina", "BE": "Belgium",
+    "BG": "Bulgaria", "BH": "Bahrain", "BR": "Brazil", "BY": "Belarus",
+    "CH": "Switzerland", "CL": "Chile", "CN": "China", "CR": "Costa Rica",
+    "CY": "Cyprus", "CZ": "Czechia", "DE": "Germany", "DK": "Denmark",
+    "EE": "Estonia", "EG": "Egypt", "ES": "Spain", "FI": "Finland",
+    "FR": "France", "GB": "United Kingdom", "GR": "Greece", "HR": "Croatia",
+    "HU": "Hungary", "IE": "Ireland", "IL": "Israel", "IN": "India",
+    "IS": "Iceland", "IT": "Italy", "JP": "Japan", "KR": "South Korea",
+    "LT": "Lithuania", "LU": "Luxembourg", "LV": "Latvia", "MA": "Morocco",
+    "MD": "Moldova", "ME": "Montenegro", "MK": "North Macedonia", "MT": "Malta",
+    "MX": "Mexico", "NL": "Netherlands", "NO": "Norway", "NZ": "New Zealand",
+    "PE": "Peru", "PL": "Poland", "PT": "Portugal", "RO": "Romania",
+    "RS": "Serbia", "RU": "Russia", "SE": "Sweden", "SI": "Slovenia",
+    "SK": "Slovakia", "SM": "San Marino", "TH": "Thailand", "TR": "Turkey",
+    "UA": "Ukraine", "US": "United States", "ZA": "South Africa",
+}
+
+
 def normalize_country_name(country_input: str) -> tuple[Optional[str], Optional[str]]:
     """Normalize country name to ISO code and standard name.
 
@@ -561,6 +587,11 @@ def normalize_country_name(country_input: str) -> tuple[Optional[str], Optional[
         Example: ("SE", "Sweden") or ("US", "United States")
     """
     if not PYCOUNTRY_AVAILABLE:
+        # The [geo] extra is optional; recognize common alpha-2 codes (e.g. a
+        # "FR" default_country) from the built-in table instead of giving up.
+        key = country_input.strip().upper() if country_input else ""
+        if key in _ISO2_FALLBACK:
+            return key, _ISO2_FALLBACK[key]
         return None, None
 
     if not country_input:
@@ -676,6 +707,9 @@ def is_country_name(text: str) -> bool:
         state_abbr, _ = normalize_us_state(text)
         if state_abbr:
             return False  # It's a US state, not a country
+
+    if len(text) == 2 and text.strip().upper() in _ISO2_FALLBACK:
+        return True  # Known ISO code, even without pycountry
 
     if len(text) <= 2:
         return False  # Unknown 2-char (not a known country or US state)
