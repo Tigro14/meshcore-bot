@@ -375,6 +375,7 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         parts, option_word, option_type, option_days = self._split_option_only(parts, GWX_MULTIDAY_MAX_DAYS)
 
         # If no location specified, check custom MQTT then WXSIM default sources
+        using_default_city = False
         if len(parts) < 2:
             mqtt_topic = self._get_custom_mqtt_weather_topic(None)
             if mqtt_topic:
@@ -392,6 +393,11 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             if location_str is None:
                 await self.send_response(message, self.translate('commands.gwx.usage'))
                 return True
+            # A default city stands in for a sender who named no place, so the
+            # reply names it: the user never typed it and cannot infer it from
+            # "Ce soir: …". A companion or bot position arrives as coordinates
+            # and keeps its reverse-lookup label instead.
+            using_default_city = location_str == self._default_city_query()
             parts = [parts[0], location_str]
 
         if option_word:
@@ -433,7 +439,9 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             self.record_execution(message.sender_id)
 
             # Get weather data for the location
-            weather_data = await self.get_weather_for_location(location, forecast_type, num_days, message)
+            weather_data = await self.get_weather_for_location(
+                location, forecast_type, num_days, message, default_location=using_default_city
+            )
 
             return await self._send_weather_reply(message, weather_data, forecast_type)
 
@@ -442,7 +450,7 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             await self.send_response(message, self.translate('commands.gwx.error', error=str(e)))
             return True
 
-    async def get_weather_for_location(self, location: str, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None) -> Union[str, tuple[str, str, str]]:
+    async def get_weather_for_location(self, location: str, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, default_location: bool = False) -> Union[str, tuple[str, str, str]]:
         """Get weather data for any global location.
 
         Args:
@@ -450,6 +458,8 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             forecast_type: "default", "tomorrow", "multiday", or "hourly".
             num_days: Number of days for multiday forecast (2–16).
             message: The MeshMessage for dynamic length calculation.
+            default_location: The location is [Weather] default_city standing in
+                for a request that named no place; the reply names it.
 
         Geocoding and the Open-Meteo fetch are both blocking HTTP, so the whole
         body runs on a worker thread; inline it stalled every other coroutine for
@@ -459,7 +469,7 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             Union[str, Tuple[str, str, str]]: Format string or tuple for multi-message response.
         """
         return await asyncio.to_thread(
-            self._get_weather_for_location_sync, location, forecast_type, num_days, message
+            self._get_weather_for_location_sync, location, forecast_type, num_days, message, default_location
         )
 
     def _get_weather_for_location_sync(
@@ -468,6 +478,7 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         forecast_type: str = "default",
         num_days: int = 7,
         message: MeshMessage = None,
+        default_location: bool = False,
     ) -> Union[str, tuple[str, str, str]]:
         """Blocking body of :meth:`get_weather_for_location` (runs off the event loop)."""
         try:
@@ -478,7 +489,8 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
 
             lat, lon, address_info, geocode_result = result
             return self._weather_for_point(
-                location, lat, lon, address_info, geocode_result, forecast_type, num_days, message
+                location, lat, lon, address_info, geocode_result, forecast_type, num_days, message,
+                default_location=default_location,
             )
 
         except Exception as e:
@@ -495,14 +507,17 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         forecast_type: str = "default",
         num_days: int = 7,
         message: MeshMessage = None,
+        default_location: bool = False,
     ) -> Union[str, tuple[str, str, str]]:
         """The Open-Meteo reply for a place already geocoded, labeled when the label adds information.
 
         Also wx's answer for a place outside NWS coverage ([Weather] openmeteo_fallback).
+        ``default_location`` forces the label for a bare request answered from
+        [Weather] default_city: the sender never typed that name.
         """
         # Format location name for display, when it tells the user something
         location_display = ""
-        if self._location_label_adds_information(location, address_info):
+        if default_location or self._location_label_adds_information(location, address_info):
             location_display = self._format_location_display(address_info, geocode_result, location)
         self.logger.debug(f"Formatted location_display: '{location_display}' from location: '{location}'")
         prefix = f"{location_display}: " if location_display else ""

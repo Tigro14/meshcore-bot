@@ -541,6 +541,7 @@ async def test_global_wx_lookup_keeps_event_loop_responsive() -> None:
         _forecast_type: str = "default",
         _num_days: int = 7,
         _message: Any = None,
+        _default_location: bool = False,
     ) -> str:
         gate.block_until_heartbeat()
         return "Tokyo: 20C clear"
