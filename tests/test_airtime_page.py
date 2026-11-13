@@ -74,7 +74,7 @@ class TestAirtimePage:
         body = viewer.app.test_client().get('/airtime').data.decode()
         assert "type: 'bar'" in body
         assert 'airtimeUnavailable' in body
-        assert 'Gris : données indisponibles' in body
+        assert 'Tirets gris : données indisponibles' in body
         assert 'null' in body
 
     def test_page_script_carries_a_csp_nonce(self, viewer):

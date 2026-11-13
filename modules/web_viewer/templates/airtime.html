@@ -8,7 +8,7 @@
     .airtime-page { max-width: 1400px; margin: auto; }
     .airtime-value { font-size: clamp(1.7rem, 3vw, 2.3rem); font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.3; }
     .airtime-label { color: var(--text-muted); font-size: .9rem; }
-    .airtime-chart { height: 260px; position: relative; }
+    .airtime-chart { height: 220px; position: relative; }
     .airtime-row { padding: .65rem 0; }
     .airtime-row + .airtime-row { border-top: 1px solid var(--border-color, #dee2e6); }
     .airtime-name { min-width: 0; overflow-wrap: anywhere; }
@@ -20,7 +20,7 @@
     #airtime-details .modal-body { min-height: 250px; }
     #airtime-details td:first-child { overflow-wrap: anywhere; }
     @media (max-width: 575px) {
-        .airtime-chart { height: 220px; }
+        .airtime-chart { height: 190px; }
         .airtime-controls { width: 100%; }
         .airtime-controls select { flex: 1; }
     }
@@ -60,7 +60,7 @@
         <div class="card-body">
             <p class="small text-muted mb-0" id="airtime-chart-empty" hidden>Aucune observation exploitable.</p>
             <div class="airtime-chart" id="airtime-chart-wrap"><canvas id="airtime-chart" aria-label="Histogramme de l’occupation reçue au fil du temps"></canvas></div>
-            <p class="small text-muted mt-2 mb-0">Écoute locale de Baliz · Une partie du trafic reste invisible.<br><span style="display:inline-block;width:12px;height:12px;background:rgba(128,128,128,.18);vertical-align:middle"></span> Gris : données indisponibles · 0 % : écoute suivie, aucun paquet reçu.</p>
+            <p class="small text-muted mt-2 mb-0">Écoute locale de Baliz · <span style="display:inline-block;width:12px;height:3px;background:#aeb7c2;vertical-align:middle"></span> Tirets gris : données indisponibles · 0 % : silence confirmé.</p>
         </div>
     </section>
     <div class="row g-3 mb-3">
@@ -256,8 +256,9 @@
             const dataset = {label: 'Occupation reçue (%)', data: series.map(point => {
                 const start = point.start_time ?? point.end_time - (data.local.rx_bucket_seconds || 300);
                 return {x: (start + point.end_time) / 2, y: point.percent, start, end: point.end_time, coverage: point.coverage};
-            }), backgroundColor: '#0d6efd', borderWidth: 0, barThickness: 'flex',
-                categoryPercentage: 1, barPercentage: .95};
+            }), backgroundColor: '#7ca4cf', hoverBackgroundColor: '#497fb8', borderWidth: 0,
+                borderRadius: 2, barThickness: 'flex', maxBarThickness: 16,
+                categoryPercentage: 1, barPercentage: .65};
             if (this.chart) {
                 this.chart.data.datasets = [dataset];
                 this.chart.options.scales.x.min = data.start_time;
@@ -266,15 +267,15 @@
                 this.chart.update();
                 return;
             }
-            const unavailable = {id: 'airtimeUnavailable', beforeDatasetsDraw: chart => {
+            const unavailable = {id: 'airtimeUnavailable', afterDraw: chart => {
                 const {ctx, chartArea, scales} = chart;
                 ctx.save();
-                ctx.fillStyle = 'rgba(128,128,128,.18)';
+                ctx.fillStyle = '#aeb7c2';
                 for (const point of chart.data.datasets[0].data) {
                     if (point.y !== null) continue;
                     const left = scales.x.getPixelForValue(point.start), right = scales.x.getPixelForValue(point.end);
-                    ctx.fillRect(Math.max(chartArea.left, left), chartArea.top,
-                        Math.max(0, Math.min(chartArea.right, right)-Math.max(chartArea.left, left)), chartArea.bottom-chartArea.top);
+                    ctx.fillRect(Math.max(chartArea.left, left)+1, chartArea.bottom+4,
+                        Math.max(1, Math.min(chartArea.right, right)-Math.max(chartArea.left, left)-2), 3);
                 }
                 ctx.restore();
             }};
@@ -287,9 +288,12 @@
                     label: item => pct(item.parsed.y),
                 }}},
                 scales: {x: {type: 'linear', offset: false, min: data.start_time, max: data.end_time,
-                    ticks: {maxTicksLimit: 5, callback: value => new Date(value * 1000).toLocaleString('fr-FR', this.chartPeriod === '7d'
+                    grid: {display: false}, border: {display: false},
+                    ticks: {maxTicksLimit: 5, padding: 12, font: {size: 11}, callback: value => new Date(value * 1000).toLocaleString('fr-FR', this.chartPeriod === '7d'
                         ? {day: '2-digit', month: '2-digit'} : {hour: '2-digit', minute: '2-digit'})}},
-                y: {display: hasData, beginAtZero: true, suggestedMax: 1, title: {display: true, text: 'Occupation reçue (%)'}, ticks: {maxTicksLimit: 5}}},
+                y: {display: hasData, beginAtZero: true, suggestedMax: 1,
+                    grid: {color: 'rgba(128,128,128,.10)', drawTicks: false}, border: {display: false},
+                    ticks: {maxTicksLimit: 4, padding: 8, font: {size: 11}, callback: value => number(value) + ' %'}}},
             }});
         }
         renderDetails() {
