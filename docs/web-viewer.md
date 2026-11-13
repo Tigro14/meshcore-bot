@@ -626,18 +626,49 @@ emission can be attributed. Discovery filters do not change that one-hour window
 
 `GET /api/telemetry/occupancy/analysis?window=1h|24h|7d` exposes a versioned JSON
 read model for future assistant tools: `schema_version`, Unix-second period bounds,
-`units`, `method`, `coverage`, `local`, `traffic`, `quality`, `authors`, `repeaters`, `comparison`, and
-`limitations`. Airtime values use milliseconds; percentages are ordinary 0–100
-percentages, not fractions. Local RX averages use the available wall-clock span
+`units`, `method`, `coverage`, `local`, `local_load`, `observer`, `traffic`, `quality`, `authors`, `repeaters`, `comparison`, and
+`limitations`. Airtime values use milliseconds; percentages use percentage points,
+not fractions. Summed offered load can exceed 100% because emissions overlap.
+Local RX averages use the available wall-clock span
 inside the requested window (coverage.available_seconds), not missing days before
 recording started; requested_window_rx_percent keeps the whole-window equivalent.
 Capture uptime remains unknown rather than treating gaps as observed silence. Each repeater includes direct/inferred airtime,
 last-hour and peak rolling-hour estimates, and `compliance: "unknown"`.
-`method.version: 3` uses exact `(t-3600, t]` windows at event timestamps, without
+`method.version: 4` uses exact `(t-3600, t]` windows at event timestamps, without
 minute buckets (`peak_resolution_seconds: null`). The peak also considers the
 hour ending at the selected period's start, using retained lookbehind events.
 `peak_hour_ending_at` identifies the first endpoint reaching that maximum.
 The 10% reference is a comparison assumption, not a per-band legal assessment.
+
+Version 4 also exposes exact rolling five-minute bursts, their endpoints,
+direct/inferred emission counts, hour bins with evidence (not radio availability),
+and the last hour's direct/inferred percentage components. Contacts uses those
+same one-hour components in its tooltip. A five-minute burst has no 10% threshold.
+The historical observation's radio profile is used for every reconstructed hop;
+Baliz's Brittany deployment uses the common SF8 / 62.5 kHz / CR 4/8 profile. No
+repeater-specific CR or packet-loss multiplier is invented.
+
+`local_load` takes inspiration from [the analysis project's ECL method](https://www.ans-innovation.fr/meshcore-analysis/2026-10/qualite-lorient.html?lang=fr),
+but is explicitly **partial evidenced load**, not expected ECL. A local neighbour
+needs an unambiguous direct RF reception in the selected period. Its evidenced
+transmissions (heard directly or supported by other paths) are summed once, along
+with evidenced origins from the observer's public identity. RX is not added again;
+remote path stages are not included as local interferers. The observer's TX is
+incomplete too: accepted send requests do not establish a full frame on air.
+`observer_tx_complete: false`, `is_duty_cycle: false`, missing-data flags and the
+neighbour list make these limitations machine-readable. Existing global radio
+cost remains a separate measure covering all received paths.
+
+The local load includes rolling-hour/five-minute peaks and a bounded time series.
+Absent buckets stay `null`; nonempty buckets use their full fixed duration even
+at a partial history edge. A mean requires at least five minutes of retained
+history. No silent interval is used to infer uptime. The dominant neighbour's
+share of **local received airtime** makes receiver bias visible; it is not that
+neighbour's share of regional traffic. Neither this share nor path participation
+is an FDR. `expected_ecl_percent` and each neighbour's FDR `expected` / `percent`
+stay `null`: a companion with only winning flood paths has no independent count
+of mandatory retransmissions, known forwarding policies or counterfactual losses.
+There is no division by FDR to inflate a repeater's duty estimate.
 
 `traffic.distinct_packets` deduplicates payload fingerprints across all selected
 receptions, including repeated delivery attempts and alternate routes. Received
@@ -694,7 +725,9 @@ Inferred same-path retries may still be merged. Direct routing paths
 and TRACE instructions/SNR bytes are never treated as completed flood history.
 Short prefixes are attributed only when unique among known nodes. Unresolved and
 ambiguous hops, and received airtime without an identifiable author, remain explicit.
-Correlated message metadata can supply an author; message bodies and channel keys
+Correlated message metadata can supply an author. A reply hash established by the
+existing transmission tracker can link the observer's identity to an RF copy;
+an unconfirmed send request alone cannot. Message bodies and channel keys
 are never copied to these tables or exposed by this API.
 
 The writer incrementally imports retained RF rows and saves per-observation

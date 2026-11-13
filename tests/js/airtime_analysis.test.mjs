@@ -90,3 +90,28 @@ test('negative observed trends sort above unknown rather than treating unknown a
     assert.match(html,/-25 %/);
     assert.match(html,/N\/D/);
 });
+test('local load is not clipped to 100, missing buckets stay gaps and neighbour names are text',()=>{
+    const {instance,elements}=viewer();
+    instance.renderAnalysis({...data,method:{modulation_profiles:[{sf:8,bw_khz:62.5,cr_den:8}]},
+        local_load:{estimated_percent:125,peak_five_minutes:{percent:160,ending_at:200000},
+            peak_hour:{percent:125},neighbour_count:1,
+            dominant_neighbour:{name:'<script>evil()</script>',local_rx_share_percent:95},
+            buckets:[{end_time:200000,percent:125},{end_time:200300,percent:null}]}});
+    assert.equal(elements.get('oc-load-mean').textContent,'125 %');
+    assert.equal(elements.get('oc-load-burst').textContent,'160 %');
+    assert.match(elements.get('oc-load-context').textContent,/CR 4\/8/);
+    assert.equal(elements.get('oc-load-context').innerHTML,'');
+    assert.equal(instance.localChart.data.datasets.length,1);
+    assert.equal(instance.localChart.data.datasets[0].data[1].y,null);
+    assert.equal(instance.localChart.data.datasets[0].spanGaps,false);
+});
+test('a five-minute burst above 10 percent is not marked as an hourly duty infringement',()=>{
+    const {instance,elements}=viewer();
+    instance.renderAnalysis({...data,repeaters:[{...data.repeaters[0],peak_five_minute_percent:15,
+        last_hour_percent:1,peak_hour_percent:2,direct_packets:1,inferred_packets:2,local_neighbour:true}]});
+    const html=elements.get('oc-repeaters').innerHTML;
+    assert.match(html,/15 %/);
+    assert.match(html,/1 entendues<br>2 déduites/);
+    assert.match(html,/Voisin entendu directement/);
+    assert.doesNotMatch(html,/text-danger/);
+});

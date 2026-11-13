@@ -545,6 +545,8 @@ class BotIntegration:
         try:
             occupancy.flush(conn)
             from modules.airtime_analysis import ingest_stream
+            from modules.airtime_quality import write_observer_metadata
+            write_observer_metadata(conn, getattr(getattr(self.bot, 'meshcore', None), 'self_info', None))
             ingest_stream(conn, occupancy.modulation())
             conn.commit()
         except Exception as e:

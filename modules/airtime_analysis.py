@@ -15,10 +15,11 @@ import time
 from collections import defaultdict
 from typing import Any
 
+from modules.airtime_quality import local_load, observer_metadata, rolling_peak
 from modules.channel_occupancy import lora_airtime_ms
 
 SCHEMA_VERSION = 1
-METHOD_VERSION = 3
+METHOD_VERSION = 4
 DEDUP_SECONDS = 60
 MAX_ROWS = 100000
 WINDOWS = {'1h': 3600, '24h': 86400, '7d': 604800}
@@ -114,7 +115,7 @@ def ingest_stream(conn: sqlite3.Connection, modulation: dict, *, limit: int = 10
     imported = 0
     for source_id, observed_at, raw, kind in rows:
         last_id = source_id
-        if kind not in ('packet', 'message'):
+        if kind not in ('packet', 'message', 'command'):
             continue
         try:
             data = json.loads(raw)
@@ -126,10 +127,10 @@ def ingest_stream(conn: sqlite3.Connection, modulation: dict, *, limit: int = 10
                     conn.execute('INSERT OR IGNORE INTO airtime_observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', values)
                     imported += 1
             else:
-                packet_hash = _hex(data.get('packet_hash'))
+                packet_hash = _hex(data.get('reply_packet_hash') if kind == 'command' else data.get('packet_hash'))
                 if packet_hash:
-                    key = _hex(data.get('sender_pubkey'), (64,))
-                    name = data.get('sender')
+                    key = observer_metadata(conn).get('public_key') if kind == 'command' else _hex(data.get('sender_pubkey'), (64,))
+                    name = None if kind == 'command' else data.get('sender')
                     name = name[:128] if isinstance(name, str) and name.strip() else None
                     conn.execute('INSERT OR IGNORE INTO airtime_author_links VALUES (?,?,?,?,?)',
                                  (source_id, observed_at, packet_hash, key, name))
@@ -189,6 +190,10 @@ def duty_summary(events: list[tuple[float, float, bool]], start: float, end: flo
     if not selected:
         return {'estimated_percent': None, 'last_hour_percent': None, 'peak_hour_percent': None,
                 'peak_hour_ending_at': None,
+                'peak_five_minute_percent': None, 'peak_five_minute_ending_at': None,
+                'direct_packets': 0, 'inferred_packets': 0, 'hours_with_evidence': 0,
+                'last_hour_direct_percent': None, 'last_hour_inferred_percent': None,
+                'last_hour_packets': 0,
                 'airtime_ms': 0.0, 'direct_airtime_ms': 0.0, 'inferred_airtime_ms': 0.0,
                 'packets': 0, 'reference_percent': REFERENCE_PERCENT, 'compliance': 'unknown',
                 'status': 'no_attributed_observation'}
@@ -209,9 +214,17 @@ def duty_summary(events: list[tuple[float, float, bool]], start: float, end: flo
             peak_at = at
     last = sum(ms for at, ms in ordered if end-3600 < at)
     peak_percent = peak/3600000*100
+    burst = rolling_peak(events, start, end, 300)
     return {'estimated_percent': round(total/max(1,end-start)/1000*100, 6),
             'last_hour_percent': round(last/3600000*100, 6),
             'peak_hour_percent': round(peak_percent, 6), 'peak_hour_ending_at': peak_at,
+            'peak_five_minute_percent': burst['percent'], 'peak_five_minute_ending_at': burst['ending_at'],
+            'direct_packets': sum(1 for _, _, direct in selected if direct),
+            'inferred_packets': sum(1 for _, _, direct in selected if not direct),
+            'hours_with_evidence': len({int(at//3600) for at, _, _ in selected}),
+            'last_hour_direct_percent': round(sum(ms for at, ms, direct in events if end-3600 < at <= end and direct)/3600000*100, 6),
+            'last_hour_inferred_percent': round(sum(ms for at, ms, direct in events if end-3600 < at <= end and not direct)/3600000*100, 6),
+            'last_hour_packets': sum(1 for at, _, _ in events if end-3600 < at <= end),
             'airtime_ms': round(total, 3),
             'direct_airtime_ms': round(sum(ms for _, ms, direct in selected if direct), 3),
             'inferred_airtime_ms': round(sum(ms for _, ms, direct in selected if not direct), 3),
@@ -333,11 +346,15 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
     report: dict[str, Any] = {
         'schema_version': SCHEMA_VERSION, 'generated_at': now, 'window': window,
         'start_time': start, 'end_time': now, 'window_seconds': seconds,
-        'units': {'airtime': 'milliseconds', 'timestamp': 'unix_seconds', 'percent': '0_to_100'},
+        'units': {'airtime': 'milliseconds', 'timestamp': 'unix_seconds', 'percent': 'percentage_points'},
         'method': {'version': METHOD_VERSION, 'airtime': 'lora_full_frame_model', 'relay': 'flood_path_reconstruction',
                    'branch_dedup_seconds': DEDUP_SECONDS, 'branch_dedup': 'causal_path_intervals',
                    'inferred_time': 'latest_compatible_upstream_time',
                    'peak_window': 'event_timestamps', 'peak_resolution_seconds': None,
+                   'burst_window_seconds': 300,
+                   'radio_assumption': 'all_hops_use_recorded_observer_profile',
+                   'local_load': 'evidenced_neighbours_only_not_expected_ecl',
+                   'fdr': 'unavailable_without_independent_forwarding_obligations',
                    'traffic_identity': 'payload_fingerprint', 'duty_reference_scope': 'per_transmitter',
                    'traffic_cost_basis': 'emission_groups_supported_by_selected_receptions',
                    'participation_denominator': 'distinct_flood_packets_with_nonempty_received_path',
@@ -347,7 +364,9 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                         'known_prefix_uniqueness_not_identity_proof', 'same_path_retries_may_be_merged_when_inferred',
                         'unobserved_forwarding_delay_is_assumed', 'inferred_transmission_time_is_estimated',
                         'no_direct_route_or_trace_inference', 'historical_modulation_assumed_during_backfill',
-                        'winning_paths_do_not_describe_all_flood_branches', 'radio_cost_is_not_global_channel_occupancy'],
+                        'winning_paths_do_not_describe_all_flood_branches', 'radio_cost_is_not_global_channel_occupancy',
+                        'local_load_counts_only_evidenced_neighbour_transmissions',
+                        'forwarding_policy_and_expected_transmissions_unknown', 'no_inverse_fdr_correction'],
         'coverage': {'first_observation_at': None, 'last_observation_at': None,
                      'missing_intervals_are_unknown': True, 'truncated': False,
                      'capture_uptime_known': False, 'effective_start_time': start,
@@ -360,6 +379,9 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                        'previous_end_time': start, 'window_seconds': seconds,
                        'capture_uptime_known': False, 'interpretation': 'observed_traffic_only'}}
     report['traffic'], _ = _traffic_summary({}, {}, contacts)
+    observer = observer_metadata(conn)
+    report['observer'] = observer or {'public_key': None, 'role': 'unknown'}
+    report['local_load'] = local_load({}, contacts, observer, start, now, start, 0, None)
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='airtime_observations'").fetchone():
         return report
     retained_from = conn.execute('SELECT MIN(observed_at) FROM airtime_observations').fetchone()[0]
@@ -435,7 +457,7 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
         for count in range(len(path)-1, -1, -1):
             downstream_ms[count] = downstream_ms[count+1] + stage_ms[count+1]
         candidates: list[tuple[str | None, tuple[str, ...], bool, int]] = [
-            (author if author and contacts.relay(author) else None, (), len(path) == 0, 0)]
+            (author, (), len(path) == 0, 0)]
         if path and at >= start:
             path_packets.add(fingerprint)
         for index, prefix in enumerate(path):
@@ -474,6 +496,8 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
     report['traffic']['path_packets'] = len(path_packets)
     report['traffic']['identifiable_path_packets'] = len(identified_path_packets)
     for key, relay_events in events.items():
+        if not contacts.relay(key):
+            continue
         duty = duty_summary(relay_events, start, now)
         if duty['packets']:
             report['repeaters'].append({**contacts.identity(key), **duty,
@@ -483,6 +507,17 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                                         'trend': {'status': 'insufficient_history', 'change_percent': None,
                                                   'previous_airtime_ms': None},
                                         'identification': 'unique_among_known_nodes', 'hardware_tx_counter': False})
+    report['local_load'] = local_load(events, contacts, observer, start, now,
+        report['coverage']['effective_start_time'], report['local']['rx_airtime_ms'], retained_from)
+    report['local_load']['processing_truncated'] = report['coverage']['truncated']
+    if report['coverage']['truncated']:
+        report['local_load']['retained_full_hour'] = False
+    neighbour_keys = {node['public_key'] for node in report['local_load']['neighbours']}
+    for node in report['repeaters']:
+        node['local_neighbour'] = node['public_key'] in neighbour_keys
+        node['evidence'] = 'direct_and_path' if node['direct_packets'] and node['inferred_packets'] else (
+            'direct_receptions' if node['direct_packets'] else 'received_paths_only')
+        node['last_hour_history_complete'] = not report['coverage']['truncated'] and retained_from is not None and retained_from <= now-3600
     report['repeaters'].sort(key=lambda item: (item['path_packets'], item['airtime_ms']), reverse=True)
     local = report['local']
     if local['rx_packets']:

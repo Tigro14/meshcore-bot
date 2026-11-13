@@ -603,4 +603,8 @@ test('passive relay duty is partial and unknown never turns into zero or complia
     assert.match(small, /ne prouve pas/);
     assert.doesNotMatch(small, /bg-success/);
     assert.match(manager.formatDutyCycle({airtime_duty: {estimated_percent: 11}}), /bg-danger/);
+    const evidence = manager.formatDutyCycle({airtime_duty: {estimated_percent: 0.25,
+        direct_percent:0.2,inferred_percent:0.05,attributed_packets:8,retained_full_hour:false}});
+    assert.match(evidence, /Entendu : 0,2 % ; déduit : 0,05 % ; 8 émissions/);
+    assert.match(evidence, /Historique disponible inférieur/);
 });

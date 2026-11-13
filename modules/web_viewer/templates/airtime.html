@@ -199,6 +199,22 @@
             <p class="small text-muted mb-0">Le coût radio additionne les émissions reconstituées à l’origine et sur les chemins reçus. Il ne mesure pas l’occupation de tout le réseau.</p>
         </div>
     </section>
+    <section class="card mb-4" aria-labelledby="oc-load-title">
+        <div class="card-header"><h2 class="h5 mb-0" id="oc-load-title">Charge locale reconstituée — voisins de Baliz</h2></div>
+        <div class="card-body">
+            <div class="row g-3 mb-3">
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Charge partielle moyenne</div><div class="oc-figure" id="oc-load-mean">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Pic sur 5 minutes</div><div class="oc-figure" id="oc-load-burst">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Pic sur 1 heure</div><div class="oc-figure" id="oc-load-hour">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Voisins entendus directement</div><div class="oc-figure" id="oc-load-neighbours">—</div></div>
+            </div>
+            <p id="oc-load-context" class="small mb-2"></p>
+            <div style="position:relative;height:220px"><canvas id="oc-load-chart" aria-label="Charge locale partielle reconstituée"></canvas></div>
+            <p class="small text-muted mt-2 mb-1">Approche inspirée de l’ECL : somme des émissions reconstituées des voisins directs et des émissions de Baliz retrouvées dans les chemins. Les relais lointains ne sont pas additionnés à la charge locale. Les pertes restent inconnues.</p>
+            <p class="small text-muted mb-1">Cette charge peut dépasser 100 % si les émissions se chevauchent. Ce n’est pas un duty cycle. Un creux ne prouve pas une absence de trafic.</p>
+            <p class="small text-muted mb-0">FDR non calculable : le nombre de retransmissions attendues de chaque voisin est inconnu. Le DC des répéteurs n’est pas corrigé artificiellement pour les pertes.</p>
+        </div>
+    </section>
     <div class="card mb-4">
         <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
             <h2 class="h5 mb-0">Auteurs des paquets reçus</h2>
@@ -220,19 +236,19 @@
             <div class="d-flex flex-wrap gap-2">
                 <input id="oc-relay-filter" class="form-control form-control-sm" style="width:auto" placeholder="Chercher un répéteur…" aria-label="Chercher un répéteur">
                 <select id="oc-relay-sort" class="form-select form-select-sm" style="width:auto" aria-label="Classement des répéteurs">
-                    <option value="path_packets">Participation aux chemins</option><option value="airtime_ms">Temps d’émission reconstitué</option><option value="change_percent">Évolution observée</option><option value="last_hour_percent">DC sur 1 h</option><option value="peak_hour_percent">Pic DC sur 1 h</option>
+                    <option value="path_packets">Participation aux chemins</option><option value="airtime_ms">Temps d’émission reconstitué</option><option value="change_percent">Évolution observée</option><option value="last_hour_percent">DC sur 1 h</option><option value="peak_hour_percent">Pic DC sur 1 h</option><option value="peak_five_minute_percent">Pic sur 5 min</option>
                 </select>
             </div>
         </div>
         <div class="card-body">
             <div class="table-responsive"><table class="table table-hover align-middle mb-0">
-                <thead><tr><th>Répéteur</th><th>Participation</th><th>Émission reconstituée</th><th>Évolution observée</th><th>DC sur 1 h</th><th>Pic DC sur 1 h</th><th>Émissions</th></tr></thead>
+                <thead><tr><th>Répéteur</th><th>Participation</th><th>Émission reconstituée</th><th>Évolution observée</th><th>DC sur 1 h</th><th>Pic DC sur 1 h</th><th>Pic sur 5 min</th><th>Émissions</th></tr></thead>
                 <tbody id="oc-repeaters"></tbody>
             </table></div>
             <p class="small text-muted mt-2 mb-0" id="oc-analysis-quality"></p>
             <p class="small text-muted mb-2">La participation compte les paquets distincts dont le chemin contient ce relais. Les branches qui n’atteignent pas Baliz restent invisibles.</p>
             <p class="small text-muted mb-2" id="oc-comparison-note"></p>
-            <p class="small text-muted mb-0">Le DC est estimé par émetteur, sur une heure, avec un repère de 10 %. Une écoute partielle ne permet pas de conclure à sa conformité.</p>
+            <p class="small text-muted mb-0">Le DC est estimé par émetteur à partir des trames flood identifiables, sur une heure, avec un repère de 10 %. Le pic sur 5 minutes décrit les rafales de trafic, sans seuil réglementaire associé. Une écoute partielle ne permet pas de conclure à la conformité.</p>
         </div>
     </div>
 </div>
@@ -262,6 +278,7 @@
         constructor() {
             this.days = parseInt(el('oc-window').value, 10) || 7;
             this.chart = null;
+            this.localChart = null;
             this.analysisSequence = 0;
             const redraw = () => { if (this.lastAnalysisData) this.renderAnalysis(this.lastAnalysisData); };
             el('oc-relay-filter').addEventListener('input', redraw);
@@ -455,6 +472,7 @@
             el('oc-analysis-cost').textContent = duration(traffic.reconstructed_radio_airtime_ms);
             el('oc-analysis-unknown').textContent = traffic.distinct_packets ? pct(traffic.unattributed_author_packets / traffic.distinct_packets * 100) : 'N/D';
             const date = timestamp => new Date(timestamp * 1000).toLocaleString('fr-FR');
+            this.renderLocalLoad(data, pct, number, date);
             el('oc-analysis-coverage').textContent = data.coverage.first_observation_at
                 ? 'Observations du ' + date(data.coverage.first_observation_at) + ' au ' + date(data.coverage.last_observation_at) + '. Moyenne sur ' + formatSeconds(data.coverage.available_seconds) + ' d’historique disponible. Couverture partielle.' + (data.coverage.truncated ? ' Limite de traitement atteinte.' : '')
                 : 'Aucune observation exploitable sur cette période. Cela ne signifie pas une absence de trafic.';
@@ -474,15 +492,56 @@
             const repeaters = data.repeaters.filter(node => node.name.toLocaleLowerCase().includes(query))
                 .sort((left, right) => Number(sortValue(right) ?? -Infinity) - Number(sortValue(left) ?? -Infinity));
             const trend = node => node.trend.change_percent === null ? 'N/D' : (node.trend.change_percent > 0 ? '+' : '') + pct(node.trend.change_percent);
-            el('oc-repeaters').innerHTML = repeaters.map(node => '<tr><td>' + escapeHtml(node.name) + '</td><td>' + pct(node.participation_percent)
+            el('oc-repeaters').innerHTML = repeaters.map(node => '<tr><td>' + escapeHtml(node.name)
+                + (node.local_neighbour ? '<small class="d-block text-muted">Voisin entendu directement</small>' : '') + '</td><td>' + pct(node.participation_percent)
                 + '<small class="d-block text-muted text-nowrap">' + number(node.path_packets) + ' / ' + number(node.path_packets_total) + ' paquets</small></td>'
-                + '<td title="' + escapeHtml('Entendu : ' + duration(node.direct_airtime_ms) + ' · Déduit : ' + duration(node.inferred_airtime_ms)) + '">' + duration(node.airtime_ms) + '</td>'
-                + '<td>' + trend(node) + '</td><td class="' + (node.last_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.last_hour_percent) + '</td><td class="' + (node.peak_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.peak_hour_percent) + '</td><td>' + number(node.packets) + '</td></tr>').join('') || '<tr><td colspan="7" class="text-muted">Aucune émission attribuable.</td></tr>';
+                + '<td>' + duration(node.airtime_ms) + '<small class="d-block text-muted text-nowrap">Entendu : ' + duration(node.direct_airtime_ms) + '<br>Déduit : ' + duration(node.inferred_airtime_ms) + '</small></td>'
+                + '<td>' + trend(node) + '</td><td class="' + (node.last_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.last_hour_percent)
+                + (node.last_hour_history_complete === false ? '<small class="d-block text-muted">Historique &lt; 1 h</small>' : '')
+                + '</td><td title="' + escapeHtml(node.peak_hour_ending_at ? 'Heure se terminant le ' + date(node.peak_hour_ending_at) : '') + '" class="' + (node.peak_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.peak_hour_percent)
+                + '</td><td title="' + escapeHtml(node.peak_five_minute_ending_at ? '5 minutes se terminant le ' + date(node.peak_five_minute_ending_at) : '') + '">' + pct(node.peak_five_minute_percent)
+                + '</td><td>' + number(node.packets) + (node.direct_packets !== undefined ? '<small class="d-block text-muted text-nowrap">' + number(node.direct_packets) + ' entendues<br>' + number(node.inferred_packets) + ' déduites</small>' : '') + '</td></tr>').join('') || '<tr><td colspan="8" class="text-muted">Aucune émission attribuable.</td></tr>';
             const quality = data.quality;
             el('oc-analysis-quality').textContent = number(quality.ambiguous_hops) + ' passages ambigus · ' + number(quality.unknown_hops) + ' non identifiés · ' + number(quality.collapsed_inferred_copies) + ' copies déduites regroupées.';
             el('oc-comparison-note').textContent = data.comparison.status === 'available_partial_observations'
                 ? 'Évolution du temps d’émission reconstitué par rapport à la période précédente, du ' + date(data.comparison.previous_start_time) + ' au ' + date(data.comparison.previous_end_time) + '. Les deux périodes restent partiellement observées.'
                 : 'Évolution : historique comparable insuffisant. N/D ne signifie pas une absence de trafic.';
+        }
+
+        renderLocalLoad(data, pct, number, date) {
+            const load = data.local_load || {};
+            el('oc-load-mean').textContent = pct(load.estimated_percent);
+            el('oc-load-burst').textContent = pct(load.peak_five_minutes?.percent);
+            el('oc-load-hour').textContent = pct(load.peak_hour?.percent);
+            el('oc-load-neighbours').textContent = load.neighbour_count === undefined ? 'N/D' : number(load.neighbour_count);
+            el('oc-load-burst').title = load.peak_five_minutes?.ending_at ? '5 minutes se terminant le ' + date(load.peak_five_minutes.ending_at) : '';
+            el('oc-load-hour').title = load.peak_hour?.ending_at ? 'Heure se terminant le ' + date(load.peak_hour.ending_at) : '';
+            const profiles = data.method?.modulation_profiles || [];
+            const profile = profiles.map(item => 'SF' + item.sf + ' · ' + item.bw_khz + ' kHz · CR 4/' + item.cr_den).join(' / ');
+            const dominant = load.dominant_neighbour;
+            el('oc-load-context').textContent = (dominant
+                ? dominant.name + ' représente ' + pct(dominant.local_rx_share_percent) + ' du temps de réception local. Ce biais d’écoute ne mesure pas sa part du trafic de toute la Bretagne.'
+                : 'Aucun voisin directement identifié sur cette période. Charge locale inconnue.')
+                + (profile ? ' Profil radio appliqué aux chemins : ' + profile + '.' : '')
+                + (load.bucket_seconds ? ' Courbe par tranches de ' + formatSeconds(load.bucket_seconds) + '.' : '');
+            const buckets = load.buckets || [];
+            const hasData = buckets.some(bucket => bucket.percent !== null && bucket.percent !== undefined);
+            el('oc-load-chart').style.display = hasData ? 'block' : 'none';
+            const datasets = [{label: 'Charge locale partielle (%)',
+                data: buckets.map(bucket => ({x: bucket.end_time, y: bucket.percent})),
+                borderColor: '#9370db', backgroundColor: '#9370db22', fill: true, pointRadius: 1, spanGaps: false}];
+            if (this.localChart) {
+                this.localChart.data.datasets = datasets;
+                this.localChart.update();
+            } else if (hasData) {
+                this.localChart = new Chart(el('oc-load-chart'), {type: 'line', data: {datasets}, options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {tooltip: {callbacks: {title: items => items.length ? date(items[0].parsed.x) : '',
+                        label: item => 'Charge partielle : ' + pct(item.parsed.y)}}},
+                    scales: {x: {type: 'linear', ticks: {maxTicksLimit: 6, callback: value => new Date(value * 1000).toLocaleString('fr-FR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}},
+                        y: {beginAtZero: true, title: {display: true, text: 'Émissions locales reconstituées (%)'}}},
+                }});
+            }
         }
     }
 

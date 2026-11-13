@@ -276,6 +276,12 @@ class ContactTrackingMixin:
                                 'reference_percent': 10.0, 'compliance': 'unknown',
                                 'status': estimate['status'] if estimate else 'no_attributed_observation',
                                 'method': 'passive_flood_path_reconstruction',
+                                'direct_percent': estimate['last_hour_direct_percent'] if estimate else None,
+                                'inferred_percent': estimate['last_hour_inferred_percent'] if estimate else None,
+                                'attributed_packets': estimate['last_hour_packets'] if estimate else 0,
+                                'retained_full_hour': estimate['last_hour_history_complete'] if estimate else False,
+                                'capture_uptime_known': False,
+                                'modulation_profiles': airtime['method']['modulation_profiles'],
                             }
 
                 # Get server statistics for daily tracking using direct database queries
