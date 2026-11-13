@@ -213,18 +213,19 @@ def duty_summary(events: list[tuple[float, float, bool]], start: float, end: flo
             peak = rolling
             peak_at = at
     last = sum(ms for at, ms in ordered if end-3600 < at)
+    last_events = [(at, ms, direct) for at, ms, direct in events if end-3600 < at <= end]
     peak_percent = peak/3600000*100
     burst = rolling_peak(events, start, end, 300)
     return {'estimated_percent': round(total/max(1,end-start)/1000*100, 6),
-            'last_hour_percent': round(last/3600000*100, 6),
+            'last_hour_percent': round(last/3600000*100, 6) if last_events else None,
             'peak_hour_percent': round(peak_percent, 6), 'peak_hour_ending_at': peak_at,
             'peak_five_minute_percent': burst['percent'], 'peak_five_minute_ending_at': burst['ending_at'],
             'direct_packets': sum(1 for _, _, direct in selected if direct),
             'inferred_packets': sum(1 for _, _, direct in selected if not direct),
             'hours_with_evidence': len({int(at//3600) for at, _, _ in selected}),
-            'last_hour_direct_percent': round(sum(ms for at, ms, direct in events if end-3600 < at <= end and direct)/3600000*100, 6),
-            'last_hour_inferred_percent': round(sum(ms for at, ms, direct in events if end-3600 < at <= end and not direct)/3600000*100, 6),
-            'last_hour_packets': sum(1 for at, _, _ in events if end-3600 < at <= end),
+            'last_hour_direct_percent': round(sum(ms for _, ms, direct in last_events if direct)/3600000*100, 6) if last_events else None,
+            'last_hour_inferred_percent': round(sum(ms for _, ms, direct in last_events if not direct)/3600000*100, 6) if last_events else None,
+            'last_hour_packets': len(last_events),
             'airtime_ms': round(total, 3),
             'direct_airtime_ms': round(sum(ms for _, ms, direct in selected if direct), 3),
             'inferred_airtime_ms': round(sum(ms for _, ms, direct in selected if not direct), 3),

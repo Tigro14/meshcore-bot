@@ -115,3 +115,9 @@ test('a five-minute burst above 10 percent is not marked as an hourly duty infri
     assert.match(html,/Voisin entendu directement/);
     assert.doesNotMatch(html,/text-danger/);
 });
+test('daily relay evidence does not turn an unknown last hour into zero duty',()=>{
+    const {instance,elements}=viewer();
+    instance.renderAnalysis({...data,repeaters:[{...data.repeaters[0],last_hour_percent:null}]});
+    assert.doesNotMatch(elements.get('oc-repeaters').innerHTML,/≈ N\/D|≈ 0 %/);
+    assert.match(elements.get('oc-repeaters').innerHTML,/N\/D/);
+});

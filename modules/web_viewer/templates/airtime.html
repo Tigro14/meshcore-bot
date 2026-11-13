@@ -496,7 +496,7 @@
                 + (node.local_neighbour ? '<small class="d-block text-muted">Voisin entendu directement</small>' : '') + '</td><td>' + pct(node.participation_percent)
                 + '<small class="d-block text-muted text-nowrap">' + number(node.path_packets) + ' / ' + number(node.path_packets_total) + ' paquets</small></td>'
                 + '<td>' + duration(node.airtime_ms) + '<small class="d-block text-muted text-nowrap">Entendu : ' + duration(node.direct_airtime_ms) + '<br>Déduit : ' + duration(node.inferred_airtime_ms) + '</small></td>'
-                + '<td>' + trend(node) + '</td><td class="' + (node.last_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.last_hour_percent)
+                + '<td>' + trend(node) + '</td><td class="' + (node.last_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">' + (node.last_hour_percent === null || node.last_hour_percent === undefined ? 'N/D' : '≈ ' + pct(node.last_hour_percent))
                 + (node.last_hour_history_complete === false ? '<small class="d-block text-muted">Historique &lt; 1 h</small>' : '')
                 + '</td><td title="' + escapeHtml(node.peak_hour_ending_at ? 'Heure se terminant le ' + date(node.peak_hour_ending_at) : '') + '" class="' + (node.peak_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.peak_hour_percent)
                 + '</td><td title="' + escapeHtml(node.peak_five_minute_ending_at ? '5 minutes se terminant le ' + date(node.peak_five_minute_ending_at) : '') + '">' + pct(node.peak_five_minute_percent)

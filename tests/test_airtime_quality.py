@@ -102,6 +102,16 @@ def test_dc_evidence_is_independent_of_five_minute_burst():
     assert result['compliance'] == 'unknown'
 
 
+def test_old_daily_evidence_does_not_claim_a_silent_last_hour():
+    result = duty_summary([(100, 1000, True)], 0, 86400)
+    assert result['packets'] == 1
+    assert result['last_hour_percent'] is None
+    assert result['last_hour_direct_percent'] is None
+    assert result['last_hour_inferred_percent'] is None
+    assert result['last_hour_packets'] == 0
+    assert result['peak_hour_percent'] > 0
+
+
 def test_observer_snapshot_contains_only_public_identity(db):
     write_observer_metadata(db, {'public_key': SELF, 'type': 1, 'channel_key': 'secret', 'name': 'private'})
     assert observer_metadata(db) == {'public_key': SELF, 'role': 'companion'}
