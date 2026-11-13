@@ -141,25 +141,26 @@ test('a late old-period response cannot overwrite a newer period or its controls
     assert.equal(elements.get('airtime-refresh').disabled,false);
 });
 
-test('the dominant directly heard relay is hidden by default only in the overview',()=>{
+test('all directly heard relays are hidden by default only in the overview',()=>{
     const {instance,elements}=viewer();
     const neighbour={public_key:'first',name:'Direct neighbour'};
-    const repeaters=[{...neighbour,last_hour_percent:2},
+    const second={public_key:'second',name:'Second direct neighbour'};
+    const repeaters=[{...neighbour,last_hour_percent:2},{...second,last_hour_percent:1.5},
         ...Array.from({length:6},(_,i)=>({public_key:String(i),name:'Remote '+i,last_hour_percent:1/(i+1)}))];
-    const current={repeaters,local_load:{dominant_neighbour:neighbour}};
+    const current={repeaters,local_load:{neighbours:[neighbour,second]}};
     instance.render({...data,repeaters},current);
     assert.doesNotMatch(elements.get('airtime-duty-list').innerHTML,/Direct neighbour/);
     assert.equal((elements.get('airtime-duty-list').innerHTML.match(/role="meter"/g)||[]).length,5);
     assert.equal(elements.get('airtime-duty').textContent,'1 %');
-    assert.match(elements.get('airtime-duty-note').textContent,/Hors premier lien/);
-    assert.equal(elements.get('airtime-first-link-note').hidden,false);
+    assert.match(elements.get('airtime-duty-note').textContent,/Hors premiers liens/);
+    assert.doesNotMatch(elements.get('airtime-duty-list').innerHTML,/Second direct neighbour/);
     assert.match(elements.get('airtime-relay-details').innerHTML,/Direct neighbour/);
-    assert.equal(instance.data.repeaters.length,7);
+    assert.equal(instance.data.repeaters.length,8);
     elements.get('airtime-show-first-link').checked=true;
     instance.renderDuty();
     assert.equal(elements.get('airtime-duty').textContent,'2 %');
     assert.match(elements.get('airtime-duty-list').innerHTML,/Direct neighbour/);
-    assert.equal(elements.get('airtime-first-link-note').hidden,true);
+    assert.match(elements.get('airtime-duty-list').innerHTML,/Second direct neighbour/);
     instance.render({...data,repeaters},current);
     assert.equal(elements.get('airtime-duty').textContent,'2 %');
     elements.get('airtime-show-first-link').checked=false;
@@ -170,10 +171,8 @@ test('a highest-duty remote relay is never hidden without direct-neighbour evide
     const {instance,elements}=viewer();
     instance.render(data,hourly);
     assert.equal(elements.get('airtime-duty').textContent,'0,1 %');
-    assert.equal(elements.get('airtime-first-link-note').hidden,true);
     // Identification follows the public key, regardless of a changed display name.
-    instance.render({...data,local_load:{dominant_neighbour:{public_key:'r',name:'Renamed neighbour'}}},hourly);
+    instance.render({...data,local_load:{neighbours:[{public_key:'r',name:'Renamed neighbour'}]}},hourly);
     assert.equal(elements.get('airtime-duty').textContent,'N/D');
     assert.doesNotMatch(elements.get('airtime-duty-list').innerHTML,/Relay/);
-    assert.match(elements.get('airtime-first-link-note').textContent,/Renamed neighbour/);
 });

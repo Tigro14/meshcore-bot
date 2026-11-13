@@ -67,14 +67,13 @@
         <section class="col-12 col-lg-6" aria-labelledby="airtime-duty-title"><div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center gap-2"><h2 class="h6 mb-0" id="airtime-duty-title">Duty cycle — dernière heure</h2><button class="btn btn-link btn-sm p-0 text-nowrap" data-airtime-detail="relays">Voir tous</button></div>
             <div class="card-body">
-                <div class="form-check mb-2">
-                    <input class="form-check-input" type="checkbox" id="airtime-show-first-link">
-                    <label class="form-check-label small" for="airtime-show-first-link" title="Répéteur principalement entendu directement par Baliz">Afficher le premier lien</label>
-                </div>
-                <p class="small text-muted mb-2 airtime-name" id="airtime-first-link-note" hidden></p>
                 <div class="d-flex justify-content-between text-muted small gap-2"><span>0 %</span><span>10 % = 6 min/h par répéteur</span></div>
                 <div id="airtime-duty-list"></div>
                 <p class="small text-muted mt-2 mb-0">Estimations partielles. « Scénario » inclut des retransmissions possibles.</p>
+                <div class="form-check mt-2">
+                    <input class="form-check-input" type="checkbox" id="airtime-show-first-link">
+                    <label class="form-check-label small" for="airtime-show-first-link" title="Répéteurs entendus directement par Baliz">Afficher les premiers liens</label>
+                </div>
             </div>
         </div></section>
         <section class="col-12 col-lg-6" aria-labelledby="airtime-sources-title"><div class="card h-100">
@@ -227,16 +226,15 @@
         }
         renderDuty() {
             if (!this.data) return;
-            const first = this.hourly?.local_load?.dominant_neighbour ?? this.data.local_load?.dominant_neighbour;
-            const hideFirst = !el('airtime-show-first-link').checked && !!first?.public_key;
-            const visible = this.rows.filter(node => !hideFirst || node.public_key !== first.public_key);
-            el('airtime-first-link-note').hidden = !hideFirst;
-            el('airtime-first-link-note').textContent = hideFirst ? 'Premier lien masqué : ' + first.name : '';
+            const neighbours = this.hourly?.local_load?.neighbours ?? this.data.local_load?.neighbours ?? [];
+            const firstKeys = new Set(neighbours.map(node => node.public_key).filter(Boolean));
+            const hideFirst = !el('airtime-show-first-link').checked && firstKeys.size > 0;
+            const visible = this.rows.filter(node => !hideFirst || !firstKeys.has(node.public_key));
             const top = visible.find(node => node.value !== null);
             el('airtime-duty').textContent = pct(top?.value);
             el('airtime-duty').classList.toggle('text-danger', (top?.value ?? 0) >= 10);
             el('airtime-duty-note').textContent = top ? (top.projected ? 'Scénario · ' : '') + top.name + ' · Dernière heure'
-                + (hideFirst ? ' · Hors premier lien' : '') : 'Aucune estimation récente';
+                + (hideFirst ? ' · Hors premiers liens' : '') : 'Aucune estimation récente';
             const active = visible.filter(node => node.value !== null).slice(0, 5);
             el('airtime-duty-list').innerHTML = active.map(node => {
                 const width = Math.max(0, Math.min(100, node.value / 10 * 100));
