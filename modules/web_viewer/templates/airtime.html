@@ -234,6 +234,7 @@
             this.renderDetails();
         }
         renderChart(data) {
+            this.chartPeriod = data.window;
             const series = data.local.rx_series || [];
             const hasData = series.some(point => known(point.percent));
             el('airtime-chart-wrap').hidden = !hasData;
@@ -255,7 +256,8 @@
                     label: item => pct(item.parsed.y),
                 }}},
                 scales: {x: {type: 'linear', min: data.start_time, max: data.end_time,
-                    ticks: {maxTicksLimit: 6, callback: value => new Date(value * 1000).toLocaleString('fr-FR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}},
+                    ticks: {maxTicksLimit: 5, callback: value => new Date(value * 1000).toLocaleString('fr-FR', this.chartPeriod === '7d'
+                        ? {day: '2-digit', month: '2-digit'} : {hour: '2-digit', minute: '2-digit'})}},
                 y: {beginAtZero: true, title: {display: true, text: 'Occupation reçue (%)'}, ticks: {maxTicksLimit: 5}}},
             }});
         }

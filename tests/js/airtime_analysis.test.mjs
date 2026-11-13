@@ -69,10 +69,13 @@ test('the one RX chart has real gaps, no global threshold and updates its period
     assert.equal(instance.chart.data.datasets[0].data[1].y,null);
     assert.equal(instance.chart.data.datasets[0].spanGaps,false);
     assert.equal(instance.chart.options.scales.x.min,1000);
+    assert.match(instance.chart.options.scales.x.ticks.callback(1000),/^\d{2}:\d{2}$/);
     instance.render({...data,start_time:500,end_time:90000},hourly);
     assert.equal(instance.chart.options.scales.x.min,500);
     assert.equal(instance.chart.options.scales.x.max,90000);
     assert.equal(instance.chart.data.datasets[0].label,'Occupation reçue (%)');
+    instance.render({...data,window:'7d'},hourly);
+    assert.match(instance.chart.options.scales.x.ticks.callback(1000),/^\d{2}\/\d{2}$/);
 });
 test('insufficient capture never becomes a quiet-network zero; historical coverage is explicit',()=>{
     const {instance,elements}=viewer();
