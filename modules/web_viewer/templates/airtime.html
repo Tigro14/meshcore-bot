@@ -87,13 +87,8 @@
     </div>
 
     <p class="small text-muted mb-4">
-        This is <strong>modelled</strong> airtime, not a measurement of the channel being busy.
-        Over serial, BLE or TCP the bot is a client of a radio: it cannot see whether the channel
-        was clear, only how long a packet of a given size occupies it at the current
-        SF/BW/coding rate. Real occupancy (CAD, LBT) belongs to a radio driver, and a repeater's
-        own occupancy comes from that repeater's API. The two shares are kept apart on purpose:
-        <strong>rx</strong> is what this node hears — a local observation, not the airtime of the
-        whole channel — and <strong>tx</strong> is what the bot spends itself.
+        Temps d’antenne <strong>estimé</strong> à partir du profil radio.
+        <strong>RX</strong> : paquets reçus. <strong>TX</strong> : demandes d’émission de Baliz.
     </p>
 
     <!-- Live windows -->
@@ -168,12 +163,7 @@
             <div id="ocChartError" class="oc-empty" style="display:none"></div>
             <canvas id="oc-chart" height="140"></canvas>
             <p class="small text-muted mt-3 mb-0">
-                A gap is not a zero: a period with no packet is absent from the result, so the
-                line breaks there rather than dropping to 0. A bucket that was observed and held
-                nothing on air stays a zero — those are two different facts, and a chart that
-                draws the first as the second shows a cliff that reads as an outage. Percentiles
-                are nearest-rank over the stored buckets, which is not the same measurement as
-                the instant windows above.
+                Les périodes sans relevé restent vides.
             </p>
         </div>
     </div>
@@ -196,11 +186,11 @@
                 <div class="col-6 col-lg-3"><div class="oc-figure-label">Paquets sans auteur identifié</div><div class="oc-figure" id="oc-analysis-unknown">—</div></div>
             </div>
             <p id="oc-analysis-coverage" class="small text-muted mb-2"></p>
-            <p class="small text-muted mb-0">Le coût radio additionne les émissions reconstituées à l’origine et sur les chemins reçus. Il ne mesure pas l’occupation de tout le réseau.</p>
+            <p class="small text-muted mb-0">Coût radio : somme des émissions reconstituées sur les chemins reçus.</p>
         </div>
     </section>
     <section class="card mb-4" aria-labelledby="oc-load-title">
-        <div class="card-header"><h2 class="h5 mb-0" id="oc-load-title">Charge locale reconstituée — voisins de Baliz</h2></div>
+        <div class="card-header"><h2 class="h5 mb-0" id="oc-load-title">Charge locale estimée</h2></div>
         <div class="card-body">
             <div class="row g-3 mb-3">
                 <div class="col-6 col-lg-3"><div class="oc-figure-label">Charge partielle moyenne</div><div class="oc-figure" id="oc-load-mean">—</div></div>
@@ -210,9 +200,7 @@
             </div>
             <p id="oc-load-context" class="small mb-2"></p>
             <div style="position:relative;height:220px"><canvas id="oc-load-chart" aria-label="Charge locale partielle reconstituée"></canvas></div>
-            <p class="small text-muted mt-2 mb-1">Approche inspirée de l’ECL : somme des émissions reconstituées des voisins directs et des émissions de Baliz retrouvées dans les chemins. Les relais lointains ne sont pas additionnés à la charge locale. Les pertes restent inconnues.</p>
-            <p class="small text-muted mb-1">Cette charge peut dépasser 100 % si les émissions se chevauchent. Ce n’est pas un duty cycle. Un creux ne prouve pas une absence de trafic.</p>
-            <p class="small text-muted mb-0">FDR non calculable : le nombre de retransmissions attendues de chaque voisin est inconnu. Le DC des répéteurs n’est pas corrigé artificiellement pour les pertes.</p>
+            <p class="small text-muted mt-2 mb-0">Émissions reconstituées des voisins directs et de Baliz. Observation partielle, pertes non quantifiées.</p>
         </div>
     </section>
     <div class="card mb-4">
@@ -246,9 +234,9 @@
                 <tbody id="oc-repeaters"></tbody>
             </table></div>
             <p class="small text-muted mt-2 mb-0" id="oc-analysis-quality"></p>
-            <p class="small text-muted mb-2">La participation compte les paquets distincts dont le chemin contient ce relais. Les branches qui n’atteignent pas Baliz restent invisibles.</p>
+            <p class="small text-muted mb-2">Participation : part des paquets distincts dont le chemin contient ce relais.</p>
             <p class="small text-muted mb-2" id="oc-comparison-note"></p>
-            <p class="small text-muted mb-0">Le DC est estimé par émetteur à partir des trames flood identifiables, sur une heure, avec un repère de 10 %. Le pic sur 5 minutes décrit les rafales de trafic, sans seuil réglementaire associé. Une écoute partielle ne permet pas de conclure à la conformité.</p>
+            <p class="small text-muted mb-0">DC sur 1 h, par émetteur · Repère : 10 % · Estimation partielle.</p>
         </div>
     </div>
 </div>
@@ -474,8 +462,8 @@
             const date = timestamp => new Date(timestamp * 1000).toLocaleString('fr-FR');
             this.renderLocalLoad(data, pct, number, date);
             el('oc-analysis-coverage').textContent = data.coverage.first_observation_at
-                ? 'Observations du ' + date(data.coverage.first_observation_at) + ' au ' + date(data.coverage.last_observation_at) + '. Moyenne sur ' + formatSeconds(data.coverage.available_seconds) + ' d’historique disponible. Couverture partielle.' + (data.coverage.truncated ? ' Limite de traitement atteinte.' : '')
-                : 'Aucune observation exploitable sur cette période. Cela ne signifie pas une absence de trafic.';
+                ? 'Du ' + date(data.coverage.first_observation_at) + ' au ' + date(data.coverage.last_observation_at) + ' · ' + formatSeconds(data.coverage.available_seconds) + ' disponibles · Données partielles.' + (data.coverage.truncated ? ' Traitement limité.' : '')
+                : 'Aucune observation exploitable sur cette période.';
             const authorSort = el('oc-author-sort').value || 'distinct_packets';
             const authorRow = author => '<tr><td>' + escapeHtml(author.name) + '</td><td>' + number(author.distinct_packets) + '</td>'
                 + ['messages', 'adverts', 'other'].map(kind => '<td>' + number(author.categories[kind].distinct_packets) + '</td>').join('')
@@ -485,7 +473,7 @@
                 Number(right[authorSort] ?? -Infinity) - Number(left[authorSort] ?? -Infinity)).slice(0, 50).map(authorRow);
             if (traffic.unknown_author.distinct_packets) authors.push(authorRow(traffic.unknown_author));
             el('oc-authors').innerHTML = authors.join('') || '<tr><td colspan="6" class="text-muted">Aucune observation.</td></tr>';
-            el('oc-author-coverage').textContent = 'Chaque paquet d’origine est compté une fois, même reçu par plusieurs chemins. ' + number(traffic.cost_reconstructed_packets) + ' / ' + number(traffic.distinct_packets) + ' paquets permettent une reconstitution du coût radio. Affichage des 50 premiers auteurs.';
+            el('oc-author-coverage').textContent = number(traffic.cost_reconstructed_packets) + ' / ' + number(traffic.distinct_packets) + ' paquets reconstitués · 50 premiers auteurs · Copies dédupliquées.';
             const query = el('oc-relay-filter').value.trim().toLocaleLowerCase();
             const sortKey = el('oc-relay-sort').value || 'path_packets';
             const sortValue = node => sortKey === 'change_percent' ? node.trend.change_percent : node[sortKey];
@@ -504,8 +492,8 @@
             const quality = data.quality;
             el('oc-analysis-quality').textContent = number(quality.ambiguous_hops) + ' passages ambigus · ' + number(quality.unknown_hops) + ' non identifiés · ' + number(quality.collapsed_inferred_copies) + ' copies déduites regroupées.';
             el('oc-comparison-note').textContent = data.comparison.status === 'available_partial_observations'
-                ? 'Évolution du temps d’émission reconstitué par rapport à la période précédente, du ' + date(data.comparison.previous_start_time) + ' au ' + date(data.comparison.previous_end_time) + '. Les deux périodes restent partiellement observées.'
-                : 'Évolution : historique comparable insuffisant. N/D ne signifie pas une absence de trafic.';
+                ? 'Période comparée : du ' + date(data.comparison.previous_start_time) + ' au ' + date(data.comparison.previous_end_time) + '.'
+                : 'Évolution : historique comparable insuffisant.';
         }
 
         renderLocalLoad(data, pct, number, date) {
@@ -518,12 +506,11 @@
             el('oc-load-hour').title = load.peak_hour?.ending_at ? 'Heure se terminant le ' + date(load.peak_hour.ending_at) : '';
             const profiles = data.method?.modulation_profiles || [];
             const profile = profiles.map(item => 'SF' + item.sf + ' · ' + item.bw_khz + ' kHz · CR 4/' + item.cr_den).join(' / ');
-            const dominant = load.dominant_neighbour;
-            el('oc-load-context').textContent = (dominant
-                ? dominant.name + ' représente ' + pct(dominant.local_rx_share_percent) + ' du temps de réception local. Ce biais d’écoute ne mesure pas sa part du trafic de toute la Bretagne.'
-                : 'Aucun voisin directement identifié sur cette période. Charge locale inconnue.')
-                + (profile ? ' Profil radio appliqué aux chemins : ' + profile + '.' : '')
-                + (load.bucket_seconds ? ' Courbe par tranches de ' + formatSeconds(load.bucket_seconds) + '.' : '');
+            el('oc-load-context').textContent = [
+                profile,
+                load.bucket_seconds ? 'Tranches de ' + formatSeconds(load.bucket_seconds) : '',
+                load.neighbour_count === 0 ? 'Aucun voisin directement identifié' : '',
+            ].filter(Boolean).join(' · ');
             const buckets = load.buckets || [];
             const hasData = buckets.some(bucket => bucket.percent !== null && bucket.percent !== undefined);
             el('oc-load-chart').style.display = hasData ? 'block' : 'none';

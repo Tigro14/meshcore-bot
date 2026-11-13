@@ -56,14 +56,14 @@ class TestAirtimePage:
     def test_page_says_the_airtime_is_modelled(self, viewer):
         """The page cannot present a computed figure as a measurement of the channel."""
         body = viewer.app.test_client().get("/airtime").data.decode()
-        assert "modelled" in body
-        assert "CAD" in body
+        assert "estimé" in body
+        assert "profil radio" in body
 
     def test_page_keeps_rx_and_tx_apart(self, viewer):
         """rx is a local observation, tx is what the bot decides about: never one number."""
         body = viewer.app.test_client().get("/airtime").data.decode()
-        assert "rx" in body and "tx" in body
-        assert "the two shares are kept apart" in body.lower() or "kept apart" in body.lower()
+        assert "RX</strong> : paquets reçus" in body
+        assert "TX</strong> : demandes d’émission" in body
 
     def test_chart_draws_an_absent_bucket_as_a_gap(self, viewer):
         """A window with no written bucket must not render as 0.0."""

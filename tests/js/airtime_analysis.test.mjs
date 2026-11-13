@@ -49,7 +49,7 @@ test('empty observations are unknown, not a quiet-network zero',()=>{
             reconstructed_radio_airtime_ms:null,cost_reconstructed_packets:0,
             unknown_author:{distinct_packets:0}},coverage:{},authors:[],repeaters:[]});
     assert.equal(elements.get('oc-analysis-rx').textContent,'N/D');
-    assert.match(elements.get('oc-analysis-coverage').textContent,/ne signifie pas une absence/);
+    assert.match(elements.get('oc-analysis-coverage').textContent,/Aucune observation exploitable/);
     assert.equal(elements.get('oc-analysis-cost').textContent,'N/D');
 });
 test('distinct traffic, radio cost and participation have separate denominators',()=>{
@@ -100,6 +100,7 @@ test('local load is not clipped to 100, missing buckets stay gaps and neighbour 
     assert.equal(elements.get('oc-load-mean').textContent,'125 %');
     assert.equal(elements.get('oc-load-burst').textContent,'160 %');
     assert.match(elements.get('oc-load-context').textContent,/CR 4\/8/);
+    assert.doesNotMatch(elements.get('oc-load-context').textContent, /evil|représente|Bretagne/);
     assert.equal(elements.get('oc-load-context').innerHTML,'');
     assert.equal(instance.localChart.data.datasets.length,1);
     assert.equal(instance.localChart.data.datasets[0].data[1].y,null);
