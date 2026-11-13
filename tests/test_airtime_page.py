@@ -101,7 +101,7 @@ class TestPassiveAirtimeAPI:
         assert data['window_seconds'] == 3600
         assert data['local']['rx_percent'] is None
         assert data['local']['rx_peak_five_minute_percent'] is None
-        assert len(data['local']['rx_series']) == 12
+        assert len(data['local']['rx_series']) == 60
         assert all(bucket['percent'] is None for bucket in data['local']['rx_series'])
         assert data['method']['compliance'] == 'not_determined'
         assert data['repeaters'] == []

@@ -34,7 +34,8 @@ def rolling_peak(events: list[tuple[float, float, bool]], start: float, end: flo
 def reception_history(events: list[tuple[float, float, bool]], start: float, end: float,
                       intervals: list[tuple[float, float]] | None = None) -> dict:
     """One full-frame RX series; fixed buckets and unknown gaps, no TX mixture."""
-    step = 3600 if end-start > 86400 else 300
+    duration = end-start
+    step = 60 if duration <= 3600 else 900 if duration <= 86400 else 3600
     count = max(1, int((end-start+step-1)//step))
     coverage = covered_buckets(intervals or [], start, end, step)
     totals: dict[int, float] = {}
@@ -51,8 +52,11 @@ def reception_history(events: list[tuple[float, float, bool]], start: float, end
                        'listening_seconds': round(coverage[index], 3),
                        'coverage': 'complete' if complete else 'partial' if coverage[index] else 'unknown'})
     peak = rolling_peak(events, start, end, 300) if totals else {'percent': None, 'ending_at': None}
-    if not totals and any(point['percent'] == 0 and point['end_time']-point['start_time'] >= 300 for point in series):
-        peak = {'percent': 0.0, 'ending_at': next(point['end_time'] for point in series if point['percent'] == 0)}
+    if not totals:
+        for index, seconds in enumerate(covered_buckets(intervals or [], start, end, 300)):
+            if seconds >= 300-1e-6:
+                peak = {'percent': 0.0, 'ending_at': start+(index+1)*300}
+                break
     return {'rx_bucket_seconds': step,
             'rx_series': series,
             'rx_confirmed_listening_seconds': round(sum(coverage), 3),

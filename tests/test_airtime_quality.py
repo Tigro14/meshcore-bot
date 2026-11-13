@@ -141,7 +141,7 @@ def test_cr8_full_frames_and_own_reply_correlation_are_preserved(db):
     assert result['method']['modulation_profiles'] == [MOD]
     assert result['local']['rx_airtime_ms'] == lora_airtime_ms(46, **MOD)
     nonempty = [point['percent'] for point in result['local']['rx_series'] if point['percent'] is not None]
-    assert nonempty == [pytest.approx(result['local']['rx_airtime_ms']/300000*100, abs=1e-6)]
+    assert nonempty == [pytest.approx(result['local']['rx_airtime_ms']/60000*100, abs=1e-6)]
     assert result['local_load']['neighbour_count'] == 1
     assert result['local_load']['observer_evidenced_airtime_ms'] == pytest.approx(lora_airtime_ms(42, **MOD), abs=.001)
     assert result['traffic']['identified_author_packets'] == 1
@@ -152,16 +152,16 @@ def test_cr8_full_frames_and_own_reply_correlation_are_preserved(db):
 
 
 def test_rx_history_uses_full_frame_airtime_and_preserves_unknown_gaps():
-    result = reception_history([(0, 1000, True), (299, 2000, True), (900, 6000, True)], 0, 900)
-    assert result['rx_bucket_seconds'] == 300
-    assert [point['end_time'] for point in result['rx_series']] == [300, 600, 900]
-    assert [point['percent'] for point in result['rx_series']] == [1, None, 2]
+    result = reception_history([(0, 1000, True), (59, 2000, True), (900, 6000, True)], 0, 900)
+    assert result['rx_bucket_seconds'] == 60
+    assert [point['end_time'] for point in result['rx_series']] == list(range(60, 901, 60))
+    assert [point['percent'] for point in result['rx_series']] == [5] + [None]*13 + [10]
     assert result['rx_peak_five_minute_percent'] == 2
 
 
 def test_rx_history_rolling_peak_uses_lookbehind_but_series_does_not():
     result = reception_history([(50, 2000, True), (301, 1000, True)], 300, 900)
-    assert result['rx_series'][0]['percent'] == pytest.approx(1/3, abs=1e-6)
+    assert result['rx_series'][0]['percent'] == pytest.approx(5/3, abs=1e-6)
     assert result['rx_peak_five_minute_percent'] == 1
     empty = reception_history([(50, 2000, True)], 300, 900)
     assert empty['rx_peak_five_minute_percent'] is None
@@ -174,3 +174,14 @@ def test_weekly_chart_downsamples_but_keeps_exact_five_minute_peak():
     assert len(result['rx_series']) == 168
     assert result['rx_series'][0]['percent'] == pytest.approx(3/3600*100, abs=1e-6)
     assert result['rx_peak_five_minute_percent'] == 2
+
+
+@pytest.mark.parametrize('duration,step,count', [(3600,60,60), (86400,900,96), (7*86400,3600,168)])
+def test_display_resolution_preserves_total_airtime_and_exact_five_minute_peak(duration, step, count):
+    result = reception_history([(50, 1000, True), (70, 2000, True), (3500, 3000, True)],
+                               0, duration, [(0, duration)])
+    assert result['rx_bucket_seconds'] == step
+    assert len(result['rx_series']) == count
+    assert sum(point['percent']*step/100 for point in result['rx_series']) == pytest.approx(6, abs=1e-4)
+    assert result['rx_peak_five_minute_percent'] == 1
+    assert result['rx_confirmed_listening_seconds'] == duration

@@ -60,7 +60,7 @@
         <div class="card-body">
             <p class="small text-muted mb-0" id="airtime-chart-empty" hidden>Aucune observation exploitable.</p>
             <div class="airtime-chart" id="airtime-chart-wrap"><canvas id="airtime-chart" aria-label="Histogramme de l’occupation reçue au fil du temps"></canvas></div>
-            <p class="small text-muted mt-2 mb-0">Écoute locale de Baliz · <span style="display:inline-block;width:12px;height:3px;background:#aeb7c2;vertical-align:middle"></span> Tirets gris : données indisponibles · 0 % : silence confirmé.</p>
+            <p class="small text-muted mt-2 mb-0"><span id="airtime-resolution"></span> · Écoute locale de Baliz · <span style="display:inline-block;width:12px;height:3px;background:#aeb7c2;vertical-align:middle"></span> Tirets gris : données indisponibles · 0 % : silence confirmé.</p>
         </div>
     </section>
     <div class="row g-3 mb-3">
@@ -248,17 +248,19 @@
         }
         renderChart(data) {
             this.chartPeriod = data.window;
+            const bucketSeconds = data.local.rx_bucket_seconds || ({'1h': 60, '24h': 900, '7d': 3600}[data.window]);
+            el('airtime-resolution').textContent = 'Une barre = ' + (bucketSeconds < 3600 ? number(bucketSeconds/60) + ' min' : number(bucketSeconds/3600) + ' h');
             const series = data.local.rx_series || [];
             const hasData = series.some(point => known(point.percent));
             el('airtime-chart-wrap').hidden = !series.length;
             el('airtime-chart-empty').hidden = hasData;
             if (!series.length) return;
             const dataset = {label: 'Occupation reçue (%)', data: series.map(point => {
-                const start = point.start_time ?? point.end_time - (data.local.rx_bucket_seconds || 300);
+                const start = point.start_time ?? point.end_time - bucketSeconds;
                 return {x: (start + point.end_time) / 2, y: point.percent, start, end: point.end_time, coverage: point.coverage};
             }), backgroundColor: '#7ca4cf', hoverBackgroundColor: '#497fb8', borderWidth: 0,
                 borderRadius: 2, barThickness: 'flex', maxBarThickness: data.window === '1h' ? 44 : 16,
-                categoryPercentage: 1, barPercentage: .65};
+                categoryPercentage: 1, barPercentage: data.window === '1h' ? .85 : .65};
             if (this.chart) {
                 this.chart.data.datasets = [dataset];
                 this.chart.options.scales.x.min = data.start_time;

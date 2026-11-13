@@ -44,18 +44,18 @@ def test_stall_wall_clock_jump_or_capture_loss_breaks_continuity(conn, wall, mon
 def test_overlapping_intervals_cannot_hide_an_unknown_gap():
     assert covered_buckets([(0, 150), (0, 150), (200, 300)], 0, 300, 300) == [250]
     series = reception_history([], 0, 900, [(0, 150), (150, 300), (600, 899)])
-    assert [point['percent'] for point in series['rx_series']] == [0, None, None]
-    assert [point['coverage'] for point in series['rx_series']] == ['complete', 'unknown', 'partial']
+    assert [point['percent'] for point in series['rx_series']] == [0]*5 + [None]*5 + [0]*4 + [None]
+    assert [series['rx_series'][index]['coverage'] for index in (0,5,14)] == ['complete', 'unknown', 'partial']
     assert series['rx_confirmed_listening_seconds'] == 599
     assert series['rx_peak_five_minute_percent'] == 0
     assert reception_history([], 0, 900)['rx_peak_five_minute_percent'] is None
 
 
 def test_rx_is_retained_when_capture_coverage_is_incomplete():
-    result = reception_history([(100, 3000, True)], 0, 300, [(50, 200)])
-    assert result['rx_series'][0]['percent'] == 1
-    assert result['rx_series'][0]['coverage'] == 'partial'
-    assert result['rx_series'][0]['listening_seconds'] == 150
+    result = reception_history([(100, 3000, True)], 0, 300, [(90, 120)])
+    assert result['rx_series'][1]['percent'] == 5
+    assert result['rx_series'][1]['coverage'] == 'partial'
+    assert result['rx_series'][1]['listening_seconds'] == 30
 
 
 def test_empty_capture_is_zero_only_if_the_entire_requested_window_is_confirmed(conn):

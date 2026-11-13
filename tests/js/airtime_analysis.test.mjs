@@ -22,7 +22,7 @@ function viewer() {
 }
 const categories={messages:{distinct_packets:1},adverts:{distinct_packets:0},other:{distinct_packets:0}};
 const data={window:'24h',window_seconds:86400,start_time:1000,end_time:87400,
-    local:{rx_percent:0.5,rx_peak_five_minute_percent:2,rx_series:[{end_time:1300,percent:1},{end_time:1600,percent:null}]},
+    local:{rx_bucket_seconds:300,rx_percent:0.5,rx_peak_five_minute_percent:2,rx_series:[{end_time:1300,percent:1},{end_time:1600,percent:null}]},
     coverage:{available_seconds:86400},traffic:{distinct_packets:3,unattributed_author_packets:1,
         unknown_author:{name:'Auteur non identifiable',distinct_packets:1,categories}},
     authors:[{name:'<img src=x onerror=evil()>',public_key:'a',distinct_packets:2,categories}],
@@ -193,4 +193,14 @@ test('unavailable periods use short markers below the axis, while confirmed sile
     assert.equal(instance.chart.data.datasets[0].data[1].y,null);
     instance.render({...data,local:{rx_series:[{start_time:1000,end_time:1300,percent:null}]}},null);
     assert.equal(instance.chart.options.scales.y.display,false);
+});
+
+
+test('hourly, daily and weekly views show their bin duration and adjust bar spacing',()=>{
+    const {instance,elements}=viewer();
+    for (const [window,seconds,label] of [['1h',60,'Une barre = 1 min'],['24h',900,'Une barre = 15 min'],['7d',3600,'Une barre = 1 h']]) {
+        instance.render({...data,window,local:{...data.local,rx_bucket_seconds:seconds}},hourly);
+        assert.equal(elements.get('airtime-resolution').textContent,label);
+        assert.equal(instance.chart.data.datasets[0].barPercentage,window==='1h'?.85:.65);
+    }
 });
