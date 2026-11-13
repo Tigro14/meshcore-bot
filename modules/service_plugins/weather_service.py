@@ -1304,9 +1304,11 @@ class WeatherService(BaseServicePlugin):
 
         broker_host = "blitzortung.ha.sed.pl"
         broker_port = 1883
-        topic = "blitzortung/1.1/#"
+        # Per-geohash wildcards: the relay refuses "blitzortung/1.1/#" with SUBACK 0x80.
+        from .blitzortung_service import _mqtt_topics_for_area
+        topics = _mqtt_topics_for_area(self.blitz_area)
 
-        self.logger.info(f"Connecting to Blitzortung MQTT broker: {broker_host}:{broker_port}")
+        self.logger.info(f"Connecting to Blitzortung MQTT broker: {broker_host}:{broker_port} ({len(topics)} topics)")
 
         while self._running:
             try:
@@ -1341,6 +1343,19 @@ class WeatherService(BaseServicePlugin):
 
                 client.on_message = on_message
 
+                def on_subscribe(client, userdata, mid, granted_qos):
+                    # A broker can accept CONNECT but refuse SUBSCRIBE (granted
+                    # QoS >= 0x80); without this the service silently receives
+                    # nothing while logging "Connected".
+                    try:
+                        denied = [q for q in granted_qos if int(q) >= 0x80]
+                    except (TypeError, ValueError):
+                        denied = []
+                    if denied:
+                        self.logger.warning(f"Blitzortung MQTT subscription {mid} refused by broker (granted_qos={granted_qos})")
+
+                client.on_subscribe = on_subscribe
+
                 # Connect and subscribe (non-blocking to avoid blocking event loop)
                 loop = asyncio.get_running_loop()
                 try:
@@ -1352,14 +1367,14 @@ class WeatherService(BaseServicePlugin):
 
                 # Subscribe is non-blocking, but wrap it anyway for consistency
                 try:
-                    client.subscribe(topic)
+                    client.subscribe([(t, 0) for t in topics])
                 except Exception as subscribe_error:
                     self.logger.debug(f"Subscribe() call failed: {subscribe_error}")
                     raise
 
                 client.loop_start()
 
-                self.logger.info(f"Connected to Blitzortung MQTT, subscribed to {topic}")
+                self.logger.info(f"Connected to Blitzortung MQTT, subscribed to {', '.join(topics)}")
 
                 # Keep connection alive
                 while self._running:
