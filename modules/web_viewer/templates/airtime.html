@@ -59,8 +59,8 @@
         </div>
         <div class="card-body">
             <p class="small text-muted mb-0" id="airtime-chart-empty" hidden>Aucune observation exploitable.</p>
-            <div class="airtime-chart" id="airtime-chart-wrap"><canvas id="airtime-chart" aria-label="Occupation reçue au fil du temps"></canvas></div>
-            <p class="small text-muted mt-2 mb-0">Écoute locale de Baliz · Une partie du trafic reste invisible.</p>
+            <div class="airtime-chart" id="airtime-chart-wrap"><canvas id="airtime-chart" aria-label="Histogramme de l’occupation reçue au fil du temps"></canvas></div>
+            <p class="small text-muted mt-2 mb-0">Écoute locale de Baliz · Une partie du trafic reste invisible.<br><span style="display:inline-block;width:12px;height:12px;background:rgba(128,128,128,.18);vertical-align:middle"></span> Gris : données indisponibles · 0 % : écoute suivie, aucun paquet reçu.</p>
         </div>
     </section>
     <div class="row g-3 mb-3">
@@ -250,28 +250,46 @@
             this.chartPeriod = data.window;
             const series = data.local.rx_series || [];
             const hasData = series.some(point => known(point.percent));
-            el('airtime-chart-wrap').hidden = !hasData;
+            el('airtime-chart-wrap').hidden = !series.length;
             el('airtime-chart-empty').hidden = hasData;
-            if (!hasData) return;
-            const dataset = {label: 'Occupation reçue (%)', data: series.map(point => ({x: point.end_time, y: point.percent})),
-                borderColor: '#0d6efd', backgroundColor: '#0d6efd18', fill: true, pointRadius: 0, borderWidth: 2, spanGaps: false};
+            if (!series.length) return;
+            const dataset = {label: 'Occupation reçue (%)', data: series.map(point => {
+                const start = point.start_time ?? point.end_time - (data.local.rx_bucket_seconds || 300);
+                return {x: (start + point.end_time) / 2, y: point.percent, start, end: point.end_time, coverage: point.coverage};
+            }), backgroundColor: '#0d6efd', borderWidth: 0, barThickness: 'flex',
+                categoryPercentage: 1, barPercentage: .95};
             if (this.chart) {
                 this.chart.data.datasets = [dataset];
                 this.chart.options.scales.x.min = data.start_time;
                 this.chart.options.scales.x.max = data.end_time;
+                this.chart.options.scales.y.display = hasData;
                 this.chart.update();
                 return;
             }
-            this.chart = new Chart(el('airtime-chart'), {type: 'line', data: {datasets: [dataset]}, options: {
+            const unavailable = {id: 'airtimeUnavailable', beforeDatasetsDraw: chart => {
+                const {ctx, chartArea, scales} = chart;
+                ctx.save();
+                ctx.fillStyle = 'rgba(128,128,128,.18)';
+                for (const point of chart.data.datasets[0].data) {
+                    if (point.y !== null) continue;
+                    const left = scales.x.getPixelForValue(point.start), right = scales.x.getPixelForValue(point.end);
+                    ctx.fillRect(Math.max(chartArea.left, left), chartArea.top,
+                        Math.max(0, Math.min(chartArea.right, right)-Math.max(chartArea.left, left)), chartArea.bottom-chartArea.top);
+                }
+                ctx.restore();
+            }};
+            this.chart = new Chart(el('airtime-chart'), {type: 'bar', plugins: [unavailable], data: {datasets: [dataset]}, options: {
                 responsive: true, maintainAspectRatio: false,
+                animation: false, interaction: {mode: 'index', intersect: false},
                 plugins: {legend: {display: false}, tooltip: {callbacks: {
-                    title: items => items.length ? new Date(items[0].parsed.x * 1000).toLocaleString('fr-FR') : '',
+                    title: items => items.length ? new Date(items[0].raw.start * 1000).toLocaleString('fr-FR') + ' — '
+                        + new Date(items[0].raw.end * 1000).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'}) : '',
                     label: item => pct(item.parsed.y),
                 }}},
-                scales: {x: {type: 'linear', min: data.start_time, max: data.end_time,
+                scales: {x: {type: 'linear', offset: false, min: data.start_time, max: data.end_time,
                     ticks: {maxTicksLimit: 5, callback: value => new Date(value * 1000).toLocaleString('fr-FR', this.chartPeriod === '7d'
                         ? {day: '2-digit', month: '2-digit'} : {hour: '2-digit', minute: '2-digit'})}},
-                y: {beginAtZero: true, title: {display: true, text: 'Occupation reçue (%)'}, ticks: {maxTicksLimit: 5}}},
+                y: {display: hasData, beginAtZero: true, suggestedMax: 1, title: {display: true, text: 'Occupation reçue (%)'}, ticks: {maxTicksLimit: 5}}},
             }});
         }
         renderDetails() {

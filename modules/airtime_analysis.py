@@ -15,6 +15,7 @@ import time
 from collections import defaultdict
 from typing import Any
 
+from modules.airtime_capture import listening_intervals
 from modules.airtime_forwarding import build_forwarding_model, empty_forwarding_model, ingest_context
 from modules.airtime_quality import local_load, observer_metadata, reception_history, rolling_peak
 from modules.channel_occupancy import lora_airtime_ms
@@ -363,7 +364,9 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                    'traffic_cost_basis': 'emission_groups_supported_by_selected_receptions',
                    'participation_denominator': 'distinct_flood_packets_with_nonempty_received_path',
                    'compliance': 'not_determined',
-                   'rx_denominator': 'available_wall_clock_span', 'modulation_profiles': []},
+                   'rx_denominator': 'available_wall_clock_span', 'modulation_profiles': [],
+                   'capture_continuity': 'healthy_local_pipeline_heartbeats',
+                   'capture_max_interval_seconds': 75},
         'limitations': ['local_receiver_only', 'unheard_transmissions_not_counted',
                         'known_prefix_uniqueness_not_identity_proof', 'same_path_retries_may_be_merged_when_inferred',
                         'unobserved_forwarding_delay_is_assumed', 'inferred_transmission_time_is_estimated',
@@ -387,7 +390,8 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
     report['observer'] = observer or {'public_key': None, 'role': 'unknown'}
     report['local_load'] = local_load({}, contacts, observer, start, now, start, 0, None)
     report['forwarding_model'] = empty_forwarding_model(start, now)
-    report['local'].update(reception_history([], start, now))
+    capture = listening_intervals(conn, start, now)
+    report['local'].update(reception_history([], start, now, capture))
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='airtime_observations'").fetchone():
         return report
     retained_from = conn.execute('SELECT MIN(observed_at) FROM airtime_observations').fetchone()[0]
@@ -400,7 +404,7 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                         'ORDER BY observed_at DESC,source_id DESC LIMIT ?', (start-3600-DEDUP_SECONDS, now, MAX_ROWS+1)).fetchall()
     report['coverage']['truncated'] = len(rows) > MAX_ROWS
     rows = rows[:MAX_ROWS][::-1]
-    report['local'].update(reception_history([(row[0], row[9], True) for row in rows], start, now))
+    report['local'].update(reception_history([(row[0], row[9], True) for row in rows], start, now, capture))
     links: dict[str, list] = defaultdict(list)
     for at, packet_hash, key, name in conn.execute('SELECT observed_at,packet_hash,author_key,author_name '
                                                  'FROM airtime_author_links WHERE observed_at>=? AND observed_at<=?',
@@ -536,6 +540,8 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
     if local['rx_packets']:
         local['requested_window_rx_percent'] = round(local['rx_airtime_ms']/1000/seconds*100, 6)
         local['rx_percent'] = round(local['rx_airtime_ms']/1000/report['coverage']['available_seconds']*100, 6)
+    elif local['rx_confirmed_listening_seconds'] >= seconds-1e-6:
+        local['rx_percent'] = 0.0
     if _comparison and retained_from is not None and retained_from <= start-seconds:
         if report['coverage']['truncated']:
             report['comparison']['status'] = 'truncated'

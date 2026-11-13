@@ -56,7 +56,7 @@ class TestAirtimePage:
         main, details = body.split('<div class="modal fade" id="airtime-details"', 1)
         assert main.count('<canvas') == 1
         assert '<table' not in main
-        assert 'Occupation reçue' in main
+        assert 'Occupation moyenne du canal' in main
         assert 'Duty cycle estimé' in main
         assert 'airtime-duty-list' in main and 'airtime-source-list' in main
         assert details.count('<table') == 3
@@ -72,7 +72,9 @@ class TestAirtimePage:
 
     def test_chart_draws_an_absent_bucket_as_a_gap(self, viewer):
         body = viewer.app.test_client().get('/airtime').data.decode()
-        assert 'spanGaps: false' in body
+        assert "type: 'bar'" in body
+        assert 'airtimeUnavailable' in body
+        assert 'Gris : données indisponibles' in body
         assert 'null' in body
 
     def test_page_script_carries_a_csp_nonce(self, viewer):

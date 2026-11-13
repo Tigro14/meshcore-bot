@@ -10,6 +10,8 @@ import json
 import sqlite3
 from typing import Any
 
+from modules.airtime_capture import covered_buckets
+
 
 def rolling_peak(events: list[tuple[float, float, bool]], start: float, end: float,
                  seconds: int) -> dict:
@@ -29,20 +31,31 @@ def rolling_peak(events: list[tuple[float, float, bool]], start: float, end: flo
     return {'percent': round(peak / (seconds * 1000) * 100, 6), 'ending_at': peak_at}
 
 
-def reception_history(events: list[tuple[float, float, bool]], start: float, end: float) -> dict:
+def reception_history(events: list[tuple[float, float, bool]], start: float, end: float,
+                      intervals: list[tuple[float, float]] | None = None) -> dict:
     """One full-frame RX series; fixed buckets and unknown gaps, no TX mixture."""
     step = 3600 if end-start > 86400 else 300
     count = max(1, int((end-start+step-1)//step))
+    coverage = covered_buckets(intervals or [], start, end, step)
     totals: dict[int, float] = {}
     for at, ms, _ in events:
         if start <= at <= end:
             index = min(count-1, int((at-start)//step))
             totals[index] = totals.get(index, 0.0)+ms
+    series: list[dict[str, Any]] = []
+    for index in range(count):
+        left, right = start+index*step, min(end, start+(index+1)*step)
+        complete = coverage[index] >= right-left-1e-6
+        value = round(totals[index]/step/1000*100, 6) if index in totals else 0.0 if complete else None
+        series.append({'start_time': left, 'end_time': right, 'percent': value,
+                       'listening_seconds': round(coverage[index], 3),
+                       'coverage': 'complete' if complete else 'partial' if coverage[index] else 'unknown'})
     peak = rolling_peak(events, start, end, 300) if totals else {'percent': None, 'ending_at': None}
+    if not totals and any(point['percent'] == 0 and point['end_time']-point['start_time'] >= 300 for point in series):
+        peak = {'percent': 0.0, 'ending_at': next(point['end_time'] for point in series if point['percent'] == 0)}
     return {'rx_bucket_seconds': step,
-            'rx_series': [{'end_time': min(end, start+(index+1)*step),
-                           'percent': round(totals[index]/step/1000*100, 6) if index in totals else None}
-                          for index in range(count)],
+            'rx_series': series,
+            'rx_confirmed_listening_seconds': round(sum(coverage), 3),
             'rx_peak_five_minute_percent': peak['percent'],
             'rx_peak_five_minute_ending_at': peak['ending_at']}
 

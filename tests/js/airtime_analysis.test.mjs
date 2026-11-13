@@ -11,7 +11,7 @@ function viewer() {
             classList:{toggle() {}},setAttribute() {}});
         return elements.get(id);
     }}, Date, AbortController, Chart:class {
-        constructor(element, options) {this.data=options.data;this.options=options.options;}
+        constructor(element, options) {this.data=options.data;this.options=options.options;this.type=options.type;this.plugins=options.plugins;}
         update() {}
     }});
     vm.runInContext(source.slice(source.indexOf('    const el ='),
@@ -67,7 +67,8 @@ test('the one RX chart has real gaps, no global threshold and updates its period
     const {instance}=viewer();instance.render(data,hourly);
     assert.equal(instance.chart.data.datasets.length,1);
     assert.equal(instance.chart.data.datasets[0].data[1].y,null);
-    assert.equal(instance.chart.data.datasets[0].spanGaps,false);
+    assert.equal(instance.chart.type,'bar');
+    assert.equal(instance.chart.data.datasets[0].data[0].x,1150);
     assert.equal(instance.chart.options.scales.x.min,1000);
     assert.match(instance.chart.options.scales.x.ticks.callback(1000),/^\d{2}:\d{2}$/);
     instance.render({...data,start_time:500,end_time:90000},hourly);
@@ -175,4 +176,21 @@ test('a highest-duty remote relay is never hidden without direct-neighbour evide
     instance.render({...data,local_load:{neighbours:[{public_key:'r',name:'Renamed neighbour'}]}},hourly);
     assert.equal(elements.get('airtime-duty').textContent,'N/D');
     assert.doesNotMatch(elements.get('airtime-duty-list').innerHTML,/Relay/);
+});
+
+
+test('unavailable periods are grey bands, while confirmed silence stays at zero',()=>{
+    const {instance}=viewer();
+    instance.render({...data,local:{...data.local,rx_series:[{start_time:1000,end_time:1300,percent:0,coverage:'complete'},
+        {start_time:1300,end_time:1600,percent:null,coverage:'unknown'},
+        {start_time:1600,end_time:1900,percent:1,coverage:'partial'}]}},hourly);
+    const drawn=[];
+    instance.chart.plugins[0].beforeDatasetsDraw({data:instance.chart.data,
+        ctx:{save(){},restore(){},fillRect(...rect){drawn.push(rect);}},
+        chartArea:{left:1000,right:1900,top:0,bottom:100},scales:{x:{getPixelForValue:x=>x}}});
+    assert.deepEqual(drawn,[[1300,0,300,100]]);
+    assert.equal(instance.chart.data.datasets[0].data[0].y,0);
+    assert.equal(instance.chart.data.datasets[0].data[1].y,null);
+    instance.render({...data,local:{rx_series:[{start_time:1000,end_time:1300,percent:null}]}},null);
+    assert.equal(instance.chart.options.scales.y.display,false);
 });
