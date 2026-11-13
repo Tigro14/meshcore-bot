@@ -187,9 +187,17 @@ local/service_plugins/*
 # Local engineering audit reports (may contain security-sensitive findings)
 /PROJECT_REVIEW_*.md
 
+# DietPi recovery project (plan + capture.sh + restore.sh + snapshot). Not part of the bot:
+# it describes a machine, and its snapshot holds config.ini and the bot database.
+local/dietpi-restore/
+
 # Local debugging scratch (captured configs and logs — may contain real settings)
 _debug/
 aqi_http_cache.sqlite
 
 # Agent session context (contains internal IPs, SSH targets)
 AGENTS.md
+
+# Generated knowledge graph (rebuilt locally by `graphify update .`) and agent harness state
+graphify-out/
+.opencode/
