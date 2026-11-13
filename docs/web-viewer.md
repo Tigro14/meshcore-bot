@@ -634,7 +634,7 @@ inside the requested window (coverage.available_seconds), not missing days befor
 recording started; requested_window_rx_percent keeps the whole-window equivalent.
 Capture uptime remains unknown rather than treating gaps as observed silence. Each repeater includes direct/inferred airtime,
 last-hour and peak rolling-hour estimates, and `compliance: "unknown"`.
-`method.version: 4` uses exact `(t-3600, t]` windows at event timestamps, without
+`method.version: 5` uses exact `(t-3600, t]` windows at event timestamps, without
 minute buckets (`peak_resolution_seconds: null`). The peak also considers the
 hour ending at the selected period's start, using retained lookbehind events.
 `peak_hour_ending_at` identifies the first endpoint reaching that maximum.
@@ -669,6 +669,45 @@ is an FDR. `expected_ecl_percent` and each neighbour's FDR `expected` / `percent
 stay `null`: a companion with only winning flood paths has no independent count
 of mandatory retransmissions, known forwarding policies or counterfactual losses.
 There is no division by FDR to inflate a repeater's duty estimate.
+
+Version 5 adds `forwarding_model`, a separate one-hop scenario for **received
+traffic only**. Training uses up to seven days preceding the evaluation window,
+with at least six hours of retained history. A directed edge and each forwarding
+class require three distinct packet fingerprints. Classes distinguish resolved
+scope, exact packet type, hash width and radio profile. Supported hop depths need
+three positive examples at that depth or deeper; an observed depth is a lower
+bound on permitted forwarding, never a readout of `flood.max`. Links and policies
+older than 24 hours at the evaluated emission are withheld. These thresholds are
+modelling assumptions. They are not MeshCore protocol requirements.
+
+Only unambiguous 2/3-byte paths and identified origins enter a scenario. DIRECT,
+TRACE, loops, unknown scopes/origins, stale evidence and unsupported classes or
+depths remain excluded. Scoped packets are matched with the protocol's
+payload-dependent transport HMAC, not by grouping equal raw transport codes.
+The metadata-only `airtime_packet_context` stores an opaque scope digest, never
+the scope name/key or message body. A separate bounded import watermark permits
+backfill and retries after the configured key set changes. Already resolved
+historical scopes are preserved. Both attribution and scope context follow the
+occupancy retention setting; the operator's radio configuration is unchanged.
+
+For each mature original packet (60 seconds allowed for returns), the model
+predicts at most one forward per supported relay from actual reconstructed
+upstream emissions. The same fingerprint cannot train its own prediction.
+Hypothetical emissions never seed further predictions. Expected/retrieved/
+unretrieved counts concern distinct `(original, relay)` pairs. Existing observed
+emissions, including their repeats, are retained; a scenario adds only the
+airtime of expected forwards not found in any compatible received copy. A frame
+adds that relay's path hash and uses the recorded common radio profile.
+
+`nodes[].reconstructed_hour_percent` and `scenario_hour_percent` remain separate.
+The local scenario adds only modelled extras for directly identified local
+neighbours, not remote nodes. Unsupported cases remain `null`. Counts with
+`independent_exposure_packets` distinguish upstream evidence available without
+a path through the target from evidence selected through that target itself.
+The scenario has `is_fdr: false` and `compliance: "unknown"`: learned reception,
+stable policy, deduplication and node availability are assumptions; a missing
+return is not a proven lost frame. No unseen origin traffic is extrapolated.
+The UI uses the existing Airtime page and keeps descriptions brief.
 
 `traffic.distinct_packets` deduplicates payload fingerprints across all selected
 receptions, including repeated delivery attempts and alternate routes. Received

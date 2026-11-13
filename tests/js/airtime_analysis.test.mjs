@@ -122,3 +122,23 @@ test('daily relay evidence does not turn an unknown last hour into zero duty',()
     assert.doesNotMatch(elements.get('oc-repeaters').innerHTML,/≈ N\/D|≈ 0 %/);
     assert.match(elements.get('oc-repeaters').innerHTML,/N\/D/);
 });
+test('forwarding scenarios keep observed and hypothetical duty separate and escape node names',()=>{
+    const {instance,elements}=viewer();
+    instance.renderAnalysis({...data,forwarding_model:{status:'partial_scenario',
+        evaluation:{modelled_packets:2,distinct_packets:10},training:{supported_edges:3,start_time:100,end_time:200},
+        expected_packets:4,unretrieved_packets:1,additional_airtime_ms:1000,
+        local_load:{scenario_percent:0.8},nodes:[{name:'<script>evil()</script>',expected_packets:4,retrieved_packets:3,
+            unretrieved_packets:1,additional_airtime_ms:1000,reconstructed_hour_percent:null,scenario_hour_percent:0.03}]}});
+    assert.equal(elements.get('oc-model-coverage').textContent,'2 / 10');
+    assert.equal(elements.get('oc-model-missing').textContent,'1');
+    assert.match(elements.get('oc-model-nodes').innerHTML,/N\/D/);
+    assert.match(elements.get('oc-model-nodes').innerHTML,/0,03 %/);
+    assert.doesNotMatch(elements.get('oc-model-nodes').innerHTML,/<script>|bg-success/);
+    assert.match(elements.get('oc-load-scenario').textContent,/Scénario : 0,8 %/);
+});
+test('unsupported forwarding scenarios show unknown rather than a zero prediction',()=>{
+    const {instance,elements}=viewer();instance.renderAnalysis(data);
+    assert.equal(elements.get('oc-model-expected').textContent,'N/D');
+    assert.equal(elements.get('oc-model-missing').textContent,'N/D');
+    assert.equal(elements.get('oc-load-scenario').textContent,'');
+});

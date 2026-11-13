@@ -193,7 +193,7 @@
         <div class="card-header"><h2 class="h5 mb-0" id="oc-load-title">Charge locale estimée</h2></div>
         <div class="card-body">
             <div class="row g-3 mb-3">
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Charge partielle moyenne</div><div class="oc-figure" id="oc-load-mean">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Charge partielle moyenne</div><div class="oc-figure" id="oc-load-mean">—</div><small class="text-muted" id="oc-load-scenario"></small></div>
                 <div class="col-6 col-lg-3"><div class="oc-figure-label">Pic sur 5 minutes</div><div class="oc-figure" id="oc-load-burst">—</div></div>
                 <div class="col-6 col-lg-3"><div class="oc-figure-label">Pic sur 1 heure</div><div class="oc-figure" id="oc-load-hour">—</div></div>
                 <div class="col-6 col-lg-3"><div class="oc-figure-label">Voisins entendus directement</div><div class="oc-figure" id="oc-load-neighbours">—</div></div>
@@ -201,6 +201,23 @@
             <p id="oc-load-context" class="small mb-2"></p>
             <div style="position:relative;height:220px"><canvas id="oc-load-chart" aria-label="Charge locale partielle reconstituée"></canvas></div>
             <p class="small text-muted mt-2 mb-0">Émissions reconstituées des voisins directs et de Baliz. Observation partielle, pertes non quantifiées.</p>
+        </div>
+    </section>
+    <section class="card mb-4" aria-labelledby="oc-model-title">
+        <div class="card-header"><h2 class="h5 mb-0" id="oc-model-title">Retransmissions attendues</h2></div>
+        <div class="card-body">
+            <div class="row g-3 mb-3">
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Paquets modélisés</div><div class="oc-figure" id="oc-model-coverage">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Retransmissions attendues</div><div class="oc-figure" id="oc-model-expected">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Non retrouvées</div><div class="oc-figure" id="oc-model-missing">—</div></div>
+                <div class="col-6 col-lg-3"><div class="oc-figure-label">Airtime supplémentaire estimé</div><div class="oc-figure" id="oc-model-airtime">—</div></div>
+            </div>
+            <p class="small text-muted" id="oc-model-context"></p>
+            <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+                <thead><tr><th>Répéteur</th><th>Attendues</th><th>Retrouvées</th><th>Non retrouvées</th><th>Airtime ajouté</th><th>DC reconstitué · 1 h</th><th>DC scénario · 1 h</th></tr></thead>
+                <tbody id="oc-model-nodes"></tbody>
+            </table></div>
+            <p class="small text-muted mt-2 mb-0">Scénario sur le trafic reçu, selon les liaisons et comportements précédemment observés. Non retrouvée ne signifie pas perdue.</p>
         </div>
     </section>
     <div class="card mb-4">
@@ -461,6 +478,7 @@
             el('oc-analysis-unknown').textContent = traffic.distinct_packets ? pct(traffic.unattributed_author_packets / traffic.distinct_packets * 100) : 'N/D';
             const date = timestamp => new Date(timestamp * 1000).toLocaleString('fr-FR');
             this.renderLocalLoad(data, pct, number, date);
+            this.renderForwardingModel(data.forwarding_model, pct, number, duration, date);
             el('oc-analysis-coverage').textContent = data.coverage.first_observation_at
                 ? 'Du ' + date(data.coverage.first_observation_at) + ' au ' + date(data.coverage.last_observation_at) + ' · ' + formatSeconds(data.coverage.available_seconds) + ' disponibles · Données partielles.' + (data.coverage.truncated ? ' Traitement limité.' : '')
                 : 'Aucune observation exploitable sur cette période.';
@@ -529,6 +547,27 @@
                         y: {beginAtZero: true, title: {display: true, text: 'Émissions locales reconstituées (%)'}}},
                 }});
             }
+        }
+
+        renderForwardingModel(model, pct, number, duration, date) {
+            const active = model?.status === 'partial_scenario';
+            el('oc-model-coverage').textContent = active ? number(model.evaluation.modelled_packets) + ' / ' + number(model.evaluation.distinct_packets) : 'N/D';
+            el('oc-model-expected').textContent = active ? number(model.expected_packets) : 'N/D';
+            el('oc-model-missing').textContent = active ? number(model.unretrieved_packets) : 'N/D';
+            el('oc-model-airtime').textContent = active ? duration(model.additional_airtime_ms) : 'N/D';
+            el('oc-load-scenario').textContent = active && model.local_load.scenario_percent !== null
+                ? 'Scénario : ' + pct(model.local_load.scenario_percent) : '';
+            const status = model?.status === 'processing_limit' ? 'Limite de traitement atteinte.'
+                : model?.status === 'no_supported_opportunity' ? 'Aucune retransmission modélisable sur cette période.'
+                    : 'Historique antérieur insuffisant.';
+            el('oc-model-context').textContent = active
+                ? number(model.training.supported_edges) + ' liaisons apprises · Historique du ' + date(model.training.start_time) + ' au ' + date(model.training.end_time) + ' · 30 premiers répéteurs.'
+                : status;
+            el('oc-model-nodes').innerHTML = active ? model.nodes.slice(0, 30).map(node => '<tr><td>' + escapeHtml(node.name)
+                + '</td><td>' + number(node.expected_packets) + '</td><td>' + number(node.retrieved_packets)
+                + '</td><td>' + number(node.unretrieved_packets) + '</td><td>' + duration(node.additional_airtime_ms)
+                + '</td><td>' + pct(node.reconstructed_hour_percent) + '</td><td>' + pct(node.scenario_hour_percent)
+                + '</td></tr>').join('') : '<tr><td colspan="7" class="text-muted">' + escapeHtml(status) + '</td></tr>';
         }
     }
 

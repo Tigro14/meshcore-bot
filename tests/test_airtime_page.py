@@ -117,7 +117,9 @@ class TestPassiveAirtimeAPI:
         assert data['local']['rx_percent'] is None
         assert data['method']['compliance'] == 'not_determined'
         assert data['repeaters'] == []
-        assert data['method']['version'] == 4
+        assert data['method']['version'] == 5
+        assert data['forwarding_model']['status'] == 'insufficient_training'
+        assert data['forwarding_model']['is_fdr'] is False
         assert data['local_load']['estimated_percent'] is None
         assert data['local_load']['expected_ecl_percent'] is None
         assert data['local_load']['is_duty_cycle'] is False

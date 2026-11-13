@@ -15,11 +15,12 @@ import time
 from collections import defaultdict
 from typing import Any
 
+from modules.airtime_forwarding import build_forwarding_model, empty_forwarding_model, ingest_context
 from modules.airtime_quality import local_load, observer_metadata, rolling_peak
 from modules.channel_occupancy import lora_airtime_ms
 
 SCHEMA_VERSION = 1
-METHOD_VERSION = 4
+METHOD_VERSION = 5
 DEDUP_SECONDS = 60
 MAX_ROWS = 100000
 WINDOWS = {'1h': 3600, '24h': 86400, '7d': 604800}
@@ -100,7 +101,8 @@ def normalize_packet(packet: dict, observed_at: float, source_id: int, modulatio
             json.dumps(modulation, sort_keys=True), author)
 
 
-def ingest_stream(conn: sqlite3.Connection, modulation: dict, *, limit: int = 1000) -> dict:
+def ingest_stream(conn: sqlite3.Connection, modulation: dict, *, limit: int = 1000,
+                  scope_keys: dict[str, bytes] | None = None) -> dict:
     """Idempotent incremental import from packet_stream, in the existing writer thread.
 
     No message text, channel name, payload or raw frame is copied. Correlation uses
@@ -108,6 +110,7 @@ def ingest_stream(conn: sqlite3.Connection, modulation: dict, *, limit: int = 10
     """
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='airtime_observations'").fetchone():
         return {'processed': 0, 'imported': 0}
+    context_processed = ingest_context(conn, scope_keys or {}, limit)
     state = conn.execute('SELECT last_source_id FROM airtime_ingest_state WHERE id=1').fetchone()
     last_id = state[0] if state else 0
     rows = conn.execute('SELECT id,timestamp,data,type FROM packet_stream WHERE id>? ORDER BY id LIMIT ?',
@@ -139,7 +142,7 @@ def ingest_stream(conn: sqlite3.Connection, modulation: dict, *, limit: int = 10
     if rows:
         conn.execute('INSERT INTO airtime_ingest_state VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET '
                      'last_source_id=excluded.last_source_id,updated_at=excluded.updated_at', (last_id, time.time()))
-    return {'processed': len(rows), 'imported': imported}
+    return {'processed': max(len(rows), context_processed), 'imported': imported}
 
 
 class Contacts:
@@ -383,6 +386,7 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
     observer = observer_metadata(conn)
     report['observer'] = observer or {'public_key': None, 'role': 'unknown'}
     report['local_load'] = local_load({}, contacts, observer, start, now, start, 0, None)
+    report['forwarding_model'] = empty_forwarding_model(start, now)
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='airtime_observations'").fetchone():
         return report
     retained_from = conn.execute('SELECT MIN(observed_at) FROM airtime_observations').fetchone()[0]
@@ -514,6 +518,12 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
     if report['coverage']['truncated']:
         report['local_load']['retained_full_hour'] = False
     neighbour_keys = {node['public_key'] for node in report['local_load']['neighbours']}
+    if _comparison:
+        report['forwarding_model'] = build_forwarding_model(conn, contacts, start=start, end=now,
+            authors=resolved_authors, evidence_events=events, local_keys=neighbour_keys,
+            local_airtime_ms=report['local_load']['airtime_ms'],
+            available_seconds=report['coverage']['available_seconds'], observer_key=observer.get('public_key'),
+            truncated=report['coverage']['truncated'])
     for node in report['repeaters']:
         node['local_neighbour'] = node['public_key'] in neighbour_keys
         node['evidence'] = 'direct_and_path' if node['direct_packets'] and node['inferred_packets'] else (

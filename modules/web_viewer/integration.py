@@ -545,9 +545,12 @@ class BotIntegration:
         try:
             occupancy.flush(conn)
             from modules.airtime_analysis import ingest_stream
+            from modules.airtime_forwarding import analysis_scope_keys
             from modules.airtime_quality import write_observer_metadata
             write_observer_metadata(conn, getattr(getattr(self.bot, 'meshcore', None), 'self_info', None))
-            ingest_stream(conn, occupancy.modulation())
+            scope_keys = getattr(getattr(self.bot, 'command_manager', None), 'flood_scope_keys', None)
+            known_scopes = analysis_scope_keys(getattr(self.bot, 'config', None), scope_keys if isinstance(scope_keys, dict) else {})
+            ingest_stream(conn, occupancy.modulation(), scope_keys=known_scopes)
             conn.commit()
         except Exception as e:
             self.bot.logger.warning("occupancy: flush failed: %s", e)
