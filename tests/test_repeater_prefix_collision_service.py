@@ -96,7 +96,6 @@ def _make_bot(section_overrides=None):
     cfg.set("RepeaterPrefixCollision_Service", "post_process_delay_seconds", "0.0")
     cfg.set("RepeaterPrefixCollision_Service", "post_process_timeout_seconds", "2.0")
     cfg.set("RepeaterPrefixCollision_Service", "post_process_poll_interval_seconds", "0.01")
-    cfg.set("RepeaterPrefixCollision_Service", "include_prefix_free_hint", "true")
     cfg.set("RepeaterPrefixCollision_Service", "cooldown_minutes_per_prefix", "60")
 
     if section_overrides:
@@ -173,7 +172,7 @@ async def test_posts_message_on_duplicate_prefix_after_row_available():
     assert "prefix 01" in msg  # 1-byte prefix
     assert "near Seattle, WA, US" in msg
     assert "free prefixes remain" in msg
-    assert "Type 'prefix free' to find one." in msg
+    assert "Type 'prefix free' to find one." not in msg
 
 
 @pytest.mark.asyncio
@@ -265,13 +264,8 @@ async def test_dedup_suppresses_repeat_for_same_public_key_and_prefix_bytes():
 
 
 @pytest.mark.asyncio
-async def test_multi_byte_notifications_work_and_hint_is_omitted():
-    bot = _make_bot(
-        {
-            "notify_on_prefix_bytes": "2",
-            "include_prefix_free_hint": "true",
-        }
-    )
+async def test_multi_byte_notifications_work():
+    bot = _make_bot({"notify_on_prefix_bytes": "2"})
     db: _FakeDB = bot.db_manager
     db.contact_row = _base_contact_row(
         public_key="010101AA",
@@ -293,6 +287,24 @@ async def test_multi_byte_notifications_work_and_hint_is_omitted():
     msg = bot.command_manager.send_channel_message.await_args_list[0].args[1]
     assert "prefix 0101" in msg
     assert "Type 'prefix free' to find one." not in msg
+
+
+@pytest.mark.asyncio
+async def test_posts_to_bot_channel_only_when_channels_unset():
+    bot = _make_bot({"channels": ""})
+    db: _FakeDB = bot.db_manager
+    db.contact_row = _base_contact_row()
+    db.duplicate_count = 2
+    db.used_prefixes = 10
+
+    svc = RepeaterPrefixCollisionService(bot)
+    await svc.start()
+
+    await svc._handle_new_contact_payload({"public_key": "01020304", "name": "NewRepeater"})
+
+    assert bot.command_manager.send_channel_message.await_count == 1
+    calls = [c.args for c in bot.command_manager.send_channel_message.await_args_list]
+    assert calls[0][0] == "#bot"
 
 
 @pytest.mark.asyncio
