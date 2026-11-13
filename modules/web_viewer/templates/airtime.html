@@ -328,16 +328,13 @@
                         const midnights = parisMidnights(scale.min, scale.max);
                         if (!midnights.length) return;
                         const gap = (scale.max-scale.min) * 45 / (scale.width || scale.maxWidth || 300);
-                        scale.ticks = [...scale.ticks.filter(tick => midnights.every(marker => Math.abs(tick.value-marker.at) >= gap)),
+                        const regular = this.chartPeriod === '7d' ? [] : scale.ticks.filter(tick => midnights.every(marker => Math.abs(tick.value-marker.at) >= gap));
+                        scale.ticks = [...regular,
                             ...midnights.map(marker => ({value: marker.at, major: true}))].sort((a,b) => a.value-b.value);
                     },
                     grid: {display: false}, border: {display: false},
-                    ticks: {autoSkip: false, maxTicksLimit: 5, maxRotation: 0, padding: 12, font: {size: 11}, callback: value => {
-                        const date = new Date(value * 1000);
-                        if (parisTime.format(date) === '00:00') return '00:00';
-                        return date.toLocaleString('fr-FR', this.chartPeriod === '7d'
-                            ? {timeZone, day: '2-digit', month: '2-digit'} : {timeZone, hour: '2-digit', minute: '2-digit'});
-                    }}},
+                    ticks: {autoSkip: false, maxTicksLimit: 5, maxRotation: 0, padding: 12, font: {size: 11},
+                        callback: value => parisTime.format(new Date(value * 1000))}},
                 y: {display: hasData, beginAtZero: true, suggestedMax: 1,
                     grid: {color: 'rgba(128,128,128,.10)', drawTicks: false}, border: {display: false},
                     ticks: {maxTicksLimit: 4, padding: 8, font: {size: 11}, callback: value => number(value) + ' %'}}},

@@ -76,7 +76,7 @@ test('the one RX chart has real gaps, no global threshold and updates its period
     assert.equal(instance.chart.options.scales.x.max,90000);
     assert.equal(instance.chart.data.datasets[0].label,'Occupation reçue (%)');
     instance.render({...data,window:'7d'},hourly);
-    assert.match(instance.chart.options.scales.x.ticks.callback(1000),/^\d{2}\/\d{2}$/);
+    assert.match(instance.chart.options.scales.x.ticks.callback(1000),/^\d{2}:\d{2}$/);
 });
 test('insufficient capture never becomes a quiet-network zero; historical coverage is explicit',()=>{
     const {instance,elements}=viewer();
@@ -245,6 +245,8 @@ test('midnight is a mandatory X-axis tick and nearby labels do not overlap it',(
     assert.equal(axis.ticks.callback(midnight),'00:00');
     instance.render({...data,window:'7d'},hourly);
     assert.equal(axis.ticks.callback(midnight),'00:00');
+    axis.afterBuildTicks(scale);
+    assert.deepEqual(Array.from(scale.ticks,tick=>tick.value),[midnight]);
     const noMidnight={min:midnight+3600,max:midnight+7200,width:300,ticks:[{value:midnight+3600}]};
     axis.afterBuildTicks(noMidnight);
     assert.equal(noMidnight.ticks.length,1);
