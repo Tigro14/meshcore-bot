@@ -60,12 +60,17 @@
     <div class="col-12">
         <h1 class="mb-1"><i class="fas fa-hashtag"></i> Canaux</h1>
         <p class="text-muted mb-3">
-            Les canaux que ce bot surveille, avec le code d'ajout MeshCore de chacun.
-            Scannez-le dans l'application MeshCore (Canaux, puis «&nbsp;+&nbsp;» →
+            Les canaux connus de ce bot, avec le code d'ajout MeshCore de chacun. Scannez-le
+            dans l'application MeshCore (Canaux, puis «&nbsp;+&nbsp;» →
             «&nbsp;Scanner un code QR&nbsp;»), ou copiez le lien vers un téléphone&nbsp;: un
             navigateur d'ordinateur n'ouvre pas les liens <code>meshcore://</code>.
         </p>
         <p class="text-muted small mb-4">
+            Un badge dit ce que le bot fait de chaque canal&nbsp;: «&nbsp;surveillé&nbsp;» — il y
+            répond&nbsp;; «&nbsp;sur la radio&nbsp;» — le nœud y est abonné&nbsp;;
+            «&nbsp;décodé&nbsp;» — le bot en connaît la clé (liste de canaux de la commande
+            <code>channels</code> et canaux de décodage de la configuration), mais le nœud n'y a
+            pas de slot.
             Seuls les canaux dièse et les canaux personnalisés que l'opérateur a publiés sur le
             web ont un code visible ici. Le canal Public n'est pas distribué.
         </p>
@@ -110,12 +115,27 @@
             const monitored = document.createElement('span');
             monitored.className = 'badge bg-success';
             monitored.textContent = 'surveillé';
+            monitored.title = 'Le bot répond sur ce canal.';
             badges.appendChild(monitored);
+        }
+        if (channel.on_radio) {
+            const radio = document.createElement('span');
+            radio.className = 'badge bg-primary';
+            radio.textContent = 'sur la radio';
+            radio.title = 'Le nœud tient un slot pour ce canal.';
+            badges.appendChild(radio);
+        } else if (channel.decoded) {
+            const decoded = document.createElement('span');
+            decoded.className = 'badge bg-warning text-dark';
+            decoded.textContent = 'décodé';
+            decoded.title = 'Le bot connaît la clé de ce canal, mais le nœud n\'y a pas de slot.';
+            badges.appendChild(decoded);
         }
         if (channel.published) {
             const published = document.createElement('span');
             published.className = 'badge bg-info';
             published.textContent = 'publié sur le web';
+            published.title = 'L\'opérateur a autorisé ce canal personnalisé sur le web.';
             badges.appendChild(published);
         }
         card.appendChild(badges);

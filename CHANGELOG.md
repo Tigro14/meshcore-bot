@@ -8,8 +8,10 @@ semantic versioning.
 
 ### Added
 
-- Web viewer gains a **Channels** page at `/channels`, on the anonymous allowlist: every
-  monitored channel as a card with its MeshCore add-channel QR code
+- Web viewer gains a **Channels** page at `/channels`, on the anonymous allowlist: the channels
+  this bot knows — monitored, held by the radio, or only listed by the bot (`[Channels_List]`,
+  `decode_hashtag_channels`), each badged with which of those it is — as a card grid with its
+  MeshCore add-channel QR code
   (`meshcore://channel/add?name=…&secret=…`, drawn in the browser by the vendored
   `qrcode-generator`) plus a copyable link. The QR exposure is consent-limited — a hashtag
   channel is always encoded because its secret is derivable from the published name

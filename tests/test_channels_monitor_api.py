@@ -235,6 +235,56 @@ class TestChannelsViewFeed:
 
 
 # ---------------------------------------------------------------------------
+# Channels the bot only lists
+# ---------------------------------------------------------------------------
+
+class TestListedDecodeOnlyChannels:
+    """[Channels_List] and [Web_Viewer] decode_hashtag_channels put names on the page that
+    the radio holds no slot for.  They stay on the page — the bot publishes them through its
+    ``channels`` command and derives their hashtag key — but the feed labels them with
+    ``decoded``, because a card with a QR on a public page must not read as a channel the bot
+    answers on.
+    """
+
+    def _declare(self, viewer, tmp_path, keys):
+        with open(tmp_path / "config.ini", "a", encoding="utf-8") as handle:
+            handle.write("\n[Channels_List]\n")
+            for key in keys:
+                handle.write(f"{key} = Test channel\n")
+        viewer.config = viewer._load_merged_config()
+
+    def _feed(self, client):
+        return {c["name"]: c for c in client.get("/api/channels/view").get_json()["channels"]}
+
+    def test_a_listed_channel_is_shared_with_a_derived_qr(self, gated_viewer, tmp_path):
+        self._declare(gated_viewer, tmp_path, ["weather"])
+        entry = self._feed(_client(gated_viewer))["#weather"]
+        assert entry["decoded"] is True
+        assert entry["monitored"] is False
+        assert entry["on_radio"] is False
+        assert entry["qr"]["secret"] == hashtag_secret("#weather")
+
+    def test_a_categorized_key_is_shared_under_its_wire_name(self, gated_viewer, tmp_path):
+        self._declare(gated_viewer, tmp_path, ["sports.sounders"])
+        assert "#sounders" in self._feed(_client(gated_viewer))
+
+    def test_a_channel_the_radio_holds_is_not_flagged_decoded(self, gated_viewer, tmp_path):
+        _seed_channels(gated_viewer, [(0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf"))])
+        self._declare(gated_viewer, tmp_path, ["weather"])
+        entries = self._feed(_client(gated_viewer))
+        assert entries["#fr-idf"]["decoded"] is False
+        assert entries["#fr-idf"]["on_radio"] is True
+        assert entries["#weather"]["decoded"] is True
+
+    def test_a_listed_channel_that_is_also_monitored_reads_as_monitored(self, gated_viewer, tmp_path):
+        self._declare(gated_viewer, tmp_path, ["fr-idf"])
+        entry = self._feed(_client(gated_viewer))["#fr-idf"]
+        assert entry["monitored"] is True
+        assert entry["decoded"] is True
+        assert entry["on_radio"] is False
+
+
+# ---------------------------------------------------------------------------
 # Saving the monitor list
 # ---------------------------------------------------------------------------
 

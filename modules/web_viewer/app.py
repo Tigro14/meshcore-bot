@@ -5179,6 +5179,10 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         def api_channels_view():
             """Payload for the /channels page: names, join QR codes, monitoring state.
 
+            The merged list is monitored names first, then the radio's own slots, then the
+            names the bot only lists (`[Channels_List]`, ``decode_hashtag_channels``); the
+            ``monitored``/``on_radio``/``decoded`` flags tell the page which group a card is in.
+
             Public surface: a hashtag channel's QR secret is derivable from its
             name, so publishing it leaks nothing the name list does not.  A custom
             channel's key is only handed to an anonymous visitor when the operator
@@ -5209,6 +5213,9 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     'type': channel.get('type') or 'hashtag',
                     'monitored': bool(channel.get('monitored')),
                     'on_radio': bool(channel.get('on_radio')),
+                    # Names the bot only lists (its `channels` command section and its
+                    # decode list): no slot, so the page has to say which group a card is in.
+                    'decoded': bool(channel.get('decode_only')),
                     'published': bool(channel.get('live_messages_visible')),
                     'qr': qr,
                     'share_reason': None if qr else (

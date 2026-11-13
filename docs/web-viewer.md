@@ -429,6 +429,10 @@ next hourly tick.
     hashtag-derived, and it is not this bot's channel to distribute
 - A monitored channel the radio does not subscribe to yet is still listed, with its hashtag QR
   available, since the QR is derived from the name alone
+- Channels the bot only *lists* are listed here too, and badged `décodé`: the names of the
+  `[Channels_List]` section it publishes through the `channels` command, and
+  `[Web_Viewer] decode_hashtag_channels`. The radio holds no slot for them, so the page says so
+  rather than letting a card with a QR read as a monitored channel
 - Editing the list happens on `/channels/settings` (in the Settings dropdown, admin only);
   see [Channel Monitoring Settings](#channel-monitoring-settings)
 - QR codes are drawn in the browser by the vendored `qrcode-generator` library, so the page
@@ -502,13 +506,14 @@ The viewer also provides JSON API endpoints:
   `outgoing_flood_scope_override`, and queue a hot config reload. Returns the
   reload's `channel_operations` id so the caller can poll
   `/api/channel-operations/<id>` for what the bot actually did
-- `GET /api/channels/view` - The `/channels` page payload: every monitored and
-  radio-held channel with its join QR (`qr.name`, `qr.secret`, `qr.uri`),
-  `monitored`/`on_radio`/`published` flags, and a `share_reason` when a channel
-  carries no QR. Public, so the QRs are consent-limited: hashtag channels always,
-  custom channels only when published on the Radio page, `Public` never. An
-  authenticated operator's response adds `is_admin: true` and the private keys of
-  unpublished custom channels
+- `GET /api/channels/view` - The `/channels` page payload: every monitored, radio-held and
+  bot-listed channel with its join QR (`qr.name`, `qr.secret`, `qr.uri`),
+  `monitored`/`on_radio`/`decoded`/`published` flags, and a `share_reason` when a channel
+  carries no QR. `decoded` marks a name that comes from `[Channels_List]` or
+  `[Web_Viewer] decode_hashtag_channels` rather than from a radio slot. Public, so the QRs are
+  consent-limited: hashtag channels always, custom channels only when published on the Radio
+  page, `Public` never. An authenticated operator's response adds `is_admin: true` and the
+  private keys of unpublished custom channels
 - `GET /api/channels/settings` - Admin only. `[Channels] monitor_channels` as a
   list, the merged channel view (which entries the radio holds and in which slot),
   and `limit`, the free-slot count `[Bot] max_channels` allows
