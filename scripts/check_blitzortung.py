@@ -151,14 +151,21 @@ def listen_broker(svc: BlitzortungService, seconds: int, topics: list[str]) -> N
             return
         stats["parsed"] += 1
         a_ = svc.blitz_area
+        if not a_:
+            return
         if a_["min_lat"] <= lat <= a_["max_lat"] and a_["min_lon"] <= lon <= a_["max_lon"]:
             stats["in_area"] += 1
 
     def on_connect(*a):
-        stats["connack"] = a[3]
+        # paho 2.x: (client, userdata, flags, reason_code, properties)
+        # paho 1.6: (client, userdata, flags, rc)
+        stats["connack"] = next(x for x in a if isinstance(x, int) or hasattr(x, "value"))
 
     def on_subscribe(*a):
-        stats["suback"] = a[3]
+        # paho 2.x: (client, userdata, mid, reason_codes, properties)
+        # paho 1.6: (client, userdata, mid, granted_qos)
+        last = a[-1]
+        stats["suback"] = last if isinstance(last, (list, tuple)) else a[3]
 
     client.on_message = on_message
     client.on_connect = on_connect
