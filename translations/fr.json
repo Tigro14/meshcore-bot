@@ -293,6 +293,17 @@
       "mqtt_weather_payload_error": "Erreur dans les données météo MQTT : {detail}",
       "mqtt_weather_stale": "Les données météo MQTT sont trop anciennes"
     },
+    "rain": {
+      "precip_types": {
+        "drizzle": "Bruine",
+        "rain": "Pluie",
+        "heavy_rain": "Pluie forte",
+        "freezing": "Pluie verglaçante",
+        "snow": "Neige",
+        "showers": "Averses",
+        "thunder": "Orages"
+      }
+    },
     "sports": {
       "description": "Scores et calendriers sportifs (usage: sports [équipe/ligue])",
       "help": "Scores et calendriers. 'sports' pour équipes par défaut, 'sports [équipe]' pour équipe spécifique, 'sports [ligue]' pour matchs.",
@@ -1123,5 +1134,49 @@
     "analytics": "Commandes analytiques",
     "meshcore_info": "Commandes infos MeshCore",
     "management": "Commandes gestion"
+  },
+  "services": {
+    "weather_service": {
+      "daily_weather": "Météo du jour",
+      "tomorrow": "Demain",
+      "error_fetching": "Erreur de récupération des données météo",
+      "no_data": "Aucune donnée de prévision disponible",
+      "near": "près de",
+      "est": "env.",
+      "steady": "soutenue",
+      "rain_starting": "{emoji} {ptype} commence dans ~{minutes} min{est}{steady}{temp}{location}",
+      "rain_ending": "{emoji} {ptype} se termine dans ~{minutes} min{est}{temp}{location}",
+      "weather_descriptions": {
+        "0": "Dégagé",
+        "1": "Plutôt dégagé",
+        "2": "Partiellement nuageux",
+        "3": "Couvert",
+        "45": "Brouillard",
+        "48": "Brouillard",
+        "51": "Bruine légère",
+        "53": "Bruine",
+        "55": "Bruine forte",
+        "56": "Bruine verglaçante légère",
+        "57": "Bruine verglaçante",
+        "61": "Pluie légère",
+        "63": "Pluie",
+        "65": "Pluie forte",
+        "66": "Pluie verglaçante légère",
+        "67": "Pluie verglaçante",
+        "71": "Neige légère",
+        "73": "Neige",
+        "75": "Neige forte",
+        "77": "Grains de neige",
+        "80": "Averses légères",
+        "81": "Averses",
+        "82": "Averses fortes",
+        "85": "Averses neige légères",
+        "86": "Averses de neige",
+        "95": "Orage",
+        "96": "Orage avec grêle",
+        "97": "Orage fort",
+        "99": "Orage violent"
+      }
+    }
   }
 }
