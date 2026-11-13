@@ -87,14 +87,15 @@ admin surface. Everything not on the public allowlist redirects to `/login` (pag
 
 - **Readable without login**: Dashboard (`/`), Contacts, Mesh Graph, Real-time, Region,
   Airtime, BBS statistics, the Time synchronization page (`/time`, read-only:
-  add/delete/toggle/Run Now are hidden for anonymous visitors) and Infos. The read-only GET
-  APIs these pages fetch are public too (`/api/contacts`, `/api/regions`, `/api/bbs`,
+  add/delete/toggle/Run Now are hidden for anonymous visitors), the Channels page
+  (`/channels`, see below) and Infos. The read-only GET APIs these pages fetch are public too
+  (`/api/contacts`, `/api/regions`, `/api/bbs`, `/api/channels/view`,
   `/api/telemetry/occupancy*`, `/api/clock-sync-targets-admin`, `/api/packets/by-hash/<hash>`);
   their payloads carry mesh-visible data only — counts, names, key prefixes, drift and battery
   badges, packet ciphertext with radio metadata, never channel keys, config or unpublished
   message bodies.
 - **Admin login required**: Logs, the Settings dropdown (Radio, Scheduled Messages,
-  Greeter, Feeds, Region Warnings, Plugins, Config), the Multibyte monitor, the Time target
+  Greeter, Feeds, Region Warnings, Channels, Plugins, Config), the Multibyte monitor, the Time target
   editor (`/time/admin`), every mutating API, per-target sync history (`GET
   /api/clock-sync-targets-admin/<id>/history`), the Run Now action, battery history (`GET
   /api/battery/<key>/history`) and the live Socket.IO log stream. Real-time's live traffic
@@ -410,6 +411,53 @@ next hourly tick.
   so the bot must be running and connected to the radio for reads/writes to
   complete
 
+### Channels
+- The monitored channels (`[Channels] monitor_channels`) as a card grid, each with the
+  MeshCore "Add Channel" QR code a visitor can scan from the MeshCore mobile app
+  (`meshcore://channel/add?name=…&secret=…`), plus a button to copy the URI
+- Public page: it is on the anonymous allowlist, so it works without a login, and the QR
+  exposure is limited accordingly
+  - Hashtag channels are always encoded: their secret is the first 16 bytes of
+    `SHA256("#name")`, which anyone can derive from the published name, so the QR leaks
+    nothing new
+  - A custom (non-hashtag) channel's secret *is* its private key. Its QR is only given to
+    an anonymous visitor when the operator marked that channel publishable on the Radio page;
+    otherwise the channel is left out of the anonymous feed entirely rather than shown
+    name-only, because a join nobody can complete is worse than no join
+  - An authenticated operator also sees the private keys of unpublished custom channels
+  - The `Public` channel is never encoded: its key is fixed by MeshCore rather than
+    hashtag-derived, and it is not this bot's channel to distribute
+- A monitored channel the radio does not subscribe to yet is still listed, with its hashtag QR
+  available, since the QR is derived from the name alone
+- Editing the list happens on `/channels/settings` (in the Settings dropdown, admin only);
+  see [Channel Monitoring Settings](#channel-monitoring-settings)
+- QR codes are drawn in the browser by the vendored `qrcode-generator` library, so the page
+  needs no network access and no server-side image generation
+
+### Channel Monitoring Settings
+- Edits `[Channels] monitor_channels` in `config.ini`, the list of channels the bot answers on
+- Add by name (`#fr-idf` or `fr-idf`; the `#` is kept for hashtag channels because that is how
+  the bot compares names against incoming messages), remove with the row's button, and reorder
+  with the up/down controls
+- A save writes the file, queues a hot config reload, and reports what the bot actually did
+  with it — including plainly saying so when nothing picked the edit up
+- Monitored hashtag channels are provisioned automatically: each one the radio does not already
+  hold is queued onto a free channel slot (`[Bot] max_channels` slots), with no key sent so the
+  firmware derives the hashtag key itself. Slots that are all taken are reported as
+  not provisioned rather than silently dropped
+- Monitored custom channels are *not* created here: choosing a private key is a deliberate act,
+  so the page reports them and points at the Radio page
+- Removing a channel stops the bot answering it but leaves the radio slot in place, for the same
+  reason; the Radio page is where slots are deleted
+- The `Public` channel is refused unless `[Bot]
+  i_understand_that_running_the_bot_on_the_public_channel_is_potentially_disruptive_to_other_users_enjoyment_of_the_mesh_and_i_would_like_to_do_it_anyway`
+  is `true`, matching what the bot refuses at startup
+- Names containing a space, a comma, a `%` or a newline are refused before the write: the comma
+  would split the name into a channel nobody asked for, and `%` breaks every later read of the
+  section because config.ini is parsed with interpolation on
+- The bot matches `monitor_channels` against the wire name verbatim, so the stored list keeps
+  the `#` where the channel has one and stays lowercase
+
 ### Purging Log
 - Audit trail of contact purging operations
 - Timestamps and reasons
@@ -454,6 +502,22 @@ The viewer also provides JSON API endpoints:
   `outgoing_flood_scope_override`, and queue a hot config reload. Returns the
   reload's `channel_operations` id so the caller can poll
   `/api/channel-operations/<id>` for what the bot actually did
+- `GET /api/channels/view` - The `/channels` page payload: every monitored and
+  radio-held channel with its join QR (`qr.name`, `qr.secret`, `qr.uri`),
+  `monitored`/`on_radio`/`published` flags, and a `share_reason` when a channel
+  carries no QR. Public, so the QRs are consent-limited: hashtag channels always,
+  custom channels only when published on the Radio page, `Public` never. An
+  authenticated operator's response adds `is_admin: true` and the private keys of
+  unpublished custom channels
+- `GET /api/channels/settings` - Admin only. `[Channels] monitor_channels` as a
+  list, the merged channel view (which entries the radio holds and in which slot),
+  and `limit`, the free-slot count `[Bot] max_channels` allows
+- `POST /api/channels/settings` - Admin only. Save `monitor_channels` (a list of
+  names, `#` optional) and queue a hot config reload. Refuses a list longer than
+  `max_channels` slots, an invalid name, and `Public` without the `[Bot]` override
+  key. Returns `reload_operation_id` plus `provisioned` (with each queued
+  `channel_operations` id and slot), `not_provisioned`, `custom_monitored` and
+  `radio_only`, so the page can report what the bot did
 - `GET /api/dashboard/summary` - Snapshot-backed dashboard payload, including
   30-day sparkline series and change figures, plus `packet_encoding`: 30 days of
   raw per-payload-type multibyte/total counts for the stacked encoding chart.

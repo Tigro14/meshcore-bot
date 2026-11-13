@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Canaux - MeshCore Bot{% endblock %}
+
+{% block extra_css %}
+<style>
+    .ch-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 1rem;
+    }
+    .ch-card {
+        border: 1px solid var(--border-color);
+        border-radius: .5rem;
+        padding: 1rem;
+        background-color: var(--bg-secondary);
+    }
+    .ch-card h3 {
+        margin: 0 0 .5rem;
+        font-size: 1.05rem;
+        font-family: var(--bs-font-monospace, monospace);
+        overflow-wrap: anywhere;
+    }
+    .ch-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .35rem;
+        margin-bottom: .75rem;
+    }
+    .ch-qr {
+        display: flex;
+        justify-content: center;
+        padding: .5rem;
+        margin-bottom: .75rem;
+        background-color: #fff;
+        border-radius: .375rem;
+    }
+    .ch-qr svg {
+        width: 100%;
+        max-width: 220px;
+        height: auto;
+    }
+    .ch-uri {
+        display: block;
+        font-family: var(--bs-font-monospace, monospace);
+        font-size: .78rem;
+        overflow-wrap: anywhere;
+        margin-bottom: .5rem;
+    }
+    .ch-note {
+        font-size: .85rem;
+        color: var(--text-muted);
+        margin: 0 0 .5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-1"><i class="fas fa-hashtag"></i> Canaux</h1>
+        <p class="text-muted mb-3">
+            Les canaux que ce bot surveille, avec le code d'ajout MeshCore de chacun.
+            Scannez-le dans l'application MeshCore (Canaux, puis «&nbsp;+&nbsp;» →
+            «&nbsp;Scanner un code QR&nbsp;»), ou copiez le lien vers un téléphone&nbsp;: un
+            navigateur d'ordinateur n'ouvre pas les liens <code>meshcore://</code>.
+        </p>
+        <p class="text-muted small mb-4">
+            Seuls les canaux dièse et les canaux personnalisés que l'opérateur a publiés sur le
+            web ont un code visible ici. Le canal Public n'est pas distribué.
+        </p>
+        <div id="ch-alert" class="alert d-none" role="status" aria-live="polite"></div>
+        <div id="ch-loading" class="text-muted">Chargement des canaux…</div>
+        <div id="ch-grid" class="ch-grid" hidden></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='vendor/qrcode-generator/qrcode.js') }}"></script>
+<script nonce="{{ g.csp_nonce }}">
+(function () {
+    'use strict';
+
+    function el(id) { return document.getElementById(id); }
+
+    function showAlert(text, kind) {
+        const box = el('ch-alert');
+        box.className = 'alert alert-' + (kind || 'secondary');
+        box.textContent = text;
+    }
+
+    const TYPE_LABEL = { hashtag: 'dièse', custom: 'personnalisé', public: 'public' };
+
+    function renderCard(channel) {
+        const card = document.createElement('article');
+        card.className = 'ch-card';
+
+        const title = document.createElement('h3');
+        title.textContent = channel.public ? 'Public' : channel.name;
+        card.appendChild(title);
+
+        const badges = document.createElement('div');
+        badges.className = 'ch-badges';
+        const type = document.createElement('span');
+        type.className = 'badge bg-secondary';
+        type.textContent = TYPE_LABEL[channel.type] || channel.type;
+        badges.appendChild(type);
+        if (channel.monitored) {
+            const monitored = document.createElement('span');
+            monitored.className = 'badge bg-success';
+            monitored.textContent = 'surveillé';
+            badges.appendChild(monitored);
+        }
+        if (channel.published) {
+            const published = document.createElement('span');
+            published.className = 'badge bg-info';
+            published.textContent = 'publié sur le web';
+            badges.appendChild(published);
+        }
+        card.appendChild(badges);
+
+        if (!channel.qr) {
+            const note = document.createElement('p');
+            note.className = 'ch-note';
+            note.textContent = channel.share_reason === 'public_channel'
+                ? 'Le canal Public est commun à tout le réseau : il n\'est pas distribué ici.'
+                : 'Clé indisponible : ce canal n\'est pas encore créé sur le nœud '
+                    + '(à faire depuis la gestion Radio).';
+            card.appendChild(note);
+            return card;
+        }
+
+        const qrBox = document.createElement('div');
+        qrBox.className = 'ch-qr';
+        try {
+            const qr = qrcode(0, 'M');
+            qr.addData(channel.qr.uri);
+            qr.make();
+            qrBox.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+        } catch (error) {
+            console.error('QR rendering failed for channel', channel.name, error);
+            const note = document.createElement('p');
+            note.className = 'ch-note';
+            note.textContent = 'Code illisible : réessayez, ou utilisez le lien ci-dessous.';
+            card.appendChild(note);
+            return card;
+        }
+        card.appendChild(qrBox);
+
+        const link = document.createElement('a');
+        link.className = 'ch-uri';
+        link.href = channel.qr.uri;
+        link.textContent = channel.qr.uri;
+        card.appendChild(link);
+
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'btn btn-sm btn-outline-secondary';
+        copy.textContent = 'Copier le lien';
+        copy.addEventListener('click', function () {
+            function restore(text) {
+                copy.textContent = text;
+                setTimeout(function () { copy.textContent = 'Copier le lien'; }, 2000);
+            }
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(channel.qr.uri)
+                    .then(function () { restore('Lien copié'); }, function () { restore('Copie impossible'); });
+            } else {
+                restore('Copie impossible');
+            }
+        });
+        card.appendChild(copy);
+        return card;
+    }
+
+    async function load() {
+        let data;
+        try {
+            const resp = await fetch('/api/channels/view', {
+                headers: {'X-Requested-With': 'XMLHttpRequest'}
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            data = await resp.json();
+        } catch (error) {
+            console.error('Error loading channels:', error);
+            el('ch-loading').textContent = 'Chargement impossible.';
+            return;
+        }
+
+        el('ch-loading').hidden = true;
+        const grid = el('ch-grid');
+        grid.hidden = false;
+        grid.textContent = '';
+
+        if (data.is_admin) {
+            showAlert('Connecté en tant qu\'administrateur : les codes des canaux privés sont '
+                + 'affichés. La liste se modifie depuis le menu Settings → Channels.', 'info');
+        }
+
+        if (!data.channels.length) {
+            const empty = document.createElement('p');
+            empty.className = 'text-muted';
+            empty.textContent = 'Aucun canal partageable pour l\'instant.';
+            grid.appendChild(empty);
+            return;
+        }
+        data.channels.forEach((channel) => grid.appendChild(renderCard(channel)));
+    }
+
+    document.addEventListener('DOMContentLoaded', load);
+})();
+</script>
+{% endblock %}

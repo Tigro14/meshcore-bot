@@ -271,6 +271,20 @@
    "GET"
   ]
  },
+ "/api/channels/settings": {
+  "POST locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 401,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_channels_settings_save",
+  "methods": [
+   "POST"
+  ]
+ },
  "/api/channels/stats": {
   "GET locked anon": {
    "content_type": "application/json",
@@ -305,6 +319,28 @@
   "endpoint": "api_validate_channel",
   "methods": [
    "POST"
+  ]
+ },
+ "/api/channels/view": {
+  "GET locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_channels_view",
+  "methods": [
+   "GET"
   ]
  },
  "/api/clock-sync-targets": {
@@ -1845,6 +1881,50 @@
    "x_frame_options": "SAMEORIGIN"
   },
   "endpoint": "cache",
+  "methods": [
+   "GET"
+  ]
+ },
+ "/channels": {
+  "GET locked anon": {
+   "content_type": "text/html",
+   "csp_script_src": "script-src 'self' 'nonce-X'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "text/html",
+   "csp_script_src": "script-src 'self' 'nonce-X'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "channels_page",
+  "methods": [
+   "GET"
+  ]
+ },
+ "/channels/settings": {
+  "GET locked anon": {
+   "content_type": "text/html",
+   "csp_script_src": "script-src 'self' 'nonce-X'",
+   "location": "/login?next=/channels/settings",
+   "status": 302,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "text/html",
+   "csp_script_src": "script-src 'self' 'nonce-X'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "channel_settings_page",
   "methods": [
    "GET"
   ]

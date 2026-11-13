@@ -360,6 +360,9 @@ critical_voltage = 3.4
 # Use hashtags for hashtag channels (i.e. #mybotchannel, #weather, etc.)
 # If you intentionally include Public, also set the long [Bot] override key above.
 # Example: monitor_channels = Public,#bot,#fr,#fr-idf,#test
+# The web viewer also edits this list (Settings -> Canaux surveilles, at
+# /channels/settings), and its public /channels page publishes the MeshCore
+# "Add Channel" QR code of every monitored hashtag channel.
 monitor_channels = #mybotchannel
 
 # Optional persistent radio flood scope applied once at startup/reconnect,

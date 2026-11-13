@@ -1,0 +1,451 @@
+{% extends "base.html" %}
+
+{% block title %}Canaux surveillés - MeshCore Bot{% endblock %}
+
+{% block extra_css %}
+<style>
+    .cs-row {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        margin-bottom: .5rem;
+    }
+    .cs-row .cs-name {
+        flex: 1 1 auto;
+        font-family: var(--bs-font-monospace, monospace);
+    }
+    .cs-badge {
+        white-space: nowrap;
+    }
+    .cs-empty {
+        color: var(--text-muted);
+        padding: .75rem 0;
+    }
+    .cs-flag {
+        font-size: .875rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-1"><i class="fas fa-hashtag"></i> Canaux surveillés</h1>
+        <p class="text-muted mb-4">
+            Les canaux sur lesquels ce bot répond. Enregistré dans
+            <code>config.ini</code> &rarr; <code>[Channels] monitor_channels</code>,
+            rechargé à chaud par le bot après chaque sauvegarde.
+            <a href="/channels">Voir la page publique des canaux</a>.
+        </p>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><i class="fas fa-list"></i> Liste des canaux surveillés</div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Un canal <strong>hashtag</strong> commence par <code>#</code> : sa clef est dérivée
+                    de son nom et le canal est ajouté sur la radio à la sauvegarde s&#39;il y manque.
+                    Un canal <strong>personnalisé</strong> (sans <code>#</code>) doit d&#39;abord être
+                    créé sur la page <a href="/radio">Radio</a>, où vous choisissez sa clef.
+                </p>
+
+                <div id="cs-alert" class="alert d-none" role="alert"></div>
+
+                <div id="cs-list" aria-live="polite"></div>
+
+                <div class="cs-row mt-3">
+                    <input type="text" class="form-control cs-name" id="cs-new"
+                           placeholder="#mon-canal" autocomplete="off" spellcheck="false"
+                           aria-label="Nom du nouveau canal">
+                    <button type="button" class="btn btn-outline-primary" id="cs-add">
+                        <i class="fas fa-plus me-1" aria-hidden="true"></i>Ajouter
+                    </button>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                    <span id="cs-status" class="small text-muted"></span>
+                    <button type="button" class="btn btn-primary" id="cs-save" disabled>
+                        <i class="fas fa-save me-1" aria-hidden="true"></i>Enregistrer
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-sim-card"></i> Créneaux de canaux sur la radio</span>
+                <a class="btn btn-sm btn-outline-secondary" href="/radio">
+                    <i class="fas fa-broadcast-tower me-1"></i>Gérer sur la page Radio
+                </a>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Le nœud MeshCore expose un nombre fixe de créneaux
+                    (<code>[Bot] max_channels</code>). La sauvegarde place d&#39;elle-même les canaux
+                    hashtag manquants sur les créneaux libres ; le retrait d&#39;un créneau se fait
+                    sur la page Radio.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th scope="col">Créneau</th>
+                                <th scope="col">Canal</th>
+                                <th scope="col">Type</th>
+                                <th scope="col">Statut</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cs-radio-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/channel_operations.js') }}"></script>
+<script nonce="{{ g.csp_nonce }}">
+(function () {
+    'use strict';
+
+    function el(id) { return document.getElementById(id); }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        }[c]));
+    }
+
+    // Same key the server uses to pair a monitor name with a radio slot:
+    // lowercase, leading '#' dropped (modules/web_viewer/channel_monitor.py).
+    function lookupKey(name) {
+        return String(name ?? '').trim().toLowerCase().replace(/^#/, '');
+    }
+
+    // How MeshCoreChannelOps.pollChannelOperation outcomes read in French.
+    const OPERATION_OUTCOME = {
+        failed: 'ajout refusé par le nœud',
+        interrupted: 'ajout interrompu',
+        timeout: 'ajout toujours en attente (nœud joignable ?)',
+    };
+
+    function setStatus(text, cls) {
+        const node = el('cs-status');
+        node.className = 'small ' + (cls || 'text-muted');
+        node.textContent = text;
+    }
+
+    function showAlert(html, kind) {
+        const box = el('cs-alert');
+        box.className = 'alert alert-' + (kind || 'secondary');
+        box.innerHTML = html;
+    }
+
+    function hideAlert() {
+        const box = el('cs-alert');
+        box.className = 'alert d-none';
+        box.innerHTML = '';
+    }
+
+    class ChannelSettings {
+        constructor() {
+            this.channels = [];
+            this.saved = [];
+            this.dirty = false;
+            this.reloadFailure = '';
+            this.load();
+
+            el('cs-save').addEventListener('click', () => this.save());
+            el('cs-add').addEventListener('click', () => this.addFromInput());
+            el('cs-new').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); this.addFromInput(); }
+            });
+        }
+
+        async load() {
+            try {
+                const resp = await fetch('/api/channels/settings', {
+                    headers: {'X-Requested-With': 'XMLHttpRequest'}
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                this.data = data;
+                this.channels = (data.monitor_channels || []).slice();
+                this.saved = this.channels.slice();
+                this.dirty = false;
+                this.render();
+                this.renderRadio();
+            } catch (error) {
+                console.error('Error loading channel settings:', error);
+                setStatus('Chargement impossible : ' + error.message, 'text-danger');
+            }
+        }
+
+        markDirty() {
+            this.dirty = true;
+            el('cs-save').disabled = false;
+            setStatus('Modifications non enregistrées.', 'text-muted');
+        }
+
+        addFromInput() {
+            const input = el('cs-new');
+            const raw = (input.value || '').trim();
+            if (!raw) return;
+            const name = raw.toLowerCase();
+            const key = lookupKey(name);
+            if (this.channels.some((existing) => lookupKey(existing) === key)) {
+                showAlert('Ce canal est déjà dans la liste.', 'warning');
+                return;
+            }
+            this.channels.push(name);
+            input.value = '';
+            input.focus();
+            hideAlert();
+            this.render();
+            this.markDirty();
+        }
+
+        render() {
+            const host = el('cs-list');
+            if (!this.channels.length) {
+                host.innerHTML = '<div class="cs-empty">Aucun canal surveillé : le bot ne répond '
+                    + 'qu&#39;en message direct.</div>';
+                return;
+            }
+            const limit = (this.data && this.data.limit) || 40;
+            host.innerHTML = this.channels.map((name, i) => {
+                const radio = this.radioByName(name);
+                const badges = []
+                    + (radio && radio.channel_idx !== null && radio.channel_idx !== undefined
+                        ? '<span class="badge bg-success cs-badge">Créneau ' + radio.channel_idx + '</span>'
+                        : '<span class="badge bg-warning text-dark cs-badge">Pas sur la radio</span>')
+                    + (radio && radio.live_messages_visible
+                        ? '<span class="badge bg-info cs-badge">Publié</span>' : '');
+                return ''
+                    + '<div class="cs-row">'
+                    + '  <input type="text" class="form-control cs-name cs-name-input" data-index="' + i + '" '
+                    + '         value="' + escapeHtml(name) + '" spellcheck="false" autocomplete="off" '
+                    + '         aria-label="Canal ' + (i + 1) + '">'
+                    + '  <span>' + badges + '</span>'
+                    + '  <div class="btn-group btn-group-sm" role="group" aria-label="Ordre du canal">'
+                    + '    <button type="button" class="btn btn-outline-secondary cs-move-up" data-index="' + i + '" '
+                    + (i === 0 ? 'disabled ' : '') + 'aria-label="Monter"><i class="fas fa-arrow-up" aria-hidden="true"></i></button>'
+                    + '    <button type="button" class="btn btn-outline-secondary cs-move-down" data-index="' + i + '" '
+                    + (i === this.channels.length - 1 ? 'disabled ' : '') + 'aria-label="Descendre"><i class="fas fa-arrow-down" aria-hidden="true"></i></button>'
+                    + '    <button type="button" class="btn btn-outline-danger cs-remove" data-index="' + i + '" '
+                    + 'aria-label="Retirer"><i class="fas fa-times" aria-hidden="true"></i></button>'
+                    + '  </div>'
+                    + '</div>';
+            }).join('')
+                + '<div class="small text-muted mt-1">' + this.channels.length + ' canal(s) sur ' + limit + ' possibles.</div>';
+
+            host.querySelectorAll('.cs-name-input').forEach((input) => {
+                input.addEventListener('change', () => {
+                    const i = parseInt(input.getAttribute('data-index'), 10);
+                    const value = (input.value || '').trim().toLowerCase();
+                    if (!value) { this.channels.splice(i, 1); }
+                    else { this.channels[i] = value; }
+                    this.render();
+                    this.markDirty();
+                });
+            });
+            host.querySelectorAll('.cs-move-up').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const i = parseInt(button.getAttribute('data-index'), 10);
+                    if (i <= 0) return;
+                    const tmp = this.channels[i - 1];
+                    this.channels[i - 1] = this.channels[i];
+                    this.channels[i] = tmp;
+                    this.render();
+                    this.markDirty();
+                });
+            });
+            host.querySelectorAll('.cs-move-down').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const i = parseInt(button.getAttribute('data-index'), 10);
+                    if (i >= this.channels.length - 1) return;
+                    const tmp = this.channels[i + 1];
+                    this.channels[i + 1] = this.channels[i];
+                    this.channels[i] = tmp;
+                    this.render();
+                    this.markDirty();
+                });
+            });
+            host.querySelectorAll('.cs-remove').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const i = parseInt(button.getAttribute('data-index'), 10);
+                    const removed = this.channels[i];
+                    this.channels.splice(i, 1);
+                    this.render();
+                    this.markDirty();
+                    if (this.radioByName(removed)) {
+                        showAlert('<i class="fas fa-triangle-exclamation me-1" aria-hidden="true"></i>'
+                            + escapeHtml(removed) + ' reste occupé sur la radio : retirez le créneau sur '
+                            + '<a href="/radio">la page Radio</a> si vous ne voulez plus l&#39;entendre.',
+                            'warning');
+                    }
+                });
+            });
+        }
+
+        radioByName(name) {
+            const channels = (this.data && this.data.channels) || [];
+            const key = lookupKey(name);
+            return channels.find((c) =>
+                lookupKey(c.name) === key && c.channel_idx !== null && c.channel_idx !== undefined);
+        }
+
+        renderRadio() {
+            const body = el('cs-radio-body');
+            const onRadio = ((this.data && this.data.channels) || [])
+                .filter((c) => c.channel_idx !== null && c.channel_idx !== undefined)
+                .sort((a, b) => a.channel_idx - b.channel_idx);
+            if (!onRadio.length) {
+                body.innerHTML = '<tr><td colspan="4" class="cs-empty">Aucun canal configuré sur le nœud.</td></tr>';
+                return;
+            }
+            body.innerHTML = onRadio.map((c) => {
+                const radioKey = lookupKey(c.name);
+                const monitored = this.saved.concat(this.channels)
+                    .some((name) => lookupKey(name) === radioKey);
+                return ''
+                    + '<tr>'
+                    + '  <td>' + c.channel_idx + '</td>'
+                    + '  <td class="cs-name">' + escapeHtml(c.name) + '</td>'
+                    + '  <td>' + escapeHtml(c.type === 'hashtag' ? 'hashtag' : 'personnalisé') + '</td>'
+                    + '  <td>'
+                    + (monitored
+                        ? '<span class="badge bg-success">surveillé</span>'
+                        : '<span class="badge bg-secondary">non surveillé</span>')
+                    + (c.live_messages_visible ? ' <span class="badge bg-info">publié</span>' : '')
+                    + '  </td>'
+                    + '</tr>';
+            }).join('');
+        }
+
+        async save() {
+            const button = el('cs-save');
+            button.disabled = true;
+            hideAlert();
+            this.reloadFailure = '';
+            setStatus('Enregistrement…', 'text-muted');
+            let result;
+            try {
+                const resp = await fetch('/api/channels/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify({channels: this.channels}),
+                });
+                result = await resp.json();
+                if (!resp.ok || !result.success) throw new Error(result.error || 'Enregistrement impossible');
+            } catch (error) {
+                button.disabled = false;
+                setStatus(error.message, 'text-danger');
+                return;
+            }
+
+            this.saved = result.monitor_channels.slice();
+            this.channels = result.monitor_channels.slice();
+            this.dirty = false;
+
+            // Ask the bot what it did with the new list, through the same
+            // operation queue the Radio page reports from.
+            setStatus('Enregistré. Rechargement du bot…', 'text-muted');
+            const reload = await this.awaitReload(result.reload_operation_id);
+
+            // Then the per-channel provisioning operations queued on the radio.
+            const provisioning = await Promise.all(
+                (result.provisioned || []).map(async (item) => {
+                    const outcome = await MeshCoreChannelOps.pollChannelOperation(item.operation_id, {
+                        maxWaitSeconds: 30
+                    });
+                    return {name: item.name, outcome: outcome};
+                })
+            );
+
+            this.render();
+            await this.reloadView();
+
+            const lines = [];
+            provisioning.forEach((item) => {
+                if (item.outcome === 'completed') {
+                    lines.push('<li><i class="fas fa-check me-1 text-success" aria-hidden="true"></i>'
+                        + escapeHtml(item.name) + ' ajouté sur la radio</li>');
+                } else {
+                    lines.push('<li><i class="fas fa-times me-1 text-danger" aria-hidden="true"></i>'
+                        + escapeHtml(item.name) + ' : ' + OPERATION_OUTCOME[item.outcome]
+                        + ' — à reprendre sur la page Radio</li>');
+                }
+            });
+            (result.not_provisioned || []).forEach((name) => {
+                lines.push('<li><i class="fas fa-triangle-exclamation me-1 text-warning" aria-hidden="true"></i>'
+                    + escapeHtml(name) + ' : aucun créneau libre sur le nœud</li>');
+            });
+            (result.custom_monitored || []).forEach((name) => {
+                if (!this.radioByName(name)) {
+                    lines.push('<li><i class="fas fa-key me-1 text-info" aria-hidden="true"></i>'
+                        + escapeHtml(name) + ' : canal personnalisé, à créer d&#39;abord sur la page Radio</li>');
+                }
+            });
+            (result.radio_only || []).forEach((name) => {
+                lines.push('<li><i class="fas fa-hashtag me-1 text-muted" aria-hidden="true"></i>'
+                    + escapeHtml(name) + ' : plus surveillé mais toujours sur la radio '
+                    + '(<a href="/radio">page Radio</a>)</li>');
+            });
+
+            if (lines.length) showAlert('<ul class="mb-0">' + lines.join('') + '</ul>', 'secondary');
+
+            let reloadText = reload === 'completed' ? 'le bot a rechargé sa configuration'
+                : reload === 'failed' || reload === 'interrupted'
+                    ? (this.reloadFailure
+                        ? 'le rechargement a échoué : ' + String(this.reloadFailure).trim().replace(/\.+$/, '')
+                        : (reload === 'failed'
+                            ? 'le bot a refusé le rechargement (voir ses journaux)'
+                            : 'le rechargement a été interrompu'))
+                    : reload === null ? 'rechargement non demandé'
+                    : 'rechargement toujours en attente (le bot est-il démarré ?)';
+            setStatus('Enregistré dans config.ini (' + (result.backup_path || 'sauvegarde') + '), ' + reloadText + '.',
+                reload === 'failed' || reload === 'interrupted' ? 'text-danger' : 'text-success');
+        }
+
+        async reloadView() {
+            try {
+                const resp = await fetch('/api/channels/settings', {headers: {'X-Requested-With': 'XMLHttpRequest'}});
+                if (!resp.ok) return;
+                this.data = await resp.json();
+            } catch (error) {
+                console.error('Error refreshing channel settings:', error);
+            }
+        }
+
+        async awaitReload(operationId) {
+            // No id means the queue write failed: the edit is in config.ini and
+            // applies on the bot's next restart.
+            if (!operationId) return null;
+            let reason = '';
+            const outcome = await MeshCoreChannelOps.pollChannelOperation(operationId, {
+                maxWaitSeconds: 20,
+                extendedMaxWaitSeconds: 20,
+                onFailed: (message) => { reason = String(message || ''); },
+            });
+            if (reason) this.reloadFailure = reason;
+            return outcome;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => new ChannelSettings());
+})();
+</script>
+{% endblock %}

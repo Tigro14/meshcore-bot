@@ -8,6 +8,26 @@ semantic versioning.
 
 ### Added
 
+- Web viewer gains a **Channels** page at `/channels`, on the anonymous allowlist: every
+  monitored channel as a card with its MeshCore add-channel QR code
+  (`meshcore://channel/add?name=…&secret=…`, drawn in the browser by the vendored
+  `qrcode-generator`) plus a copyable link. The QR exposure is consent-limited — a hashtag
+  channel is always encoded because its secret is derivable from the published name
+  (`SHA256("#name")[:16]`, the rule `ChannelManager.generate_hashtag_key` already uses), a
+  custom channel is encoded for visitors only once the operator published its messages on the
+  Radio page, unpublished custom channels are left out of the anonymous feed rather than listed
+  name-only, and `Public` is never encoded because its key is fixed by MeshCore rather than
+  hashtag-derived. An authenticated operator also sees the private keys. `GET /api/channels/view`
+  feeds the page.
+- A Settings entry (**Channels**, at `/channels/settings`) edits `[Channels] monitor_channels`
+  with a comment-preserving write and a queued hot reload, reported back through the same
+  operation queue the Radio page uses. A monitored hashtag channel the radio does not hold yet is
+  queued onto a free channel slot (`[Bot] max_channels`) with no key sent, so the firmware derives
+  it; a monitored custom channel is not created there, because choosing its key is a deliberate
+  act, and removing a channel does not free its radio slot. Names with a space, comma, `%` or
+  newline, a list longer than the slot count, and `Public` without the `[Bot]` override key are
+  refused before anything is written. `GET`/`POST /api/channels/settings`. See `docs/web-viewer.md`.
+
 - BBS recipients now get **private staged notifications**: one aggregate DM on
   arrival, one at +24h if still unread, and a final notice at +73h naming the purge
   age — always a single DM per recipient carrying the unread count, never one DM per
