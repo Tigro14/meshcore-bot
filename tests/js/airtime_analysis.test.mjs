@@ -152,7 +152,7 @@ test('all directly heard relays are hidden by default only in the overview',()=>
     assert.doesNotMatch(elements.get('airtime-duty-list').innerHTML,/Direct neighbour/);
     assert.equal((elements.get('airtime-duty-list').innerHTML.match(/role="meter"/g)||[]).length,5);
     assert.equal(elements.get('airtime-duty').textContent,'1 %');
-    assert.match(elements.get('airtime-duty-note').textContent,/Hors premiers liens/);
+    assert.doesNotMatch(elements.get('airtime-duty-note').textContent,/Hors premiers liens/);
     assert.doesNotMatch(elements.get('airtime-duty-list').innerHTML,/Second direct neighbour/);
     assert.match(elements.get('airtime-relay-details').innerHTML,/Direct neighbour/);
     assert.equal(instance.data.repeaters.length,8);
