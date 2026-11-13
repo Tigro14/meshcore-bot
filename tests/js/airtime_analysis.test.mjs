@@ -179,16 +179,18 @@ test('a highest-duty remote relay is never hidden without direct-neighbour evide
 });
 
 
-test('unavailable periods use short markers below the axis, while confirmed silence stays at zero',()=>{
+test('only confirmed silence gets a marker, drawn before tooltips',()=>{
     const {instance}=viewer();
     instance.render({...data,local:{...data.local,rx_series:[{start_time:1000,end_time:1300,percent:0,coverage:'complete'},
         {start_time:1300,end_time:1600,percent:null,coverage:'unknown'},
-        {start_time:1600,end_time:1900,percent:1,coverage:'partial'}]}},hourly);
+        {start_time:1600,end_time:1900,percent:1,coverage:'partial'},
+        {start_time:1900,end_time:2200,percent:0,coverage:'unknown'}]}},hourly);
     const drawn=[];
-    instance.chart.plugins[0].afterDraw({data:instance.chart.data,
+    assert.equal(instance.chart.plugins[0].afterDraw,undefined);
+    instance.chart.plugins[0].afterDatasetsDraw({data:instance.chart.data,
         ctx:{save(){},restore(){},fillRect(...rect){drawn.push(rect);}},
         chartArea:{left:1000,right:1900,top:0,bottom:100},scales:{x:{getPixelForValue:x=>x}}});
-    assert.deepEqual(drawn,[[1301,104,298,3]]);
+    assert.deepEqual(drawn,[[1001,104,298,3]]);
     assert.equal(instance.chart.data.datasets[0].data[0].y,0);
     assert.equal(instance.chart.data.datasets[0].data[1].y,null);
     instance.render({...data,local:{rx_series:[{start_time:1000,end_time:1300,percent:null}]}},null);

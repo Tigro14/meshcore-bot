@@ -73,8 +73,10 @@ class TestAirtimePage:
     def test_chart_draws_an_absent_bucket_as_a_gap(self, viewer):
         body = viewer.app.test_client().get('/airtime').data.decode()
         assert "type: 'bar'" in body
-        assert 'airtimeUnavailable' in body
-        assert 'Tirets gris : données indisponibles' in body
+        assert 'airtimeSilence' in body
+        assert '0 % : silence confirmé.' in body
+        assert 'Écoute locale de Baliz' not in body
+        assert 'Tirets gris : données indisponibles' not in body
         assert 'null' in body
 
     def test_page_script_carries_a_csp_nonce(self, viewer):

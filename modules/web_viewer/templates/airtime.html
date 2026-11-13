@@ -60,7 +60,7 @@
         <div class="card-body">
             <p class="small text-muted mb-0" id="airtime-chart-empty" hidden>Aucune observation exploitable.</p>
             <div class="airtime-chart" id="airtime-chart-wrap"><canvas id="airtime-chart" aria-label="Histogramme de l’occupation reçue au fil du temps"></canvas></div>
-            <p class="small text-muted mt-2 mb-0"><span id="airtime-resolution"></span> · Écoute locale de Baliz · <span style="display:inline-block;width:12px;height:3px;background:#aeb7c2;vertical-align:middle"></span> Tirets gris : données indisponibles · 0 % : silence confirmé.</p>
+            <p class="small text-muted mt-2 mb-0"><span id="airtime-resolution"></span> · <span style="display:inline-block;width:12px;height:3px;background:#aeb7c2;vertical-align:middle"></span> 0 % : silence confirmé.</p>
         </div>
     </section>
     <div class="row g-3 mb-3">
@@ -269,19 +269,19 @@
                 this.chart.update();
                 return;
             }
-            const unavailable = {id: 'airtimeUnavailable', afterDraw: chart => {
+            const silence = {id: 'airtimeSilence', afterDatasetsDraw: chart => {
                 const {ctx, chartArea, scales} = chart;
                 ctx.save();
                 ctx.fillStyle = '#aeb7c2';
                 for (const point of chart.data.datasets[0].data) {
-                    if (point.y !== null) continue;
+                    if (point.y !== 0 || point.coverage !== 'complete') continue;
                     const left = scales.x.getPixelForValue(point.start), right = scales.x.getPixelForValue(point.end);
                     ctx.fillRect(Math.max(chartArea.left, left)+1, chartArea.bottom+4,
                         Math.max(1, Math.min(chartArea.right, right)-Math.max(chartArea.left, left)-2), 3);
                 }
                 ctx.restore();
             }};
-            this.chart = new Chart(el('airtime-chart'), {type: 'bar', plugins: [unavailable], data: {datasets: [dataset]}, options: {
+            this.chart = new Chart(el('airtime-chart'), {type: 'bar', plugins: [silence], data: {datasets: [dataset]}, options: {
                 responsive: true, maintainAspectRatio: false,
                 animation: false, interaction: {mode: 'index', intersect: false},
                 plugins: {legend: {display: false}, tooltip: {callbacks: {
