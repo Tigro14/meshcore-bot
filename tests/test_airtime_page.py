@@ -49,72 +49,58 @@ def viewer(tmp_path):
 
 
 class TestAirtimePage:
-    def test_page_renders(self, viewer):
-        resp = viewer.app.test_client().get("/airtime")
-        assert resp.status_code == 200
+    def test_main_page_prioritizes_one_curve_and_short_lists(self, viewer):
+        response = viewer.app.test_client().get('/airtime')
+        assert response.status_code == 200
+        body = response.data.decode()
+        main, details = body.split('<div class="modal fade" id="airtime-details"', 1)
+        assert main.count('<canvas') == 1
+        assert '<table' not in main
+        assert 'Occupation reçue' in main
+        assert 'Duty cycle estimé' in main
+        assert 'airtime-duty-list' in main and 'airtime-source-list' in main
+        assert details.count('<table') == 3
+        assert 'airtime-search' in details
+        assert 'Profil radio' in body
 
-    def test_page_says_the_airtime_is_modelled(self, viewer):
-        """The page cannot present a computed figure as a measurement of the channel."""
-        body = viewer.app.test_client().get("/airtime").data.decode()
-        assert "estimé" in body
-        assert "profil radio" in body
-
-    def test_page_keeps_rx_and_tx_apart(self, viewer):
-        """rx is a local observation, tx is what the bot decides about: never one number."""
-        body = viewer.app.test_client().get("/airtime").data.decode()
-        assert "RX</strong> : paquets reçus" in body
-        assert "TX</strong> : demandes d’émission" in body
+    def test_duty_reference_is_per_repeater_and_hour(self, viewer):
+        body = viewer.app.test_client().get('/airtime').data.decode()
+        assert '10 % = 6 min/h par répéteur' in body
+        assert 'Duty cycle — dernière heure' in body
+        assert 'Estimations partielles' in body
+        assert 'Repère 10 % (par émetteur)' not in body
 
     def test_chart_draws_an_absent_bucket_as_a_gap(self, viewer):
-        """A window with no written bucket must not render as 0.0."""
-        body = viewer.app.test_client().get("/airtime").data.decode()
-        assert "spanGaps: false" in body
-        assert "null" in body
+        body = viewer.app.test_client().get('/airtime').data.decode()
+        assert 'spanGaps: false' in body
+        assert 'null' in body
 
     def test_page_script_carries_a_csp_nonce(self, viewer):
-        resp = viewer.app.test_client().get("/airtime")
-        body = resp.data.decode()
-        assert "<script nonce=" in body
-        assert "unsafe-inline" not in resp.headers["Content-Security-Policy"].split("script-src")[0]
+        response = viewer.app.test_client().get('/airtime')
+        assert '<script nonce=' in response.data.decode()
+        assert 'unsafe-inline' not in response.headers['Content-Security-Policy'].split('script-src')[0]
 
     def test_navbar_links_to_the_page(self, viewer):
-        body = viewer.app.test_client().get("/airtime").data.decode()
-        assert 'href="/airtime"' in body
+        assert 'href="/airtime"' in viewer.app.test_client().get('/airtime').data.decode()
 
-    def test_disabled_state_is_shown(self, viewer):
-        """Off by default, so the page has to say why there is nothing to read."""
-        body = viewer.app.test_client().get("/airtime").data.decode()
-        assert "[Channel_Occupancy]" in body
-        assert "Recording is off" in body
-
-    def test_the_page_keeps_the_setting_apart_from_the_snapshot(self, viewer):
-        """"Recording is off now" and "these figures were written while it was on" are two
-        different facts. Stating only the first presents the numbers on screen as current."""
-        body = viewer.app.test_client().get("/airtime").data.decode()
-        assert "was written while recording was on" in body
-        assert "the setting is off now" in body
-
-    def test_a_failed_request_retracts_the_recording_claim(self, viewer):
-        """The page may only state what a response told it.
-
-        A request that failed is not evidence that recording is off, so the claim left by the
-        last successful response has to be taken back in the error path, otherwise the page
-        keeps asserting a setting it no longer knows beside an error saying the request failed.
-        """
-        body = viewer.app.test_client().get("/airtime").data.decode()
-        error_path = body.split("async loadLive()")[1].split("catch (err) {", 1)[1]
-        assert "ocDisabled" in error_path
-        assert "ocSnapshotNote" in error_path
+    def test_recording_off_is_distinguished_from_old_data_and_request_failure(self, viewer):
+        body = viewer.app.test_client().get('/airtime').data.decode()
+        assert 'Enregistrement désactivé. Les données affichées sont historiques.' in body
+        assert 'État de l’enregistrement indisponible.' in body
+        assert 'Les données précédentes ne sont pas à jour.' in body
 
 
 class TestPassiveAirtimeAPI:
-    def test_versioned_metadata_read_model_and_unknown_not_zero(self, viewer):
+    def test_versioned_read_model_keeps_unknown_separate_from_zero(self, viewer):
         response = viewer.app.test_client().get('/api/telemetry/occupancy/analysis?window=1h')
         assert response.status_code == 200
         data = response.get_json()
         assert data['schema_version'] == 1
         assert data['window_seconds'] == 3600
         assert data['local']['rx_percent'] is None
+        assert data['local']['rx_peak_five_minute_percent'] is None
+        assert len(data['local']['rx_series']) == 12
+        assert all(bucket['percent'] is None for bucket in data['local']['rx_series'])
         assert data['method']['compliance'] == 'not_determined'
         assert data['repeaters'] == []
         assert data['method']['version'] == 5
@@ -126,17 +112,4 @@ class TestPassiveAirtimeAPI:
         assert 'content' not in data
 
     def test_window_validation(self, viewer):
-        response = viewer.app.test_client().get('/api/telemetry/occupancy/analysis?window=all')
-        assert response.status_code == 400
-
-    def test_existing_airtime_page_contains_both_attribution_views(self, viewer):
-        body = viewer.app.test_client().get('/airtime').data.decode()
-        assert 'oc-authors' in body and 'oc-repeaters' in body
-        assert 'oc-analysis-window' in body
-
-    def test_global_airtime_is_not_compared_to_a_node_duty_cycle(self, viewer):
-        body = viewer.app.test_client().get('/airtime').data.decode()
-        assert 'oc-analysis-reference' not in body
-        assert 'Repère 10 % (par émetteur)' not in body
-        assert 'Paquets distincts' in body and 'Participation' in body
-        assert 'Coût radio reconstitué' in body
+        assert viewer.app.test_client().get('/api/telemetry/occupancy/analysis?window=all').status_code == 400

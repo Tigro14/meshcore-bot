@@ -5,140 +5,135 @@ import vm from 'node:vm';
 
 function viewer() {
     const source = fs.readFileSync(new URL('../../modules/web_viewer/templates/airtime.html', import.meta.url), 'utf8');
-    const start = source.indexOf('    const el =');
-    const end = source.lastIndexOf("    document.addEventListener('DOMContentLoaded'");
     const elements = new Map();
-    const context = vm.createContext({ document: {getElementById(id) {
-        if (!elements.has(id)) elements.set(id, {textContent:'',innerHTML:'',value:'',style:{}});
+    const context = vm.createContext({document: {getElementById(id) {
+        if (!elements.has(id)) elements.set(id, {textContent:'',innerHTML:'',value:'',style:{},hidden:false,
+            classList:{toggle() {}},setAttribute() {}});
         return elements.get(id);
-    }}, Date, getComputedStyle:()=>({getPropertyValue:()=> '#123456'}),
-    Chart:class {constructor(element, options) {this.data=options.data;this.options=options.options;}} });
-    vm.runInContext(source.slice(start, end)+'\nglobalThis.Viewer = Occupancy;', context);
-    return {instance:Object.create(context.Viewer.prototype), elements};
+    }}, Date, AbortController, Chart:class {
+        constructor(element, options) {this.data=options.data;this.options=options.options;}
+        update() {}
+    }});
+    vm.runInContext(source.slice(source.indexOf('    const el ='),
+        source.lastIndexOf("    document.addEventListener('DOMContentLoaded'"))+'\nglobalThis.Page = AirtimePage;',context);
+    const instance=Object.create(context.Page.prototype);
+    instance.sequence=0; instance.chart=null;
+    return {instance,elements};
 }
-const data = {
-    local: {rx_packets:3,rx_airtime_ms:3000,unattributed_author_airtime_ms:1000,rx_percent:0.05},
-    traffic:{distinct_packets:2,additional_received_copies:1,unattributed_author_packets:1,
-        reconstructed_radio_airtime_ms:5000,cost_reconstructed_packets:1,
-        unknown_author:{name:'Auteur non identifiable',distinct_packets:1,received_packets:1,
-            reconstructed_radio_airtime_ms:null,cost_reconstructed_packets:0,
-            categories:{messages:{distinct_packets:0},adverts:{distinct_packets:1},other:{distinct_packets:0}}}},
-    coverage:{first_observation_at:200000,last_observation_at:200001,available_seconds:3600},
-    quality:{ambiguous_hops:1,unknown_hops:2,collapsed_inferred_copies:3},
-    authors:[{name:'<img src=x onerror=evil()>',distinct_packets:1,rx_airtime_ms:2000,received_packets:2,
-        reconstructed_radio_airtime_ms:5000,cost_reconstructed_packets:1,
-        categories:{messages:{distinct_packets:1},adverts:{distinct_packets:0},other:{distinct_packets:0}}}],
-    repeaters:[{name:'<script>evil()</script>',direct_airtime_ms:1000,inferred_airtime_ms:1000,airtime_ms:2000,
-        last_hour_percent:0.05,peak_hour_percent:0.1,packets:2,path_packets:2,path_packets_total:3,
-        participation_percent:66.667,trend:{change_percent:null}}],
-    comparison:{status:'insufficient_history'},
-};
-test('airtime attribution escapes RF names and keeps unassigned traffic visible',()=>{
+const categories={messages:{distinct_packets:1},adverts:{distinct_packets:0},other:{distinct_packets:0}};
+const data={window:'24h',window_seconds:86400,start_time:1000,end_time:87400,
+    local:{rx_percent:0.5,rx_peak_five_minute_percent:2,rx_series:[{end_time:1300,percent:1},{end_time:1600,percent:null}]},
+    coverage:{available_seconds:86400},traffic:{distinct_packets:3,unattributed_author_packets:1,
+        unknown_author:{name:'Auteur non identifiable',distinct_packets:1,categories}},
+    authors:[{name:'<img src=x onerror=evil()>',public_key:'a',distinct_packets:2,categories}],
+    repeaters:[{name:'Old relay',public_key:'r',last_hour_percent:9,peak_hour_percent:11}],
+    forwarding_model:{status:'insufficient_training'}};
+const hourly={repeaters:[{name:'Relay',public_key:'r',last_hour_percent:0.1}],forwarding_model:{nodes:[]}};
+
+test('only five rows appear in each main list; full names are escaped in all details',()=>{
     const {instance,elements}=viewer();
-    instance.renderAnalysis(data);
-    assert.doesNotMatch(elements.get('oc-authors').innerHTML, /<img/);
-    assert.match(elements.get('oc-authors').innerHTML, /&lt;img/);
-    assert.match(elements.get('oc-authors').innerHTML, /Auteur non identifiable/);
-    assert.doesNotMatch(elements.get('oc-repeaters').innerHTML, /<script>/);
-    assert.doesNotMatch(elements.get('oc-repeaters').innerHTML, /bg-success|conforme/);
+    const authors=Array.from({length:9},(_,i)=>({...data.authors[0],distinct_packets:i+1}));
+    const repeaters=Array.from({length:8},(_,i)=>({public_key:String(i),name:'<script>evil()</script>',last_hour_percent:i+1}));
+    instance.render({...data,authors},{repeaters});
+    assert.equal((elements.get('airtime-duty-list').innerHTML.match(/role="meter"/g)||[]).length,5);
+    assert.equal((elements.get('airtime-source-list').innerHTML.match(/class="airtime-row/g)||[]).length,5);
+    assert.doesNotMatch(elements.get('airtime-duty-list').innerHTML,/<script>/);
+    assert.match(elements.get('airtime-relay-details').innerHTML,/&lt;script&gt;/);
+    assert.doesNotMatch(elements.get('airtime-source-details').innerHTML,/<img/);
+    assert.match(elements.get('airtime-source-details').innerHTML,/Auteur non identifiable/);
+    assert.match(elements.get('airtime-source-note').textContent,/33,333 %/);
 });
-test('empty observations are unknown, not a quiet-network zero',()=>{
+test('duty always uses the current hour independently of the selected activity period',()=>{
+    const {instance,elements}=viewer();instance.render(data,hourly);
+    assert.equal(elements.get('airtime-duty').textContent,'0,1 %');
+    assert.match(elements.get('airtime-relay-details').innerHTML,/11 %/);
+    instance.render({...data,window:'7d',window_seconds:604800},hourly);
+    assert.equal(elements.get('airtime-duty').textContent,'0,1 %');
+    instance.render(data,null);
+    assert.equal(elements.get('airtime-duty').textContent,'N/D');
+    assert.match(elements.get('airtime-relay-details').innerHTML,/N\/D/);
+    assert.doesNotMatch(elements.get('airtime-duty-list').innerHTML,/≈ 0 %|bg-success|conforme/);
+});
+test('scenario duty stays labelled and the per-node bar clips without hiding the actual value',()=>{
     const {instance,elements}=viewer();
-    instance.renderAnalysis({...data,local:{rx_packets:0,rx_airtime_ms:0,rx_percent:null},
-        traffic:{...data.traffic,distinct_packets:0,additional_received_copies:0,
-            reconstructed_radio_airtime_ms:null,cost_reconstructed_packets:0,
-            unknown_author:{distinct_packets:0}},coverage:{},authors:[],repeaters:[]});
-    assert.equal(elements.get('oc-analysis-rx').textContent,'N/D');
-    assert.match(elements.get('oc-analysis-coverage').textContent,/Aucune observation exploitable/);
-    assert.equal(elements.get('oc-analysis-cost').textContent,'N/D');
+    instance.render(data,{...hourly,forwarding_model:{nodes:[{public_key:'r',scenario_hour_percent:12.5}]}});
+    assert.equal(elements.get('airtime-duty').textContent,'12,5 %');
+    assert.match(elements.get('airtime-duty-list').innerHTML,/12,5 %.*Scénario/);
+    assert.match(elements.get('airtime-duty-list').innerHTML,/width:100%/);
+    assert.match(elements.get('airtime-duty-list').innerHTML,/aria-valuemax="10"/);
+    assert.match(elements.get('airtime-relay-details').innerHTML,/0,1 %.*12,5 %/);
 });
-test('distinct traffic, radio cost and participation have separate denominators',()=>{
-    const {instance,elements}=viewer();instance.renderAnalysis(data);
-    assert.equal(elements.get('oc-analysis-packets').textContent,'2');
-    assert.match(elements.get('oc-analysis-packet-detail').textContent,/3 réceptions · 1 copies/);
-    assert.equal(elements.get('oc-analysis-cost').textContent,'5.0 s');
-    assert.equal(elements.get('oc-analysis-unknown').textContent,'50 %');
-    assert.equal(elements.has('oc-analysis-reference'),false);
-    assert.match(elements.get('oc-repeaters').innerHTML,/2 \/ 3 paquets/);
-    assert.match(elements.get('oc-authors').innerHTML,/N\/D/);
+test('the one RX chart has real gaps, no global threshold and updates its period bounds',()=>{
+    const {instance}=viewer();instance.render(data,hourly);
+    assert.equal(instance.chart.data.datasets.length,1);
+    assert.equal(instance.chart.data.datasets[0].data[1].y,null);
+    assert.equal(instance.chart.data.datasets[0].spanGaps,false);
+    assert.equal(instance.chart.options.scales.x.min,1000);
+    instance.render({...data,start_time:500,end_time:90000},hourly);
+    assert.equal(instance.chart.options.scales.x.min,500);
+    assert.equal(instance.chart.options.scales.x.max,90000);
+    assert.equal(instance.chart.data.datasets[0].label,'Occupation reçue (%)');
 });
-test('author sorting can select reconstructed cost without counting received copies',()=>{
+test('insufficient capture never becomes a quiet-network zero; historical coverage is explicit',()=>{
     const {instance,elements}=viewer();
-    const first={...data.authors[0],name:'Many originals',distinct_packets:10,reconstructed_radio_airtime_ms:1000};
-    const second={...data.authors[0],name:'High radio cost',distinct_packets:2,reconstructed_radio_airtime_ms:9000};
-    instance.renderAnalysis({...data,authors:[first,second]});
-    assert.ok(elements.get('oc-authors').innerHTML.indexOf('Many originals')<elements.get('oc-authors').innerHTML.indexOf('High radio cost'));
-    elements.get('oc-author-sort').value='reconstructed_radio_airtime_ms';
-    instance.renderAnalysis({...data,authors:[first,second]});
-    assert.ok(elements.get('oc-authors').innerHTML.indexOf('High radio cost')<elements.get('oc-authors').innerHTML.indexOf('Many originals'));
+    instance.render({...data,coverage:{available_seconds:10},local:{rx_percent:5,rx_series:[]}},null);
+    assert.equal(elements.get('airtime-rx').textContent,'N/D');
+    assert.equal(elements.get('airtime-chart-wrap').hidden,true);
+    assert.equal(elements.get('airtime-chart-empty').hidden,false);
+    assert.match(elements.get('airtime-model-note').textContent,/insuffisants/);
+    instance.render({...data,coverage:{available_seconds:3600}},hourly);
+    assert.match(elements.get('airtime-rx-note').textContent,/1 h d’historique disponible/);
 });
-test('local RX/TX chart has no global 10-percent duty-cycle reference',()=>{
-    const {instance}=viewer();
-    instance.renderHistory({start_time:1000,end_time:2000,sample_seconds:60,
-        total_rx_ms:1000,total_tx_ms:100,packets:1,buckets:[{bucket_ts:1100,rx_ms:1000,tx_ms:100}]});
-    assert.equal(instance.chart.data.datasets.length,2);
-    assert.deepEqual(Array.from(instance.chart.data.datasets,x=>x.label),['rx %','tx %']);
-});
-test('negative observed trends sort above unknown rather than treating unknown as zero',()=>{
+test('source order is distinct originals rather than received copies and search covers every detail tab',()=>{
     const {instance,elements}=viewer();
-    instance.renderAnalysis(data);elements.get('oc-relay-sort').value='change_percent';
-    const nodes=[{...data.repeaters[0],name:'Unknown trend'},
-        {...data.repeaters[0],name:'Lower activity',trend:{change_percent:-25}}];
-    instance.renderAnalysis({...data,repeaters:nodes});
-    const html=elements.get('oc-repeaters').innerHTML;
-    assert.ok(html.indexOf('Lower activity')<html.indexOf('Unknown trend'));
-    assert.match(html,/-25 %/);
-    assert.match(html,/N\/D/);
+    const authors=[{...data.authors[0],name:'High copies',distinct_packets:1,received_packets:200},
+        {...data.authors[0],name:'More originals',distinct_packets:5,received_packets:5}];
+    instance.render({...data,authors},hourly);
+    const html=elements.get('airtime-source-list').innerHTML;
+    assert.ok(html.indexOf('More originals')<html.indexOf('High copies'));
+    elements.get('airtime-search').value='MORE';instance.renderDetails();
+    assert.match(elements.get('airtime-source-details').innerHTML,/More originals/);
+    assert.doesNotMatch(elements.get('airtime-source-details').innerHTML,/High copies/);
 });
-test('local load is not clipped to 100, missing buckets stay gaps and neighbour names are text',()=>{
-    const {instance,elements}=viewer();
-    instance.renderAnalysis({...data,method:{modulation_profiles:[{sf:8,bw_khz:62.5,cr_den:8}]},
-        local_load:{estimated_percent:125,peak_five_minutes:{percent:160,ending_at:200000},
-            peak_hour:{percent:125},neighbour_count:1,
-            dominant_neighbour:{name:'<script>evil()</script>',local_rx_share_percent:95},
-            buckets:[{end_time:200000,percent:125},{end_time:200300,percent:null}]}});
-    assert.equal(elements.get('oc-load-mean').textContent,'125 %');
-    assert.equal(elements.get('oc-load-burst').textContent,'160 %');
-    assert.match(elements.get('oc-load-context').textContent,/CR 4\/8/);
-    assert.doesNotMatch(elements.get('oc-load-context').textContent, /evil|représente|Bretagne/);
-    assert.equal(elements.get('oc-load-context').innerHTML,'');
-    assert.equal(instance.localChart.data.datasets.length,1);
-    assert.equal(instance.localChart.data.datasets[0].data[1].y,null);
-    assert.equal(instance.localChart.data.datasets[0].spanGaps,false);
+test('model details remain separate from current-hour duty and names cannot inject markup',()=>{
+    const {instance,elements}=viewer();instance.render({...data,forwarding_model:{status:'partial_scenario',
+        evaluation:{modelled_packets:2,distinct_packets:3},expected_packets:4,unretrieved_packets:1,
+        additional_airtime_ms:1000,nodes:[{name:'<script>evil()</script>',expected_packets:4,
+            retrieved_packets:3,unretrieved_packets:1,additional_airtime_ms:1000,scenario_hour_percent:9}]}},hourly);
+    assert.match(elements.get('airtime-model-note').textContent,/2 \/ 3/);
+    assert.match(elements.get('airtime-model-details').innerHTML,/&lt;script&gt;/);
+    assert.doesNotMatch(elements.get('airtime-model-details').innerHTML,/<script>/);
+    assert.equal(elements.get('airtime-duty').textContent,'0,1 %');
 });
-test('a five-minute burst above 10 percent is not marked as an hourly duty infringement',()=>{
-    const {instance,elements}=viewer();
-    instance.renderAnalysis({...data,repeaters:[{...data.repeaters[0],peak_five_minute_percent:15,
-        last_hour_percent:1,peak_hour_percent:2,direct_packets:1,inferred_packets:2,local_neighbour:true}]});
-    const html=elements.get('oc-repeaters').innerHTML;
-    assert.match(html,/15 %/);
-    assert.match(html,/1 entendues<br>2 déduites/);
-    assert.match(html,/Voisin entendu directement/);
-    assert.doesNotMatch(html,/text-danger/);
+test('recording status distinguishes disabled history from an unavailable setting',()=>{
+    const {instance,elements}=viewer();instance.renderRecording({enabled:false});
+    assert.equal(elements.get('airtime-recording').hidden,false);
+    assert.match(elements.get('airtime-recording').textContent,/historiques/);
+    instance.renderRecording(null);
+    assert.match(elements.get('airtime-recording').textContent,/indisponible/);
+    instance.renderRecording({enabled:true});assert.equal(elements.get('airtime-recording').hidden,true);
 });
-test('daily relay evidence does not turn an unknown last hour into zero duty',()=>{
-    const {instance,elements}=viewer();
-    instance.renderAnalysis({...data,repeaters:[{...data.repeaters[0],last_hour_percent:null}]});
-    assert.doesNotMatch(elements.get('oc-repeaters').innerHTML,/≈ N\/D|≈ 0 %/);
-    assert.match(elements.get('oc-repeaters').innerHTML,/N\/D/);
+test('an hourly request failure clears current duty instead of using stale daily fields',async()=>{
+    const {instance,elements}=viewer();instance.render(data,hourly);
+    elements.set('airtime-period',{value:'24h'});
+    instance.request=async path=>{
+        if(path.endsWith('window=1h')) throw new Error('unavailable');
+        return path.includes('analysis?')?data:{enabled:true};
+    };
+    await instance.load();
+    assert.equal(elements.get('airtime-duty').textContent,'N/D');
+    assert.match(elements.get('airtime-status').textContent,/Duty cycle indisponible/);
 });
-test('forwarding scenarios keep observed and hypothetical duty separate and escape node names',()=>{
-    const {instance,elements}=viewer();
-    instance.renderAnalysis({...data,forwarding_model:{status:'partial_scenario',
-        evaluation:{modelled_packets:2,distinct_packets:10},training:{supported_edges:3,start_time:100,end_time:200},
-        expected_packets:4,unretrieved_packets:1,additional_airtime_ms:1000,
-        local_load:{scenario_percent:0.8},nodes:[{name:'<script>evil()</script>',expected_packets:4,retrieved_packets:3,
-            unretrieved_packets:1,additional_airtime_ms:1000,reconstructed_hour_percent:null,scenario_hour_percent:0.03}]}});
-    assert.equal(elements.get('oc-model-coverage').textContent,'2 / 10');
-    assert.equal(elements.get('oc-model-missing').textContent,'1');
-    assert.match(elements.get('oc-model-nodes').innerHTML,/N\/D/);
-    assert.match(elements.get('oc-model-nodes').innerHTML,/0,03 %/);
-    assert.doesNotMatch(elements.get('oc-model-nodes').innerHTML,/<script>|bg-success/);
-    assert.match(elements.get('oc-load-scenario').textContent,/Scénario : 0,8 %/);
-});
-test('unsupported forwarding scenarios show unknown rather than a zero prediction',()=>{
-    const {instance,elements}=viewer();instance.renderAnalysis(data);
-    assert.equal(elements.get('oc-model-expected').textContent,'N/D');
-    assert.equal(elements.get('oc-model-missing').textContent,'N/D');
-    assert.equal(elements.get('oc-load-scenario').textContent,'');
+test('a late old-period response cannot overwrite a newer period or its controls',async()=>{
+    const {instance,elements}=viewer();elements.set('airtime-period',{value:'24h'});
+    let resolveOld;
+    const old=new Promise(resolve=>{resolveOld=resolve;});
+    instance.request=path=>path.endsWith('window=24h')?old:Promise.resolve(path.includes('analysis?')?hourly:{enabled:true});
+    let rendered;
+    instance.render=value=>{rendered=value;};
+    const pending=instance.load();elements.get('airtime-period').value='1h';
+    await instance.load();assert.equal(rendered,hourly);
+    resolveOld(data);await pending;
+    assert.equal(rendered,hourly);
+    assert.equal(elements.get('airtime-refresh').disabled,false);
 });

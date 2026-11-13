@@ -1,577 +1,295 @@
 {% extends "base.html" %}
-
 {% block title %}Airtime - MeshCore Bot Data Viewer{% endblock %}
-
 {% block page_libs %}
 <script src="{{ url_for('static', filename='vendor/chart.js/chart.umd.js') }}"></script>
 {% endblock %}
-
 {% block extra_css %}
 <style>
-    :root {
-        --oc-rx: #198754;
-        --oc-tx: #0d6efd;
-    }
-    [data-theme="dark"] {
-        --oc-rx: #2fa36b;
-        --oc-tx: #6ea8fe;
-    }
-
-    .oc-figure {
-        font-size: 1.5rem;
-        line-height: 1.1;
-        font-variant-numeric: tabular-nums;
-    }
-    .oc-figure-label {
-        font-size: .8rem;
-        text-transform: uppercase;
-        letter-spacing: .04em;
-        color: var(--text-muted);
-    }
-
-    /* One window per row: rx and tx kept apart, never merged into one number. */
-    .oc-window-row {
-        display: flex;
-        align-items: center;
-        gap: .75rem;
-        padding: .35rem 0;
-    }
-    .oc-window-name {
-        min-width: 6rem;
-        font-size: .85rem;
-        color: var(--text-muted);
-    }
-    .oc-bar {
-        flex: 1;
-        height: 8px;
-        border-radius: 4px;
-        background-color: var(--bg-tertiary);
-        overflow: hidden;
-    }
-    .oc-bar span { display: block; height: 100%; }
-    .oc-seg-rx { background-color: var(--oc-rx); }
-    .oc-seg-tx { background-color: var(--oc-tx); }
-
-    .oc-empty {
-        color: var(--text-muted);
-        font-style: italic;
-    }
-
-    .oc-stale {
-        color: var(--oc-tx);
-        font-weight: 600;
+    .airtime-page { max-width: 1400px; margin: auto; }
+    .airtime-value { font-size: clamp(1.7rem, 3vw, 2.3rem); font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.3; }
+    .airtime-label { color: var(--text-muted); font-size: .9rem; }
+    .airtime-chart { height: 260px; position: relative; }
+    .airtime-row { padding: .65rem 0; }
+    .airtime-row + .airtime-row { border-top: 1px solid var(--border-color, #dee2e6); }
+    .airtime-name { min-width: 0; overflow-wrap: anywhere; }
+    .airtime-meter { height: 7px; background: var(--bg-tertiary, #e9ecef); border-radius: 5px; overflow: hidden; margin-top: .4rem; }
+    .airtime-meter-fill { height: 100%; background: #0d6efd; border-radius: inherit; }
+    .airtime-meter-fill.scenario { background: #8b5cc7; }
+    .airtime-meter-fill.reference { background: #dc3545; }
+    .airtime-count { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    #airtime-details .modal-body { min-height: 250px; }
+    #airtime-details td:first-child { overflow-wrap: anywhere; }
+    @media (max-width: 575px) {
+        .airtime-chart { height: 220px; }
+        .airtime-controls { width: 100%; }
+        .airtime-controls select { flex: 1; }
     }
 </style>
 {% endblock %}
-
 {% block content %}
-<div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-        <h1 class="mb-0">
-            <i class="fas fa-stopwatch"></i> Airtime
-        </h1>
-        <div class="d-flex align-items-center gap-2">
-            <label class="form-label mb-0 small" for="oc-window">History</label>
-            <select class="form-select form-select-sm" id="oc-window" style="width:auto">
-                <option value="1">Last 24 h</option>
-                <option value="7" selected>Last 7 days</option>
-                <option value="14">Last 14 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="90">Last 90 days</option>
+<div class="container-fluid airtime-page" id="airtime-page" aria-busy="true">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+        <div><h1 class="h3 mb-1"><i class="fas fa-stopwatch me-2"></i>Airtime</h1><p class="text-muted mb-0 small">Activité reçue et émissions estimées des répéteurs.</p></div>
+        <div class="d-flex align-items-center gap-2 airtime-controls">
+            <select class="form-select form-select-sm" id="airtime-period" aria-label="Période de l’activité">
+                <option value="1h">Dernière heure</option><option value="24h" selected>Dernières 24 heures</option><option value="7d">7 derniers jours</option>
             </select>
-            <button class="btn btn-sm btn-outline-secondary" id="ocRefreshBtn">
-                <span class="spinner-border spinner-border-sm me-1" id="ocSpinner" style="display:none" role="status"></span>
-                <i class="fas fa-sync me-1"></i>Refresh
-            </button>
+            <button class="btn btn-sm btn-outline-secondary" id="airtime-refresh" aria-label="Actualiser"><i class="fas fa-sync"></i></button>
         </div>
     </div>
-
-    <p class="small text-muted mb-4">
-        Temps d’antenne <strong>estimé</strong> à partir du profil radio.
-        <strong>RX</strong> : paquets reçus. <strong>TX</strong> : demandes d’émission de Baliz.
-    </p>
-
-    <!-- Live windows -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h2 class="h5 mb-0"><i class="fas fa-tachometer-alt me-2"></i>Right now</h2>
-            <small class="text-muted" id="ocAge"></small>
-        </div>
-        <div class="card-body">
-            <div class="row g-3 mb-3">
-                <div class="col-md-2">
-                    <div class="oc-figure-label">Spreading factor</div>
-                    <div class="oc-figure" id="oc-sf">-</div>
-                </div>
-                <div class="col-md-2">
-                    <div class="oc-figure-label">Bandwidth</div>
-                    <div class="oc-figure" id="oc-bw">-</div>
-                </div>
-                <div class="col-md-2">
-                    <div class="oc-figure-label">Coding rate</div>
-                    <div class="oc-figure" id="oc-cr">-</div>
-                </div>
-                <div class="col-md-2">
-                    <div class="oc-figure-label">Preamble</div>
-                    <div class="oc-figure" id="oc-preamble">-</div>
-                </div>
-                <div class="col-md-2">
-                    <div class="oc-figure-label">Samples kept</div>
-                    <div class="oc-figure" id="oc-samples">-</div>
-                </div>
-            </div>
-            <div id="ocWindows"></div>
-            <small class="form-text text-muted mt-2" id="ocDisabled" style="display:none">
-                Recording is off. Set <code>enabled = true</code> under
-                <code>[Channel_Occupancy]</code> in config.ini; nothing is recorded until then.
-            </small>
-            <small class="form-text text-muted mt-2" id="ocSnapshotNote" style="display:none">
-                What is on screen was written while recording was on; the setting is off now.
-                The age above says how long ago that was.
-            </small>
-        </div>
+    <p class="small text-muted mb-2" id="airtime-status" role="status" aria-live="polite">Chargement…</p>
+    <div class="alert alert-warning py-2 small" id="airtime-recording" hidden></div>
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-sm-4"><div class="card h-100"><div class="card-body">
+            <div class="airtime-label">Occupation reçue</div><div class="airtime-value" id="airtime-rx">N/D</div>
+            <div class="small text-muted" id="airtime-rx-note">Moyenne sur la période</div>
+        </div></div></div>
+        <div class="col-12 col-sm-4"><div class="card h-100"><div class="card-body">
+            <div class="airtime-label">Pic sur 5 minutes</div><div class="airtime-value" id="airtime-peak">N/D</div>
+            <div class="small text-muted">Les cinq minutes les plus chargées</div>
+        </div></div></div>
+        <div class="col-12 col-sm-4"><div class="card h-100"><div class="card-body">
+            <div class="airtime-label">Duty cycle estimé le plus élevé</div><div class="airtime-value" id="airtime-duty">N/D</div>
+            <div class="small text-muted airtime-name" id="airtime-duty-note">Sur la dernière heure · Repère : 10 %</div>
+        </div></div></div>
     </div>
-
-    <!-- History -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h2 class="h5 mb-0"><i class="fas fa-chart-line me-2"></i>History</h2>
+    <section class="card mb-3" aria-labelledby="airtime-activity-title">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-1">
+            <h2 class="h6 mb-0" id="airtime-activity-title">Activité reçue</h2><small class="text-muted" id="airtime-volume"></small>
         </div>
         <div class="card-body">
-            <div class="row g-3 mb-3">
-                <div class="col-md-2">
-                    <div class="oc-figure-label">rx airtime</div>
-                    <div class="oc-figure" id="oc-total-rx">-</div>
-                </div>
-                <div class="col-md-2">
-                    <div class="oc-figure-label">tx airtime</div>
-                    <div class="oc-figure" id="oc-total-tx">-</div>
-                </div>
-                <div class="col-md-2">
-                    <div class="oc-figure-label">Packets</div>
-                    <div class="oc-figure" id="oc-packets">-</div>
-                </div>
-                <div class="col-md-2">
-                    <div class="oc-figure-label">p50 rx</div>
-                    <div class="oc-figure" id="oc-p50">-</div>
-                </div>
-                <div class="col-md-2">
-                    <div class="oc-figure-label">p95 rx</div>
-                    <div class="oc-figure" id="oc-p95">-</div>
-                </div>
-            </div>
-            <div id="ocChartError" class="oc-empty" style="display:none"></div>
-            <canvas id="oc-chart" height="140"></canvas>
-            <p class="small text-muted mt-3 mb-0">
-                Les périodes sans relevé restent vides.
-            </p>
-        </div>
-    </div>
-
-    <section class="card mb-4" aria-labelledby="oc-analysis-title">
-        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <h2 class="h5 mb-0" id="oc-analysis-title">Trafic observable depuis Baliz</h2>
-            <select id="oc-analysis-window" class="form-select form-select-sm" style="width:auto" aria-label="Période de l’analyse passive">
-                <option value="1h">Dernière heure</option>
-                <option value="24h" selected>Dernières 24 heures</option>
-                <option value="7d">7 derniers jours</option>
-            </select>
-        </div>
-        <div class="card-body">
-            <div id="oc-analysis-error" class="text-danger" role="status"></div>
-            <div class="row g-3 mb-3">
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Occupation RX locale</div><div class="oc-figure" id="oc-analysis-rx">—</div></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Paquets distincts</div><div class="oc-figure" id="oc-analysis-packets">—</div><small class="text-muted" id="oc-analysis-packet-detail"></small></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Coût radio reconstitué</div><div class="oc-figure" id="oc-analysis-cost">—</div></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Paquets sans auteur identifié</div><div class="oc-figure" id="oc-analysis-unknown">—</div></div>
-            </div>
-            <p id="oc-analysis-coverage" class="small text-muted mb-2"></p>
-            <p class="small text-muted mb-0">Coût radio : somme des émissions reconstituées sur les chemins reçus.</p>
+            <p class="small text-muted mb-0" id="airtime-chart-empty" hidden>Aucune observation exploitable.</p>
+            <div class="airtime-chart" id="airtime-chart-wrap"><canvas id="airtime-chart" aria-label="Occupation reçue au fil du temps"></canvas></div>
+            <p class="small text-muted mt-2 mb-0">Écoute locale de Baliz · Une partie du trafic reste invisible.</p>
         </div>
     </section>
-    <section class="card mb-4" aria-labelledby="oc-load-title">
-        <div class="card-header"><h2 class="h5 mb-0" id="oc-load-title">Charge locale estimée</h2></div>
-        <div class="card-body">
-            <div class="row g-3 mb-3">
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Charge partielle moyenne</div><div class="oc-figure" id="oc-load-mean">—</div><small class="text-muted" id="oc-load-scenario"></small></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Pic sur 5 minutes</div><div class="oc-figure" id="oc-load-burst">—</div></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Pic sur 1 heure</div><div class="oc-figure" id="oc-load-hour">—</div></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Voisins entendus directement</div><div class="oc-figure" id="oc-load-neighbours">—</div></div>
+    <div class="row g-3 mb-3">
+        <section class="col-12 col-lg-6" aria-labelledby="airtime-duty-title"><div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center gap-2"><h2 class="h6 mb-0" id="airtime-duty-title">Duty cycle — dernière heure</h2><button class="btn btn-link btn-sm p-0 text-nowrap" data-airtime-detail="relays">Voir tous</button></div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small gap-2"><span>0 %</span><span>10 % = 6 min/h par répéteur</span></div>
+                <div id="airtime-duty-list"></div>
+                <p class="small text-muted mt-2 mb-0">Estimations partielles. « Scénario » inclut des retransmissions possibles.</p>
             </div>
-            <p id="oc-load-context" class="small mb-2"></p>
-            <div style="position:relative;height:220px"><canvas id="oc-load-chart" aria-label="Charge locale partielle reconstituée"></canvas></div>
-            <p class="small text-muted mt-2 mb-0">Émissions reconstituées des voisins directs et de Baliz. Observation partielle, pertes non quantifiées.</p>
-        </div>
-    </section>
-    <section class="card mb-4" aria-labelledby="oc-model-title">
-        <div class="card-header"><h2 class="h5 mb-0" id="oc-model-title">Retransmissions attendues</h2></div>
-        <div class="card-body">
-            <div class="row g-3 mb-3">
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Paquets modélisés</div><div class="oc-figure" id="oc-model-coverage">—</div></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Retransmissions attendues</div><div class="oc-figure" id="oc-model-expected">—</div></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Non retrouvées</div><div class="oc-figure" id="oc-model-missing">—</div></div>
-                <div class="col-6 col-lg-3"><div class="oc-figure-label">Airtime supplémentaire estimé</div><div class="oc-figure" id="oc-model-airtime">—</div></div>
-            </div>
-            <p class="small text-muted" id="oc-model-context"></p>
-            <div class="table-responsive"><table class="table table-hover align-middle mb-0">
-                <thead><tr><th>Répéteur</th><th>Attendues</th><th>Retrouvées</th><th>Non retrouvées</th><th>Airtime ajouté</th><th>DC reconstitué · 1 h</th><th>DC scénario · 1 h</th></tr></thead>
-                <tbody id="oc-model-nodes"></tbody>
-            </table></div>
-            <p class="small text-muted mt-2 mb-0">Scénario sur le trafic reçu, selon les liaisons et comportements précédemment observés. Non retrouvée ne signifie pas perdue.</p>
-        </div>
-    </section>
-    <div class="card mb-4">
-        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <h2 class="h5 mb-0">Auteurs des paquets reçus</h2>
-            <select id="oc-author-sort" class="form-select form-select-sm" style="width:auto" aria-label="Classement des auteurs">
-                <option value="distinct_packets">Paquets distincts</option><option value="reconstructed_radio_airtime_ms">Coût radio reconstitué</option>
-            </select>
-        </div>
-        <div class="card-body">
-            <div class="table-responsive"><table class="table table-hover align-middle mb-0">
-                <thead><tr><th>Nœud</th><th>Paquets distincts</th><th>Messages</th><th>Annonces</th><th>Autres</th><th>Coût radio reconstitué</th></tr></thead>
-                <tbody id="oc-authors"></tbody>
-            </table></div>
-            <p class="small text-muted mt-2 mb-0" id="oc-author-coverage"></p>
-        </div>
+        </div></section>
+        <section class="col-12 col-lg-6" aria-labelledby="airtime-sources-title"><div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center gap-2"><h2 class="h6 mb-0" id="airtime-sources-title">Principales sources</h2><button class="btn btn-link btn-sm p-0" data-airtime-detail="sources">Voir toutes</button></div>
+            <div class="card-body"><div id="airtime-source-list"></div><p class="small text-muted mt-2 mb-0" id="airtime-source-note"></p></div>
+        </div></section>
     </div>
-    <div class="card mb-4">
-        <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
-            <h2 class="h5 mb-0">Répéteurs dans les chemins reçus</h2>
-            <div class="d-flex flex-wrap gap-2">
-                <input id="oc-relay-filter" class="form-control form-control-sm" style="width:auto" placeholder="Chercher un répéteur…" aria-label="Chercher un répéteur">
-                <select id="oc-relay-sort" class="form-select form-select-sm" style="width:auto" aria-label="Classement des répéteurs">
-                    <option value="path_packets">Participation aux chemins</option><option value="airtime_ms">Temps d’émission reconstitué</option><option value="change_percent">Évolution observée</option><option value="last_hour_percent">DC sur 1 h</option><option value="peak_hour_percent">Pic DC sur 1 h</option><option value="peak_five_minute_percent">Pic sur 5 min</option>
-                </select>
-            </div>
-        </div>
-        <div class="card-body">
-            <div class="table-responsive"><table class="table table-hover align-middle mb-0">
-                <thead><tr><th>Répéteur</th><th>Participation</th><th>Émission reconstituée</th><th>Évolution observée</th><th>DC sur 1 h</th><th>Pic DC sur 1 h</th><th>Pic sur 5 min</th><th>Émissions</th></tr></thead>
-                <tbody id="oc-repeaters"></tbody>
-            </table></div>
-            <p class="small text-muted mt-2 mb-0" id="oc-analysis-quality"></p>
-            <p class="small text-muted mb-2">Participation : part des paquets distincts dont le chemin contient ce relais.</p>
-            <p class="small text-muted mb-2" id="oc-comparison-note"></p>
-            <p class="small text-muted mb-0">DC sur 1 h, par émetteur · Repère : 10 % · Estimation partielle.</p>
-        </div>
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 small text-muted mb-4">
+        <span id="airtime-model-note"></span><button class="btn btn-outline-secondary btn-sm" data-airtime-detail="model">Détails de la modélisation</button>
     </div>
 </div>
+<div class="modal fade" id="airtime-details" tabindex="-1" aria-labelledby="airtime-details-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header"><h2 class="modal-title h5" id="airtime-details-title">Détails Airtime</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button></div>
+        <div class="modal-body">
+            <ul class="nav nav-tabs mb-3" role="tablist">
+                <li class="nav-item" role="presentation"><button class="nav-link active" id="airtime-tab-relays" data-bs-toggle="tab" data-bs-target="#airtime-pane-relays" type="button" role="tab" aria-controls="airtime-pane-relays" aria-selected="true">Répéteurs</button></li>
+                <li class="nav-item" role="presentation"><button class="nav-link" id="airtime-tab-sources" data-bs-toggle="tab" data-bs-target="#airtime-pane-sources" type="button" role="tab" aria-controls="airtime-pane-sources" aria-selected="false">Sources</button></li>
+                <li class="nav-item" role="presentation"><button class="nav-link" id="airtime-tab-model" data-bs-toggle="tab" data-bs-target="#airtime-pane-model" type="button" role="tab" aria-controls="airtime-pane-model" aria-selected="false">Modèle</button></li>
+            </ul>
+            <input class="form-control form-control-sm mb-3" id="airtime-search" placeholder="Chercher un nœud…" aria-label="Chercher dans les détails">
+            <div class="tab-content">
+                <div class="tab-pane fade show active" id="airtime-pane-relays" role="tabpanel" aria-labelledby="airtime-tab-relays">
+                    <p class="small text-muted">Duty cycle sur la dernière heure. Pic sur la période sélectionnée. N/D : données insuffisantes.</p>
+                    <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Répéteur</th><th>DC reconstitué · 1 h</th><th>DC scénario · 1 h</th><th>Pic sur 1 h</th></tr></thead><tbody id="airtime-relay-details"></tbody></table></div>
+                </div>
+                <div class="tab-pane fade" id="airtime-pane-sources" role="tabpanel" aria-labelledby="airtime-tab-sources">
+                    <p class="small text-muted">Paquets distincts sur la période, copies dédupliquées.</p>
+                    <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Nœud</th><th>Messages</th><th>Annonces</th><th>Autres</th><th>Total</th></tr></thead><tbody id="airtime-source-details"></tbody></table></div>
+                </div>
+                <div class="tab-pane fade" id="airtime-pane-model" role="tabpanel" aria-labelledby="airtime-tab-model">
+                    <p class="small text-muted" id="airtime-model-context"></p>
+                    <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Répéteur</th><th>Attendues</th><th>Retrouvées</th><th>Non retrouvées</th><th>Airtime estimé en plus</th></tr></thead><tbody id="airtime-model-details"></tbody></table></div>
+                    <p class="small text-muted">Scénario sur le trafic reçu. Non retrouvée ne signifie pas perdue.</p>
+                </div>
+            </div>
+            <p class="small text-muted mb-0" id="airtime-profile"></p>
+        </div>
+    </div></div>
+</div>
 {% endblock %}
-
 {% block extra_js %}
 <script nonce="{{ g.csp_nonce }}">
 (function () {
     'use strict';
-
-    const el = (id) => document.getElementById(id);
-
-    function escapeHtml(value) {
-        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-        }[c]));
-    }
-
-    function formatSeconds(seconds) {
-        if (seconds == null) return '-';
-        if (seconds < 60) return seconds.toFixed(1) + ' s';
-        if (seconds < 3600) return (seconds / 60).toFixed(1) + ' min';
-        return (seconds / 3600).toFixed(1) + ' h';
-    }
-
-    class Occupancy {
+    const el = id => document.getElementById(id);
+    const known = value => typeof value === 'number' && Number.isFinite(value);
+    const number = value => Number(value).toLocaleString('fr-FR', {maximumFractionDigits: 3});
+    const pct = value => known(value) ? number(value) + ' %' : 'N/D';
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+    class AirtimePage {
         constructor() {
-            this.days = parseInt(el('oc-window').value, 10) || 7;
-            this.chart = null;
-            this.localChart = null;
-            this.analysisSequence = 0;
-            const redraw = () => { if (this.lastAnalysisData) this.renderAnalysis(this.lastAnalysisData); };
-            el('oc-relay-filter').addEventListener('input', redraw);
-            el('oc-relay-sort').addEventListener('change', redraw);
-            el('oc-author-sort').addEventListener('change', redraw);
-            el('oc-analysis-window').addEventListener('change', () => this.loadAnalysis());
-            el('oc-window').addEventListener('change', (e) => {
-                this.days = parseInt(e.target.value, 10) || 7;
-                this.load();
-            });
-            el('ocRefreshBtn').addEventListener('click', () => this.load());
+            this.sequence = 0; this.chart = null;
+            el('airtime-period').addEventListener('change', () => this.load());
+            el('airtime-refresh').addEventListener('click', () => this.load());
+            el('airtime-search').addEventListener('input', () => this.renderDetails());
+            document.querySelectorAll('[data-airtime-detail]').forEach(button =>
+                button.addEventListener('click', () => this.openDetails(button.dataset.airtimeDetail)));
             this.load();
-            // The "right now" panel is only worth reading if it stays current.
-            setInterval(() => { this.loadLive(); this.loadAnalysis(); }, 30000);
+            setInterval(() => this.load(), 30000);
         }
-
+        async request(path, signal) {
+            const response = await fetch(path, {signal, headers: {'X-Requested-With': 'XMLHttpRequest'}});
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            return response.json();
+        }
         async load() {
-            await Promise.all([this.loadLive(), this.loadHistory(), this.loadAnalysis()]);
-        }
-
-        async loadLive() {
+            const sequence = ++this.sequence;
+            this.controller?.abort();
+            this.controller = new AbortController();
+            el('airtime-page').setAttribute('aria-busy', 'true');
+            el('airtime-refresh').disabled = true;
+            el('airtime-status').textContent = 'Actualisation…';
             try {
-                const resp = await fetch('/api/telemetry/occupancy?limit=10', {
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                });
-                if (!resp.ok) throw new Error('Request failed (' + resp.status + ')');
-                const data = await resp.json();
-                this.renderLive(data);
-            } catch (err) {
-                // A failed request is not evidence that recording is off, so the claim from
-                // the last response has to be retracted here: otherwise the page goes on
-                // asserting a setting it no longer knows, beside an error saying the request
-                // failed.
-                el('ocDisabled').style.display = 'none';
-                el('ocSnapshotNote').style.display = 'none';
-                el('ocWindows').innerHTML = '<div class="oc-empty">' + escapeHtml(err.message) + '</div>';
+                const period = el('airtime-period').value;
+                const selectedRequest = this.request('/api/telemetry/occupancy/analysis?window=' + encodeURIComponent(period), this.controller.signal);
+                const results = await Promise.allSettled([selectedRequest,
+                    period === '1h' ? selectedRequest : this.request('/api/telemetry/occupancy/analysis?window=1h', this.controller.signal),
+                    this.request('/api/telemetry/occupancy', this.controller.signal)]);
+                if (sequence !== this.sequence) return;
+                if (results[0].status !== 'fulfilled') throw new Error('analysis unavailable');
+                const hourly = results[1].status === 'fulfilled' ? results[1].value : null;
+                this.render(results[0].value, hourly);
+                const live = results[2].status === 'fulfilled' ? results[2].value : null;
+                this.renderRecording(live);
+                el('airtime-status').textContent = hourly
+                    ? 'Actualisé à ' + new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})
+                    : 'Activité actualisée · Duty cycle indisponible.';
+            } catch {
+                if (sequence !== this.sequence) return;
+                el('airtime-status').textContent = 'Actualisation impossible. Les données précédentes ne sont pas à jour.';
+                this.renderRecording(null);
+            } finally {
+                if (sequence === this.sequence) {
+                    el('airtime-page').setAttribute('aria-busy', 'false');
+                    el('airtime-refresh').disabled = false;
+                }
             }
         }
-
-        async loadHistory() {
-            try {
-                const resp = await fetch('/api/telemetry/occupancy/history?days=' + this.days, {
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                });
-                if (!resp.ok) throw new Error('Request failed (' + resp.status + ')');
-                this.renderHistory(await resp.json());
-            } catch (err) {
-                el('oc-chart').innerHTML = '';
-                el('ocChartError').textContent = err.message;
-                el('ocChartError').style.display = 'block';
-            }
+        renderRecording(live) {
+            el('airtime-recording').hidden = live?.enabled === true;
+            el('airtime-recording').textContent = live
+                ? 'Enregistrement désactivé. Les données affichées sont historiques.'
+                : 'État de l’enregistrement indisponible.';
         }
-
-        renderLive(data) {
-            el('oc-sf').textContent = data.sf == null ? '-' : data.sf;
-            el('oc-bw').textContent = data.bw_khz == null ? '-' : data.bw_khz + ' kHz';
-            el('oc-cr').textContent = data.coding_rate == null ? '-' : '4/' + data.coding_rate;
-            el('oc-preamble').textContent = data.preamble == null ? '-' : data.preamble;
-            el('oc-samples').textContent = data.samples == null ? '-' : data.samples;
-
-            const age = el('ocAge');
-            if (data.age_seconds == null) {
-                age.textContent = 'no snapshot yet';
-            } else {
-                age.textContent = 'snapshot ' + formatSeconds(data.age_seconds) + ' old';
-                age.className = data.stale ? 'small oc-stale' : 'small text-muted';
-            }
-
-            el('ocDisabled').style.display = data.enabled ? 'none' : 'block';
-            // The setting and the snapshot are two different facts: recording can be off
-            // now while the figures on screen were written while it was on.
-            el('ocSnapshotNote').style.display = (!data.enabled && data.snapshot_enabled) ? 'block' : 'none';
-
-            const windows = Object.keys(data)
-                .filter((key) => key.endsWith('_rx_percent'))
-                .map((key) => key.slice(0, -'_rx_percent'.length));
-            if (!windows.length) {
-                el('ocWindows').innerHTML = '<div class="oc-empty">Nothing recorded yet.</div>';
-                return;
-            }
-            el('ocWindows').innerHTML = windows.map((name) => {
-                const rx = data[name + '_rx_percent'] || 0;
-                const tx = data[name + '_tx_percent'] || 0;
-                const seconds = data[name + '_seconds'] || 0;
-                return '<div class="oc-window-row">'
-                    + '<div class="oc-window-name">' + escapeHtml(name) + ' (' + seconds + ' s)</div>'
-                    + '<div class="oc-bar"><span class="oc-seg-rx" style="width:' + Math.min(rx, 100) + '%"></span></div>'
-                    + '<span class="small">' + rx.toFixed(1) + '% rx</span>'
-                    + '<span class="small">' + tx.toFixed(1) + '% tx</span>'
-                    + '</div>';
-            }).join('');
+        dutyRows(data, hourly) {
+            const rows = new Map();
+            for (const node of data.repeaters || []) rows.set(node.public_key, {...node, observed: null, scenario: null});
+            for (const node of hourly?.repeaters || []) rows.set(node.public_key,
+                {...rows.get(node.public_key), ...node, peak_hour_percent: rows.get(node.public_key)?.peak_hour_percent ?? node.peak_hour_percent,
+                    observed: node.last_hour_percent, scenario: null});
+            for (const node of hourly?.forwarding_model?.nodes || []) rows.set(node.public_key,
+                {...node, ...rows.get(node.public_key), scenario: node.scenario_hour_percent});
+            return [...rows.values()].map(node => {
+                const observed = known(node.observed) ? node.observed : null;
+                const scenario = known(node.scenario) ? node.scenario : null;
+                return {...node, observed, scenario, projected: scenario !== null && (observed === null || scenario > observed),
+                    value: observed === null ? scenario : scenario === null ? observed : Math.max(observed, scenario)};
+            }).sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
         }
-
-        renderHistory(data) {
-            const buckets = data.buckets || [];
-            const sampleSeconds = data.sample_seconds || 60;
-            const hasData = buckets.length > 0;
-
-            el('ocChartError').textContent = hasData ? '' : 'Nothing recorded in this window.';
-            el('ocChartError').style.display = hasData ? 'none' : 'block';
-            el('oc-chart').style.display = hasData ? 'block' : 'none';
-
-            el('oc-total-rx').textContent = hasData ? (data.total_rx_ms / 1000).toFixed(1) + ' s' : '-';
-            el('oc-total-tx').textContent = hasData ? (data.total_tx_ms / 1000).toFixed(1) + ' s' : '-';
-            el('oc-packets').textContent = hasData ? data.packets : '-';
-            el('oc-p50').textContent = data.p50_rx_ms == null ? '-' : data.p50_rx_ms.toFixed(1) + ' ms';
-            el('oc-p95').textContent = data.p95_rx_ms == null ? '-' : data.p95_rx_ms.toFixed(1) + ' ms';
-
+        render(data, hourly) {
+            this.data = data; this.hourly = hourly;
+            this.rows = this.dutyRows(data, hourly);
+            const enoughHistory = (data.coverage?.available_seconds || 0) >= 300;
+            el('airtime-rx').textContent = pct(enoughHistory ? data.local.rx_percent : null);
+            const periodNames = {'1h': 'la dernière heure', '24h': '24 heures', '7d': '7 jours'};
+            const partial = data.coverage?.available_seconds < data.window_seconds - 300;
+            el('airtime-rx-note').textContent = enoughHistory
+                ? (partial ? 'Moyenne sur ' + number(data.coverage.available_seconds / 3600) + ' h d’historique disponible' : 'Moyenne sur ' + periodNames[data.window])
+                : 'Historique en cours de constitution';
+            el('airtime-peak').textContent = pct(data.local.rx_peak_five_minute_percent);
+            const top = this.rows.find(node => node.value !== null);
+            el('airtime-duty').textContent = pct(top?.value);
+            el('airtime-duty').classList.toggle('text-danger', (top?.value ?? 0) >= 10);
+            el('airtime-duty-note').textContent = top ? (top.projected ? 'Scénario · ' : '') + top.name + ' · Dernière heure' : 'Aucune estimation récente';
+            el('airtime-volume').textContent = number(data.traffic.distinct_packets) + ' paquets distincts';
+            this.renderChart(data);
+            const active = this.rows.filter(node => node.value !== null).slice(0, 5);
+            el('airtime-duty-list').innerHTML = active.map(node => {
+                const width = Math.max(0, Math.min(100, node.value / 10 * 100));
+                const color = node.value >= 10 ? ' reference' : node.projected ? ' scenario' : '';
+                return '<div class="airtime-row"><div class="d-flex justify-content-between gap-3"><span class="airtime-name">'
+                    + escapeHtml(node.name) + '</span><span class="airtime-count' + (node.value >= 10 ? ' text-danger' : '') + '">≈ '
+                    + pct(node.value) + (node.projected ? ' <small class="text-muted">Scénario</small>' : '') + '</span></div>'
+                    + '<div class="airtime-meter" role="meter" aria-label="' + escapeHtml(node.name) + '" aria-valuemin="0" aria-valuemax="10" aria-valuenow="'
+                    + Math.min(10, Math.max(0, node.value)) + '" aria-valuetext="' + escapeHtml(pct(node.value))
+                    + '"><div class="airtime-meter-fill' + color + '" style="width:' + width + '%"></div></div></div>';
+            }).join('') || '<p class="small text-muted mt-3">Aucune estimation récente.</p>';
+            const authors = (data.authors || []).slice().sort((a, b) => b.distinct_packets-a.distinct_packets);
+            el('airtime-source-list').innerHTML = authors.slice(0, 5).map(author =>
+                '<div class="airtime-row d-flex justify-content-between gap-3"><span class="airtime-name">' + escapeHtml(author.name)
+                + '</span><span class="airtime-count">' + number(author.distinct_packets) + ' paquets</span></div>').join('')
+                || '<p class="small text-muted">Aucune source identifiable.</p>';
+            const unknown = data.traffic.distinct_packets ? data.traffic.unattributed_author_packets / data.traffic.distinct_packets * 100 : null;
+            el('airtime-source-note').textContent = known(unknown) ? 'Origine non identifiée : ' + pct(unknown) + ' des paquets.' : 'Origine des paquets non disponible.';
+            const model = data.forwarding_model;
+            el('airtime-model-note').textContent = model?.status === 'partial_scenario'
+                ? 'Modélisation partielle : ' + number(model.evaluation.modelled_packets) + ' / ' + number(model.evaluation.distinct_packets) + ' paquets.'
+                : 'Modélisation : historique ou données insuffisants.';
+            this.renderDetails();
+        }
+        renderChart(data) {
+            const series = data.local.rx_series || [];
+            const hasData = series.some(point => known(point.percent));
+            el('airtime-chart-wrap').hidden = !hasData;
+            el('airtime-chart-empty').hidden = hasData;
             if (!hasData) return;
-
-            /* Aggregate to a readable number of columns. Sums can be re-aggregated
-               the way means cannot, so a coarser step is the same measurement rather
-               than a rounded one. A column with no written bucket stays a gap: "nothing
-               seen" and "observed and empty" are two different facts. */
-            const maxColumns = 120;
-            const duration = Math.max(data.end_time - data.start_time, sampleSeconds);
-            const step = Math.max(sampleSeconds, Math.ceil(duration / maxColumns));
-            const groups = new Map();
-            buckets.forEach((bucket) => {
-                const index = Math.floor((bucket.bucket_ts - data.start_time) / step);
-                const group = groups.get(index) || { rx: 0, tx: 0 };
-                group.rx += bucket.rx_ms;
-                group.tx += bucket.tx_ms;
-                groups.set(index, group);
-            });
-
-            const rxPoints = [];
-            const txPoints = [];
-            const columnCount = Math.floor(duration / step) + 1;
-            for (let index = 0; index < columnCount; index += 1) {
-                const group = groups.get(index);
-                const x = data.start_time + index * step;
-                const percentOfColumn = (millis) => millis / (step * 1000) * 100;
-                rxPoints.push({ x: x, y: group ? percentOfColumn(group.rx) : null });
-                txPoints.push({ x: x, y: group ? percentOfColumn(group.tx) : null });
-            }
-
-            const style = getComputedStyle(document.documentElement);
-            const datasets = [
-                { label: 'rx %', data: rxPoints, borderColor: style.getPropertyValue('--oc-rx').trim(), pointRadius: 2, spanGaps: false },
-                { label: 'tx %', data: txPoints, borderColor: style.getPropertyValue('--oc-tx').trim(), pointRadius: 2, spanGaps: false },
-            ];
-
+            const dataset = {label: 'Occupation reçue (%)', data: series.map(point => ({x: point.end_time, y: point.percent})),
+                borderColor: '#0d6efd', backgroundColor: '#0d6efd18', fill: true, pointRadius: 0, borderWidth: 2, spanGaps: false};
             if (this.chart) {
-                this.chart.data.datasets = datasets;
+                this.chart.data.datasets = [dataset];
+                this.chart.options.scales.x.min = data.start_time;
+                this.chart.options.scales.x.max = data.end_time;
                 this.chart.update();
                 return;
             }
-            this.chart = new Chart(el('oc-chart'), {
-                type: 'line',
-                data: { datasets: datasets },
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: {
-                            type: 'linear',
-                            ticks: { callback: (value) => new Date(value * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit' }) },
-                        },
-                        y: { title: { display: true, text: 'Temps d’antenne local (%)' }, beginAtZero: true },
-                    },
-                },
-            });
+            this.chart = new Chart(el('airtime-chart'), {type: 'line', data: {datasets: [dataset]}, options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {legend: {display: false}, tooltip: {callbacks: {
+                    title: items => items.length ? new Date(items[0].parsed.x * 1000).toLocaleString('fr-FR') : '',
+                    label: item => pct(item.parsed.y),
+                }}},
+                scales: {x: {type: 'linear', min: data.start_time, max: data.end_time,
+                    ticks: {maxTicksLimit: 6, callback: value => new Date(value * 1000).toLocaleString('fr-FR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}},
+                y: {beginAtZero: true, title: {display: true, text: 'Occupation reçue (%)'}, ticks: {maxTicksLimit: 5}}},
+            }});
         }
-
-        async loadAnalysis() {
-            const sequence = ++this.analysisSequence;
-            try {
-                const window = el('oc-analysis-window').value;
-                const response = await fetch('/api/telemetry/occupancy/analysis?window=' + encodeURIComponent(window));
-                if (!response.ok) throw new Error('Analyse indisponible (' + response.status + ')');
-                const data = await response.json();
-                if (sequence !== this.analysisSequence) return;
-                el('oc-analysis-error').textContent = '';
-                this.renderAnalysis(data);
-            } catch (error) {
-                if (sequence !== this.analysisSequence) return;
-                el('oc-analysis-error').textContent = error.message + '. Les valeurs précédentes ne sont pas actualisées.';
-            }
+        renderDetails() {
+            if (!this.data) return;
+            const query = el('airtime-search').value.trim().toLocaleLowerCase();
+            const matches = node => String(node.name || '').toLocaleLowerCase().includes(query);
+            const empty = columns => '<tr><td colspan="' + columns + '" class="text-muted">Aucune donnée disponible.</td></tr>';
+            el('airtime-relay-details').innerHTML = this.rows.filter(matches).slice(0, 200).map(node => '<tr><td>' + escapeHtml(node.name)
+                + '</td><td>' + pct(node.observed) + '</td><td>' + pct(node.scenario) + '</td><td>' + pct(node.peak_hour_percent)
+                + '</td></tr>').join('') || empty(4);
+            const authors = (this.data.authors || []).slice();
+            if (this.data.traffic.unknown_author?.distinct_packets) authors.push(this.data.traffic.unknown_author);
+            el('airtime-source-details').innerHTML = authors.filter(matches).slice(0, 200).map(author => '<tr><td>' + escapeHtml(author.name)
+                + '</td>' + ['messages', 'adverts', 'other'].map(kind => '<td>' + number(author.categories[kind].distinct_packets) + '</td>').join('')
+                + '<td>' + number(author.distinct_packets) + '</td></tr>').join('') || empty(5);
+            const model = this.data.forwarding_model;
+            const valid = model?.status === 'partial_scenario';
+            el('airtime-model-context').textContent = valid ? number(model.expected_packets) + ' retransmissions attendues · '
+                + number(model.unretrieved_packets) + ' non retrouvées · +' + number(model.additional_airtime_ms / 1000) + ' s estimées.'
+                : 'Historique antérieur ou données insuffisants.';
+            el('airtime-model-details').innerHTML = (valid ? model.nodes : []).filter(matches).slice(0, 200).map(node =>
+                '<tr><td>' + escapeHtml(node.name) + '</td><td>' + number(node.expected_packets) + '</td><td>'
+                + number(node.retrieved_packets) + '</td><td>' + number(node.unretrieved_packets) + '</td><td>'
+                + number(node.additional_airtime_ms / 1000) + ' s</td></tr>').join('') || empty(5);
+            el('airtime-profile').textContent = (this.data.method?.modulation_profiles || []).map(profile =>
+                'Profil radio : SF' + profile.sf + ' · ' + profile.bw_khz + ' kHz · CR 4/' + profile.cr_den).join(' / ');
         }
-
-        renderAnalysis(data) {
-            this.lastAnalysisData = data;
-            const number = value => Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
-            const pct = value => value === null || value === undefined ? 'N/D' : number(value) + ' %';
-            const duration = value => value === null || value === undefined ? 'N/D' : formatSeconds(Number(value) / 1000);
-            const local = data.local;
-            const traffic = data.traffic;
-            el('oc-analysis-rx').textContent = pct(local.rx_percent);
-            el('oc-analysis-packets').textContent = number(traffic.distinct_packets);
-            el('oc-analysis-packet-detail').textContent = number(local.rx_packets) + ' réceptions · ' + number(traffic.additional_received_copies) + ' copies supplémentaires';
-            el('oc-analysis-cost').textContent = duration(traffic.reconstructed_radio_airtime_ms);
-            el('oc-analysis-unknown').textContent = traffic.distinct_packets ? pct(traffic.unattributed_author_packets / traffic.distinct_packets * 100) : 'N/D';
-            const date = timestamp => new Date(timestamp * 1000).toLocaleString('fr-FR');
-            this.renderLocalLoad(data, pct, number, date);
-            this.renderForwardingModel(data.forwarding_model, pct, number, duration, date);
-            el('oc-analysis-coverage').textContent = data.coverage.first_observation_at
-                ? 'Du ' + date(data.coverage.first_observation_at) + ' au ' + date(data.coverage.last_observation_at) + ' · ' + formatSeconds(data.coverage.available_seconds) + ' disponibles · Données partielles.' + (data.coverage.truncated ? ' Traitement limité.' : '')
-                : 'Aucune observation exploitable sur cette période.';
-            const authorSort = el('oc-author-sort').value || 'distinct_packets';
-            const authorRow = author => '<tr><td>' + escapeHtml(author.name) + '</td><td>' + number(author.distinct_packets) + '</td>'
-                + ['messages', 'adverts', 'other'].map(kind => '<td>' + number(author.categories[kind].distinct_packets) + '</td>').join('')
-                + '<td>' + duration(author.reconstructed_radio_airtime_ms)
-                + (author.cost_reconstructed_packets < author.distinct_packets ? '<small class="d-block text-muted">' + number(author.cost_reconstructed_packets) + ' / ' + number(author.distinct_packets) + ' paquets reconstitués</small>' : '') + '</td></tr>';
-            const authors = data.authors.slice().sort((left, right) =>
-                Number(right[authorSort] ?? -Infinity) - Number(left[authorSort] ?? -Infinity)).slice(0, 50).map(authorRow);
-            if (traffic.unknown_author.distinct_packets) authors.push(authorRow(traffic.unknown_author));
-            el('oc-authors').innerHTML = authors.join('') || '<tr><td colspan="6" class="text-muted">Aucune observation.</td></tr>';
-            el('oc-author-coverage').textContent = number(traffic.cost_reconstructed_packets) + ' / ' + number(traffic.distinct_packets) + ' paquets reconstitués · 50 premiers auteurs · Copies dédupliquées.';
-            const query = el('oc-relay-filter').value.trim().toLocaleLowerCase();
-            const sortKey = el('oc-relay-sort').value || 'path_packets';
-            const sortValue = node => sortKey === 'change_percent' ? node.trend.change_percent : node[sortKey];
-            const repeaters = data.repeaters.filter(node => node.name.toLocaleLowerCase().includes(query))
-                .sort((left, right) => Number(sortValue(right) ?? -Infinity) - Number(sortValue(left) ?? -Infinity));
-            const trend = node => node.trend.change_percent === null ? 'N/D' : (node.trend.change_percent > 0 ? '+' : '') + pct(node.trend.change_percent);
-            el('oc-repeaters').innerHTML = repeaters.map(node => '<tr><td>' + escapeHtml(node.name)
-                + (node.local_neighbour ? '<small class="d-block text-muted">Voisin entendu directement</small>' : '') + '</td><td>' + pct(node.participation_percent)
-                + '<small class="d-block text-muted text-nowrap">' + number(node.path_packets) + ' / ' + number(node.path_packets_total) + ' paquets</small></td>'
-                + '<td>' + duration(node.airtime_ms) + '<small class="d-block text-muted text-nowrap">Entendu : ' + duration(node.direct_airtime_ms) + '<br>Déduit : ' + duration(node.inferred_airtime_ms) + '</small></td>'
-                + '<td>' + trend(node) + '</td><td class="' + (node.last_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">' + (node.last_hour_percent === null || node.last_hour_percent === undefined ? 'N/D' : '≈ ' + pct(node.last_hour_percent))
-                + (node.last_hour_history_complete === false ? '<small class="d-block text-muted">Historique &lt; 1 h</small>' : '')
-                + '</td><td title="' + escapeHtml(node.peak_hour_ending_at ? 'Heure se terminant le ' + date(node.peak_hour_ending_at) : '') + '" class="' + (node.peak_hour_percent >= 10 ? 'text-danger fw-bold' : '') + '">≈ ' + pct(node.peak_hour_percent)
-                + '</td><td title="' + escapeHtml(node.peak_five_minute_ending_at ? '5 minutes se terminant le ' + date(node.peak_five_minute_ending_at) : '') + '">' + pct(node.peak_five_minute_percent)
-                + '</td><td>' + number(node.packets) + (node.direct_packets !== undefined ? '<small class="d-block text-muted text-nowrap">' + number(node.direct_packets) + ' entendues<br>' + number(node.inferred_packets) + ' déduites</small>' : '') + '</td></tr>').join('') || '<tr><td colspan="8" class="text-muted">Aucune émission attribuable.</td></tr>';
-            const quality = data.quality;
-            el('oc-analysis-quality').textContent = number(quality.ambiguous_hops) + ' passages ambigus · ' + number(quality.unknown_hops) + ' non identifiés · ' + number(quality.collapsed_inferred_copies) + ' copies déduites regroupées.';
-            el('oc-comparison-note').textContent = data.comparison.status === 'available_partial_observations'
-                ? 'Période comparée : du ' + date(data.comparison.previous_start_time) + ' au ' + date(data.comparison.previous_end_time) + '.'
-                : 'Évolution : historique comparable insuffisant.';
-        }
-
-        renderLocalLoad(data, pct, number, date) {
-            const load = data.local_load || {};
-            el('oc-load-mean').textContent = pct(load.estimated_percent);
-            el('oc-load-burst').textContent = pct(load.peak_five_minutes?.percent);
-            el('oc-load-hour').textContent = pct(load.peak_hour?.percent);
-            el('oc-load-neighbours').textContent = load.neighbour_count === undefined ? 'N/D' : number(load.neighbour_count);
-            el('oc-load-burst').title = load.peak_five_minutes?.ending_at ? '5 minutes se terminant le ' + date(load.peak_five_minutes.ending_at) : '';
-            el('oc-load-hour').title = load.peak_hour?.ending_at ? 'Heure se terminant le ' + date(load.peak_hour.ending_at) : '';
-            const profiles = data.method?.modulation_profiles || [];
-            const profile = profiles.map(item => 'SF' + item.sf + ' · ' + item.bw_khz + ' kHz · CR 4/' + item.cr_den).join(' / ');
-            el('oc-load-context').textContent = [
-                profile,
-                load.bucket_seconds ? 'Tranches de ' + formatSeconds(load.bucket_seconds) : '',
-                load.neighbour_count === 0 ? 'Aucun voisin directement identifié' : '',
-            ].filter(Boolean).join(' · ');
-            const buckets = load.buckets || [];
-            const hasData = buckets.some(bucket => bucket.percent !== null && bucket.percent !== undefined);
-            el('oc-load-chart').style.display = hasData ? 'block' : 'none';
-            const datasets = [{label: 'Charge locale partielle (%)',
-                data: buckets.map(bucket => ({x: bucket.end_time, y: bucket.percent})),
-                borderColor: '#9370db', backgroundColor: '#9370db22', fill: true, pointRadius: 1, spanGaps: false}];
-            if (this.localChart) {
-                this.localChart.data.datasets = datasets;
-                this.localChart.update();
-            } else if (hasData) {
-                this.localChart = new Chart(el('oc-load-chart'), {type: 'line', data: {datasets}, options: {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: {tooltip: {callbacks: {title: items => items.length ? date(items[0].parsed.x) : '',
-                        label: item => 'Charge partielle : ' + pct(item.parsed.y)}}},
-                    scales: {x: {type: 'linear', ticks: {maxTicksLimit: 6, callback: value => new Date(value * 1000).toLocaleString('fr-FR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}},
-                        y: {beginAtZero: true, title: {display: true, text: 'Émissions locales reconstituées (%)'}}},
-                }});
-            }
-        }
-
-        renderForwardingModel(model, pct, number, duration, date) {
-            const active = model?.status === 'partial_scenario';
-            el('oc-model-coverage').textContent = active ? number(model.evaluation.modelled_packets) + ' / ' + number(model.evaluation.distinct_packets) : 'N/D';
-            el('oc-model-expected').textContent = active ? number(model.expected_packets) : 'N/D';
-            el('oc-model-missing').textContent = active ? number(model.unretrieved_packets) : 'N/D';
-            el('oc-model-airtime').textContent = active ? duration(model.additional_airtime_ms) : 'N/D';
-            el('oc-load-scenario').textContent = active && model.local_load.scenario_percent !== null
-                ? 'Scénario : ' + pct(model.local_load.scenario_percent) : '';
-            const status = model?.status === 'processing_limit' ? 'Limite de traitement atteinte.'
-                : model?.status === 'no_supported_opportunity' ? 'Aucune retransmission modélisable sur cette période.'
-                    : 'Historique antérieur insuffisant.';
-            el('oc-model-context').textContent = active
-                ? number(model.training.supported_edges) + ' liaisons apprises · Historique du ' + date(model.training.start_time) + ' au ' + date(model.training.end_time) + ' · 30 premiers répéteurs.'
-                : status;
-            el('oc-model-nodes').innerHTML = active ? model.nodes.slice(0, 30).map(node => '<tr><td>' + escapeHtml(node.name)
-                + '</td><td>' + number(node.expected_packets) + '</td><td>' + number(node.retrieved_packets)
-                + '</td><td>' + number(node.unretrieved_packets) + '</td><td>' + duration(node.additional_airtime_ms)
-                + '</td><td>' + pct(node.reconstructed_hour_percent) + '</td><td>' + pct(node.scenario_hour_percent)
-                + '</td></tr>').join('') : '<tr><td colspan="7" class="text-muted">' + escapeHtml(status) + '</td></tr>';
+        openDetails(section) {
+            bootstrap.Tab.getOrCreateInstance(el('airtime-tab-' + section)).show();
+            bootstrap.Modal.getOrCreateInstance(el('airtime-details')).show();
         }
     }
-
-    document.addEventListener('DOMContentLoaded', () => new Occupancy());
+    document.addEventListener('DOMContentLoaded', () => new AirtimePage());
 })();
 </script>
 {% endblock %}

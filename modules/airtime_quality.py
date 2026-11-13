@@ -29,6 +29,24 @@ def rolling_peak(events: list[tuple[float, float, bool]], start: float, end: flo
     return {'percent': round(peak / (seconds * 1000) * 100, 6), 'ending_at': peak_at}
 
 
+def reception_history(events: list[tuple[float, float, bool]], start: float, end: float) -> dict:
+    """One full-frame RX series; fixed buckets and unknown gaps, no TX mixture."""
+    step = 3600 if end-start > 86400 else 300
+    count = max(1, int((end-start+step-1)//step))
+    totals: dict[int, float] = {}
+    for at, ms, _ in events:
+        if start <= at <= end:
+            index = min(count-1, int((at-start)//step))
+            totals[index] = totals.get(index, 0.0)+ms
+    peak = rolling_peak(events, start, end, 300) if totals else {'percent': None, 'ending_at': None}
+    return {'rx_bucket_seconds': step,
+            'rx_series': [{'end_time': min(end, start+(index+1)*step),
+                           'percent': round(totals[index]/step/1000*100, 6) if index in totals else None}
+                          for index in range(count)],
+            'rx_peak_five_minute_percent': peak['percent'],
+            'rx_peak_five_minute_ending_at': peak['ending_at']}
+
+
 def observer_metadata(conn: sqlite3.Connection) -> dict:
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='bot_metadata'").fetchone():
         return {}

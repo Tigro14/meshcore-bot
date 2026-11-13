@@ -16,7 +16,7 @@ from collections import defaultdict
 from typing import Any
 
 from modules.airtime_forwarding import build_forwarding_model, empty_forwarding_model, ingest_context
-from modules.airtime_quality import local_load, observer_metadata, rolling_peak
+from modules.airtime_quality import local_load, observer_metadata, reception_history, rolling_peak
 from modules.channel_occupancy import lora_airtime_ms
 
 SCHEMA_VERSION = 1
@@ -387,6 +387,7 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
     report['observer'] = observer or {'public_key': None, 'role': 'unknown'}
     report['local_load'] = local_load({}, contacts, observer, start, now, start, 0, None)
     report['forwarding_model'] = empty_forwarding_model(start, now)
+    report['local'].update(reception_history([], start, now))
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='airtime_observations'").fetchone():
         return report
     retained_from = conn.execute('SELECT MIN(observed_at) FROM airtime_observations').fetchone()[0]
@@ -399,6 +400,7 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                         'ORDER BY observed_at DESC,source_id DESC LIMIT ?', (start-3600-DEDUP_SECONDS, now, MAX_ROWS+1)).fetchall()
     report['coverage']['truncated'] = len(rows) > MAX_ROWS
     rows = rows[:MAX_ROWS][::-1]
+    report['local'].update(reception_history([(row[0], row[9], True) for row in rows], start, now))
     links: dict[str, list] = defaultdict(list)
     for at, packet_hash, key, name in conn.execute('SELECT observed_at,packet_hash,author_key,author_name '
                                                  'FROM airtime_author_links WHERE observed_at>=? AND observed_at<=?',

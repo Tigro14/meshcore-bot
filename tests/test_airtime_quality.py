@@ -6,7 +6,13 @@ import sqlite3
 import pytest
 
 from modules.airtime_analysis import Contacts, build_report, create_tables, duty_summary, ingest_stream
-from modules.airtime_quality import local_load, observer_metadata, rolling_peak, write_observer_metadata
+from modules.airtime_quality import (
+    local_load,
+    observer_metadata,
+    reception_history,
+    rolling_peak,
+    write_observer_metadata,
+)
 from modules.channel_occupancy import lora_airtime_ms
 
 A, B, SELF = 'aaaa'+'11'*30, 'bbbb'+'22'*30, 'cccc'+'33'*30
@@ -134,6 +140,8 @@ def test_cr8_full_frames_and_own_reply_correlation_are_preserved(db):
     result = build_report(db, now=3600, window='1h')
     assert result['method']['modulation_profiles'] == [MOD]
     assert result['local']['rx_airtime_ms'] == lora_airtime_ms(46, **MOD)
+    nonempty = [point['percent'] for point in result['local']['rx_series'] if point['percent'] is not None]
+    assert nonempty == [pytest.approx(result['local']['rx_airtime_ms']/300000*100, abs=1e-6)]
     assert result['local_load']['neighbour_count'] == 1
     assert result['local_load']['observer_evidenced_airtime_ms'] == pytest.approx(lora_airtime_ms(42, **MOD), abs=.001)
     assert result['traffic']['identified_author_packets'] == 1
@@ -141,3 +149,28 @@ def test_cr8_full_frames_and_own_reply_correlation_are_preserved(db):
     assert next(node for node in result['repeaters'] if node['public_key'] == B)['local_neighbour'] is True
     assert next(node for node in result['repeaters'] if node['public_key'] == A)['local_neighbour'] is False
     assert 'PRIVATE TEXT' not in repr(db.execute('SELECT * FROM airtime_author_links').fetchall())
+
+
+def test_rx_history_uses_full_frame_airtime_and_preserves_unknown_gaps():
+    result = reception_history([(0, 1000, True), (299, 2000, True), (900, 6000, True)], 0, 900)
+    assert result['rx_bucket_seconds'] == 300
+    assert [point['end_time'] for point in result['rx_series']] == [300, 600, 900]
+    assert [point['percent'] for point in result['rx_series']] == [1, None, 2]
+    assert result['rx_peak_five_minute_percent'] == 2
+
+
+def test_rx_history_rolling_peak_uses_lookbehind_but_series_does_not():
+    result = reception_history([(50, 2000, True), (301, 1000, True)], 300, 900)
+    assert result['rx_series'][0]['percent'] == pytest.approx(1/3, abs=1e-6)
+    assert result['rx_peak_five_minute_percent'] == 1
+    empty = reception_history([(50, 2000, True)], 300, 900)
+    assert empty['rx_peak_five_minute_percent'] is None
+    assert all(point['percent'] is None for point in empty['rx_series'])
+
+
+def test_weekly_chart_downsamples_but_keeps_exact_five_minute_peak():
+    result = reception_history([(3500, 3000, True), (3601, 3000, True)], 0, 7*86400)
+    assert result['rx_bucket_seconds'] == 3600
+    assert len(result['rx_series']) == 168
+    assert result['rx_series'][0]['percent'] == pytest.approx(3/3600*100, abs=1e-6)
+    assert result['rx_peak_five_minute_percent'] == 2
