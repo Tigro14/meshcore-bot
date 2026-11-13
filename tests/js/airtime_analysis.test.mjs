@@ -230,3 +230,22 @@ test('midnight markers follow both French daylight-saving transitions',()=>{
     const autumn=midnights(epoch('2026-10-24T21:00:00Z'),epoch('2026-10-26T00:00:00Z'));
     assert.equal(autumn.length,2);assert.equal(autumn[1].at-autumn[0].at,25*3600);
 });
+
+test('midnight is a mandatory X-axis tick and nearby labels do not overlap it',()=>{
+    const {instance}=viewer();instance.render(data,hourly);
+    const epoch=value=>Date.parse(value)/1000;
+    const midnight=epoch('2026-11-12T23:00:00Z');
+    const scale={min:midnight-10*3600,max:midnight+14*3600,width:1000,
+        ticks:[{value:midnight-10*3600},{value:midnight-300},{value:midnight+600},{value:midnight+14*3600}]};
+    const axis=instance.chart.options.scales.x;
+    axis.afterBuildTicks(scale);
+    assert.deepEqual(Array.from(scale.ticks,tick=>tick.value),[scale.min,midnight,scale.max]);
+    assert.equal(scale.ticks[1].major,true);
+    assert.equal(axis.ticks.autoSkip,false);
+    assert.equal(axis.ticks.callback(midnight),'00:00');
+    instance.render({...data,window:'7d'},hourly);
+    assert.equal(axis.ticks.callback(midnight),'00:00');
+    const noMidnight={min:midnight+3600,max:midnight+7200,width:300,ticks:[{value:midnight+3600}]};
+    axis.afterBuildTicks(noMidnight);
+    assert.equal(noMidnight.ticks.length,1);
+});
