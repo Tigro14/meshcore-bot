@@ -15,10 +15,10 @@ function viewer() {
         update() {}
     }});
     vm.runInContext(source.slice(source.indexOf('    const el ='),
-        source.lastIndexOf("    document.addEventListener('DOMContentLoaded'"))+'\nglobalThis.Page = AirtimePage;',context);
+        source.lastIndexOf("    document.addEventListener('DOMContentLoaded'"))+'\nglobalThis.Page = AirtimePage; globalThis.midnights = parisMidnights;',context);
     const instance=Object.create(context.Page.prototype);
     instance.sequence=0; instance.chart=null;
-    return {instance,elements};
+    return {instance,elements,midnights:context.midnights};
 }
 const categories={messages:{distinct_packets:1},adverts:{distinct_packets:0},other:{distinct_packets:0}};
 const data={window:'24h',window_seconds:86400,start_time:1000,end_time:87400,
@@ -205,4 +205,28 @@ test('hourly, daily and weekly views show their bin duration and adjust bar spac
         assert.equal(elements.get('airtime-resolution').textContent,label);
         assert.equal(instance.chart.data.datasets[0].barPercentage,window==='1h'?.85:.65);
     }
+});
+
+
+test('midnight markers use French local dates and update with the chart bounds',()=>{
+    const {instance,midnights}=viewer();
+    const epoch=value=>Date.parse(value)/1000;
+    const start=epoch('2026-11-12T15:00:00Z'), end=epoch('2026-11-13T15:00:00Z');
+    assert.deepEqual(Array.from(midnights(start,end),marker=>({...marker})),[{at:epoch('2026-11-12T23:00:00Z'),label:'13/11'}]);
+    assert.equal(midnights(epoch('2026-11-13T00:00:00Z'),epoch('2026-11-13T01:00:00Z')).length,0);
+    instance.render({...data,start_time:start,end_time:end},hourly);
+    const lines=[],labels=[];
+    instance.chart.plugins[1].beforeDatasetsDraw({scales:{x:{min:start,max:end,getPixelForValue:()=>200}},
+        chartArea:{left:0,right:500,top:20,bottom:220},ctx:{save(){},restore(){},setLineDash(){},beginPath(){},
+            moveTo(...point){lines.push(point);},lineTo(...point){lines.push(point);},stroke(){},
+            measureText:()=>({width:30}),fillText(...text){labels.push(text);}}});
+    assert.deepEqual(lines,[[200,20],[200,220]]);
+    assert.deepEqual(labels,[['13/11',204,14]]);
+});
+test('midnight markers follow both French daylight-saving transitions',()=>{
+    const {midnights}=viewer();const epoch=value=>Date.parse(value)/1000;
+    const spring=midnights(epoch('2026-03-28T22:00:00Z'),epoch('2026-03-30T00:00:00Z'));
+    assert.equal(spring.length,2);assert.equal(spring[1].at-spring[0].at,23*3600);
+    const autumn=midnights(epoch('2026-10-24T21:00:00Z'),epoch('2026-10-26T00:00:00Z'));
+    assert.equal(autumn.length,2);assert.equal(autumn[1].at-autumn[0].at,25*3600);
 });

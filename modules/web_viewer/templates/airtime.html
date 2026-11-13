@@ -123,6 +123,18 @@
     const known = value => typeof value === 'number' && Number.isFinite(value);
     const number = value => Number(value).toLocaleString('fr-FR', {maximumFractionDigits: 3});
     const pct = value => known(value) ? number(value) + ' %' : 'N/D';
+    const timeZone = 'Europe/Paris';
+    const parisTime = new Intl.DateTimeFormat('fr-FR', {timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
+    const parisDate = new Intl.DateTimeFormat('fr-FR', {timeZone, day: '2-digit', month: '2-digit'});
+    const parisMidnights = (start, end) => {
+        const markers = [];
+        // Scan UTC hours rather than adding 24 h: French days can last 23/25 h.
+        for (let at = Math.ceil(start / 3600) * 3600; at < end; at += 3600) {
+            const date = new Date(at * 1000);
+            if (parisTime.format(date) === '00:00') markers.push({at, label: parisDate.format(date)});
+        }
+        return markers;
+    };
     const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     }[c]));
@@ -281,18 +293,40 @@
                 }
                 ctx.restore();
             }};
-            this.chart = new Chart(el('airtime-chart'), {type: 'bar', plugins: [silence], data: {datasets: [dataset]}, options: {
+            const dates = {id: 'airtimeDates', beforeDatasetsDraw: chart => {
+                const {ctx, chartArea, scales} = chart;
+                ctx.save();
+                ctx.strokeStyle = 'rgba(128,128,128,.30)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 4]);
+                ctx.fillStyle = '#6b7280';
+                ctx.font = '11px system-ui, sans-serif';
+                ctx.textBaseline = 'bottom';
+                ctx.textAlign = 'left';
+                for (const marker of parisMidnights(scales.x.min, scales.x.max)) {
+                    const x = scales.x.getPixelForValue(marker.at);
+                    ctx.beginPath();
+                    ctx.moveTo(x, chartArea.top);
+                    ctx.lineTo(x, chartArea.bottom);
+                    ctx.stroke();
+                    const width = ctx.measureText(marker.label).width;
+                    ctx.fillText(marker.label, Math.min(Math.max(x+4, chartArea.left+3), chartArea.right-width-3), chartArea.top-6);
+                }
+                ctx.restore();
+            }};
+            this.chart = new Chart(el('airtime-chart'), {type: 'bar', plugins: [silence, dates], data: {datasets: [dataset]}, options: {
                 responsive: true, maintainAspectRatio: false,
+                layout: {padding: {top: 18}},
                 animation: false, interaction: {mode: 'index', intersect: false},
                 plugins: {legend: {display: false}, tooltip: {callbacks: {
-                    title: items => items.length ? new Date(items[0].raw.start * 1000).toLocaleString('fr-FR') + ' — '
-                        + new Date(items[0].raw.end * 1000).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'}) : '',
+                    title: items => items.length ? new Date(items[0].raw.start * 1000).toLocaleString('fr-FR', {timeZone}) + ' — '
+                        + new Date(items[0].raw.end * 1000).toLocaleTimeString('fr-FR', {timeZone, hour: '2-digit', minute: '2-digit'}) : '',
                     label: item => pct(item.parsed.y),
                 }}},
                 scales: {x: {type: 'linear', offset: false, min: data.start_time, max: data.end_time,
                     grid: {display: false}, border: {display: false},
                     ticks: {maxTicksLimit: 5, padding: 12, font: {size: 11}, callback: value => new Date(value * 1000).toLocaleString('fr-FR', this.chartPeriod === '7d'
-                        ? {day: '2-digit', month: '2-digit'} : {hour: '2-digit', minute: '2-digit'})}},
+                        ? {timeZone, day: '2-digit', month: '2-digit'} : {timeZone, hour: '2-digit', minute: '2-digit'})}},
                 y: {display: hasData, beginAtZero: true, suggestedMax: 1,
                     grid: {color: 'rgba(128,128,128,.10)', drawTicks: false}, border: {display: false},
                     ticks: {maxTicksLimit: 4, padding: 8, font: {size: 11}, callback: value => number(value) + ' %'}}},
