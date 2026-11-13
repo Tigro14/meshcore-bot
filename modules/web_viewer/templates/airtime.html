@@ -257,7 +257,7 @@
                 const start = point.start_time ?? point.end_time - (data.local.rx_bucket_seconds || 300);
                 return {x: (start + point.end_time) / 2, y: point.percent, start, end: point.end_time, coverage: point.coverage};
             }), backgroundColor: '#7ca4cf', hoverBackgroundColor: '#497fb8', borderWidth: 0,
-                borderRadius: 2, barThickness: 'flex', maxBarThickness: 16,
+                borderRadius: 2, barThickness: 'flex', maxBarThickness: data.window === '1h' ? 44 : 16,
                 categoryPercentage: 1, barPercentage: .65};
             if (this.chart) {
                 this.chart.data.datasets = [dataset];
