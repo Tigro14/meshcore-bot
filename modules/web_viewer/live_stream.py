@@ -46,7 +46,8 @@ class LiveStreamMixin:
     def _tiered_subscribed_clients(self, flag: str) -> tuple[list, list]:
         """(admin_sids, anonymous_sids) of connected clients with ``flag`` set."""
         with self._clients_lock:
-            admins, anonymous = [], []
+            admins: list[Any] = []
+            anonymous: list[Any] = []
             for client_id, client_info in self.connected_clients.items():
                 if not client_info.get(flag, False):
                     continue
