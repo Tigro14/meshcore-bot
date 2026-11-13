@@ -39,6 +39,92 @@ except ImportError:
 
 from .base_service import BaseServicePlugin
 
+_B32 = "0123456789bcdefghjkmnpqrstuvwxyz"
+
+
+def _geohash_encode(lat: float, lon: float, precision: int) -> str:
+    """Encode a point into a geohash string of the given precision."""
+    lat_rng = [-90.0, 90.0]
+    lon_rng = [-180.0, 180.0]
+    out: list[str] = []
+    bits: list[int] = []
+    even = True  # longitude bit first, then alternating
+    while len(out) < precision:
+        if even:
+            mid = (lon_rng[0] + lon_rng[1]) / 2.0
+            b = 1 if lon >= mid else 0
+            lon_rng[1 - b] = mid  # bit 1 narrows the lower bound, bit 0 the upper
+        else:
+            mid = (lat_rng[0] + lat_rng[1]) / 2.0
+            b = 1 if lat >= mid else 0
+            lat_rng[1 - b] = mid
+        bits.append(b)
+        even = not even
+        if len(bits) == 5:
+            out.append(_B32[int("".join(map(str, bits)), 2)])
+            bits = []
+    return "".join(out)
+
+
+def _geohash_cells(
+    min_lat: float, min_lon: float, max_lat: float, max_lon: float, precision: int
+) -> list[str]:
+    """Enumerate every geohash cell of *precision* that intersects a bbox.
+
+    Uses cell-index arithmetic (not point sampling) so no intersecting cell is
+    skipped. The Blitzortung MQTT relay rejects wildcard subscriptions that are
+    too shallow (e.g. "blitzortung/1.1/#" answers SUBACK 0x80), so the service
+    must subscribe per-cell prefixes instead.
+    """
+    lon_bits = (5 * precision + 1) // 2  # alternating, longitude first
+    lat_bits = 5 * precision - lon_bits
+    lon_size = 360.0 / 2**lon_bits
+    lat_size = 180.0 / 2**lat_bits
+    lon_i0 = max(0, int((min_lon + 180.0) // lon_size))
+    lon_i1 = min(2**lon_bits - 1, int((max_lon + 180.0) // lon_size))
+    lat_i0 = max(0, int((min_lat + 90.0) // lat_size))
+    lat_i1 = min(2**lat_bits - 1, int((max_lat + 90.0) // lat_size))
+
+    cells: list[str] = []
+    for li in range(lat_i0, lat_i1 + 1):
+        for lo in range(lon_i0, lon_i1 + 1):
+            # Re-interleave the cell indices into geohash bits, longitude first.
+            bits: list[int] = []
+            for bit in range(5 * precision):
+                if bit % 2 == 0:
+                    n = bit // 2
+                    bits.append((lo >> (lon_bits - 1 - n)) & 1 if n < lon_bits else 0)
+                else:
+                    n = bit // 2
+                    bits.append((li >> (lat_bits - 1 - n)) & 1 if n < lat_bits else 0)
+            cells.append(
+                "".join(
+                    _B32[int("".join(map(str, bits[i * 5 : i * 5 + 5])), 2)]
+                    for i in range(precision)
+                )
+            )
+    return cells
+
+
+def _mqtt_topics_for_area(area: dict[str, float]) -> list[str]:
+    """Per-geohash wildcard subscriptions covering a bounding box.
+
+    The relay (blitzortung.ha.sed.pl) answers SUBACK 0x80 to "blitzortung/1.1/#",
+    so we subscribe one wildcard per geohash cell instead. Cells of precision 3
+    (~1.4° x 1.4°) keep traffic low for a typical bbox; larger boxes fall back
+    to precision 2. Out-of-box strikes are dropped by the on_message filter.
+    """
+    precision = 3
+    cells = _geohash_cells(
+        area["min_lat"], area["min_lon"], area["max_lat"], area["max_lon"], precision
+    )
+    if len(cells) > 16:
+        precision = 2
+        cells = _geohash_cells(
+            area["min_lat"], area["min_lon"], area["max_lat"], area["max_lon"], precision
+        )
+    return [f"blitzortung/1.1/{'/'.join(cell)}/#" for cell in cells[:24]]
+
 
 class BlitzortungService(BaseServicePlugin):
     """Real-time lightning detection via Blitzortung MQTT.
@@ -204,6 +290,12 @@ class BlitzortungService(BaseServicePlugin):
 
     # ── MQTT connection ───────────────────────────────────────────────────────
 
+    def _mqtt_topics(self) -> list[str]:
+        """Wildcard subscriptions covering the configured bbox (see _mqtt_topics_for_area)."""
+        if not self.blitz_area:
+            return []
+        return _mqtt_topics_for_area(self.blitz_area)
+
     async def _connect_blitzortung_mqtt(self) -> None:
         """Connect to Blitzortung MQTT broker and subscribe to strike feed."""
         if not self.blitz_area or not MQTT_AVAILABLE:
@@ -211,10 +303,13 @@ class BlitzortungService(BaseServicePlugin):
 
         broker_host = "blitzortung.ha.sed.pl"
         broker_port = 1883
-        topic = "blitzortung/1.1/#"
+        topics = self._mqtt_topics()
 
         self.logger.info(
-            "Connecting to Blitzortung MQTT broker: %s:%d", broker_host, broker_port
+            "Connecting to Blitzortung MQTT broker: %s:%d (%d topics)",
+            broker_host,
+            broker_port,
+            len(topics),
         )
 
         while self._running:
@@ -247,6 +342,22 @@ class BlitzortungService(BaseServicePlugin):
 
                 client.on_message = on_message
 
+                def on_subscribe(client: Any, userdata: Any, mid: Any, granted_qos: Any) -> None:
+                    # A broker can accept CONNECT but refuse SUBSCRIBE (granted QoS
+                    # >= 0x80); without this check the service looks connected but
+                    # silently receives nothing.
+                    try:
+                        denied = [q for q in granted_qos if int(q) >= 0x80]
+                    except (TypeError, ValueError):
+                        denied = []
+                    if denied:
+                        self.logger.warning(
+                            "Blitzortung MQTT subscription %s refused by broker "
+                            "(granted_qos=%s)", mid, granted_qos
+                        )
+
+                client.on_subscribe = on_subscribe
+
                 loop = asyncio.get_event_loop()
                 try:
                     await loop.run_in_executor(
@@ -256,10 +367,11 @@ class BlitzortungService(BaseServicePlugin):
                     self.logger.debug("connect() failed: %s", connect_error)
                     raise
 
-                client.subscribe(topic)
+                client.subscribe([(t, 0) for t in topics])
                 client.loop_start()
                 self.logger.info(
-                    "Connected to Blitzortung MQTT, subscribed to %s", topic
+                    "Connected to Blitzortung MQTT, subscribed to %s",
+                    ", ".join(topics),
                 )
 
                 while self._running:
