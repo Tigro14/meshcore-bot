@@ -319,10 +319,12 @@ def build_forwarding_model(conn: sqlite3.Connection, contacts: Any, *, start: fl
         node = nodes.setdefault(key, {**contacts.identity(key), 'expected_packets': 0,
             'retrieved_packets': 0, 'unretrieved_packets': 0, 'additional_airtime_ms': 0.0,
             'independent_exposure_packets': 0,
+            'last_hour_expected_packets': 0,
             'local_neighbour': key in local_keys, 'edge_support_min': opportunity['edge_support'],
             'policy_support_min': opportunity['policy_support']})
         node['expected_packets'] += 1
         node['independent_exposure_packets'] += int(opportunity['independent_exposure'])
+        node['last_hour_expected_packets'] += int(end-3600 < opportunity['at'] <= end)
         node['edge_support_min'] = min(node['edge_support_min'], opportunity['edge_support'])
         node['policy_support_min'] = min(node['policy_support_min'], opportunity['policy_support'])
         if key in seen_forwarders[fp]:
@@ -340,7 +342,8 @@ def build_forwarding_model(conn: sqlite3.Connection, contacts: Any, *, start: fl
             reconstructed_airtime_ms=round(sum(ms for _, ms in observed), 3),
             reconstructed_hour_percent=round(sum(ms for _, ms in last_observed)/3600000*100, 6) if last_observed else None,
             scenario_hour_percent=round((sum(ms for _, ms in last_observed)+sum(ms for _, ms in last_extra))/3600000*100, 6)
-                if last_observed or last_extra else None,
+                if node['last_hour_expected_packets'] and (last_observed or last_extra) else None,
+            scenario_hour_status='supported_opportunities' if node['last_hour_expected_packets'] else 'no_supported_hourly_opportunity',
             is_fdr=False, compliance='unknown')
         if key in local_keys:
             local_extra += node['additional_airtime_ms']

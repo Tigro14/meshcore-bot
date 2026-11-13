@@ -220,6 +220,21 @@ def test_scope_matching_rejects_invalid_inputs():
     assert packet_scope({'route_type_name': 'DIRECT'}, KEYS) == (None, 'not_flood')
 
 
+def test_old_predictions_do_not_claim_a_current_hour_scenario(db):
+    train(db);add(db, END-120, [A])
+    while ingest_stream(db, MOD, scope_keys=KEYS)['processed']:pass
+    authors = {fp: C for fp, in db.execute('SELECT fingerprint FROM airtime_observations WHERE observed_at>=?', (START,))}
+    result = build_forwarding_model(db, Contacts(db), start=START, end=END+7200, authors=authors,
+        evidence_events={B: [(END+7100, 1000, True)]}, local_keys={B}, local_airtime_ms=1000,
+        available_seconds=10800)
+    node = result['nodes'][0]
+    assert node['expected_packets'] == 1
+    assert node['reconstructed_hour_percent'] > 0
+    assert node['last_hour_expected_packets'] == 0
+    assert node['scenario_hour_percent'] is None
+    assert node['scenario_hour_status'] == 'no_supported_hourly_opportunity'
+
+
 def test_analysis_uses_existing_outgoing_regions_without_changing_allowlist():
     config = configparser.ConfigParser()
     config.read_dict({'Channels': {'flood_scopes': '*', 'startup_flood_scope': 'region-one',

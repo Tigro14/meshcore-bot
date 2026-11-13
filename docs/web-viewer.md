@@ -700,6 +700,8 @@ airtime of expected forwards not found in any compatible received copy. A frame
 adds that relay's path hash and uses the recorded common radio profile.
 
 `nodes[].reconstructed_hour_percent` and `scenario_hour_percent` remain separate.
+The hourly scenario stays `null` without a supported opportunity in that hour,
+even if older predictions and recent reconstructed transmissions exist.
 The local scenario adds only modelled extras for directly identified local
 neighbours, not remote nodes. Unsupported cases remain `null`. Counts with
 `independent_exposure_packets` distinguish upstream evidence available without
