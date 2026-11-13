@@ -2960,12 +2960,12 @@ enabled = false
 # Optional regional TC_FLOOD scope for mesh channel posts from this service.
 # flood_scope = #west
 
-# Channels to post alerts to (comma-separated).
+# Channels to post alerts to (comma-separated). Default: #bot only.
 # Prefer this option if you want multiple channels.
-channels = #mybotchannel
+channels = #bot
 
 # Fallback single channel option (used only when channels= is not set).
-# channel = #general
+# channel = #bot
 
 # Notify on duplicate prefix matches for 1, 2, or 3 bytes.
 # 1 byte = 2 hex chars (01), 2 bytes = 4 hex chars (0101), 3 bytes = 6 hex chars (010101)
@@ -2983,9 +2983,6 @@ post_process_delay_seconds = 0.5
 post_process_timeout_seconds = 15.0
 # Seconds between DB polls while waiting for the row (default 0.2).
 # post_process_poll_interval_seconds = 0.2
-
-# Include: "Type 'prefix free' to find one." (only applies to 1-byte notifications).
-include_prefix_free_hint = true
 
 # Cooldown (minutes) to reduce alert spam for the same prefix (and repeated NEW_CONTACT events).
 cooldown_minutes_per_prefix = 60

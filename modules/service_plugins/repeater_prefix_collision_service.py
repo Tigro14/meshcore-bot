@@ -37,8 +37,8 @@ class RepeaterPrefixCollisionService(BaseServicePlugin):
 
     # Web-viewer settings schema (see modules/settings_schema.py)
     settings_schema = [
-        {"key": "channels", "label": "Alert channels", "type": "list", "default": "",
-         "help": "Channels to post collision alerts to (comma-separated)."},
+        {"key": "channels", "label": "Alert channels", "type": "list", "default": "#bot",
+         "help": "Channels to post collision alerts to (comma-separated). Defaults to #bot only."},
         {"key": "notify_on_prefix_bytes", "label": "Notify on prefix bytes", "type": "list",
          "pattern": "[123]", "default": "1",
          "help": "Prefix lengths that count as a collision, comma-separated: 1 byte (01), 2 (0101), "
@@ -47,8 +47,6 @@ class RepeaterPrefixCollisionService(BaseServicePlugin):
          "help": "Only treat an existing prefix as in-use if heard within this window."},
         {"key": "prefix_free_days", "label": "Free window", "type": "int", "min": 0, "default": 30, "unit": "days",
          "help": "Window for the 'free prefixes remain' count. 0 = all history."},
-        {"key": "include_prefix_free_hint", "label": "Include 'prefix free' hint", "type": "bool", "default": True,
-         "help": "Append a hint to find a free prefix (1-byte notifications only)."},
         {"key": "cooldown_minutes_per_prefix", "label": "Per-prefix cooldown", "type": "int", "min": 0, "default": 60, "unit": "min",
          "help": "Cooldown to reduce repeat alerts for the same prefix."},
         {"key": "flood_scope", "label": "Flood scope", "type": "str", "default": "",
@@ -99,11 +97,6 @@ class RepeaterPrefixCollisionService(BaseServicePlugin):
         )
         self.post_process_poll_interval_seconds = self.bot.config.getfloat(
             section, "post_process_poll_interval_seconds", fallback=0.2
-        )
-
-        # Message content toggles
-        self.include_prefix_free_hint = self.bot.config.getboolean(
-            section, "include_prefix_free_hint", fallback=True
         )
 
         # Spam control / dedupe
@@ -426,7 +419,6 @@ class RepeaterPrefixCollisionService(BaseServicePlugin):
             prefix=prefix.upper(),
             location=location,
             prefixes_free=prefixes_free,
-            prefix_bytes=prefix_bytes,
         )
         if not self._claim_prefix_alert(public_key, prefix_bytes, prefix):
             return
@@ -517,16 +509,12 @@ class RepeaterPrefixCollisionService(BaseServicePlugin):
         prefix: str,
         location: str,
         prefixes_free: Optional[int],
-        prefix_bytes: int,
     ) -> str:
         free_str = "Unknown"
         if prefixes_free is not None:
             free_str = str(prefixes_free)
 
-        text = f"Heard new repeater {name} with prefix {prefix} near {location}. {free_str} free prefixes remain."
-        if self.include_prefix_free_hint and prefix_bytes == 1:
-            text += " Type 'prefix free' to find one."
-        return text
+        return f"Heard new repeater {name} with prefix {prefix} near {location}. {free_str} free prefixes remain."
 
     async def _send_to_channels(self, text: str) -> None:
         for ch in self.channels:
@@ -571,10 +559,10 @@ class RepeaterPrefixCollisionService(BaseServicePlugin):
         if self.bot.config.has_option(section, "channels"):
             raw = (self.bot.config.get(section, "channels") or "").strip()
         if not raw:
-            raw = (self.bot.config.get(section, "channel", fallback="#general") or "").strip()
+            raw = (self.bot.config.get(section, "channel", fallback="#bot") or "").strip()
         channels = [c.strip() for c in raw.split(",") if c.strip()]
         if not channels:
-            channels = ["#general"]
+            channels = ["#bot"]
         return channels
 
     def _load_notify_on_prefix_bytes(self, section: str) -> list[int]:
