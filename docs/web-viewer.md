@@ -164,6 +164,13 @@ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 proxy_set_header X-Forwarded-Proto $scheme;
 ```
 
+Every page already carries its own `Content-Security-Policy` header — `script-src 'self'` plus a
+per-request nonce for inline scripts on the hardened pages, and no CDN host anywhere, because every
+script the viewer runs is vendored under `static/vendor/`. A proxy that adds a second CSP header
+does not replace that one: a browser enforces **both**. A proxy policy that allows a CDN therefore
+buys nothing, and one that forbids something a page needs breaks the page. Keep the policy in the
+viewer and do not add a second one in Nginx.
+
 ## Pages Overview
 
 ### Dashboard
