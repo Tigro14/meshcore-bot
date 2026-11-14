@@ -322,6 +322,13 @@ event has to be sent as `42[...]`.
 - Hop count and routing information
 - Advertisement data
 - Currently tracked status
+- The **View advertisement data** action shows the contact's raw advert payload next to a QR
+  code carrying `meshcore://contact/add?name=…&public_key=…&type=…` — the deep link the MeshCore
+  mobile app scans to add that node as a contact (MeshCore → Admin → Add Node → Scan QR). The key
+  is the contact's own 64-hex public key, which the page already prints, and `type` is the
+  contact's role mapped to MeshCore's numbering (1 Companion, 2 Repeater, 3 Room Server,
+  4 Sensor) — the same table the bot's own `contact` command uses for its card. Nothing is
+  encoded for a contact whose key is not 64 hex characters.
 - Region-code status: a red globe badge next to the name flags a contact whose channel
   messages were received as an unscoped FLOOD, i.e. sent without a region code (see
   [Region scopes](region-scopes.md)). Only `global` counts as evidence — `unknown` means the

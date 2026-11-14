@@ -30,6 +30,17 @@ semantic versioning.
   newline, a list longer than the slot count, and `Public` without the `[Bot]` override key are
   refused before anything is written. `GET`/`POST /api/channels/settings`. See `docs/web-viewer.md`.
 
+- The **View advertisement data** modal on the contacts page shows a **MeshCore add-contact QR**
+  beside the advert payload: `meshcore://contact/add?name=…&public_key=…&type=…`, the deep link the
+  MeshCore mobile app scans to add that heard node as a contact. It is drawn from the vendored
+  `qrcode-generator` like the Channels page, and it is a *restoration*: the modal carried this QR
+  since `9526622` (2026-09-09), and merge `4517e7e` dropped it while resolving `contacts.html` in
+  favour of the restyled side of the conflict — pickaxe history hides such losses because `git log
+  -S` skips merge commits. Drawn client-side from data the page already prints (the 64-hex public
+  key, the advert name, the role → MeshCore `type` table also used by the bot's `contact` command);
+  a contact whose key is not 64 hex characters gets no QR. `tests/js/contacts_manager.test.mjs`
+  pins the payload so a future conflict resolution cannot silently drop it again.
+
 - BBS recipients now get **private staged notifications**: one aggregate DM on
   arrival, one at +24h if still unread, and a final notice at +73h naming the purge
   age — always a single DM per recipient carrying the unread count, never one DM per

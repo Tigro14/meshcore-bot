@@ -826,6 +826,7 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/clock_drift.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/qrcode-generator/qrcode.js') }}"></script>
         <script nonce="{{ g.csp_nonce }}">
 // IS_ADMIN comes from base.html (display hint only; mutations are enforced
 // server-side via authenticated_admin). Redeclaring it here is a SyntaxError.
@@ -2320,7 +2321,10 @@ class ModernContactsManager {
             console.error('Error loading advertisement data:', err);
         }
 
-        // Create a modal to display the advertisement data
+        // Create a modal to display the advertisement data + the add-contact QR
+        // user_id is the contact's MeshCore public key: 64 hex characters, which is
+        // exactly what the add-contact QR takes as `public_key`.
+        const publicKey = contact.user_id;
         const modalHtml = `
             <div class="modal fade" id="advertModal" tabindex="-1" aria-labelledby="advertModalTitle">
                 <div class="modal-dialog modal-lg">
@@ -2330,7 +2334,19 @@ class ModernContactsManager {
                             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
                         <div class="modal-body">
-                            <pre class="advert-json mb-0">${this.escapeHtml(JSON.stringify(advertData, null, 2))}</pre>
+                            <div class="row g-3">
+                                <div class="col-md-8">
+                                    <pre class="advert-json mb-0">${this.escapeHtml(JSON.stringify(advertData, null, 2))}</pre>
+                                </div>
+                                <div class="col-md-4 text-center">
+                                    <h6><i class="fas fa-qrcode me-1" aria-hidden="true"></i>Scan to add node</h6>
+                                    <p class="small text-muted">MeshCore → Admin → Add Node → Scan QR</p>
+                                    <div id="qrCodeContainer" class="d-inline-block"></div>
+                                    <div class="mt-2">
+                                        <code class="small user-select-all" style="word-break: break-all;">${this.escapeHtml(publicKey)}</code>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
@@ -2352,6 +2368,26 @@ class ModernContactsManager {
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById('advertModal'));
         modal.show();
+
+        // Render the MeshCore add-contact deep link as a scannable QR
+        const qrContainer = document.getElementById('qrCodeContainer');
+        if (qrContainer && /^[0-9a-f]{64}$/.test(publicKey)) {
+            // Same table modules/commands/contact_command.py uses for the bot's own card:
+            // 1 Companion, 2 Repeater, 3 Room Server, 4 Sensor.
+            const roleToType = { companion: 1, repeater: 2, roomserver: 3, sensor: 4 };
+            const contactType = roleToType[contact.role] || 1;
+            const qrName = contact.username || 'Unknown';
+            const qrUrl = `meshcore://contact/add?name=${encodeURIComponent(qrName)}`
+                + `&public_key=${publicKey}&type=${contactType}`;
+            try {
+                const qr = qrcode(0, 'M');
+                qr.addData(qrUrl);
+                qr.make();
+                qrContainer.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+            } catch (error) {
+                console.error('QR rendering failed for contact', userId, error);
+            }
+        }
     }
     
     async geocodeContact(userId, buttonElement = null) {
