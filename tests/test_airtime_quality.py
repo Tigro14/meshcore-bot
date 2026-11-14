@@ -9,6 +9,7 @@ from modules.airtime_analysis import Contacts, build_report, create_tables, duty
 from modules.airtime_quality import (
     local_load,
     observer_metadata,
+    recent_receptions,
     reception_history,
     rolling_peak,
     write_observer_metadata,
@@ -218,3 +219,48 @@ def test_packet_history_distinguishes_confirmed_zero_from_missing_and_truncated_
                                   frames=[(10, 80)], truncated=True)
     assert all(point['rx_packets_per_minute'] is None for point in truncated['rx_series'])
     assert all(point['rx_mean_frame_bytes'] is None for point in truncated['rx_series'])
+
+
+def test_recent_receptions_use_exact_rolling_bounds_and_all_copies():
+    frames = [(599, 9000, 250), (600, 9000, 250), (601, 1000, 40),
+              (601, 1000, 40), (900, 2000, 70), (901, 9000, 250)]
+    result = recent_receptions(frames, 900, [], 0)
+    assert result['start_time'] == 600
+    assert result['window_seconds'] == 300
+    assert result['rx_packets'] == 3
+    assert result['rx_airtime_ms'] == 4000
+    assert result['rx_percent'] == pytest.approx(4/300*100, abs=1e-6)
+    assert result['rx_packets_per_minute'] == .6
+    assert result['rx_mean_frame_bytes'] == 50
+    assert result['status'] == 'partial_observations'
+
+
+def test_recent_metrics_require_history_and_never_invent_silence():
+    warmup = recent_receptions([(899, 1000, 40)], 900, [(880, 900)], 880)
+    assert warmup['status'] == 'insufficient_history'
+    assert warmup['rx_percent'] is warmup['rx_packets_per_minute'] is warmup['rx_mean_frame_bytes'] is None
+    silent = recent_receptions([], 900, [(600, 900)])
+    assert silent['rx_percent'] == silent['rx_packets_per_minute'] == 0
+    assert silent['rx_mean_frame_bytes'] is None
+    assert silent['status'] == 'complete_capture'
+    gap = recent_receptions([], 900, [(600, 890)], 0)
+    assert gap['listening_seconds'] == 290
+    assert gap['rx_percent'] is gap['rx_packets_per_minute'] is None
+    truncated = recent_receptions([(899, 1000, 40)], 900, [(600, 900)], 0, truncated=True)
+    assert truncated['status'] == 'truncated'
+    assert truncated['rx_percent'] is truncated['rx_packets_per_minute'] is None
+
+
+def test_report_recent_metrics_are_independent_of_selected_history_and_display_bins(db):
+    now = 7*86400
+    packet = {'path_hex': '', 'route_type_name': 'FLOOD', 'payload_type_name': 'GRP_TXT',
+              'bytes_per_hop': 2, 'payload_hex': '11'*40}
+    for index, at in enumerate([0, now-301, now-300, now-299, now, now+1]):
+        db.execute("INSERT INTO packet_stream VALUES (?,?,?,'packet')", (index, at, json.dumps(packet)))
+    ingest_stream(db, MOD)
+    snapshots = [build_report(db, now=now, window=period, _comparison=False)['local']['rx_last_five_minutes']
+                 for period in ('1h', '24h', '7d')]
+    assert snapshots[0] == snapshots[1] == snapshots[2]
+    assert snapshots[0]['rx_packets'] == 2
+    assert snapshots[0]['rx_packets_per_minute'] == .4
+    assert snapshots[0]['rx_mean_frame_bytes'] == 42

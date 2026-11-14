@@ -41,15 +41,15 @@
     <div class="alert alert-warning py-2 small" id="airtime-recording" hidden></div>
     <div class="row g-3 mb-3">
         <div class="col-12 col-sm-6 col-xl-3"><div class="card h-100"><div class="card-body">
-            <div class="airtime-label">Occupation moyenne du canal</div><div class="airtime-value" id="airtime-rx">N/D</div>
+            <div class="airtime-label">Occupation du canal · 5 min</div><div class="airtime-value" id="airtime-rx">N/D</div>
             <div class="small text-muted" id="airtime-rx-note">Moyenne sur la période</div>
         </div></div></div>
         <div class="col-12 col-sm-6 col-xl-3"><div class="card h-100"><div class="card-body">
             <div class="airtime-label">Pic d’occupation du canal</div><div class="airtime-value" id="airtime-peak">N/D</div>
-            <div class="small text-muted">Les cinq minutes les plus chargées</div>
+            <div class="small text-muted" id="airtime-peak-note">Pic sur 5 minutes</div>
         </div></div></div>
         <div class="col-12 col-sm-6 col-xl-3"><div class="card h-100"><div class="card-body">
-            <div class="airtime-label" title="Moyenne sur l’historique disponible de la période, copies reçues comprises.">Paquets reçus par minute</div><div class="airtime-value" id="airtime-packet-rate">N/D</div>
+            <div class="airtime-label" title="Moyenne sur les cinq dernières minutes, copies reçues comprises.">Paquets reçus/min · 5 min</div><div class="airtime-value" id="airtime-packet-rate">N/D</div>
             <div class="small text-muted" id="airtime-packet-size">Taille moyenne : N/D</div>
         </div></div></div>
         <div class="col-12 col-sm-6 col-xl-3"><div class="card h-100"><div class="card-body">
@@ -184,7 +184,7 @@
                 this.renderRecording(live);
                 el('airtime-status').textContent = hourly
                     ? 'Actualisé à ' + new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})
-                    : 'Activité actualisée · Duty cycle indisponible.';
+                    : 'Historique actualisé · Mesures récentes indisponibles.';
             } catch {
                 if (sequence !== this.sequence) return;
                 el('airtime-status').textContent = 'Actualisation impossible. Les données précédentes ne sont pas à jour.';
@@ -221,17 +221,22 @@
             this.data = data; this.hourly = hourly;
             this.rows = this.dutyRows(data, hourly);
             const enoughHistory = (data.coverage?.available_seconds || 0) >= 300;
-            el('airtime-rx').textContent = pct(enoughHistory ? data.local.rx_percent : null);
+            const recent = hourly?.local?.rx_last_five_minutes;
+            el('airtime-rx').textContent = pct(recent?.rx_percent);
             const periodNames = {'1h': 'la dernière heure', '24h': '24 heures', '7d': '7 jours'};
             const partial = data.coverage?.available_seconds < data.window_seconds - 300;
             el('airtime-rx-note').textContent = enoughHistory
-                ? (partial ? 'Moyenne sur ' + number(data.coverage.available_seconds / 3600) + ' h d’historique disponible' : 'Moyenne sur ' + periodNames[data.window])
+                ? (partial ? 'Moyenne sur ' + number(data.coverage.available_seconds / 3600) + ' h disponibles' : 'Moyenne sur ' + periodNames[data.window]) + ' : ' + pct(data.local.rx_percent)
                 : 'Historique en cours de constitution';
             el('airtime-peak').textContent = pct(data.local.rx_peak_five_minute_percent);
-            const packetRate = enoughHistory ? data.local.rx_packets_per_minute : null;
+            const peakAt = data.local.rx_peak_five_minute_ending_at;
+            el('airtime-peak-note').textContent = known(data.local.rx_peak_five_minute_percent) && known(peakAt)
+                ? '5 min se terminant le ' + parisDate.format(new Date(peakAt * 1000)) + ' à ' + parisTime.format(new Date(peakAt * 1000))
+                : 'Pic sur 5 minutes indisponible';
+            const packetRate = recent?.rx_packets_per_minute;
             el('airtime-packet-rate').textContent = known(packetRate)
                 ? (packetRate > 0 && packetRate < .001 ? '< 0,001' : number(packetRate)) : 'N/D';
-            const meanSize = data.local.rx_mean_frame_bytes;
+            const meanSize = recent?.rx_mean_frame_bytes;
             el('airtime-packet-size').textContent = 'Taille moyenne : ' + (known(meanSize)
                 ? meanSize.toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' octets' : 'N/D');
             this.renderDuty();

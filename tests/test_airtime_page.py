@@ -56,7 +56,8 @@ class TestAirtimePage:
         main, details = body.split('<div class="modal fade" id="airtime-details"', 1)
         assert main.count('<canvas') == 1
         assert '<table' not in main
-        assert 'Occupation moyenne du canal' in main
+        assert 'Occupation du canal · 5 min' in main
+        assert 'Paquets reçus/min · 5 min' in main
         assert 'Duty cycle estimé' in main
         assert 'airtime-duty-list' in main and 'airtime-source-list' in main
         assert details.count('<table') == 3
@@ -105,6 +106,9 @@ class TestPassiveAirtimeAPI:
         assert data['local']['rx_packets_per_minute'] is None
         assert data['local']['rx_mean_frame_bytes'] is None
         assert data['local']['rx_frame_bytes'] == 0
+        assert data['local']['rx_last_five_minutes']['window_seconds'] == 300
+        assert data['local']['rx_last_five_minutes']['rx_percent'] is None
+        assert data['local']['rx_last_five_minutes']['rx_packets_per_minute'] is None
         assert data['local']['rx_peak_five_minute_percent'] is None
         assert len(data['local']['rx_series']) == 60
         assert all(bucket['percent'] is None for bucket in data['local']['rx_series'])

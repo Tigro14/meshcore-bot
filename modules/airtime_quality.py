@@ -31,6 +31,33 @@ def rolling_peak(events: list[tuple[float, float, bool]], start: float, end: flo
     return {'percent': round(peak / (seconds * 1000) * 100, 6), 'ending_at': peak_at}
 
 
+def recent_receptions(frames: list[tuple[float, float, int]], end: float,
+                      intervals: list[tuple[float, float]], retained_from: float | None = None,
+                      *, truncated: bool = False) -> dict:
+    """Exact rolling five minutes, all RX copies, independent of display bins.
+
+    A missing capture interval never confirms silence. A fresh installation
+    must accumulate five minutes of history before reporting a fixed-window rate.
+    """
+    start = end-300
+    listening = covered_buckets(intervals, start, end, 300)[0]
+    complete = listening >= 300-1e-6
+    selected = [(ms, size) for at, ms, size in frames if start < at <= end]
+    ready = not truncated and (complete or retained_from is not None and retained_from <= start)
+    known = ready and (bool(selected) or complete)
+    airtime = sum(ms for ms, _ in selected)
+    size = sum(size for _, size in selected)
+    return {'start_time': start, 'end_time': end, 'window_seconds': 300,
+            'status': 'truncated' if truncated else 'insufficient_history' if not ready else (
+                'complete_capture' if complete else 'partial_observations'),
+            'listening_seconds': round(listening, 3),
+            'rx_packets': len(selected) if known else None,
+            'rx_airtime_ms': round(airtime, 3) if known else None,
+            'rx_percent': round(airtime/300000*100, 6) if known else None,
+            'rx_packets_per_minute': round(len(selected)/5, 6) if known else None,
+            'rx_mean_frame_bytes': round(size/len(selected), 3) if known and selected else None}
+
+
 def reception_history(events: list[tuple[float, float, bool]], start: float, end: float,
                       intervals: list[tuple[float, float]] | None = None, *,
                       frames: list[tuple[float, int]] | None = None, truncated: bool = False) -> dict:
