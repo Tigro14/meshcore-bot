@@ -56,8 +56,8 @@ class TestAirtimePage:
         main, details = body.split('<div class="modal fade" id="airtime-details"', 1)
         assert main.count('<canvas') == 1
         assert '<table' not in main
-        assert 'Occupation du canal · 5 min' in main
-        assert 'Paquets reçus/min · 5 min' in main
+        assert 'Occupation moyenne du canal' in main
+        assert 'Paquets reçus par minute' in main
         assert 'Duty cycle estimé' in main
         assert 'airtime-duty-list' in main and 'airtime-source-list' in main
         assert details.count('<table') == 3

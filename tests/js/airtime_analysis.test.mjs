@@ -112,7 +112,7 @@ test('insufficient capture never becomes a quiet-network zero; historical covera
     assert.equal(elements.get('airtime-chart-empty').hidden,false);
     assert.match(elements.get('airtime-model-note').textContent,/insuffisants/);
     instance.render({...data,coverage:{available_seconds:3600}},hourly);
-    assert.match(elements.get('airtime-rx-note').textContent,/1 h disponibles : 0,5 %/);
+    assert.equal(elements.get('airtime-rx-note').textContent,'Moyenne sur 1 h disponibles');
 });
 test('source order is distinct originals rather than received copies and search covers every detail tab',()=>{
     const {instance,elements}=viewer();
@@ -152,9 +152,9 @@ test('an hourly request failure clears current duty instead of using stale daily
     };
     await instance.load();
     assert.equal(elements.get('airtime-duty').textContent,'N/D');
-    assert.equal(elements.get('airtime-rx').textContent,'N/D');
+    assert.equal(elements.get('airtime-rx').textContent,'0,5 %');
     assert.equal(elements.get('airtime-packet-rate').textContent,'N/D');
-    assert.match(elements.get('airtime-status').textContent,/Mesures récentes indisponibles/);
+    assert.match(elements.get('airtime-status').textContent,/Duty cycle indisponible/);
 });
 test('a late old-period response cannot overwrite a newer period or its controls',async()=>{
     const {instance,elements}=viewer();elements.set('airtime-period',{value:'24h'});
@@ -281,32 +281,40 @@ test('midnight is a mandatory X-axis tick and nearby labels do not overlap it',(
 });
 
 
-test('recent headers stay on five minutes while the comparison and peak follow the selected period',()=>{
+test('occupation and packet averages follow the selected period while duty stays hourly',()=>{
     const {instance,elements}=viewer();
     const peakAt=Date.parse('2026-11-14T08:34:00Z')/1000;
     instance.render({...data,local:{...data.local,rx_packets_per_minute:9,rx_mean_frame_bytes:150,
         rx_peak_five_minute_ending_at:peakAt}},hourly);
-    assert.equal(elements.get('airtime-rx').textContent,'1,5 %');
-    assert.equal(elements.get('airtime-rx-note').textContent,'Moyenne sur 24 heures : 0,5 %');
+    assert.equal(elements.get('airtime-rx').textContent,'0,5 %');
+    assert.equal(elements.get('airtime-rx-note').textContent,'Moyenne sur 24 heures');
     assert.equal(elements.get('airtime-peak-note').textContent,'5 min se terminant le 14/11 à 09:34');
-    assert.equal(elements.get('airtime-packet-rate').textContent,'0,6');
-    assert.equal(elements.get('airtime-packet-size').textContent,'Taille moyenne : 63,8 octets');
+    assert.equal(elements.get('airtime-packet-rate').textContent,'9');
+    assert.equal(elements.get('airtime-packet-size').textContent,'Taille moyenne : 150 octets');
     instance.render({...data,window:'7d',window_seconds:604800,coverage:{available_seconds:604800},
-        local:{...data.local,rx_percent:.2,rx_peak_five_minute_percent:4,rx_peak_five_minute_ending_at:peakAt-86400}},hourly);
-    assert.equal(elements.get('airtime-rx').textContent,'1,5 %');
-    assert.equal(elements.get('airtime-rx-note').textContent,'Moyenne sur 7 jours : 0,2 %');
-    assert.equal(elements.get('airtime-packet-rate').textContent,'0,6');
+        local:{...data.local,rx_percent:.2,rx_packets_per_minute:.8,rx_mean_frame_bytes:63.75,
+            rx_peak_five_minute_percent:4,rx_peak_five_minute_ending_at:peakAt-86400}},hourly);
+    assert.equal(elements.get('airtime-rx').textContent,'0,2 %');
+    assert.equal(elements.get('airtime-rx-note').textContent,'Moyenne sur 7 jours');
+    assert.equal(elements.get('airtime-packet-rate').textContent,'0,8');
+    assert.equal(elements.get('airtime-packet-size').textContent,'Taille moyenne : 63,8 octets');
+    assert.equal(elements.get('airtime-duty').textContent,'0,1 %');
     assert.equal(elements.get('airtime-peak').textContent,'4 %');
     assert.equal(elements.get('airtime-peak-note').textContent,'5 min se terminant le 13/11 à 09:34');
-    instance.render(data,{...hourly,local:{rx_last_five_minutes:{rx_percent:0,rx_packets_per_minute:0,rx_mean_frame_bytes:null}}});
+    instance.render({...data,local:{...data.local,rx_percent:0,rx_packets_per_minute:0,rx_mean_frame_bytes:null}},hourly);
     assert.equal(elements.get('airtime-rx').textContent,'0 %');
     assert.equal(elements.get('airtime-packet-rate').textContent,'0');
     assert.equal(elements.get('airtime-packet-size').textContent,'Taille moyenne : N/D');
-    instance.render(data,{...hourly,local:{rx_last_five_minutes:{rx_percent:null,rx_packets_per_minute:null,rx_mean_frame_bytes:null}}});
+    instance.render({...data,local:{...data.local,rx_percent:null,rx_packets_per_minute:null,rx_mean_frame_bytes:null}},hourly);
     assert.equal(elements.get('airtime-rx').textContent,'N/D');
     assert.equal(elements.get('airtime-packet-rate').textContent,'N/D');
     instance.render(data,null);
-    assert.equal(elements.get('airtime-rx').textContent,'N/D');
+    assert.equal(elements.get('airtime-rx').textContent,'0,5 %');
     assert.equal(elements.get('airtime-packet-rate').textContent,'N/D');
     assert.equal(elements.get('airtime-peak-note').textContent,'Pic sur 5 minutes indisponible');
+    instance.render({...data,coverage:{available_seconds:10},local:{...data.local,rx_packets_per_minute:6}},hourly);
+    assert.equal(elements.get('airtime-rx').textContent,'N/D');
+    assert.equal(elements.get('airtime-packet-rate').textContent,'N/D');
+    instance.render({...data,local:{...data.local,rx_packets_per_minute:.000099}},hourly);
+    assert.equal(elements.get('airtime-packet-rate').textContent,'< 0,001');
 });
