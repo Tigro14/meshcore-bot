@@ -6,6 +6,11 @@ semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Web viewer gains a **Channels** page at `/channels`, on the anonymous allowlist: every channel the bot knows — monitored (`[Channels] monitor_channels`), held by a radio slot, or only known by key — as a card badged with which of those it is, each with its MeshCore add-channel QR code (`meshcore://channel/add?name=…&secret=…`, drawn in the browser by the vendored `qrcode-generator`) plus a copyable link. The QR exposure is consent-limited: a hashtag channel is always encoded because its secret is derivable from the published name (`SHA256("#name")[:16]`, the rule `ChannelManager.generate_hashtag_key` already uses), a custom channel's secret is its private key and is only encoded for an authenticated operator, and `Public` is never encoded because its key is fixed by MeshCore rather than hashtag-derived. `GET /api/channels/view` feeds the page.
+- A Settings entry (**Channels**, at `/channels/settings`) edits `[Channels] monitor_channels` with a comment-preserving write and a queued hot reload, reported back through the same operation queue the Radio page uses. A monitored hashtag channel the radio does not hold yet is queued onto a free channel slot (`[Bot] max_channels`) with no key sent, so the firmware derives it; a monitored custom channel is not created there, because choosing its key is a deliberate act, and removing a channel does not free its radio slot. Names with a space, a comma, `%` or a newline, a list longer than the slot count, and `Public` without the `[Bot]` override key are refused before anything is written. `GET`/`POST /api/channels/settings`. See `docs/web-viewer.md`.
+
 ### Fixed
 
 - The bot refuses to start when another instance is already running against the same database, and names that instance's PID. Two instances on one radio evicted each other from single-client companion servers in an endless reconnect loop. The lock is a `<db_path>.lock` file beside the bot database and is released by the OS when the process exits, so a killed bot never leaves a stale lock behind.

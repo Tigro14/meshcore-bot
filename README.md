@@ -209,6 +209,9 @@ Features:
 - **Contacts** — live contact list with signal, path, and location data; star any contact; purge inactive contacts by age threshold; export to CSV/JSON
 - **Mesh Graph** — interactive node graph of the mesh network
 - **Radio Settings** — manage channels, reboot or connect/disconnect the radio
+- **Channels** — public `/channels` page carrying a MeshCore "Add Channel" QR code for each hashtag
+  channel (a custom channel's code is admin-only, and `Public` is never shared), plus a Settings editor
+  for `monitor_channels` that provisions new hashtag channels onto free radio slots
 - **Feeds** — manage RSS/API feed subscriptions per channel
 - **Packets** — raw packet monitor
 - **Live Activity** — real-time color-coded packet/command/message feed with pause and clear controls

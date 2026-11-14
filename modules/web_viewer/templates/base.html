@@ -833,6 +833,14 @@
                             <i class="fas fa-project-diagram"></i> Mesh Graph
                         </a>
                     </li>
+                    {#- Ungated like Contacts and the mesh graph: the /channels page carries
+                        channel names and hashtag-derived QR secrets (see api_channels_view),
+                        never a private channel key. -#}
+                    <li class="nav-item">
+                        <a class="nav-link {{ 'active' if request.path == '/channels' }}" href="{{ url_for('channels_page') }}">
+                            <i class="fas fa-hashtag"></i> Channels
+                        </a>
+                    </li>
                     {% if multibyte_monitor_enabled %}
                     <li class="nav-item">
                         <a class="nav-link {{ 'active' if request.path == '/multibyte-rollout' }}" href="{{ url_for('multibyte_rollout') }}">
@@ -849,7 +857,7 @@
 
                     {#- Configuration pages live behind one gear so the bar stays about
                         what the mesh is doing, not how the bot is set up. -#}
-                    {% set settings_paths = ['/radio', '/schedule', '/greeter', '/feeds', '/region-warnings', '/repeater-watch', '/plugins', '/config'] %}
+                    {% set settings_paths = ['/radio', '/schedule', '/greeter', '/feeds', '/region-warnings', '/channels/settings', '/repeater-watch', '/plugins', '/config'] %}
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle {{ 'active' if request.path in settings_paths }}"
                            href="#" id="settingsDropdown" role="button"
@@ -889,6 +897,11 @@
                             <li>
                                 <a class="dropdown-item {{ 'active' if request.path == '/repeater-watch' }}" href="{{ url_for('repeater_watch_page') }}">
                                     <i class="fas fa-heart-pulse fa-fw me-2"></i>Repeater Watch
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item {{ 'active' if request.path == '/channels/settings' }}" href="{{ url_for('channel_settings_page') }}">
+                                    <i class="fas fa-hashtag fa-fw me-2"></i>Channels
                                 </a>
                             </li>
                             <li>

@@ -273,6 +273,9 @@ token =
 # Bot will only respond to messages on these channels
 # Use exact channel names as configured on your MeshCore node
 # Use hashtags for hashtag channels (i.e. #mybotchannel, #weather, etc.)
+# The web viewer also edits this list (Settings -> Channels, at /channels/settings), and
+# its public /channels page publishes the MeshCore "Add Channel" QR code of every monitored
+# hashtag channel.
 monitor_channels = #mybotchannel
 
 # Enable DM responses
