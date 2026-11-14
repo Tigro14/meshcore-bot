@@ -146,6 +146,8 @@ class TestChannelsPageAccess:
         resp = _client(gated_viewer).get("/channels/settings")
         assert resp.status_code == 302
         assert "/login" in resp.headers["Location"]
+        # A reused redirect is how a stale login page survives a deployment.
+        assert "no-cache" in resp.headers["Cache-Control"]
 
     def test_the_settings_editor_opens_for_an_admin(self, gated_viewer):
         resp = _login(gated_viewer).get("/channels/settings")
@@ -160,6 +162,18 @@ class TestChannelsPageAccess:
         html = _client(viewer).get("/channels").get_data(as_text=True)
         assert 'href="/channels"' in html
         assert 'href="/channels/settings"' in html
+
+    def test_a_rendered_page_is_not_kept_by_the_browser(self, viewer):
+        """The nav is rendered from the deployed template, and pages carry no asset
+        fingerprint: a page a browser reused from before a deployment hides links
+        that page no longer has."""
+        resp = _client(viewer).get("/channels")
+        assert "no-cache" in resp.headers["Cache-Control"]
+
+    def test_an_api_that_sets_its_own_freshness_is_left_alone(self, viewer):
+        """Revalidation must not overwrite a deliberate max-age on a feed."""
+        resp = _client(viewer).get("/api/telemetry/occupancy")
+        assert "max-age" in resp.headers.get("Cache-Control", "")
 
 
 # ---------------------------------------------------------------------------

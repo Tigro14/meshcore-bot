@@ -291,6 +291,14 @@ semantic versioning.
 
 ### Fixed
 
+- A web viewer page kept in a browser could show a **navigation bar from before the deployment**
+  that added a page — the new **Channels** link stayed invisible on a live bot days after it
+  shipped. Pages are rendered fresh but reference their assets by plain path, and rendered HTML
+  carried no `Cache-Control` at all, so a browser was free to reuse its copy of the page while
+  every asset it loaded was current (Werkzeug serves `static/` with an `ETag` and `no-cache`).
+  Rendered HTML and redirects are now sent with `Cache-Control: no-cache`, so a reused page has to
+  revalidate it; endpoints that deliberately cache their payload keep their own `Cache-Control`.
+  `docs/web-viewer.md` records the symptom and the manual way out (force reload, private window).
 - Web Viewer `/bbs` top senders now print the sender **name** instead of the raw public key for
   legacy `bbs_messages` rows. Rows written after BBS went key-based hold the sender public key in
   `sender_id` and the display name in `sender_name`, but the stats query used `sender_id` as the

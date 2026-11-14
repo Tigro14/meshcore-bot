@@ -1086,6 +1086,14 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             response.headers['X-Content-Type-Options'] = 'nosniff'
             response.headers['X-Frame-Options'] = 'SAMEORIGIN'
             response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+            # Rendered pages carry no fingerprint and no version query on their
+            # assets, so a page a browser kept from an earlier deployment can show a
+            # navigation bar from before that deployment — the Channels link stayed
+            # invisible on a live bot days after it shipped, while every asset was
+            # fresh (Werkzeug serves static/ with an ETag).  Revalidate each page;
+            # endpoints that want real caching set their own Cache-Control below.
+            if 'text/html' in (response.content_type or ''):
+                response.headers.setdefault('Cache-Control', 'no-cache')
             # Every script, stylesheet and font is served from static/ (see
             # static/vendor/README.md); the only external hosts are the map tiles.
             # The highest-risk admin screens have migrated their inline handlers

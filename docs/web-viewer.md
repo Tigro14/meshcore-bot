@@ -678,12 +678,26 @@ pip3 install flask flask-socketio
 chmod +x restart_viewer.sh
 ```
 
+### A navigation link is missing after a deployment
+The navigation bar is rendered from the deployed template, and pages reference their
+assets by plain path (no fingerprint, no version query), so a page a browser kept from
+before a deployment can show a navigation bar from before it. Static files are not the
+problem: Werkzeug serves `static/` with an `ETag` and `no-cache`, so a reused page still
+fetches fresh JS and CSS. Force a reload (Ctrl+Shift+R), or open the page in a private
+window, and the current navigation appears. Rendered HTML now answers with
+`Cache-Control: no-cache`, so a reused page has to revalidate it instead of trusting its
+copy; endpoints that deliberately cache their payload (`/api/telemetry/occupancy`, the
+mesh and tracking feeds) still set their own `Cache-Control`.
+
 ## Security Notes
 
 - The web viewer is designed for local network use
 - Set `host = 127.0.0.1` for localhost-only access
 - Set `host = 0.0.0.0` for network access (use with caution)
 - For network access, set `web_viewer_password` or use a reverse proxy with authentication and firewall rules
+- Rendered pages and redirects are sent with `Cache-Control: no-cache`: they carry per-request
+  state (a CSP nonce, the session's admin flag, the deployed template) that must not survive in
+  a browser copy
 
 ## Future Enhancements
 
