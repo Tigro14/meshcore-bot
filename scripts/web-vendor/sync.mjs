@@ -70,6 +70,12 @@ const LIBRARIES = {
     'vendor/js-sha256/sha256.min.js': 'build/sha256.min.js',
     'vendor/js-sha256/LICENSE.txt': 'LICENSE.txt',
   },
+  // No .min.js build upstream; the dist UMD build defines the global `qrcode`.
+  // The package ships no LICENSE file — its MIT terms are the header of the
+  // dist file itself, which is why nothing else is vendored here.
+  'qrcode-generator': {
+    'vendor/qrcode-generator/qrcode.js': 'dist/qrcode.js',
+  },
   // The login page's fonts: variable, Latin subset.
   '@fontsource-variable/dm-sans': {
     'fonts/dm-sans-latin-opsz-normal.woff2': 'files/dm-sans-latin-opsz-normal.woff2',
