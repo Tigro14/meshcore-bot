@@ -311,6 +311,12 @@ semantic versioning.
   config overlay) and read back on every start. If that file cannot be read or written the viewer
   still starts, on a key for that process only, and says so in the log. Deleting the file is how you
   invalidate every outstanding login.
+- The **add-contact QR could draw nothing at all** in the advert modal. The vendored
+  `qrcode-generator` emits a scalable `<svg>` with a `viewBox` but no `width`/`height` attributes,
+  and inside the modal's shrink-to-fit `#qrCodeContainer` that left the size circular — a browser
+  free to resolve it to a collapsed box. The modal now sizes the QR itself (a 220px box capped by
+  the column, `width: 100%; height: auto` on the SVG), the way the Channels page already sizes its
+  QR cards.
 - A web viewer page kept in a browser could show a **navigation bar from before the deployment**
   that added a page — the new **Channels** link stayed invisible on a live bot days after it
   shipped. Pages are rendered fresh but reference their assets by plain path, and rendered HTML

@@ -418,6 +418,26 @@
         overflow-wrap: anywhere;
     }
 
+    /* Advert modal QR: the vendored library emits a scalable <svg> with a viewBox but no
+       width/height attributes, so the box has to supply one — an attribute-free SVG inside a
+       shrink-to-fit container can collapse to nothing. */
+    #qrCodeContainer {
+        width: 220px;
+        max-width: 100%;
+        padding: 0.5rem;
+        background-color: #fff;
+        border-radius: 0.375rem;
+    }
+    #qrCodeContainer:empty {
+        padding: 0;
+        background-color: transparent;
+    }
+    #qrCodeContainer svg {
+        display: block;
+        width: 100%;
+        height: auto;
+    }
+
     .tooltip.multibyte-capable-hint .tooltip-inner {
         max-width: min(22rem, 92vw);
         text-align: left;
