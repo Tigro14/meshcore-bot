@@ -366,7 +366,9 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                    'compliance': 'not_determined',
                    'rx_denominator': 'available_wall_clock_span', 'modulation_profiles': [],
                    'capture_continuity': 'healthy_local_pipeline_heartbeats',
-                   'capture_max_interval_seconds': 75},
+                   'capture_max_interval_seconds': 75,
+                   'rx_packet_basis': 'local_receptions_including_copies',
+                   'rx_packet_size': 'complete_meshcore_frame_bytes'},
         'limitations': ['local_receiver_only', 'unheard_transmissions_not_counted',
                         'known_prefix_uniqueness_not_identity_proof', 'same_path_retries_may_be_merged_when_inferred',
                         'unobserved_forwarding_delay_is_assumed', 'inferred_transmission_time_is_estimated',
@@ -379,6 +381,7 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                      'capture_uptime_known': False, 'effective_start_time': start,
                      'available_seconds': seconds},
         'local': {'rx_airtime_ms': 0.0, 'rx_packets': 0, 'rx_percent': None,
+                  'rx_frame_bytes': 0, 'rx_packets_per_minute': None, 'rx_mean_frame_bytes': None,
                   'unattributed_author_airtime_ms': 0.0, 'unattributed_author_packets': 0},
         'quality': {'ambiguous_hops': 0, 'unknown_hops': 0, 'excluded_route_packets': 0,
                     'collapsed_inferred_copies': 0}, 'authors': [], 'repeaters': [],
@@ -443,6 +446,7 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                 report['method']['modulation_profiles'].append(profile)
             local['rx_airtime_ms'] += ms
             local['rx_packets'] += 1
+            local['rx_frame_bytes'] += frame_bytes
             if report['coverage']['first_observation_at'] is None:
                 report['coverage']['first_observation_at'] = at
             report['coverage']['last_observation_at'] = at
@@ -540,8 +544,12 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
     if local['rx_packets']:
         local['requested_window_rx_percent'] = round(local['rx_airtime_ms']/1000/seconds*100, 6)
         local['rx_percent'] = round(local['rx_airtime_ms']/1000/report['coverage']['available_seconds']*100, 6)
+        if not report['coverage']['truncated']:
+            local['rx_packets_per_minute'] = round(local['rx_packets']/report['coverage']['available_seconds']*60, 6)
+            local['rx_mean_frame_bytes'] = round(local['rx_frame_bytes']/local['rx_packets'], 3)
     elif local['rx_confirmed_listening_seconds'] >= seconds-1e-6:
         local['rx_percent'] = 0.0
+        local['rx_packets_per_minute'] = 0.0
     if _comparison and retained_from is not None and retained_from <= start-seconds:
         if report['coverage']['truncated']:
             report['comparison']['status'] = 'truncated'

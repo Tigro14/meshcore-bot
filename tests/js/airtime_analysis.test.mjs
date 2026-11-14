@@ -251,3 +251,23 @@ test('midnight is a mandatory X-axis tick and nearby labels do not overlap it',(
     axis.afterBuildTicks(noMidnight);
     assert.equal(noMidnight.ticks.length,1);
 });
+
+
+test('packet card follows the selected period and keeps average frame size below the rate',()=>{
+    const {instance,elements}=viewer();
+    instance.render({...data,local:{...data.local,rx_packets_per_minute:.5,rx_mean_frame_bytes:63.75}},hourly);
+    assert.equal(elements.get('airtime-packet-rate').textContent,'0,5');
+    assert.equal(elements.get('airtime-packet-size').textContent,'Taille moyenne : 63,8 octets');
+    instance.render({...data,window:'1h',local:{...data.local,rx_packets_per_minute:2,rx_mean_frame_bytes:80}},hourly);
+    assert.equal(elements.get('airtime-packet-rate').textContent,'2');
+    assert.equal(elements.get('airtime-packet-size').textContent,'Taille moyenne : 80 octets');
+    instance.render({...data,local:{...data.local,rx_packets_per_minute:0,rx_mean_frame_bytes:null}},hourly);
+    assert.equal(elements.get('airtime-packet-rate').textContent,'0');
+    assert.equal(elements.get('airtime-packet-size').textContent,'Taille moyenne : N/D');
+    instance.render({...data,local:{...data.local,rx_packets_per_minute:.000099,rx_mean_frame_bytes:50}},hourly);
+    assert.equal(elements.get('airtime-packet-rate').textContent,'< 0,001');
+    instance.render({...data,coverage:{available_seconds:10},local:{...data.local,rx_packets_per_minute:6}},hourly);
+    assert.equal(elements.get('airtime-packet-rate').textContent,'N/D');
+    instance.render(data,hourly);
+    assert.equal(elements.get('airtime-packet-rate').textContent,'N/D');
+});

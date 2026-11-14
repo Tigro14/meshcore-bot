@@ -40,15 +40,19 @@
     <p class="small text-muted mb-2" id="airtime-status" role="status" aria-live="polite">Chargement…</p>
     <div class="alert alert-warning py-2 small" id="airtime-recording" hidden></div>
     <div class="row g-3 mb-3">
-        <div class="col-12 col-sm-4"><div class="card h-100"><div class="card-body">
+        <div class="col-12 col-sm-6 col-xl-3"><div class="card h-100"><div class="card-body">
             <div class="airtime-label">Occupation moyenne du canal</div><div class="airtime-value" id="airtime-rx">N/D</div>
             <div class="small text-muted" id="airtime-rx-note">Moyenne sur la période</div>
         </div></div></div>
-        <div class="col-12 col-sm-4"><div class="card h-100"><div class="card-body">
+        <div class="col-12 col-sm-6 col-xl-3"><div class="card h-100"><div class="card-body">
             <div class="airtime-label">Pic d’occupation du canal</div><div class="airtime-value" id="airtime-peak">N/D</div>
             <div class="small text-muted">Les cinq minutes les plus chargées</div>
         </div></div></div>
-        <div class="col-12 col-sm-4"><div class="card h-100"><div class="card-body">
+        <div class="col-12 col-sm-6 col-xl-3"><div class="card h-100"><div class="card-body">
+            <div class="airtime-label" title="Moyenne sur l’historique disponible de la période, copies reçues comprises.">Paquets reçus par minute</div><div class="airtime-value" id="airtime-packet-rate">N/D</div>
+            <div class="small text-muted" id="airtime-packet-size">Taille moyenne : N/D</div>
+        </div></div></div>
+        <div class="col-12 col-sm-6 col-xl-3"><div class="card h-100"><div class="card-body">
             <div class="airtime-label">Duty cycle estimé le plus élevé</div><div class="airtime-value" id="airtime-duty">N/D</div>
             <div class="small text-muted airtime-name" id="airtime-duty-note">Sur la dernière heure · Repère : 10 %</div>
         </div></div></div>
@@ -220,6 +224,12 @@
                 ? (partial ? 'Moyenne sur ' + number(data.coverage.available_seconds / 3600) + ' h d’historique disponible' : 'Moyenne sur ' + periodNames[data.window])
                 : 'Historique en cours de constitution';
             el('airtime-peak').textContent = pct(data.local.rx_peak_five_minute_percent);
+            const packetRate = enoughHistory ? data.local.rx_packets_per_minute : null;
+            el('airtime-packet-rate').textContent = known(packetRate)
+                ? (packetRate > 0 && packetRate < .001 ? '< 0,001' : number(packetRate)) : 'N/D';
+            const meanSize = data.local.rx_mean_frame_bytes;
+            el('airtime-packet-size').textContent = 'Taille moyenne : ' + (known(meanSize)
+                ? meanSize.toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' octets' : 'N/D');
             this.renderDuty();
             el('airtime-volume').textContent = number(data.traffic.distinct_packets) + ' paquets distincts';
             this.renderChart(data);

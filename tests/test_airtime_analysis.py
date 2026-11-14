@@ -433,3 +433,36 @@ def test_trend_with_short_history_is_not_extrapolated(conn):
     r = report(conn)
     assert r['comparison']['status'] == 'insufficient_history'
     assert all(node['trend']['change_percent'] is None for node in r['repeaters'])
+
+
+def test_rx_packet_rate_and_mean_size_share_full_frames_copies_and_period(conn):
+    # An older retained frame sets the available-history boundary without entering 1 h.
+    insert(conn, 1, packet(('aabb',), payload='cc'*20), NOW-7200)
+    original = packet(('aabb',), payload='aa'*10)
+    insert(conn, 2, original, NOW-120)
+    insert(conn, 3, original, NOW-110)
+    insert(conn, 4, packet(route='TRANSPORT_FLOOD', payload='bb'*20), NOW-100)
+    hourly = report(conn)
+    local = hourly['local']
+    assert local['rx_packets'] == 3
+    assert hourly['traffic']['distinct_packets'] == 2
+    assert local['rx_frame_bytes'] == 14+14+30
+    assert local['rx_packets_per_minute'] == .05
+    assert local['rx_mean_frame_bytes'] == pytest.approx(58/3, abs=.001)
+    daily = report(conn, '24h')
+    assert daily['coverage']['available_seconds'] == 7200
+    assert daily['local']['rx_packets_per_minute'] == pytest.approx(4/120, abs=1e-6)
+    assert daily['local']['rx_mean_frame_bytes'] == 20.5
+    assert hourly['method']['rx_packet_basis'] == 'local_receptions_including_copies'
+
+
+def test_packet_metrics_are_unknown_when_the_selected_observations_are_truncated(conn, monkeypatch):
+    insert(conn, 1, packet(), NOW-100)
+    insert(conn, 2, packet(), NOW-90)
+    while ingest_stream(conn, MOD)['processed']:
+        pass
+    monkeypatch.setattr('modules.airtime_analysis.MAX_ROWS', 1)
+    result = build_report(conn, now=NOW, window='1h')
+    assert result['coverage']['truncated'] is True
+    assert result['local']['rx_packets_per_minute'] is None
+    assert result['local']['rx_mean_frame_bytes'] is None

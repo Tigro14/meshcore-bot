@@ -63,6 +63,8 @@ def test_empty_capture_is_zero_only_if_the_entire_requested_window_is_confirmed(
     conn.execute('INSERT INTO airtime_capture_intervals VALUES (0,3600)')
     report = build_report(conn, now=3600, window='1h')
     assert report['local']['rx_percent'] == 0
+    assert report['local']['rx_packets_per_minute'] == 0
+    assert report['local']['rx_mean_frame_bytes'] is None
     assert all(point['percent'] == 0 for point in report['local']['rx_series'])
     conn.execute('DELETE FROM airtime_capture_intervals')
     conn.execute('INSERT INTO airtime_capture_intervals VALUES (0,300)')
