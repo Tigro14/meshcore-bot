@@ -102,6 +102,12 @@ admin surface. Everything not on the public allowlist redirects to `/login` (pag
   streams are open to anonymous sockets but filtered per channel: unpublished messages,
   hidden-channel commands and private bot replies reach admin sessions only.
 
+The viewer signs its admin session cookie with a key kept in `<local_dir>/web_viewer_session.key`
+(`0600`, beside `local/config.ini`), created on the first start and reused afterwards. That is what
+lets a login survive `systemctl restart`, a deploy or a reboot. A viewer that cannot read or write
+that file still starts — it runs on a key for that process only and logs a warning, which means its
+logins end at the next restart. Deleting the file invalidates every outstanding login.
+
 ## Reverse Proxy With Nginx Basic Auth
 
 If you expose the web viewer outside your local network, run it behind HTTPS and authentication. One option is to bind the viewer locally, then put Nginx in front with basic auth:

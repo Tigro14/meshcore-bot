@@ -295,8 +295,11 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             static_folder=os.path.join(os.path.dirname(__file__), 'static'),
             static_url_path='/static'
         )
-        import secrets as _secrets
-        self.app.config['SECRET_KEY'] = _secrets.token_hex(32)
+        # Flask signs the admin session cookie with this key. A key drawn afresh on every
+        # start invalidates every cookie the viewer already signed, so a restart — a deploy,
+        # a reboot, a crash-restart — logged every logged-in admin out with no message. The
+        # key is created once and kept in local/ (0600, gitignored) beside the local overlay.
+        self.app.config['SECRET_KEY'] = self._load_or_create_session_secret()
         self.app.config['SESSION_COOKIE_HTTPONLY'] = True
         self.app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
         self.app.config['PERMANENT_SESSION_LIFETIME'] = 86400  # 24 hours
@@ -586,6 +589,43 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         self._base_sections = base_sections
         self._local_sections = local_sections
         return base_parser
+
+    def _load_or_create_session_secret(self) -> str:
+        """Return the viewer's session-signing key, creating it on the first run.
+
+        The key lives at ``<local_dir>/web_viewer_session.key`` with mode 0600, beside the
+        local config overlay and outside git. Keeping it there is what lets an admin login
+        survive a restart: the cookie a previous process signed still verifies here. If the
+        file cannot be read or written (read-only install, permission slip) the viewer still
+        starts on a key for this run only and says so in the log.
+        """
+        key_path = self.local_dir / "web_viewer_session.key"
+        try:
+            stored = key_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            stored = ""
+        except OSError as exc:
+            self.logger.warning(f"Could not read the session key at {key_path}: {exc}")
+            return secrets.token_hex(32)
+
+        # 32 hex characters is what token_hex(32) writes; anything shorter is a truncated
+        # or hand-edited file, so it is replaced rather than trusted.
+        if len(stored) >= 32:
+            return stored
+
+        secret = secrets.token_hex(32)
+        try:
+            self.local_dir.mkdir(parents=True, exist_ok=True)
+            fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                os.fchmod(handle.fileno(), 0o600)
+                handle.write(secret + "\n")
+        except OSError as exc:
+            self.logger.warning(
+                f"Could not write the session key at {key_path}: {exc}. "
+                "Admin logins will not survive a restart."
+            )
+        return secret
 
     def _get_version_info(self) -> dict[str, str | None]:
         """Get version info for footer via centralized version resolver. Never raises."""

@@ -302,6 +302,15 @@ semantic versioning.
 
 ### Fixed
 
+- A viewer **restart logged every admin out**. `SECRET_KEY` was drawn from `secrets.token_hex()` on
+  every start, so the session cookie the previous process signed stopped verifying: `systemctl
+  restart`, a deploy or a reboot dropped the operator's login without a word, and on the contacts
+  page that quietly removed the admin-only row actions (star, geocode, delete) an anonymous visitor
+  never gets — it looked like the page had lost its buttons. The key is now written once to
+  `<local_dir>/web_viewer_session.key` (`0600`, inside the gitignored `local/`, beside the local
+  config overlay) and read back on every start. If that file cannot be read or written the viewer
+  still starts, on a key for that process only, and says so in the log. Deleting the file is how you
+  invalidate every outstanding login.
 - A web viewer page kept in a browser could show a **navigation bar from before the deployment**
   that added a page — the new **Channels** link stayed invisible on a live bot days after it
   shipped. Pages are rendered fresh but reference their assets by plain path, and rendered HTML

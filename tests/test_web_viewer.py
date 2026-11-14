@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import sqlite3
+import stat
 from contextlib import closing, contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -67,6 +68,18 @@ def _fake_setup_logging(self: BotDataViewer) -> None:
     if not self.logger.handlers:
         self.logger.addHandler(logging.NullHandler())
     self.logger.propagate = False
+
+
+def _viewer_without_threads(db_path: str, config_path: str) -> BotDataViewer:
+    """Build a viewer over an existing config without logging or background threads."""
+    with (
+        patch.object(BotDataViewer, "_setup_logging", _fake_setup_logging),
+        patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
+        patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
+        patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+        patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
+    ):
+        return BotDataViewer(db_path=db_path, config_path=config_path)
 
 
 # ---------------------------------------------------------------------------
@@ -1720,6 +1733,29 @@ class TestRoleBasedAccess:
         assert sock.is_connected()
         sock.get_received()
         sock.disconnect()
+
+    def test_admin_login_survives_a_viewer_restart(self, auth_viewer):
+        """A restart must not invalidate the session cookie the old process signed.
+
+        SECRET_KEY used to be drawn afresh on every start, so `systemctl restart` dropped
+        every admin session: the contacts page quietly lost its star/geocode/delete actions
+        and nothing told the operator why.
+        """
+        with auth_viewer.app.test_client() as browser:
+            browser.post("/login", data={"password": "secret123"})
+            assert browser.get("/logs").status_code == 200
+            signed_cookie = browser.get_cookie("session").value
+
+        restarted = _viewer_without_threads(auth_viewer.db_path, auth_viewer.config_path)
+        with restarted.app.test_client() as returning_browser:
+            returning_browser.set_cookie("session", signed_cookie)
+            assert returning_browser.get("/logs").status_code == 200
+
+    def test_session_key_is_a_private_file_beside_the_local_overlay(self, auth_viewer):
+        """The key is kept where the bot keeps its other machine-local state: 0600, gitignored."""
+        key_path = auth_viewer.local_dir / "web_viewer_session.key"
+        assert key_path.read_text(encoding="utf-8").strip() == auth_viewer.app.config["SECRET_KEY"]
+        assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
 
 
 # ===========================================================================
