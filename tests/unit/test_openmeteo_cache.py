@@ -153,7 +153,14 @@ def test_cache_key_rounds_coordinates_and_tracks_params():
 
 
 def test_usable_windows():
-    payload = {'utc_offset_seconds': 3600, 'current': {'time': datetime.now(timezone.utc).isoformat(timespec="minutes")}}
+    # Open-Meteo stamps `current.time` with the location's local wall clock and no zone
+    # suffix, and that is the day the freshness window compares.  A UTC-stamped time (the
+    # shape this test used to build) lands on the other side of local midnight whenever the
+    # run happens near 23:00 UTC, which is a CI hour, so the payload is built from the local
+    # day it declares — midday, so no assertion sits near that boundary.
+    offset = 3600
+    local_day = (datetime.now(timezone.utc) + timedelta(seconds=offset)).date()
+    payload = {'utc_offset_seconds': offset, 'current': {'time': f"{local_day.isoformat()}T12:00"}}
     assert open_meteo_cache_is_usable(payload, 7.0, OPEN_METEO_CACHE_FRESH_HOURS) is True
     assert open_meteo_cache_is_usable(payload, 9.0, OPEN_METEO_CACHE_FRESH_HOURS) is False
     assert open_meteo_cache_is_usable(payload, 20.0, OPEN_METEO_CACHE_MAX_AGE_HOURS) is True

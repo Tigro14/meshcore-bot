@@ -63,6 +63,23 @@ function loadManagerClass() {
         console,
         document: {
             body: fakeElement(),
+            // escapeHtml() builds a throwaway element to lean on the browser's own
+            // text/attribute escaping.
+            createElement() {
+                const node = fakeElement();
+                Object.defineProperty(node, 'innerHTML', {
+                    get() {
+                        return String(this.textContent ?? '')
+                            .replace(/&/g, '&amp;')
+                            .replace(/"/g, '&quot;')
+                            .replace(/'/g, '&#39;')
+                            .replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;');
+                    },
+                    set(value) { this.textContent = value; },
+                });
+                return node;
+            },
             getElementById(id) {
                 return elements.get(id) || null;
             },
@@ -588,4 +605,64 @@ test('Contacts always shows numeric drift, independently of clock verification',
         clock_drift_status: 'stale', clock_drift_seconds: 27,
         clock_observed_at: 1793818149, clock_drift_source: 'advert',
     }), />27s</);
+});
+
+// The advert modal carries the MeshCore add-contact deep link as a QR the phone
+// can scan.  It was lost once already, in a merge that resolved contacts.html in
+// favour of the restyled side (4517e7e), so the payload is pinned here.
+function advertQrFixture(contact) {
+    const { context, elements, Manager } = loadManagerClass();
+    const rendered = [];
+    const modalHtml = [];
+    context.document.body.insertAdjacentHTML = (_position, html) => { modalHtml.push(html); };
+    context.qrcode = () => ({
+        addData(value) { rendered.push(value); },
+        make() {},
+        createSvgTag() { return '<svg data-qr="1"></svg>'; },
+    });
+    context.bootstrap.Modal = class Modal {
+        constructor() {}
+        show() {}
+    };
+    elements.set('qrCodeContainer', fakeElement());
+    const manager = bareManager(Manager);
+    manager.filteredData = [contact];
+    context.fetch = async () => successfulResponse({ raw_advert_data_parsed: { name: contact.username } });
+    return { manager, rendered, modalHtml, qrContainer: elements.get('qrCodeContainer') };
+}
+
+test('the advert modal renders a meshcore://contact/add QR for the contact key', async () => {
+    const publicKey = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const { manager, rendered, modalHtml, qrContainer } = advertQrFixture({
+        user_id: publicKey, username: 'Relais du Mont', role: 'repeater',
+    });
+    await manager.viewAdvertData(publicKey);
+
+    assert.equal(rendered.length, 1);
+    assert.equal(
+        rendered[0],
+        `meshcore://contact/add?name=${encodeURIComponent('Relais du Mont')}` +
+        `&public_key=${publicKey}&type=2`,
+    );
+    // Drawn by the vendored library (CDN scripts are forbidden in templates).
+    assert.match(qrContainer.innerHTML, /data-qr="1"/);
+    // The QR belongs in the advert modal itself, next to the payload it describes.
+    assert.match(modalHtml.join(''), /id="qrCodeContainer"/);
+    assert.match(modalHtml.join(''), /Scan to add node/);
+});
+
+test('an unknown role still yields a companion card rather than a broken one', async () => {
+    const publicKey = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+    const { manager, rendered } = advertQrFixture({ user_id: publicKey, username: 'x', role: '' });
+    await manager.viewAdvertData(publicKey);
+    assert.match(rendered[0], /&type=1$/);
+});
+
+test('a contact without a 64-hex key renders no QR', async () => {
+    const { manager, rendered, qrContainer } = advertQrFixture({
+        user_id: 'abcd', username: 'short', role: 'companion',
+    });
+    await manager.viewAdvertData('abcd');
+    assert.equal(rendered.length, 0);
+    assert.equal(qrContainer.innerHTML, '');
 });

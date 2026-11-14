@@ -44,6 +44,13 @@ Enabling a channel publishes its messages in **Live Channel Messages**; it does
 not duplicate conversations in the log stream. Existing local log files and
 stored messages are not erased or rewritten, and retention settings are unchanged.
 
+Publication also decides what the public **Channels** page (`/channels`) may hand
+out as a MeshCore *Add Channel* QR code, whose `secret` is the channel key: a
+custom channel's code reaches anonymous visitors only while
+`live_messages_visible` is on, hashtag channels are always offered because their
+key is derived from the published name, and `Public` is never offered. See
+[web-viewer.md](web-viewer.md).
+
 ## Management API and authentication
 
 - `GET /api/channels` and `/api/channels/live`: visible channel labels only, no keys.

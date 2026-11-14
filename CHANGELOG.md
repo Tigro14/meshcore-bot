@@ -8,6 +8,39 @@ semantic versioning.
 
 ### Added
 
+- Web viewer gains a **Channels** page at `/channels`, on the anonymous allowlist: the channels
+  this bot knows — monitored, held by the radio, or only listed by the bot (`[Channels_List]`,
+  `decode_hashtag_channels`), each badged with which of those it is — as a card grid with its
+  MeshCore add-channel QR code
+  (`meshcore://channel/add?name=…&secret=…`, drawn in the browser by the vendored
+  `qrcode-generator`) plus a copyable link. The QR exposure is consent-limited — a hashtag
+  channel is always encoded because its secret is derivable from the published name
+  (`SHA256("#name")[:16]`, the rule `ChannelManager.generate_hashtag_key` already uses), a
+  custom channel is encoded for visitors only once the operator published its messages on the
+  Radio page, unpublished custom channels are left out of the anonymous feed rather than listed
+  name-only, and `Public` is never encoded because its key is fixed by MeshCore rather than
+  hashtag-derived. An authenticated operator also sees the private keys. `GET /api/channels/view`
+  feeds the page.
+- A Settings entry (**Channels**, at `/channels/settings`) edits `[Channels] monitor_channels`
+  with a comment-preserving write and a queued hot reload, reported back through the same
+  operation queue the Radio page uses. A monitored hashtag channel the radio does not hold yet is
+  queued onto a free channel slot (`[Bot] max_channels`) with no key sent, so the firmware derives
+  it; a monitored custom channel is not created there, because choosing its key is a deliberate
+  act, and removing a channel does not free its radio slot. Names with a space, comma, `%` or
+  newline, a list longer than the slot count, and `Public` without the `[Bot]` override key are
+  refused before anything is written. `GET`/`POST /api/channels/settings`. See `docs/web-viewer.md`.
+
+- The **View advertisement data** modal on the contacts page shows a **MeshCore add-contact QR**
+  beside the advert payload: `meshcore://contact/add?name=…&public_key=…&type=…`, the deep link the
+  MeshCore mobile app scans to add that heard node as a contact. It is drawn from the vendored
+  `qrcode-generator` like the Channels page, and it is a *restoration*: the modal carried this QR
+  since `9526622` (2026-09-09), and merge `4517e7e` dropped it while resolving `contacts.html` in
+  favour of the restyled side of the conflict — pickaxe history hides such losses because `git log
+  -S` skips merge commits. Drawn client-side from data the page already prints (the 64-hex public
+  key, the advert name, the role → MeshCore `type` table also used by the bot's `contact` command);
+  a contact whose key is not 64 hex characters gets no QR. `tests/js/contacts_manager.test.mjs`
+  pins the payload so a future conflict resolution cannot silently drop it again.
+
 - BBS recipients now get **private staged notifications**: one aggregate DM on
   arrival, one at +24h if still unread, and a final notice at +73h naming the purge
   age — always a single DM per recipient carrying the unread count, never one DM per
@@ -269,6 +302,29 @@ semantic versioning.
 
 ### Fixed
 
+- A viewer **restart logged every admin out**. `SECRET_KEY` was drawn from `secrets.token_hex()` on
+  every start, so the session cookie the previous process signed stopped verifying: `systemctl
+  restart`, a deploy or a reboot dropped the operator's login without a word, and on the contacts
+  page that quietly removed the admin-only row actions (star, geocode, delete) an anonymous visitor
+  never gets — it looked like the page had lost its buttons. The key is now written once to
+  `<local_dir>/web_viewer_session.key` (`0600`, inside the gitignored `local/`, beside the local
+  config overlay) and read back on every start. If that file cannot be read or written the viewer
+  still starts, on a key for that process only, and says so in the log. Deleting the file is how you
+  invalidate every outstanding login.
+- The **add-contact QR could draw nothing at all** in the advert modal. The vendored
+  `qrcode-generator` emits a scalable `<svg>` with a `viewBox` but no `width`/`height` attributes,
+  and inside the modal's shrink-to-fit `#qrCodeContainer` that left the size circular — a browser
+  free to resolve it to a collapsed box. The modal now sizes the QR itself (a 220px box capped by
+  the column, `width: 100%; height: auto` on the SVG), the way the Channels page already sizes its
+  QR cards.
+- A web viewer page kept in a browser could show a **navigation bar from before the deployment**
+  that added a page — the new **Channels** link stayed invisible on a live bot days after it
+  shipped. Pages are rendered fresh but reference their assets by plain path, and rendered HTML
+  carried no `Cache-Control` at all, so a browser was free to reuse its copy of the page while
+  every asset it loaded was current (Werkzeug serves `static/` with an `ETag` and `no-cache`).
+  Rendered HTML and redirects are now sent with `Cache-Control: no-cache`, so a reused page has to
+  revalidate it; endpoints that deliberately cache their payload keep their own `Cache-Control`.
+  `docs/web-viewer.md` records the symptom and the manual way out (force reload, private window).
 - Web Viewer `/bbs` top senders now print the sender **name** instead of the raw public key for
   legacy `bbs_messages` rows. Rows written after BBS went key-based hold the sender public key in
   `sender_id` and the display name in `sender_name`, but the stats query used `sender_id` as the

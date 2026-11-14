@@ -833,6 +833,14 @@
                             <i class="fas fa-globe"></i> Region
                         </a>
                     </li>
+                    {#- Ungated like the Region explainer: the /channels page only
+                        carries names and hashtag-derived QR secrets (see
+                        api_channels_view), never a private channel key. -#}
+                    <li class="nav-item">
+                        <a class="nav-link {{ 'active' if request.path == '/channels' }}" href="/channels">
+                            <i class="fas fa-hashtag"></i> Channels
+                        </a>
+                    </li>
                     {#- Ungated like the region page: the airtime APIs it reads are on the
                         anonymous allowlist, and a modelled airtime figure is not private. -#}
                     <li class="nav-item">
@@ -875,7 +883,7 @@
 
                     {#- Configuration pages live behind one gear so the bar stays about
                         what the mesh is doing, not how the bot is set up. -#}
-                    {% set settings_paths = ['/radio', '/schedule', '/greeter', '/feeds', '/region-warnings', '/plugins', '/config'] %}
+                    {% set settings_paths = ['/radio', '/schedule', '/greeter', '/feeds', '/region-warnings', '/channels/settings', '/plugins', '/config'] %}
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle {{ 'active' if request.path in settings_paths }}"
                            href="#" id="settingsDropdown" role="button"
@@ -910,6 +918,11 @@
                             <li>
                                 <a class="dropdown-item {{ 'active' if request.path == '/region-warnings' }}" href="/region-warnings">
                                     <i class="fas fa-globe fa-fw me-2"></i>Region Warnings
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item {{ 'active' if request.path == '/channels/settings' }}" href="/channels/settings">
+                                    <i class="fas fa-hashtag fa-fw me-2"></i>Channels
                                 </a>
                             </li>
                             <li>
