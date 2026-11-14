@@ -142,6 +142,10 @@ def test_cr8_full_frames_and_own_reply_correlation_are_preserved(db):
     assert result['local']['rx_airtime_ms'] == lora_airtime_ms(46, **MOD)
     nonempty = [point['percent'] for point in result['local']['rx_series'] if point['percent'] is not None]
     assert nonempty == [pytest.approx(result['local']['rx_airtime_ms']/60000*100, abs=1e-6)]
+    received = [point for point in result['local']['rx_series'] if point['rx_packets']]
+    assert len(received) == 1
+    assert received[0]['rx_packets_per_minute'] == 1
+    assert received[0]['rx_mean_frame_bytes'] == 46
     assert result['local_load']['neighbour_count'] == 1
     assert result['local_load']['observer_evidenced_airtime_ms'] == pytest.approx(lora_airtime_ms(42, **MOD), abs=.001)
     assert result['traffic']['identified_author_packets'] == 1
@@ -185,3 +189,32 @@ def test_display_resolution_preserves_total_airtime_and_exact_five_minute_peak(d
     assert sum(point['percent']*step/100 for point in result['rx_series']) == pytest.approx(6, abs=1e-4)
     assert result['rx_peak_five_minute_percent'] == 1
     assert result['rx_confirmed_listening_seconds'] == duration
+
+
+@pytest.mark.parametrize('duration,step', [(3600, 60), (86400, 900), (7*86400, 3600)])
+def test_packet_history_uses_the_same_bins_and_counts_all_received_copies(duration, step):
+    # Lookbehind and future frames are excluded; repeated receptions still count.
+    frames = [(-1, 200), (10, 40), (10, 40), (step, 70), (duration+1, 250)]
+    result = reception_history([(at, 1000, True) for at, _ in frames], 0, duration,
+                               [(0, step)], frames=frames)
+    first, second, unknown = result['rx_series'][:3]
+    assert first['rx_packets'] == 2
+    assert first['rx_packets_per_minute'] == round(120/step, 6)
+    assert first['rx_mean_frame_bytes'] == 40
+    assert second['rx_packets'] == 1
+    assert second['rx_packets_per_minute'] == round(60/step, 6)
+    assert second['rx_mean_frame_bytes'] == 70
+    assert unknown['rx_packets_per_minute'] is None
+    assert unknown['rx_mean_frame_bytes'] is None
+    assert sum(point['rx_packets'] or 0 for point in result['rx_series']) == 3
+
+
+def test_packet_history_distinguishes_confirmed_zero_from_missing_and_truncated_data():
+    result = reception_history([], 0, 3600, [(0, 60)])
+    assert result['rx_series'][0]['rx_packets_per_minute'] == 0
+    assert result['rx_series'][0]['rx_mean_frame_bytes'] is None
+    assert result['rx_series'][1]['rx_packets_per_minute'] is None
+    truncated = reception_history([(10, 1000, True)], 0, 3600, [(0, 3600)],
+                                  frames=[(10, 80)], truncated=True)
+    assert all(point['rx_packets_per_minute'] is None for point in truncated['rx_series'])
+    assert all(point['rx_mean_frame_bytes'] is None for point in truncated['rx_series'])

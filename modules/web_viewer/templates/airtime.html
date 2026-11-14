@@ -63,7 +63,11 @@
         </div>
         <div class="card-body">
             <p class="small text-muted mb-0" id="airtime-chart-empty" hidden>Aucune observation exploitable.</p>
-            <div class="airtime-chart" id="airtime-chart-wrap"><canvas id="airtime-chart" aria-label="Histogramme de l’occupation reçue au fil du temps"></canvas></div>
+            <div class="d-flex flex-wrap gap-3 small text-muted mb-2" aria-label="Légende du graphique">
+                <span><span style="display:inline-block;width:10px;height:10px;background:#7ca4cf;border-radius:2px;margin-right:5px"></span>Occupation du canal (%)</span>
+                <span><span style="display:inline-block;width:16px;height:2px;background:#cb873e;vertical-align:middle;margin-right:5px"></span>Paquets/min</span>
+            </div>
+            <div class="airtime-chart" id="airtime-chart-wrap"><canvas id="airtime-chart" aria-label="Occupation du canal en barres et paquets reçus par minute en courbe"></canvas></div>
             <p class="small text-muted mt-2 mb-0"><span id="airtime-resolution"></span> · <span style="display:inline-block;width:12px;height:3px;background:#aeb7c2;vertical-align:middle"></span> 0 % : silence confirmé.</p>
         </div>
     </section>
@@ -277,17 +281,26 @@
             el('airtime-chart-wrap').hidden = !series.length;
             el('airtime-chart-empty').hidden = hasData;
             if (!series.length) return;
-            const dataset = {label: 'Occupation reçue (%)', data: series.map(point => {
+            const points = series.map(point => {
                 const start = point.start_time ?? point.end_time - bucketSeconds;
-                return {x: (start + point.end_time) / 2, y: point.percent, start, end: point.end_time, coverage: point.coverage};
-            }), backgroundColor: '#7ca4cf', hoverBackgroundColor: '#497fb8', borderWidth: 0,
+                return {x: (start + point.end_time) / 2, y: point.percent, start, end: point.end_time, coverage: point.coverage,
+                    meanSize: point.rx_mean_frame_bytes};
+            });
+            const dataset = {type: 'bar', yAxisID: 'y', order: 1, label: 'Occupation du canal', data: points,
+                backgroundColor: '#7ca4cf', hoverBackgroundColor: '#497fb8', borderWidth: 0,
                 borderRadius: 2, barThickness: 'flex', maxBarThickness: data.window === '1h' ? 44 : 16,
                 categoryPercentage: 1, barPercentage: data.window === '1h' ? .85 : .65};
+            const packetDataset = {type: 'line', yAxisID: 'packets', order: 0, label: 'Paquets/min',
+                data: points.map((point, index) => ({...point, y: series[index].rx_packets_per_minute ?? null})),
+                borderColor: '#cb873e', backgroundColor: '#cb873e', borderWidth: 1.5,
+                pointRadius: 0, pointHoverRadius: 3, tension: 0, spanGaps: false};
+            const hasPackets = series.some(point => known(point.rx_packets_per_minute));
             if (this.chart) {
-                this.chart.data.datasets = [dataset];
+                this.chart.data.datasets = [dataset, packetDataset];
                 this.chart.options.scales.x.min = data.start_time;
                 this.chart.options.scales.x.max = data.end_time;
                 this.chart.options.scales.y.display = hasData;
+                this.chart.options.scales.packets.display = hasPackets;
                 this.chart.update();
                 return;
             }
@@ -324,14 +337,19 @@
                 }
                 ctx.restore();
             }};
-            this.chart = new Chart(el('airtime-chart'), {type: 'bar', plugins: [silence, dates], data: {datasets: [dataset]}, options: {
+            this.chart = new Chart(el('airtime-chart'), {type: 'bar', plugins: [silence, dates], data: {datasets: [dataset, packetDataset]}, options: {
                 responsive: true, maintainAspectRatio: false,
                 layout: {padding: {top: 18}},
                 animation: false, interaction: {mode: 'index', intersect: false},
                 plugins: {legend: {display: false}, tooltip: {callbacks: {
                     title: items => items.length ? new Date(items[0].raw.start * 1000).toLocaleString('fr-FR', {timeZone}) + ' — '
                         + new Date(items[0].raw.end * 1000).toLocaleTimeString('fr-FR', {timeZone, hour: '2-digit', minute: '2-digit'}) : '',
-                    label: item => pct(item.parsed.y),
+                    label: item => item.dataset.yAxisID === 'packets' ? 'Paquets/min : ' + number(item.parsed.y)
+                        : 'Occupation : ' + pct(item.parsed.y),
+                    afterBody: items => {
+                        const size = items[0]?.raw.meanSize;
+                        return known(size) ? 'Taille moyenne : ' + size.toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' octets' : '';
+                    },
                 }}},
                 scales: {x: {type: 'linear', offset: false, min: data.start_time, max: data.end_time,
                     afterBuildTicks: scale => {
@@ -347,7 +365,11 @@
                         callback: value => parisTime.format(new Date(value * 1000))}},
                 y: {display: hasData, beginAtZero: true, suggestedMax: 1,
                     grid: {color: 'rgba(128,128,128,.10)', drawTicks: false}, border: {display: false},
-                    ticks: {maxTicksLimit: 4, padding: 8, font: {size: 11}, callback: value => number(value) + ' %'}}},
+                    ticks: {maxTicksLimit: 4, padding: 8, font: {size: 11}, callback: value => number(value) + ' %'}},
+                packets: {type: 'linear', position: 'right', display: hasPackets, beginAtZero: true, suggestedMax: 1,
+                    grid: {drawOnChartArea: false, drawTicks: false}, border: {display: false},
+                    title: {display: true, text: 'Paquets/min', color: '#a86c2e', font: {size: 11}},
+                    ticks: {maxTicksLimit: 4, padding: 8, font: {size: 11}, color: '#a86c2e', callback: value => number(value)}}},
             }});
         }
         renderDetails() {

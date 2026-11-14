@@ -32,23 +32,38 @@ def rolling_peak(events: list[tuple[float, float, bool]], start: float, end: flo
 
 
 def reception_history(events: list[tuple[float, float, bool]], start: float, end: float,
-                      intervals: list[tuple[float, float]] | None = None) -> dict:
+                      intervals: list[tuple[float, float]] | None = None, *,
+                      frames: list[tuple[float, int]] | None = None, truncated: bool = False) -> dict:
     """One full-frame RX series; fixed buckets and unknown gaps, no TX mixture."""
     duration = end-start
     step = 60 if duration <= 3600 else 900 if duration <= 86400 else 3600
     count = max(1, int((end-start+step-1)//step))
     coverage = covered_buckets(intervals or [], start, end, step)
     totals: dict[int, float] = {}
+    packets: dict[int, int] = {}
+    sizes: dict[int, list[int]] = {}
     for at, ms, _ in events:
         if start <= at <= end:
             index = min(count-1, int((at-start)//step))
             totals[index] = totals.get(index, 0.0)+ms
+            packets[index] = packets.get(index, 0)+1
+    for at, size in frames or []:
+        if start <= at <= end:
+            index = min(count-1, int((at-start)//step))
+            sizes.setdefault(index, []).append(size)
     series: list[dict[str, Any]] = []
     for index in range(count):
         left, right = start+index*step, min(end, start+(index+1)*step)
         complete = coverage[index] >= right-left-1e-6
         value = round(totals[index]/step/1000*100, 6) if index in totals else 0.0 if complete else None
+        received = packets.get(index, 0)
+        rate = round(received/step*60, 6) if received or complete else None
+        frame_sizes = sizes.get(index, [])
+        mean_size = round(sum(frame_sizes)/received, 3) if received and len(frame_sizes) == received else None
         series.append({'start_time': left, 'end_time': right, 'percent': value,
+                       'rx_packets': received if received or complete else None,
+                       'rx_packets_per_minute': None if truncated else rate,
+                       'rx_mean_frame_bytes': None if truncated else mean_size,
                        'listening_seconds': round(coverage[index], 3),
                        'coverage': 'complete' if complete else 'partial' if coverage[index] else 'unknown'})
     peak = rolling_peak(events, start, end, 300) if totals else {'percent': None, 'ending_at': None}

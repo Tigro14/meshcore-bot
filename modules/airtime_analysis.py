@@ -407,7 +407,9 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                         'ORDER BY observed_at DESC,source_id DESC LIMIT ?', (start-3600-DEDUP_SECONDS, now, MAX_ROWS+1)).fetchall()
     report['coverage']['truncated'] = len(rows) > MAX_ROWS
     rows = rows[:MAX_ROWS][::-1]
-    report['local'].update(reception_history([(row[0], row[9], True) for row in rows], start, now, capture))
+    report['local'].update(reception_history([(row[0], row[9], True) for row in rows], start, now, capture,
+                                           frames=[(row[0], row[5]) for row in rows],
+                                           truncated=report['coverage']['truncated']))
     links: dict[str, list] = defaultdict(list)
     for at, packet_hash, key, name in conn.execute('SELECT observed_at,packet_hash,author_key,author_name '
                                                  'FROM airtime_author_links WHERE observed_at>=? AND observed_at<=?',

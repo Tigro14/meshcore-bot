@@ -63,9 +63,9 @@ test('scenario duty stays labelled and the per-node bar clips without hiding the
     assert.match(elements.get('airtime-duty-list').innerHTML,/aria-valuemax="10"/);
     assert.match(elements.get('airtime-relay-details').innerHTML,/0,1 %.*12,5 %/);
 });
-test('the one RX chart has real gaps, no global threshold and updates its period bounds',()=>{
+test('the combined chart has real gaps, no global threshold and updates its period bounds',()=>{
     const {instance}=viewer();instance.render(data,hourly);
-    assert.equal(instance.chart.data.datasets.length,1);
+    assert.equal(instance.chart.data.datasets.length,2);
     assert.equal(instance.chart.data.datasets[0].data[1].y,null);
     assert.equal(instance.chart.type,'bar');
     assert.equal(instance.chart.data.datasets[0].data[0].x,1150);
@@ -74,9 +74,34 @@ test('the one RX chart has real gaps, no global threshold and updates its period
     instance.render({...data,start_time:500,end_time:90000},hourly);
     assert.equal(instance.chart.options.scales.x.min,500);
     assert.equal(instance.chart.options.scales.x.max,90000);
-    assert.equal(instance.chart.data.datasets[0].label,'Occupation reçue (%)');
+    assert.equal(instance.chart.data.datasets[0].label,'Occupation du canal');
     instance.render({...data,window:'7d'},hourly);
     assert.match(instance.chart.options.scales.x.ticks.callback(1000),/^\d{2}:\d{2}$/);
+});
+
+test('packet line shares bin centres with bars and its tooltip shows units and mean size',()=>{
+    const {instance}=viewer();
+    const series=[{start_time:1000,end_time:1300,percent:2,rx_packets_per_minute:.4,rx_mean_frame_bytes:63.75},
+        {start_time:1300,end_time:1600,percent:null,rx_packets_per_minute:null,rx_mean_frame_bytes:null},
+        {start_time:1600,end_time:1900,percent:0,rx_packets_per_minute:0,rx_mean_frame_bytes:null}];
+    instance.render({...data,local:{...data.local,rx_series:series}},hourly);
+    const [bars,line]=instance.chart.data.datasets;
+    assert.equal(bars.type,'bar');assert.equal(line.type,'line');
+    assert.equal(line.yAxisID,'packets');assert.equal(line.spanGaps,false);
+    assert.ok(line.order<bars.order); // Chart.js draws the lower order last, above bars.
+    assert.deepEqual(Array.from(line.data,point=>point.x),Array.from(bars.data,point=>point.x));
+    assert.deepEqual(Array.from(line.data,point=>point.y),[.4,null,0]);
+    const callbacks=instance.chart.options.plugins.tooltip.callbacks;
+    assert.equal(callbacks.label({dataset:bars,parsed:{y:2}}),'Occupation : 2 %');
+    assert.equal(callbacks.label({dataset:line,parsed:{y:.4}}),'Paquets/min : 0,4');
+    assert.equal(callbacks.afterBody([{raw:line.data[0]}]),'Taille moyenne : 63,8 octets');
+    assert.equal(callbacks.afterBody([{raw:line.data[2]}]),'');
+    assert.equal(instance.chart.options.scales.packets.position,'right');
+    assert.equal(instance.chart.options.plugins.legend.display,false);
+    instance.render({...data,window:'1h',local:{...data.local,rx_series:[{...series[0],rx_packets_per_minute:5}]}},hourly);
+    assert.equal(instance.chart.data.datasets[1].data[0].y,5);
+    instance.render(data,hourly);
+    assert.equal(instance.chart.options.scales.packets.display,false);
 });
 test('insufficient capture never becomes a quiet-network zero; historical coverage is explicit',()=>{
     const {instance,elements}=viewer();
