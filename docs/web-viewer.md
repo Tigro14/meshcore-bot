@@ -273,6 +273,12 @@ Rows replayed from the database when the page opens sit under "Heard before you 
 - Device types and status
 - First/last seen timestamps
 - Purge count tracking
+- "View advertisement data" modal: the raw advert payload, plus a MeshCore add-contact QR
+  (`meshcore://contact/add?name=…&public_key=…&type=…`) that the MeshCore mobile app scans
+  (*Admin → Add Node → Scan QR*) to add that node as a contact, with the 64-hex public key
+  printed beneath it. The QR encodes only what the page already prints — the contact's own
+  public key, its advertised name and its role — so it discloses nothing the contacts list
+  does not
 
 ### Contact Tracking
 - Complete history of all heard contacts

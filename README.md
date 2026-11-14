@@ -206,7 +206,9 @@ web_viewer_password = yourpassword   # optional; omit to disable auth
 ```
 
 Features:
-- **Contacts** — live contact list with signal, path, and location data; star any contact; purge inactive contacts by age threshold; export to CSV/JSON
+- **Contacts** — live contact list with signal, path, and location data; star any contact; purge inactive
+  contacts by age threshold; export to CSV/JSON; the advertisement-data modal carries a MeshCore "Add Node"
+  QR code for that contact
 - **Mesh Graph** — interactive node graph of the mesh network
 - **Radio Settings** — manage channels, reboot or connect/disconnect the radio
 - **Channels** — public `/channels` page carrying a MeshCore "Add Channel" QR code for each hashtag

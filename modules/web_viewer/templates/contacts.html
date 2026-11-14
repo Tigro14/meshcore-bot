@@ -418,6 +418,26 @@
         overflow-wrap: anywhere;
     }
 
+    /* Advert modal QR: the vendored library emits a scalable <svg> with a viewBox but no
+       width/height attributes, so the box has to supply one — an attribute-free SVG inside a
+       shrink-to-fit container can collapse to nothing. */
+    #qrCodeContainer {
+        width: 220px;
+        max-width: 100%;
+        padding: 0.5rem;
+        background-color: #fff;
+        border-radius: 0.375rem;
+    }
+    #qrCodeContainer:empty {
+        padding: 0;
+        background-color: transparent;
+    }
+    #qrCodeContainer svg {
+        display: block;
+        width: 100%;
+        height: auto;
+    }
+
     .tooltip.multibyte-capable-hint .tooltip-inner {
         max-width: min(22rem, 92vw);
         text-align: left;
@@ -815,6 +835,8 @@
 
 {% block page_libs %}
 <script src="{{ url_for('static', filename='vendor/chart.js/chart.umd.js') }}"></script>
+<!-- Add-contact / add-channel QR codes (see static/vendor/README.md) -->
+<script src="{{ url_for('static', filename='vendor/qrcode-generator/qrcode.js') }}"></script>
 {% endblock %}
 
 {% block extra_js %}
@@ -2307,7 +2329,10 @@ class ModernContactsManager {
             console.error('Error loading advertisement data:', err);
         }
 
-        // Create a modal to display the advertisement data
+        // Create a modal to display the advertisement data + the add-contact QR
+        // user_id is the contact's MeshCore public key: 64 hex characters, which is
+        // exactly what the add-contact QR takes as `public_key`.
+        const publicKey = contact.user_id;
         const modalHtml = `
             <div class="modal fade" id="advertModal" tabindex="-1" aria-labelledby="advertModalTitle">
                 <div class="modal-dialog modal-lg">
@@ -2317,7 +2342,19 @@ class ModernContactsManager {
                             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
                         <div class="modal-body">
-                            <pre class="advert-json mb-0">${this.escapeHtml(JSON.stringify(advertData, null, 2))}</pre>
+                            <div class="row g-3">
+                                <div class="col-md-8">
+                                    <pre class="advert-json mb-0">${this.escapeHtml(JSON.stringify(advertData, null, 2))}</pre>
+                                </div>
+                                <div class="col-md-4 text-center">
+                                    <h6><i class="fas fa-qrcode me-1" aria-hidden="true"></i>Scan to add node</h6>
+                                    <p class="small text-muted">MeshCore → Admin → Add Node → Scan QR</p>
+                                    <div id="qrCodeContainer" class="d-inline-block"></div>
+                                    <div class="mt-2">
+                                        <code class="small user-select-all" style="word-break: break-all;">${this.escapeHtml(publicKey)}</code>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
@@ -2339,6 +2376,26 @@ class ModernContactsManager {
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById('advertModal'));
         modal.show();
+
+        // Render the MeshCore add-contact deep link as a scannable QR
+        const qrContainer = document.getElementById('qrCodeContainer');
+        if (qrContainer && /^[0-9a-f]{64}$/.test(publicKey)) {
+            // MeshCore advert types -> the QR's `type`: CHAT=1 Companion, 2 Repeater,
+            // 3 Room Server, 4 Sensor. The role vocabulary is the one formatDeviceType uses.
+            const roleToType = { companion: 1, repeater: 2, roomserver: 3, sensor: 4 };
+            const contactType = roleToType[(contact.role || '').toLowerCase()] || 1;
+            const qrName = contact.username || 'Unknown';
+            const qrUrl = `meshcore://contact/add?name=${encodeURIComponent(qrName)}`
+                + `&public_key=${publicKey}&type=${contactType}`;
+            try {
+                const qr = qrcode(0, 'M');
+                qr.addData(qrUrl);
+                qr.make();
+                qrContainer.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+            } catch (error) {
+                console.error('QR rendering failed for contact', userId, error);
+            }
+        }
     }
     
     async geocodeContact(userId, buttonElement = null) {
