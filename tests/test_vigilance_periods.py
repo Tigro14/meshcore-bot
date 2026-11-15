@@ -248,7 +248,7 @@ def test_group_fingerprint_includes_date_and_windows_but_not_publication_time():
 async def test_tomorrow_is_announced_even_when_today_is_green_and_restart_does_not_repeat(monitor):
     service = monitor()
     messages = await check(service, batch(future="Orange"), NOW)
-    assert len(messages) == 1 and "Demain" in messages[0] and "08:00-18:00" in messages[0]
+    assert len(messages) == 1 and "Demain" in messages[0] and "8-18h" in messages[0]
     assert "22/29/35/56" in messages[0]
     assert service.alert_policy.state(period_key("29", TOMORROW))["color"] == "Orange"
     assert await check(monitor(), batch(future="Orange"), NOW + 3600) == []
@@ -257,7 +257,7 @@ async def test_tomorrow_is_announced_even_when_today_is_green_and_restart_does_n
 async def test_today_and_tomorrow_are_not_merged_into_a_timeless_alert(monitor):
     messages = await check(monitor(), batch("Orange", "Orange"), NOW)
     assert len(messages) == 2
-    assert sum("Aujourd'hui" in message for message in messages) == 1
+    assert sum(date.fromisoformat(TODAY).strftime('%d/%m') in message for message in messages) == 1
     assert sum("Demain" in message for message in messages) == 1
 
 
@@ -266,7 +266,7 @@ async def test_green_today_does_not_close_tomorrows_alert(monitor):
     await check(service, batch("Orange", "Orange"), NOW)
     service = monitor()
     messages = await check(service, batch("Vert", "Orange"), NOW + 3600)
-    assert len(messages) == 1 and "Fin de vigilance" in messages[0] and "Aujourd'hui" in messages[0]
+    assert len(messages) == 1 and "Fin de vigilance" in messages[0] and date.fromisoformat(TODAY).strftime('%d/%m') in messages[0]
     assert service.alert_policy.state(period_key("29", TOMORROW))["color"] == "Orange"
 
 

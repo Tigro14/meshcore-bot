@@ -38,6 +38,7 @@ from bs4 import BeautifulSoup, Tag
 from modules.utils import get_config_timezone
 from modules.vigilance_alert_policy import VigilanceAlertPolicy, fingerprint
 from modules.vigilance_cache import AvailabilityNotices, VigilanceCache
+from modules.vigilance_messages import compact_alerts
 from modules.vigilance_periods import (
     PARIS,
     attach_period,
@@ -728,7 +729,7 @@ class VigilanceService(BaseServicePlugin):
         {
             "key": "group_similar_alerts", "label": "Group similar alerts", "type": "bool",
             "default": False,
-            "help": "In change mode, group departments due an alert with the same color and phenomena.",
+            "help": "In change mode, summarize due alerts by day and level, sharing identical phenomenon schedules.",
         },
         {
             "key": "silence_mesh_output",
@@ -916,20 +917,33 @@ class VigilanceService(BaseServicePlugin):
                 if day == today or future or self.bulletin_cache.get(period_key(code, day)) is not None]
 
     async def _send_grouped_alerts(self, pending: list[tuple[str, dict[str, Any], str]]) -> None:
-        groups: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
+        groups: dict[tuple, list[tuple[str, dict[str, Any], str]]] = {}
         for event in pending:
-            key = 'clear:' + str(event[1].get('period_date', '')) if event[2] == 'clear' else fingerprint(event[1])
+            info = event[1]
+            key = (info.get('period_date', ''), info['color'],
+                   None if isinstance(info.get('phenomena'), list) else fingerprint(info))
             groups.setdefault(key, []).append(event)
         priority = {'Rouge': 0, 'Orange': 1, 'Jaune': 2, 'Vert': 3}
-        for events in sorted(groups.values(), key=lambda g: priority[g[0][1]['color']]):
+        for events in sorted(groups.values(), key=lambda g: (priority[g[0][1]['color']], g[0][1].get('period_date', ''))):
             codes = sorted(split_key(event[0])[0] for event in events)
-            reason = ('clear' if events[0][1]['color'] == 'Vert' else
-                      'reminder' if all(e[2] == 'reminder' for e in events) else 'change')
             info = dict(events[0][1])
             info['url'] = '\n'.join(sorted({e[1]['url'] for e in events if e[1].get('url')}))
-            message = self._format_change_message('/'.join(codes), info, reason,
-                                                  label='Depts' if len(codes) > 1 else 'Dept')
-            if await self._send_alert(message, info):
+            budget_fn = getattr(self.bot.command_manager, 'channel_body_budget', None)
+            budget = budget_fn(channel=self.channel, scope=self.get_mesh_flood_scope()) if callable(budget_fn) else None
+            # Conservative fallback when the sender cannot supply a byte budget.
+            if type(budget) is not int or budget < 1:
+                budget = 120
+            try:
+                messages = compact_alerts(events, _PHENOMENON_NAMES, time.time(), budget)
+            except (ValueError, KeyError):
+                # The central sender can split unusual/unstructured data safely.
+                messages = [self._format_change_message(code, data, reason) for code, data, reason in events]
+            sent = True
+            for message in messages:
+                if not await self._send_alert(message, info):
+                    sent = False
+                    break
+            if sent:
                 for code, data, _ in events:
                     self.alert_policy.record_sent(code, data, time.time())
                 self.logger.info('Vigilance group transmitted for depts %s: %s', ','.join(codes), info['color'])

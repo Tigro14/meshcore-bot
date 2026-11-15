@@ -28,7 +28,9 @@ def command(command_mock_bot, tmp_path):
     bot.db_manager = Metadata(tmp_path / "vigi.db")
     cmd = VigilanceCommand(bot)
     cmd.send_response = AsyncMock(return_value=True)
-    return cmd
+    # The canned bulletins must not expire as the real calendar advances.
+    with patch('modules.commands.vigilance_command.time.time', return_value=NOW):
+        yield cmd
 
 
 async def run(command, data, text="vigi"):

@@ -65,7 +65,7 @@ comments.
 | `notify_on_change` | Announce changes, daily reminders and the return to green; persist successfully sent alerts | `false` |
 | `reminder_interval` | Seconds before repeating an unchanged active vigilance in change mode | `86400` (24 h) |
 | `offline_cache` | Persist complete bulletins; report failed updates once and answer offline `vigi` queries with dated historical information | `false` |
-| `group_similar_alerts` | In change mode, combine departments due an alert with identical colors and phenomena | `false` |
+| `group_similar_alerts` | In change mode, summarize departments due an alert by day and overall level; share identical phenomenon schedules | `false` |
 | `include_tomorrow` | Read and track dated bulletins for today and tomorrow, with official phenomenon time windows | `false` |
 | `flood_scope` | Optional regional TC_FLOOD scope, e.g. `#west` | inherits `[Channels]` |
 | `silence_mesh_output` | Send only to Discord/Telegram, not to the mesh channel | `false` |
@@ -110,8 +110,14 @@ comments.
 - **Retries**: transient network errors (connection reset, timeouts, remote disconnects)
   are retried up to 3 times with exponential backoff and jitter; a failed poll is logged and
   the loop continues.
-- **Mesh size**: legacy alerts are kept compact (≤ 180 chars). Change-mode messages use
-  the command manager's byte-aware splitting and radio pacing when needed.
+- **Mesh size**: grouped change alerts repeat the date and overall level once per message.
+  Each phenomenon names its departments and exact time windows; different phenomenon levels
+  remain explicit. Common schedules share one line, even when other risks differ between
+  departments. Whole risk/time entries are packed into the sender's UTF-8 body budget,
+  accounting for the radio name and flood scope. Each extra message repeats its date/level.
+  No risk or time window is truncated. Unstructured bulletins retain the legacy formatter
+  and the command manager's byte-aware splitting. Radio pacing and limits still apply.
+  A partly failed summary does not advance the departments' last-sent states.
 
 **Example alert:**
 ```

@@ -147,15 +147,15 @@ async def test_identical_alerts_share_one_broadcast_and_each_state_is_saved(moni
     assert await check(restarted, {code: warning() for code in ["29", "22", "35", "56"]}, NOW + 3600) == []
 
 
-async def test_different_levels_and_risks_stay_separate_and_red_is_first(monitor):
+async def test_different_overall_levels_stay_separate_and_risks_keep_their_departments(monitor):
     service = monitor()
     messages = await check(
         service, {"29": warning("Jaune"), "22": warning("Rouge"), "35": warning("Jaune", risk="3")}, NOW
     )
     # Missing 56 gets its own availability notice, not a made-up weather level.
     weather = [m for m in messages if "Vigilance " in m and "non actualisable" not in m]
-    assert len(weather) == 3 and "ROUGE" in weather[0]
-    assert any("Orages" in m for m in weather)
+    assert len(weather) == 2 and "ROUGE" in weather[0]
+    assert "Vent 29" in weather[1] and "Orages 35" in weather[1]
 
 
 async def test_only_departments_due_an_alert_are_grouped(monitor):
@@ -164,7 +164,7 @@ async def test_only_departments_due_an_alert_are_grouped(monitor):
     messages = await check(
         service, {"29": warning(), "22": warning(), "35": warning("Vert"), "56": warning("Vert")}, NOW + 3600
     )
-    assert len(messages) == 2 and "Dept 22" in messages[-1]
+    assert len(messages) == 2 and "Vent 22" in messages[-1]
     assert "29" not in messages[-1]
     assert service.alert_policy.state("29")["sent_at"] == NOW
 
@@ -303,14 +303,16 @@ def test_availability_state_is_target_scoped(tmp_path):
     assert AvailabilityNotices(db, Mock(), "other").due({"29": "missing"})
 
 
-async def test_same_overall_color_with_different_phenomenon_levels_is_not_grouped(monitor):
+async def test_same_overall_color_can_share_a_message_without_hiding_lower_phenomenon_levels(monitor):
     service = monitor()
     first = warning()
     second = warning()
     first["phenomena"].append({"id": "3", "color": "Jaune"})
     second["phenomena"].append({"id": "3", "color": "Orange"})
     messages = await check(service, {"29": first, "22": second, "35": warning("Vert"), "56": warning("Vert")}, NOW)
-    assert len(messages) == 2 and all("Depts" not in message for message in messages)
+    assert len(messages) == 1
+    assert "Vent 22/29" in messages[0]
+    assert "Orages 22" in messages[0] and "Orages jaune 29" in messages[0]
 
 
 async def test_mixed_new_and_reminder_group_is_not_labelled_as_only_a_reminder(monitor):
@@ -327,7 +329,7 @@ async def test_mixed_new_and_reminder_group_is_not_labelled_as_only_a_reminder(m
         },
         NOW + 86400,
     )
-    assert len(messages) == 2 and "Depts 22/29" in messages[-1] and "Rappel" not in messages[-1]
+    assert len(messages) == 2 and "Vent 22/29" in messages[-1] and "Rappel" not in messages[-1]
 
 
 async def test_recovery_with_unchanged_weather_only_announces_availability_once(monitor):
