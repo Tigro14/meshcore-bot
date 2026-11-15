@@ -23,7 +23,7 @@ CATALOG = {
         'trace': 'Test actif de trajet radio vers une cible ou un chemin explicite.',
         'advert': 'Demande explicite que le bot émette une annonce radio, en privé uniquement.',
         'unsupported': 'Mesure réseau précise indisponible. Jamais une demande documentée, sociale ou un simple test.'},
-    'info': {'provenance': 'Expliquer d’où Baliz obtient ses données et comment ses mesures sont calculées. topic=position pour l’origine des coordonnées, clock pour le calcul de dérive, overview sans catégorie. Autres catégories : network/paths/wiki/airtime/bbs/assistant. Fournisseur météo : weather.provider. Seulement sur demande explicite, jamais pour donner une mesure ou un résumé.'},
+    'info': {'provenance': 'Expliquer d’où Baliz obtient ses données et comment ses mesures sont calculées. topic=position pour l’origine des coordonnées, clock pour le calcul de dérive, assistant pour le nom du modèle LLM configuré, overview sans catégorie. Autres catégories : network/paths/wiki/airtime/bbs. Fournisseur météo : weather.provider. Seulement sur demande explicite, jamais pour donner une mesure ou un résumé.'},
     'bbs': {
         'send': 'Déposer un message privé pour un compagnon connu. recipient=nom exact demandé ou vide, text=texte exact après deux-points ou entre guillemets, sinon vide : demander le contenu. Jamais le mot message de la consigne. Ne réécris jamais le message.',
         'count': 'Compter mes messages privés BBS en attente.',
@@ -73,6 +73,7 @@ ROUTING_DIALOG_EXAMPLES = CLARIFICATION_EXAMPLES[:1] + [
     ('Comment calcules-tu l’occupation radio ?', {'route': 'info', 'operation': 'provenance', 'args': {'topic': 'airtime'}}),
     ('Laisse un message à Alpha : d’où viennent les coordonnées ?', {'route': 'bbs', 'operation': 'send', 'args': {'recipient': 'Alpha', 'text': 'd’où viennent les coordonnées ?'}}),
     ('Quel fournisseur te fournit la météo ?', {'route': 'weather', 'operation': 'provider', 'args': {}}),
+    ('Sur quel LLM es-tu basé ?', {'route': 'info', 'operation': 'provenance', 'args': {'topic': 'assistant'}}),
     ('météo à Quimper', {'route': 'weather', 'operation': 'forecast', 'args': {'location': 'Quimper', 'period': 'today'}}),
     ('quel temps demain à Rennes ?', {'route': 'weather', 'operation': 'forecast', 'args': {'location': 'Rennes', 'period': 'tomorrow'}}),
     ('Laisse un message à Alpha : rendez-vous à midi', {'route': 'bbs', 'operation': 'send', 'args': {'recipient': 'Alpha', 'text': 'rendez-vous à midi'}}),

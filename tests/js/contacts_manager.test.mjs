@@ -589,3 +589,22 @@ test('Contacts always shows numeric drift, independently of clock verification',
         clock_observed_at: 1793818149, clock_drift_source: 'advert',
     }), />27s</);
 });
+
+test('passive relay duty is partial and unknown never turns into zero or compliant', () => {
+    const { Manager } = loadManagerClass();
+    const manager = Object.create(Manager.prototype);
+    manager.escapeAttribute = text => String(text);
+    assert.equal(manager.formatDutyCycle({}), '');
+    const unknown = manager.formatDutyCycle({airtime_duty: {estimated_percent: null}});
+    assert.match(unknown, /N\/D/);
+    assert.doesNotMatch(unknown, /≈ 0|bg-success|conforme/);
+    const small = manager.formatDutyCycle({airtime_duty: {estimated_percent: 0.25}});
+    assert.match(small, /0,25/);
+    assert.match(small, /ne prouve pas/);
+    assert.doesNotMatch(small, /bg-success/);
+    assert.match(manager.formatDutyCycle({airtime_duty: {estimated_percent: 11}}), /bg-danger/);
+    const evidence = manager.formatDutyCycle({airtime_duty: {estimated_percent: 0.25,
+        direct_percent:0.2,inferred_percent:0.05,attributed_packets:8,retained_full_hour:false}});
+    assert.match(evidence, /Entendu : 0,2 % ; déduit : 0,05 % ; 8 émissions/);
+    assert.match(evidence, /Historique disponible inférieur/);
+});

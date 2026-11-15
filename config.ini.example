@@ -2844,6 +2844,26 @@ alert_throttle = 3600
 # Default: Orange,Rouge (only alert on elevated vigilance)
 alert_levels = Orange,Rouge
 
+# Optional change-driven policy. On first non-green vigilance or any change of
+# color/phenomena, send immediately after detection; repeat unchanged alerts only
+# after reminder_interval seconds. A return to green closes a previously sent alert
+# once. Last successfully transmitted alerts survive restarts in bot_metadata.
+# When false, the existing alert_throttle behavior above is retained.
+notify_on_change = false
+reminder_interval = 86400
+
+# Keep complete bulletins for explicitly historical offline answers to vigi.
+# The monitor announces failed updates once, then recovery (and cache expiry).
+# Cached information is never used to clear or update a live vigilance.
+offline_cache = false
+
+# In change mode, combine due departments with identical levels and phenomena.
+# Each department retains its own sent state and reminder deadline.
+group_similar_alerts = false
+
+# Keep today's and tomorrow's official bulletins and time windows separately.
+include_tomorrow = false
+
 # When true, alerts go only to Discord/Telegram webhooks, not the mesh channel.
 # Default: false
 silence_mesh_output = false

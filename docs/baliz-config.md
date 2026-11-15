@@ -20,13 +20,32 @@ tandis que sa fonction interne reste accessible à l'assistant.
 
 ## Vigilance météo
 
-Le département par défaut de Baliz est le **Finistère (29)** : `vigi` sans
-argument demande la vigilance du Finistère. Un autre département peut toujours
-être précisé, par exemple `vigi 22`.
+`vigi` sans argument vérifie les **quatre départements bretons (22, 29, 35, 56)**.
+Les niveaux et phénomènes identiques sont regroupés dans la réponse. Un département
+peut toujours être demandé séparément, par exemple `vigi 29` ou `vigi 22`.
+`include_tomorrow = true` distingue les bulletins d'aujourd'hui et de demain, avec
+leurs dates et les horaires officiels disponibles. L'échec d'un département ou
+d'une journée laisse les autres s'actualiser. Les caches et alertes restent séparés
+par date ; un retour au vert aujourd'hui ne clôt pas une alerte de demain.
 
-Le profil public conserve ce choix dans `[Vigilance_Service]` avec
-`department = 29` et `enabled = false`. Les alertes automatiques restent
-désactivées ; la consultation ponctuelle avec `vigi` reste disponible.
+Le profil active la surveillance horaire des départements `29,22,35,56` dans
+`[Vigilance_Service]`. Les niveaux jaune, orange et rouge sont publiés dans
+`#bretagne` à leur apparition ou évolution, puis rappelés après 24 heures sans
+changement. Le retour au vert est annoncé une fois après une vigilance diffusée.
+Voir le [fonctionnement du service](vigilance-service.md#change-driven-alerts).
+
+Le regroupement des alertes conserve une date et un niveau par message. Chaque
+phénomène nomme ses départements et ses créneaux ; les horaires communs sont
+regroupés et les niveaux différents restent explicites. Le format respecte la
+taille radio disponible. Le déplacement temporaire des alertes vers `#meteo`
+le 15 novembre reste un réglage local ; le profil public conserve `#bretagne`.
+
+## Relevé des batteries
+
+`[Battery_Monitor] enabled = true` et `schedule = 0 3 * * *` activent un relevé
+par jour à 03:00, heure de Paris. Le service reprend les cibles Clock Sync déjà
+autorisées, sans publier leur liste. Contacts et Time affichent les valeurs et
+leur historique de tension.
 
 ## Identité et fonctionnement conservés
 
@@ -130,6 +149,23 @@ par défaut ; aucune autre fonction n'est activée par cet ajout.
 Le fichier générique `config.ini.example` reste désactivé par défaut. L'activation
 concerne le profil `config.ini.baliz`, sur la branche `baliz`, sans intégrer la
 branche `dev` de Tigro dans GitHub ni publier la configuration privée du serveur.
+
+## Vigilance en Bretagne
+
+Le profil surveille `29,22,35,56` toutes les heures et publie sur `#bretagne` dès le
+jaune, aux changements, puis en rappel après 24 h si la situation persiste. Le retour
+au vert clôt l'alerte. `vigi` sans argument vérifie toute cette liste.
+
+`offline_cache = true` conserve les bulletins complets et datés. Une indisponibilité
+de la source est signalée une fois ; les réponses hors ligne sont explicitement
+historiques et ne déclenchent aucune nouvelle alerte météo. Le passage à un bulletin
+périmé et le rétablissement des mises à jour sont également signalés une fois.
+
+`group_similar_alerts = true` réunit les alertes dues par journée et niveau, puis
+les départements ayant les mêmes horaires pour chaque phénomène. Les créneaux
+distincts et les niveaux propres aux phénomènes restent explicites. Le délai de
+rappel reste propre à chaque département. Ces options sont désactivées dans
+l'exemple générique de Tigro.
 
 ## Utilisation
 

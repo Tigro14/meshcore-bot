@@ -47,6 +47,14 @@ def answer_source(dispatcher, topic, message, *, function=None):
         command.record_execution(message.sender_id or None)
     if topic == 'weather':
         return command.provider_description()
+    if topic == 'assistant':
+        llm = dispatcher._command('llm')
+        if llm is not None and dispatcher._allowed(llm, message, service=True):
+            model = getattr(getattr(llm, 'service', None), 'model', None)
+            if (isinstance(model, str) and model.strip() and len(model.strip().encode('utf-8')) <= 80
+                    and not any(ord(char) < 32 for char in model)):
+                return f'Le modèle configuré pour Baliz est {model.strip()}.'
+        return source.text
     if topic == 'wiki' and getattr(command.service, 'wiki_rag', None) is None:
         return 'La recherche documentaire n’est pas active actuellement. Je ne peux pas désigner de document consulté.'
     return source.text

@@ -22,16 +22,34 @@ import asyncio
 import codecs
 import contextlib
 import http.client
+import logging
 import random
 import re
 import socket
 import time
 import unicodedata
-from datetime import datetime
+from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import requests
 from bs4 import BeautifulSoup, Tag
+
+from modules.utils import get_config_timezone
+from modules.vigilance_alert_policy import VigilanceAlertPolicy, fingerprint
+from modules.vigilance_cache import AvailabilityNotices, VigilanceCache
+from modules.vigilance_messages import compact_alerts
+from modules.vigilance_periods import (
+    PARIS,
+    attach_period,
+    calendar_days,
+    day_label,
+    department_label,
+    flatten,
+    period_key,
+    risk_lines,
+    split_key,
+)
 
 from .base_service import BaseServicePlugin
 
@@ -314,13 +332,30 @@ def _page_url(code: str) -> str:
 
 
 def _parse_api_datetime(value: Any) -> datetime:
-    """Parse the product's update_time (UTC), falling back to now()."""
-    for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S+00:00', '%Y-%m-%dT%H:%M:%S'):
-        try:
-            return datetime.strptime(str(value).strip(), fmt)
-        except (ValueError, TypeError):
-            continue
-    return datetime.now()
+    """Parse the product's update_time; do not invent a fresh publication date."""
+    try:
+        if isinstance(value, str) and 'T' in value:
+            parsed = datetime.fromisoformat(value.strip().replace('Z', '+00:00'))
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
+    except (ValueError, TypeError):
+        pass
+    raise ValueError('Données de vigilance indisponibles : date du bulletin manquante ou invalide')
+
+
+def _read_color(value: Any) -> str:
+    """Missing or unknown data is not evidence of a green vigilance level."""
+    if isinstance(value, bool) or str(value) not in {'1', '2', '3', '4'}:
+        raise ValueError('Données de vigilance indisponibles : niveau manquant ou invalide')
+    return _COLOR_IDS[int(value)]
+
+
+def _phenomena(items: list[dict[str, Any]]) -> list[dict[str, str]]:
+    result = []
+    for item in items:
+        color = _read_color(item.get('phenomenon_max_color_id'))
+        if color != 'Vert':
+            result.append({'id': str(item['phenomenon_id']), 'color': color})
+    return sorted(result, key=lambda p: p['id'])
 
 
 def _api_summary(color: str, phenomena: list[dict[str, Any]]) -> str:
@@ -352,7 +387,7 @@ def _fetch_product(api_key: str, timeout: int) -> dict[str, Any]:
     return payload.get('product') or {}
 
 
-def _product_entry(department: str, product: dict[str, Any]) -> dict[str, Any]:
+def _product_entry(department: str, product: dict[str, Any], *, echeance: str | None = None) -> dict[str, Any]:
     """Read one department out of the national product.
 
     Raises:
@@ -361,6 +396,8 @@ def _product_entry(department: str, product: dict[str, Any]) -> dict[str, Any]:
     code = normalize_department(department)
     domain = None
     for period in product.get('periods') or []:
+        if echeance is not None and period.get('echeance') not in ({'J', 'J0'} if echeance == 'J0' else {'J1'}):
+            continue
         for item in (period.get('timelaps') or {}).get('domain_ids') or []:
             if str(item.get('domain_id', '')).upper() == code:
                 domain = item
@@ -370,18 +407,27 @@ def _product_entry(department: str, product: dict[str, Any]) -> dict[str, Any]:
     if domain is None:
         raise ValueError(f"The vigilance product has no block for department '{department}'")
 
-    color = _COLOR_IDS.get(int(domain.get('max_color_id') or 1), 'Vert')
+    color = _read_color(domain.get('max_color_id'))
     active = [
         p for p in domain.get('phenomenon_items') or []
-        if int(p.get('phenomenon_max_color_id') or 1) > 1
+        if _read_color(p.get('phenomenon_max_color_id')) != 'Vert'
     ]
 
-    return {
+    result = {
         'color': color,
         'summary': _api_summary(color, active),
         'bulletin_date': _parse_api_datetime(product.get('update_time')),
         'url': _page_url(code),
+        'phenomena': _phenomena(active),
+        'issued_at': _parse_api_datetime(product.get('update_time')).replace(tzinfo=timezone.utc).timestamp(),
+        'bulletin': deepcopy(product),
     }
+    if period.get('end_validity_time'):
+        result['valid_until'] = _parse_api_datetime(period['end_validity_time']).replace(tzinfo=timezone.utc).timestamp()
+    if echeance is not None:
+        day = calendar_days(time.time())[0 if echeance == 'J0' else 1]
+        return attach_period(result, day, domain.get('phenomenon_items') or [])
+    return result
 
 
 def fetch_vigilance_api(department: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
@@ -403,7 +449,8 @@ def _session_token(page_response: requests.Response) -> str:
 
 
 def fetch_vigilance_site_api(
-    department: str, token: str, url: str, timeout: int = 10, delay: float = 0.0
+    department: str, token: str, url: str, timeout: int = 10, delay: float = 0.0,
+    *, echeance: str | None = None,
 ) -> dict[str, Any]:
     """
     Read the level for a department from the JSON endpoint the site itself calls.
@@ -417,29 +464,52 @@ def fetch_vigilance_site_api(
         time.sleep(delay)
     response = requests.get(
         f'{_VIGILANCE_API_V3}/warning/full',
-        params={'domain': department},
+        params={'domain': department, **({'echeance': echeance, 'formatDate': 'timestamp'} if echeance else {})},
         headers={**_VIGILANCE_HEADERS, 'Authorization': f'Bearer {token}'},
         timeout=timeout,
     )
     response.raise_for_status()
     data = response.json()
 
-    color = _COLOR_IDS.get(int(data.get('color_max') or 1), 'Vert')
-    active: list[dict[str, Any]] = []
+    if str(data.get('domain_id', '')).upper() != normalize_department(department):
+        raise ValueError('Données de vigilance indisponibles : département incorrect')
+    color = _read_color(data.get('color_max'))
+    maxima: dict[str, int] = {}
+    for item in data.get('phenomenons_items') or []:
+        value = item.get('phenomenon_max_color_id')
+        _read_color(value)
+        maxima[str(item['phenomenon_id'])] = int(value)
     for item in data.get('timelaps') or []:
-        colors = [int(t.get('color_id') or 1) for t in item.get('timelaps_items') or []]
-        active.append({
-            'phenomenon_id': str(item.get('phenomenon_id', '')),
-            'phenomenon_max_color_id': max(colors) if colors else 1,
-        })
+        colors = []
+        for timestep in item.get('timelaps_items') or []:
+            _read_color(timestep.get('color_id'))
+            colors.append(int(timestep['color_id']))
+        identifier = str(item.get('phenomenon_id', ''))
+        maxima[identifier] = max([maxima.get(identifier, 1), *colors])
+    active: list[dict[str, Any]] = [{'phenomenon_id': identifier, 'phenomenon_max_color_id': color_id}
+                                    for identifier, color_id in maxima.items()]
 
     stamp = data.get('update_time')
-    return {
+    if isinstance(stamp, bool) or not str(stamp).isdigit() or int(stamp) <= 0:
+        raise ValueError('Données de vigilance indisponibles : date du bulletin manquante ou invalide')
+    result = {
         'color': color,
         'summary': _api_summary(color, [p for p in active if p['phenomenon_max_color_id'] > 1]),
-        'bulletin_date': datetime.fromtimestamp(int(stamp)) if stamp else datetime.now(),
+        'bulletin_date': datetime.fromtimestamp(int(stamp)),
         'url': url,
+        'phenomena': _phenomena(active),
+        'issued_at': int(stamp),
+        'bulletin': deepcopy(data),
     }
+    if data.get('end_validity_time') is not None:
+        until = data['end_validity_time']
+        if isinstance(until, bool) or not str(until).isdigit() or int(until) <= int(stamp):
+            raise ValueError('Données de vigilance indisponibles : validité du bulletin incorrecte')
+        result['valid_until'] = int(until)
+    if echeance is not None:
+        day = calendar_days(time.time())[0 if echeance == 'J0' else 1]
+        return attach_period(result, day, data.get('timelaps') or [])
+    return result
 
 
 def _spaced_page(url: str, timeout: int, delay: float) -> requests.Response:
@@ -462,62 +532,76 @@ def _page_entry(response: requests.Response, url: str) -> dict[str, Any]:
 
 
 def fetch_vigilance_multi(
-    codes: list[str], api_key: str = '', timeout: int = 10, delay: float = 0.0
+    codes: list[str], api_key: str = '', timeout: int = 10, delay: float = 0.0,
+    *, include_tomorrow: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """
     Fetch current vigilance data for several French departments from Météo-France.
 
-    Sources, in order: the official product when ``api_key`` is set, then the JSON
-    endpoint the site's JavaScript calls, then the page markup, which carries no level
-    and reports Vert.
+    Uses the official product when ``api_key`` is set, otherwise the JSON endpoint
+    the site's JavaScript calls. Page markup is not a fallback for structured data.
 
     With a key the product is national, so one request answers the whole list. Without one,
     the page is fetched once: the ``mfsession`` cookie it sets is a session cookie, so the
     same token answers for every department and only one request per department follows,
-    which is one request per department instead of two. With no cookie there is nothing to
-    authenticate with, so each department falls back to its own page.
+    which is one request per department instead of two. A missing session cookie makes
+    the fetch fail without inventing a vigilance level.
 
     ``delay`` is the pause between two requests of the same poll: the page fetch is not
     preceded by one, and every request after it is. So a list of N costs N+1 requests and N
     pauses.
 
     Returns code -> dict, each entry with keys: color, summary, bulletin_date, url.
-    Raises ValueError for an empty list, for an unknown department, or for an overseas
-    department without a key, and requests.exceptions.RequestException on network errors.
+    With include_tomorrow, entries contain independently dated J0/J1 periods and
+    official phenomenon windows. A failure affects only its department/period.
+    Other successful entries are returned; if all fail, the last error is raised.
+    A failed session page is retried using another configured department page.
     """
     codes = [normalize_department(code) for code in codes]
     if not codes:
         raise ValueError("No department to check")
 
-    if api_key:
-        product = _fetch_product(api_key, timeout)
-        return {code: _product_entry(code, product) for code in codes}
+    product = _fetch_product(api_key, timeout) if api_key else None
+    token = ''
+    last_error: Exception = ValueError('Données de vigilance indisponibles : accès au bulletin non obtenu')
+    if not api_key:
+        for index, code in enumerate(codes):
+            try:
+                response = _spaced_page(_page_url(code), timeout, delay if index else 0)
+                response.raise_for_status()
+                token = _session_token(response)
+                if token:
+                    break
+                raise ValueError('Données de vigilance indisponibles : accès au bulletin non obtenu')
+            except Exception as error:
+                last_error = error
+        if not token:
+            raise last_error
 
-    response = requests.get(_page_url(codes[0]), headers=_VIGILANCE_HEADERS, timeout=timeout)
-    response.raise_for_status()
-    token = _session_token(response)
-
+    logger = logging.getLogger(__name__)
     entries: dict[str, dict[str, Any]] = {}
     for code in codes:
-        url = _page_url(code)
-        if len(code) != 2:
-            # Overseas department: the site's endpoint has no block for it, only the
-            # official product does, and that one needs a key.
-            raise ValueError(
-                f"Department {code} is overseas, so its level needs [Vigilance_Service] api_key"
-            )
-        if token:
-            # The page is already fetched, so every endpoint call here is a request after
-            # the first one of the poll and is spaced.
-            entries[code] = fetch_vigilance_site_api(code, token, url, timeout, delay)
-        else:
-            # No cookie, so nothing to authenticate with: fall back to what the markup
-            # carries, which for a department page is no level at all, and every
-            # department then needs its own page.
-            page = response if code == codes[0] else _spaced_page(url, timeout, delay)
-            page.raise_for_status()
-            entries[code] = _page_entry(page, url)
-
+        periods = []
+        for echeance in (['J0', 'J1'] if include_tomorrow else [None]):
+            try:
+                if product is not None:
+                    entry = _product_entry(code, product, echeance=echeance)
+                else:
+                    if len(code) != 2:
+                        raise ValueError(f"Department {code} is overseas, so its level needs [Vigilance_Service] api_key")
+                    options = {'echeance': echeance} if echeance is not None else {}
+                    entry = fetch_vigilance_site_api(code, token, _page_url(code), timeout, delay, **options)
+                if include_tomorrow:
+                    periods.append(entry)
+                else:
+                    entries[code] = entry
+            except Exception as error:
+                last_error = error
+                logger.warning('Vigilance fetch unavailable for dept %s period %s: %s', code, echeance or 'current', type(error).__name__)
+        if periods:
+            entries[code] = {'periods': periods}
+    if not entries:
+        raise last_error
     return entries
 
 
@@ -623,6 +707,31 @@ class VigilanceService(BaseServicePlugin):
             "help": "Optional regional TC_FLOOD scope for mesh posts (e.g. #west).",
         },
         {
+            "key": "notify_on_change", "label": "Alert on changes", "type": "bool",
+            "default": False,
+            "help": "Send changes immediately, remember sent alerts across restarts, and repeat only at the reminder interval.",
+        },
+        {
+            "key": "reminder_interval", "label": "Reminder interval", "type": "int",
+            "default": 86400, "min": 3600, "unit": "s",
+            "help": "Repeat an unchanged active vigilance after this interval in change mode.",
+        },
+        {
+            "key": "offline_cache", "label": "Keep bulletins for offline use", "type": "bool",
+            "default": False,
+            "help": "Keep complete bulletins locally. Announce failed updates once and label cached vigi answers as historical.",
+        },
+        {
+            "key": "include_tomorrow", "label": "Monitor today and tomorrow", "type": "bool",
+            "default": False,
+            "help": "Keep dated vigilance periods and official phenomenon time windows separately.",
+        },
+        {
+            "key": "group_similar_alerts", "label": "Group similar alerts", "type": "bool",
+            "default": False,
+            "help": "In change mode, summarize due alerts by day and level, sharing identical phenomenon schedules.",
+        },
+        {
             "key": "silence_mesh_output",
             "label": "Silence mesh output",
             "type": "bool",
@@ -642,7 +751,7 @@ class VigilanceService(BaseServicePlugin):
         # poll rather than fetched for a 404.
         overseas = [code for code in codes if len(code) != 2]
         self.departments: list[str] = codes if self.api_key else [c for c in codes if len(c) == 2]
-        # `vigi` with no argument answers for this one, so the reply stays inside the RF budget.
+        # Compatibility attribute for plugins reading the first configured department.
         self.department: str = self.departments[0] if self.departments else ''
         self.channel: str = self.bot.config.get(section, 'channel', fallback='#general').strip()
         poll_ms = self.bot.config.getint(section, 'poll_interval', fallback=28800000)
@@ -656,6 +765,20 @@ class VigilanceService(BaseServicePlugin):
         self.silence_mesh: bool = self.bot.config.getboolean(
             section, 'silence_mesh_output', fallback=False
         )
+        self.notify_on_change = self.bot.config.getboolean(section, 'notify_on_change', fallback=False)
+        self.alert_policy = VigilanceAlertPolicy(
+            getattr(self.bot, 'db_manager', None), self.logger, self.channel,
+            self.get_mesh_flood_scope(),
+            reminder_seconds=max(3600, self.bot.config.getint(section, 'reminder_interval', fallback=86400)),
+        )
+        self.offline_cache = self.bot.config.getboolean(section, 'offline_cache', fallback=False)
+        self.group_similar_alerts = self.bot.config.getboolean(section, 'group_similar_alerts', fallback=False)
+        self.include_tomorrow = self.bot.config.getboolean(section, 'include_tomorrow', fallback=False)
+        self.bulletin_cache = VigilanceCache(getattr(self.bot, 'db_manager', None), self.logger)
+        self.availability = AvailabilityNotices(
+            getattr(self.bot, 'db_manager', None), self.logger, self.alert_policy.namespace,
+        )
+        self.display_tz = get_config_timezone(self.bot.config, self.logger)[0]
 
         # Runtime state, one entry per department: a level or a throttle held for one
         # department must not be read as the state of another.
@@ -667,9 +790,11 @@ class VigilanceService(BaseServicePlugin):
 
         self.logger.info(
             "Vigilance service initialized: depts=%s channel=%s interval=%.0fs throttle=%ds "
-            "levels=%s delay=%.1fs",
+            "levels=%s delay=%.1fs change_mode=%s reminder=%ds offline_cache=%s group_similar=%s tomorrow=%s",
             ', '.join(self.departments), self.channel, self.poll_interval_seconds,
             self.alert_throttle, ', '.join(self.alert_levels), self.request_delay,
+            self.notify_on_change, self.alert_policy.reminder_seconds,
+            self.offline_cache, self.group_similar_alerts, self.include_tomorrow,
         )
         if not self.api_key:
             self.logger.warning(
@@ -721,16 +846,30 @@ class VigilanceService(BaseServicePlugin):
                 break
 
     async def _check_and_alert(self) -> None:
-        """Fetch the levels and send one alert per department that warrants one."""
+        """Fetch current bulletins, transmit due alerts and report unavailable updates."""
         if not self.departments:
             return
 
         loop = asyncio.get_event_loop()
         infos = await loop.run_in_executor(None, self._fetch_with_retry)
         if not infos:
+            if self.offline_cache:
+                await self._notify_availability(self._expected_periods())
             return
 
-        for code, info in infos.items():
+        pending = []
+        available = set()
+        for code, info in flatten(infos, self.include_tomorrow).items():
+            if split_key(code)[0] not in self.departments:
+                continue
+            if info.get('color') not in _COLOR_IDS.values() or (
+                info.get('valid_until') is not None and info['valid_until'] <= time.time()
+            ):
+                self.logger.warning('Ignoring invalid or expired vigilance data for dept %s', code)
+                continue
+            if self.offline_cache and not self.bulletin_cache.put(code, info, time.time()):
+                continue
+            available.add(code)
             color = info['color']
             previous = self._last_color.get(code)
 
@@ -743,11 +882,100 @@ class VigilanceService(BaseServicePlugin):
             self._last_color[code] = color
             self._last_bulletin_date[code] = info['bulletin_date']
 
-            if self._should_alert(code, info):
+            if self.notify_on_change:
+                reason = self.alert_policy.reason(code, info, self.alert_levels, time.time())
+                if reason:
+                    if self.group_similar_alerts:
+                        pending.append((code, info, reason))
+                        continue
+                    message = self._format_change_message(code, info, reason)
+                    if await self._send_alert(message, info):
+                        self.alert_policy.record_sent(code, info, time.time())
+                        self.logger.info('Vigilance %s transmitted for dept %s: %s', reason, code, color)
+                    else:
+                        self.logger.warning('Vigilance %s not transmitted for dept %s; state retained', reason, code)
+            elif self._should_alert(code, info):
                 message = self._format_message(code, info)
-                await self._send_alert(message, info)
-                self._last_alert_time[code] = time.monotonic()
-                self.logger.info("Vigilance alert sent for dept %s: %s", code, color)
+                if await self._send_alert(message, info):
+                    self._last_alert_time[code] = time.monotonic()
+                    self.logger.info("Vigilance alert sent for dept %s: %s", code, color)
+
+        if pending:
+            await self._send_grouped_alerts(pending)
+        if self.offline_cache:
+            await self._notify_availability([code for code in self._expected_periods() if code not in available])
+
+    def _expected_periods(self) -> list[str]:
+        if not self.include_tomorrow:
+            return self.departments
+        now = time.time()
+        today, tomorrow = calendar_days(now)
+        # The next day's map normally appears with the 06:00 bulletin. Before
+        # then, an as-yet unpublished J1 alone is not evidence of an outage.
+        future = datetime.fromtimestamp(now, PARIS).hour >= 6
+        return [period_key(code, day) for code in self.departments for day in (today, tomorrow)
+                if day == today or future or self.bulletin_cache.get(period_key(code, day)) is not None]
+
+    async def _send_grouped_alerts(self, pending: list[tuple[str, dict[str, Any], str]]) -> None:
+        groups: dict[tuple, list[tuple[str, dict[str, Any], str]]] = {}
+        for event in pending:
+            info = event[1]
+            key = (info.get('period_date', ''), info['color'],
+                   None if isinstance(info.get('phenomena'), list) else fingerprint(info))
+            groups.setdefault(key, []).append(event)
+        priority = {'Rouge': 0, 'Orange': 1, 'Jaune': 2, 'Vert': 3}
+        for events in sorted(groups.values(), key=lambda g: (priority[g[0][1]['color']], g[0][1].get('period_date', ''))):
+            codes = sorted(split_key(event[0])[0] for event in events)
+            info = dict(events[0][1])
+            info['url'] = '\n'.join(sorted({e[1]['url'] for e in events if e[1].get('url')}))
+            budget_fn = getattr(self.bot.command_manager, 'channel_body_budget', None)
+            budget = budget_fn(channel=self.channel, scope=self.get_mesh_flood_scope()) if callable(budget_fn) else None
+            # Conservative fallback when the sender cannot supply a byte budget.
+            if type(budget) is not int or budget < 1:
+                budget = 120
+            try:
+                messages = compact_alerts(events, _PHENOMENON_NAMES, time.time(), budget)
+            except (ValueError, KeyError):
+                # The central sender can split unusual/unstructured data safely.
+                messages = [self._format_change_message(code, data, reason) for code, data, reason in events]
+            sent = True
+            for message in messages:
+                if not await self._send_alert(message, info):
+                    sent = False
+                    break
+            if sent:
+                for code, data, _ in events:
+                    self.alert_policy.record_sent(code, data, time.time())
+                self.logger.info('Vigilance group transmitted for depts %s: %s', ','.join(codes), info['color'])
+            else:
+                self.logger.warning('Vigilance group not transmitted for depts %s; state retained', ','.join(codes))
+
+    async def _notify_availability(self, missing: list[str]) -> None:
+        now = time.time()
+        statuses = {code: self.bulletin_cache.status(code, now) for code in sorted(missing)}
+        if not self.availability.due(statuses):
+            return
+        if not missing:
+            message = 'Actualisation de la vigilance rétablie.'
+        else:
+            lines = [f"Vigilance non actualisable - Depts {department_label(sorted(missing), now)}."]
+            expired = [code for code, status in statuses.items() if status == 'expired']
+            if expired:
+                lines.append(f"Bulletins périmés : {department_label(expired, now)}.")
+            old = [code for code, status in statuses.items() if status == 'old']
+            if old:
+                lines.append(f"Bulletins anciens : {department_label(old, now)}.")
+            records = [self.bulletin_cache.get(code) for code in missing]
+            if all(record is not None for record in records):
+                oldest = min(record['fetched_at'] for record in records if record is not None)
+                date = datetime.fromtimestamp(oldest, self.display_tz).strftime('%d/%m à %H:%M')
+                lines.append(f'Dernière récupération : {date}.')
+            elif not any(records):
+                lines.append('Aucun bulletin conservé.')
+            lines.append('Situation actuelle inconnue.')
+            message = '\n'.join(lines)
+        if await self._send_alert(message, {}):
+            self.availability.record_sent(statuses)
 
     def _fetch_with_retry(self) -> Optional[dict[str, dict[str, Any]]]:
         """Fetch the levels with exponential-backoff retries (called in executor)."""
@@ -764,9 +992,8 @@ class VigilanceService(BaseServicePlugin):
 
         for attempt in range(max_retries):
             try:
-                data = fetch_vigilance_multi(
-                    self.departments, self.api_key, delay=self.request_delay
-                )
+                options = {'include_tomorrow': True} if self.include_tomorrow else {}
+                data = fetch_vigilance_multi(self.departments, self.api_key, delay=self.request_delay, **options)
                 if attempt > 0:
                     self.logger.info(
                         "Vigilance fetched after %d attempt(s)", attempt + 1
@@ -774,7 +1001,7 @@ class VigilanceService(BaseServicePlugin):
                 else:
                     self.logger.debug(
                         "Vigilance check %s",
-                        ', '.join(f"{code} {entry['color']}" for code, entry in data.items()),
+                        ', '.join(f"{code} {entry['color']}" for code, entry in flatten(data, self.include_tomorrow).items()),
                     )
                 return data
             except transient_errors as e:
@@ -825,6 +1052,8 @@ class VigilanceService(BaseServicePlugin):
 
     def _format_message(self, code: str, info: dict[str, Any]) -> str:
         """Format a compact LoRa-friendly alert message (≤ 180 chars) for one department."""
+        if info.get('period_date'):
+            return self._format_change_message(code, info, 'new')
         color = info['color']
         emoji = {'Vert': '✅', 'Jaune': '⚠️', 'Orange': '🟠', 'Rouge': '🔴'}.get(color, '🌦️')
         lines = [f"{emoji} VIGILANCE {color.upper()}", f"Dept {code}"]
@@ -839,19 +1068,34 @@ class VigilanceService(BaseServicePlugin):
             result = result[:177] + '...'
         return result
 
-    async def _send_alert(self, message: str, info: dict[str, Any]) -> None:
+    def _format_change_message(self, code: str, info: dict[str, Any], reason: str, *, label: str = 'Dept') -> str:
+        code = split_key(code)[0]
+        suffix = ' - ' + day_label(info['period_date'], time.time()) if info.get('period_date') else ''
+        if reason == 'clear':
+            return f'✅ Fin de vigilance - {label} {code}{suffix} : retour au vert.'
+        color = info['color']
+        emoji = {'Jaune': '⚠️', 'Orange': '🟠', 'Rouge': '🔴'}[color]
+        prefix = 'Rappel : ' if reason == 'reminder' else ''
+        lines = [f'{emoji} {prefix}Vigilance {color.upper()} - {label} {code}{suffix}']
+        lines.extend(risk_lines(info, _PHENOMENON_NAMES))
+        return '\n'.join(lines)
+
+    async def _send_alert(self, message: str, info: dict[str, Any]) -> bool:
         """Post the alert to the mesh channel and/or external webhooks."""
+        sent = False
         if not self.silence_mesh:
             try:
-                await self.bot.command_manager.send_channel_message(
-                    self.channel, message, scope=self.get_mesh_flood_scope()
-                )
+                sent = bool(await self.bot.command_manager.send_channel_message(
+                    self.channel, message, scope=self.get_mesh_flood_scope(),
+                    skip_user_rate_limit=True,
+                ))
             except Exception as e:
                 self.logger.error("Failed to send vigilance mesh alert: %s", e)
 
         url = info.get('url', '')
-        if url:
-            await self.send_external_notifications(f"{message}\n{url}")
-        else:
-            await self.send_external_notifications(message)
+        try:
+            await self.send_external_notifications(f"{message}\n{url}" if url else message)
+        except Exception:
+            self.logger.warning('Failed to send external vigilance notification', exc_info=True)
+        return sent if not self.silence_mesh else self.has_external_notification_targets()
 
