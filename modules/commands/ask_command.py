@@ -47,6 +47,24 @@ class AskCommand(BaseCommand):
     def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
         return sender_may_use_llm(self.bot, message) and self.ask_enabled and super().can_execute(message, skip_channel_check)
 
+    def _punctuated_trigger(self, content: str) -> tuple[str, str] | None:
+        """Recognize punctuation directly after an assistant keyword or alias."""
+        for keyword in sorted(self.keywords, key=lambda k: (len(k.split()), len(k)), reverse=True):
+            words = keyword.split()
+            if not words:
+                continue
+            pattern = r'\s+'.join(re.escape(word) for word in words) + r'[,;:!?]+\s*(.*)'
+            match = re.fullmatch(pattern, content.strip(), flags=re.I | re.S)
+            if match:
+                return keyword.lower(), match.group(1).strip()
+        return None
+
+    def split_trigger_and_args(self, content: str) -> tuple[str | None, str]:
+        trigger, question = super().split_trigger_and_args(content)
+        if trigger is not None:
+            return trigger, re.sub(r'^[,;:!?]+\s*', '', question)
+        return self._punctuated_trigger(question) or (None, question)
+
     def mentioned_question(self, message: MeshMessage, content: str) -> str | None:
         # The channel handler may already have removed the mention. Match the
         # immutable on-air text, including bot names containing brackets.
@@ -66,7 +84,11 @@ class AskCommand(BaseCommand):
             message.content = 'ask ' + question
             message.content_lower = message.content.lower()
             return True
-        return super().matches_keyword(message)
+        if super().matches_keyword(message):
+            return True
+        return self._cleaned_content_matches(
+            message, lambda content: self._punctuated_trigger(content) is not None
+        )
 
     def bbs_text_pending(self, message: MeshMessage, content: str | None = None) -> bool:
         """Claim only the explicitly requested body in this sender's BBS session."""

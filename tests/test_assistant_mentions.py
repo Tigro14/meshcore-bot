@@ -1,13 +1,15 @@
 import configparser
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from modules.models import MeshMessage
-from modules.commands.ask_command import AskCommand
-from modules.commands.base_command import BaseCommand
+
 from modules.assistant.dispatcher import AssistantDispatcher
 from modules.assistant.response import clarification_mention
 from modules.assistant.router import Decision, Route
+from modules.commands.ask_command import AskCommand
+from modules.commands.base_command import BaseCommand
+from modules.models import MeshMessage
 
 
 def assistant(mode='also'):
@@ -17,6 +19,7 @@ def assistant(mode='also'):
     command.bot = SimpleNamespace(config=config)
     command._get_bot_name = lambda: '[BOT] Baliz'
     command._command_prefixes = []
+    command._require_command_prefix = True
     command.keywords = ['ask', 'Baliz']
     return command
 
