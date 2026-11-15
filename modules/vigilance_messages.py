@@ -8,6 +8,7 @@ from modules.vigilance_periods import PARIS, calendar_days, split_key
 
 AlertEvent = tuple[str, dict[str, Any], str]
 _COLORS = {2: 'Jaune', 3: 'Orange', 4: 'Rouge'}
+_DEPARTMENT_NAMES = {'22': 'Côtes-d’Armor', '29': 'Finistère', '35': 'Ille-et-Vilaine', '56': 'Morbihan'}
 
 
 def _day(day: str | None, now: float) -> str:
@@ -134,7 +135,9 @@ def department_alerts(events: list[AlertEvent], names: dict[str, str], now: floa
     maximum = max(colors, key=priority.__getitem__)
     emoji = {'Vert': '✅', 'Jaune': '⚠️', 'Orange': '🟠', 'Rouge': '🔴'}[maximum]
     reminder = all(reason == 'reminder' for _, _, reason in events)
-    header = f"{emoji} {'Rappel' if reminder else 'Vigilance'} {code}"
+    name = _DEPARTMENT_NAMES.get(code)
+    header = (f"{emoji} {'Rappel ' if reminder else ''}{name} ({code})" if name else
+              f"{emoji} {'Rappel' if reminder else 'Vigilance'} {code}")
     if len(colors) == 1 and maximum != 'Vert':
         header += ' : ' + maximum.upper()
     sections: list[tuple[str, list[str]]] = []
@@ -149,12 +152,12 @@ def department_alerts(events: list[AlertEvent], names: dict[str, str], now: floa
             room = budget-len((header+'\n'+(label+'\n' if label else '')).encode('utf-8'))
             lines = _department_risks(info, names, room)
         sections.append((label, lines))
-    body = '\n\n'.join('\n'.join(([label] if label else [])+lines) for label, lines in sections)
+    body = '\n'.join('\n'.join(([label] if label else [])+lines) for label, lines in sections)
     if _fits(header+'\n'+body, budget):
         return [header+'\n'+body]
     messages, current = [], header
     for label, lines in sections:
-        heading = ('\n' if current == header else '\n\n')+label if label else ''
+        heading = '\n'+label if label else ''
         for line in lines:
             candidate = current+heading+'\n'+line
             if not _fits(candidate, budget):

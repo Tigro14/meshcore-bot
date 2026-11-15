@@ -30,10 +30,11 @@ def test_both_days_fit_one_readable_message_per_department():
         assert len(messages) == 1
         assert len(messages[0].encode()) <= 132
         assert ';' not in messages[0]
-        assert '15/11\n' in messages[0] and '\n\nDemain 16/11\n' in messages[0]
+        assert '\n\n' not in messages[0]
+        assert '15/11\n' in messages[0] and '\nDemain 16/11\n' in messages[0]
     assert department_alerts(due('29', data), _PHENOMENON_NAMES, NOW, 132) == [
-        '⚠️ Vigilance 29 : JAUNE\n15/11\nVent : 6h-9h et 11h-20h\nOrages : 7h-17h'
-        '\n\nDemain 16/11\nVent : 18h-24h\nPluie-inondation : 20h-24h']
+        '⚠️ Finistère (29) : JAUNE\n15/11\nVent : 6h-9h et 11h-20h\nOrages : 7h-17h'
+        '\nDemain 16/11\nVent : 18h-24h\nPluie-inondation : 20h-24h']
 
 
 def test_mixed_day_levels_cannot_look_like_the_same_vigilance_for_both_days():
@@ -57,16 +58,16 @@ def test_long_bulletins_keep_their_dates_and_whole_risks_in_every_radio_part():
     info = bulletin(TODAY, {str(pid): [(2, 8, 18)] for pid in range(1, 10)})
     messages = department_alerts([('29', info, 'new')], _PHENOMENON_NAMES, NOW, 80)
     assert len(messages) > 1
-    assert all(m.startswith('⚠️ Vigilance 29 : JAUNE\n15/11\n') for m in messages)
+    assert all(m.startswith('⚠️ Finistère (29) : JAUNE\n15/11\n') for m in messages)
     assert all(len(m.encode()) <= 80 for m in messages)
     assert all(name in '\n'.join(messages) for name in _PHENOMENON_NAMES.values())
     assert all('…' not in m and '...' not in m for m in messages)
 
 
-def test_one_department_only_and_reminders_still_fit_the_captured_case():
+def test_reminders_keep_the_named_department_and_radio_budget():
     events = [(key, info, 'reminder') for key, info, _ in due('29', current())]
     messages = department_alerts(events, _PHENOMENON_NAMES, NOW, 132)
-    assert len(messages) == 1 and 'Rappel 29 : JAUNE' in messages[0]
+    assert all('Rappel Finistère (29) : JAUNE' in message and len(message.encode()) <= 132 for message in messages)
     with pytest.raises(ValueError):
         department_alerts(events+due('22', current()), _PHENOMENON_NAMES, NOW, 132)
 
@@ -81,8 +82,9 @@ async def test_service_combines_due_days_into_four_department_messages(tmp_path)
     instance = monitor(tmp_path)
     messages = await check(instance, current(), NOW)
     assert len(messages) == 4
+    labels = {'22': 'Côtes-d’Armor', '29': 'Finistère', '35': 'Ille-et-Vilaine', '56': 'Morbihan'}
     for code, message in zip(['22', '29', '35', '56'], messages, strict=True):
-        assert message.startswith(f'⚠️ Vigilance {code} : JAUNE\n')
+        assert message.startswith(f'⚠️ {labels[code]} ({code}) : JAUNE\n')
         assert instance.alert_policy.state(period_key(code, TODAY))['color'] == 'Jaune'
         assert instance.alert_policy.state(period_key(code, TOMORROW))['color'] == 'Jaune'
     assert await check(monitor(tmp_path), current(), NOW+3600) == []
@@ -101,7 +103,7 @@ async def test_green_today_does_not_close_tomorrow_or_repeat_its_forecast(tmp_pa
     data['29']['periods'][0] = bulletin(TODAY, {})
     instance = monitor(tmp_path)
     messages = await check(instance, data, NOW+3600)
-    assert len(messages) == 1 and 'Vigilance 29' in messages[0] and 'retour au vert' in messages[0]
+    assert len(messages) == 1 and 'Finistère (29)' in messages[0] and 'retour au vert' in messages[0]
     assert 'Demain' not in messages[0]
     assert instance.alert_policy.state(period_key('29', TOMORROW))['color'] == 'Jaune'
 
