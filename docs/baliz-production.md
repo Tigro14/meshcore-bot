@@ -11,9 +11,42 @@
 | `sync/tigro-20261106` | Intégration de `Tigro14/meshcore-bot:main` après fusion de la PR #80. |
 | `sync/lxc103-production-20261107` | Publication de la source réellement déployée dans le LXC103, avec ses correctifs et ses réglages publics. |
 | `sync/lxc103-production-20261109` | Publication des ajouts BBS et assistant effectivement déployés les 8 et 9 novembre. |
+| `sync/lxc103-production-20261115` | Publication de la source du LXC103 : vigilance, Airtime et corrections de l’interface. |
 | `feat/*`, `fix/*`, `sync/tigro-*` | Développements et intégrations isolés, à relire avant intégration dans `baliz`. |
 
 Les mises à jour de Tigro sont intégrées dans Baliz en conservant ses particularités. Publier une version de production ne remplace pas `main`, ne réécrit pas l'historique et ne supprime pas les branches de travail existantes.
+
+## Alignement avec le LXC103 — 15 novembre 2026
+
+La source installée est `3706f23eda89adf032f24eeb98924b41ca5915b5`,
+repérée par le tag `baliz-production-2026-11-15`. Les **310 fichiers applicatifs**
+ont été comparés au serveur par SHA-256 : aucune différence et aucun fichier
+supplémentaire sous `modules`. Le schéma est à **39**.
+
+La publication conserve les 34 commits depuis `7dbb84a9` avec leur historique :
+
+- Vigilance des quatre départements bretons, bulletins datés d’aujourd’hui et
+  demain, cache hors ligne, rappels persistants et alertes condensées par journée,
+  niveau et phénomène.
+- Attribution passive de l’airtime, reconstruction des émissions des répéteurs
+  et scénario de retransmissions attendues, avec couverture et limites explicites.
+- Histogramme adapté à la période, courbe des paquets/minute, taille moyenne,
+  repères de minuit et quatre indicateurs de synthèse.
+- Graphiques de batterie dans Time et Contacts, libellés de dates, noms du
+  tableau de bord et attribution des réponses aux requêtes concurrentes.
+
+Le profil public ajoute le relevé batterie quotidien à 03:00 et reprend les
+réglages publics durables de vigilance. `#meteo` est une destination temporaire
+du serveur ; le profil conserve `#bretagne`. L’identité publique est actualisée
+séparément dans `config/baliz-identity`.
+
+`main` reste à `d3ba88887b19f123dd9a8905a31857da4472f4a9`. Les ajouts
+de publication portent uniquement sur le profil public et la documentation ;
+ils ne remplacent pas la configuration active. Aucun secret, prompt privé,
+message ou état de cible n’est exporté. Cette synchronisation ne modifie ni
+ne redémarre le LXC103.
+
+Voir la [validation de l’alignement](validation/baliz-production-sync-20261115.md).
 
 ## Alignement avec le LXC103 — 9 novembre 2026
 

@@ -34,6 +34,19 @@ Le profil active la surveillance horaire des départements `29,22,35,56` dans
 changement. Le retour au vert est annoncé une fois après une vigilance diffusée.
 Voir le [fonctionnement du service](vigilance-service.md#change-driven-alerts).
 
+Le regroupement des alertes conserve une date et un niveau par message. Chaque
+phénomène nomme ses départements et ses créneaux ; les horaires communs sont
+regroupés et les niveaux différents restent explicites. Le format respecte la
+taille radio disponible. Le déplacement temporaire des alertes vers `#meteo`
+le 15 novembre reste un réglage local ; le profil public conserve `#bretagne`.
+
+## Relevé des batteries
+
+`[Battery_Monitor] enabled = true` et `schedule = 0 3 * * *` activent un relevé
+par jour à 03:00, heure de Paris. Le service reprend les cibles Clock Sync déjà
+autorisées, sans publier leur liste. Contacts et Time affichent les valeurs et
+leur historique de tension.
+
 ## Identité et fonctionnement conservés
 
 - Nom `[BOT] Baliz`, français, fuseau `Europe/Paris` et coordonnées de Morlaix.
@@ -148,9 +161,11 @@ de la source est signalée une fois ; les réponses hors ligne sont explicitemen
 historiques et ne déclenchent aucune nouvelle alerte météo. Le passage à un bulletin
 périmé et le rétablissement des mises à jour sont également signalés une fois.
 
-`group_similar_alerts = true` réunit les départements dont une alerte est due et dont
-les niveaux et phénomènes sont identiques. Le délai de rappel reste propre à chaque
-département. Ces options sont désactivées dans l'exemple générique de Tigro.
+`group_similar_alerts = true` réunit les alertes dues par journée et niveau, puis
+les départements ayant les mêmes horaires pour chaque phénomène. Les créneaux
+distincts et les niveaux propres aux phénomènes restent explicites. Le délai de
+rappel reste propre à chaque département. Ces options sont désactivées dans
+l'exemple générique de Tigro.
 
 ## Utilisation
 
