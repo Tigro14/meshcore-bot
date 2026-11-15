@@ -702,6 +702,6 @@ alert_levels = Jaune,Orange,Rouge
 notify_on_change = true
 reminder_interval = 86400
 offline_cache = true
-group_similar_alerts = true
+group_similar_alerts = false
 include_tomorrow = true
 silence_mesh_output = false

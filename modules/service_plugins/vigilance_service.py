@@ -38,7 +38,7 @@ from bs4 import BeautifulSoup, Tag
 from modules.utils import get_config_timezone
 from modules.vigilance_alert_policy import VigilanceAlertPolicy, fingerprint
 from modules.vigilance_cache import AvailabilityNotices, VigilanceCache
-from modules.vigilance_messages import compact_alerts
+from modules.vigilance_messages import compact_alerts, department_alerts
 from modules.vigilance_periods import (
     PARIS,
     attach_period,
@@ -729,7 +729,7 @@ class VigilanceService(BaseServicePlugin):
         {
             "key": "group_similar_alerts", "label": "Group similar alerts", "type": "bool",
             "default": False,
-            "help": "In change mode, summarize due alerts by day and level, sharing identical phenomenon schedules.",
+            "help": "Group different departments with shared schedules. Otherwise dated bulletins stay together per department.",
         },
         {
             "key": "silence_mesh_output",
@@ -885,7 +885,7 @@ class VigilanceService(BaseServicePlugin):
             if self.notify_on_change:
                 reason = self.alert_policy.reason(code, info, self.alert_levels, time.time())
                 if reason:
-                    if self.group_similar_alerts:
+                    if self.group_similar_alerts or self.include_tomorrow:
                         pending.append((code, info, reason))
                         continue
                     message = self._format_change_message(code, info, reason)
@@ -901,7 +901,10 @@ class VigilanceService(BaseServicePlugin):
                     self.logger.info("Vigilance alert sent for dept %s: %s", code, color)
 
         if pending:
-            await self._send_grouped_alerts(pending)
+            if self.group_similar_alerts:
+                await self._send_grouped_alerts(pending)
+            else:
+                await self._send_department_alerts(pending)
         if self.offline_cache:
             await self._notify_availability([code for code in self._expected_periods() if code not in available])
 
@@ -916,6 +919,32 @@ class VigilanceService(BaseServicePlugin):
         return [period_key(code, day) for code in self.departments for day in (today, tomorrow)
                 if day == today or future or self.bulletin_cache.get(period_key(code, day)) is not None]
 
+    def _alert_body_budget(self) -> int:
+        budget_fn = getattr(self.bot.command_manager, 'channel_body_budget', None)
+        budget = budget_fn(channel=self.channel, scope=self.get_mesh_flood_scope()) if callable(budget_fn) else None
+        return budget if type(budget) is int and budget > 0 else 120
+
+    async def _send_department_alerts(self, pending: list[tuple[str, dict[str, Any], str]]) -> None:
+        groups: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
+        for event in pending:
+            groups.setdefault(split_key(event[0])[0], []).append(event)
+        priority = {'Rouge': 0, 'Orange': 1, 'Jaune': 2, 'Vert': 3}
+        for code, events in sorted(groups.items(), key=lambda pair: (min(priority[e[1]['color']] for e in pair[1]), pair[0])):
+            info = dict(events[0][1])
+            info['url'] = '\n'.join(sorted({event[1]['url'] for event in events if event[1].get('url')}))
+            try:
+                messages = department_alerts(events, _PHENOMENON_NAMES, time.time(), self._alert_body_budget())
+            except (ValueError, KeyError):
+                messages = [self._format_change_message(key, data, reason) for key, data, reason in events]
+            for message in messages:
+                if not await self._send_alert(message, info):
+                    self.logger.warning('Vigilance summary not fully transmitted for dept %s; state retained', code)
+                    break
+            else:
+                for key, data, _ in events:
+                    self.alert_policy.record_sent(key, data, time.time())
+                self.logger.info('Vigilance summary transmitted for dept %s (%d message(s))', code, len(messages))
+
     async def _send_grouped_alerts(self, pending: list[tuple[str, dict[str, Any], str]]) -> None:
         groups: dict[tuple, list[tuple[str, dict[str, Any], str]]] = {}
         for event in pending:
@@ -928,11 +957,7 @@ class VigilanceService(BaseServicePlugin):
             codes = sorted(split_key(event[0])[0] for event in events)
             info = dict(events[0][1])
             info['url'] = '\n'.join(sorted({e[1]['url'] for e in events if e[1].get('url')}))
-            budget_fn = getattr(self.bot.command_manager, 'channel_body_budget', None)
-            budget = budget_fn(channel=self.channel, scope=self.get_mesh_flood_scope()) if callable(budget_fn) else None
-            # Conservative fallback when the sender cannot supply a byte budget.
-            if type(budget) is not int or budget < 1:
-                budget = 120
+            budget = self._alert_body_budget()
             try:
                 messages = compact_alerts(events, _PHENOMENON_NAMES, time.time(), budget)
             except (ValueError, KeyError):
