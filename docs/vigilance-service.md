@@ -118,6 +118,13 @@ comments.
   No risk or time window is truncated. Unstructured bulletins retain the legacy formatter
   and the command manager's byte-aware splitting. Radio pacing and limits still apply.
   A partly failed summary does not advance the departments' last-sent states.
+- **Department summaries**: with `include_tomorrow = true` and
+  `group_similar_alerts = false`, due bulletins are combined per department.
+  Brittany department headers include the name and code. Each day has its own
+  dated heading and each phenomenon its own line of hours, with no blank line
+  between days. The two days share one message when they fit the radio budget. Different day
+  levels and lower phenomenon levels remain explicit. Longer bulletins use
+  additional self-contained messages without truncating risks or hours.
 
 **Example alert:**
 ```

@@ -16,6 +16,21 @@
 
 Les mises à jour de Tigro sont intégrées dans Baliz en conservant ses particularités. Publier une version de production ne remplace pas `main`, ne réécrit pas l'historique et ne supprime pas les branches de travail existantes.
 
+## Mise à jour des alertes — 15 novembre 2026
+
+La source installée est `1b23c8215d8de191184d3da21e0487b57aa7949c`.
+Les 310 fichiers applicatifs correspondent à cette source ; aucun fichier
+supplémentaire n’a été trouvé sous `modules`. Le service et la radio sont actifs.
+
+Le mode par département réunit les journées dues, conserve les horaires et les
+niveaux, et affiche les noms des départements bretons. Les messages respectent
+la taille radio disponible sans tronquer les phénomènes. Le regroupement entre
+départements reste disponible et activé dans le profil public, comme sur le serveur.
+
+La publication conserve `main` et actualise séparément `config/baliz-identity`.
+La destination temporaire `#meteo` reste locale. Voir la
+[validation](validation/baliz-vigilance-sync-20261115.md).
+
 ## Alignement avec le LXC103 — 15 novembre 2026
 
 La source installée est `3706f23eda89adf032f24eeb98924b41ca5915b5`,

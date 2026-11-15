@@ -34,11 +34,13 @@ Le profil active la surveillance horaire des départements `29,22,35,56` dans
 changement. Le retour au vert est annoncé une fois après une vigilance diffusée.
 Voir le [fonctionnement du service](vigilance-service.md#change-driven-alerts).
 
-Le regroupement des alertes conserve une date et un niveau par message. Chaque
-phénomène nomme ses départements et ses créneaux ; les horaires communs sont
-regroupés et les niveaux différents restent explicites. Le format respecte la
-taille radio disponible. Le déplacement temporaire des alertes vers `#meteo`
-le 15 novembre reste un réglage local ; le profil public conserve `#bretagne`.
+`group_similar_alerts = true` regroupe les départements dont les vigilances et
+horaires correspondent. Avec `false`, les alertes sont séparées par département :
+nom et numéro en en-tête, journées dues réunies si la taille radio le permet,
+une ligne par phénomène avec ses horaires, sans ligne vide entre les journées.
+Les différences de niveau restent explicites et aucun créneau n’est tronqué.
+La destination temporaire `#meteo` reste locale ; le profil public conserve
+`#bretagne`.
 
 ## Relevé des batteries
 
@@ -161,11 +163,10 @@ de la source est signalée une fois ; les réponses hors ligne sont explicitemen
 historiques et ne déclenchent aucune nouvelle alerte météo. Le passage à un bulletin
 périmé et le rétablissement des mises à jour sont également signalés une fois.
 
-`group_similar_alerts = true` réunit les alertes dues par journée et niveau, puis
-les départements ayant les mêmes horaires pour chaque phénomène. Les créneaux
-distincts et les niveaux propres aux phénomènes restent explicites. Le délai de
-rappel reste propre à chaque département. Ces options sont désactivées dans
-l'exemple générique de Tigro.
+Le profil conserve `group_similar_alerts = true`, comme sur le serveur. Désactiver
+cette option permet d’utiliser les résumés par département décrits plus haut.
+Le délai de rappel reste propre à chaque département et journée. Ces options
+sont désactivées dans l’exemple générique de Tigro.
 
 ## Utilisation
 
