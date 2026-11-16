@@ -55,6 +55,7 @@ from flask_socketio import (  # noqa: F401  kept for modules.web_viewer.app.disc
 
 from modules import flood_scope, region_warning
 from modules.channel_occupancy import (
+    UNATTRIBUTED_SENDER,
     ChannelOccupancy,
     render_key_value,
 )
@@ -230,6 +231,110 @@ from modules.web_viewer.socket_clients import SocketClientsMixin
 from modules.web_viewer.tracking import ContactTrackingMixin
 
 
+def _fold_prefix_rows(
+    conn: sqlite3.Connection, rows: list[dict[str, Any]], label_field: str, table: str
+) -> None:
+    """Fold 2-byte address labels into the single 3-byte address they can only mean.
+
+    MeshCore writes a relay's node address 2 bytes wide in short packets and 3 bytes
+    wide in extended ones, so one antenna can stand in a per-address ledger under
+    `6201` and under `62010a`.  Two rows for one antenna read as two entries, so a
+    short label folds into the longer one — but only when the longer is the ONLY
+    address the ledger knows under that prefix.  With two longer addresses the
+    2-byte copies cannot be told apart, and folding them into either would hand a
+    station copies this radio cannot attribute at that precision.  The fold is
+    reported in the row (`merged_prefixes`) so the page can show which labels it
+    merged and at which precision.
+
+    The uniqueness check reads the cumulative table, in cumulative and windowed
+    reads alike: the ledger's knowledge of an address is not bounded by the window,
+    and folding on less knowledge would report a different antenna depending on
+    the period the reader selected.
+    """
+    by_label = {(r[label_field] or '').lower(): r for r in rows}
+    for row in list(rows):
+        label = (row[label_field] or '').lower()
+        if not re.fullmatch(r'[0-9a-f]{4}', label):
+            continue
+        try:
+            wider = conn.execute(
+                f"SELECT DISTINCT {label_field} FROM {table} "
+                f"WHERE {label_field} LIKE ? AND {label_field} <> ? AND LENGTH({label_field}) = 6",
+                (label + '%', label),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            wider = []
+        if len(wider) != 1:
+            continue
+        target = by_label.get(str(wider[0][label_field]).lower())
+        if target is None or target is row:
+            continue
+        target['airtime_ms'] = float(target.get('airtime_ms') or 0.0) + float(row.get('airtime_ms') or 0.0)
+        target['packets'] = int(target.get('packets') or 0) + int(row.get('packets') or 0)
+        if target.get('advert_ms') is not None and row.get('advert_ms') is not None:
+            target['advert_ms'] = float(target['advert_ms']) + float(row['advert_ms'])
+        if 'first_seen' in target and 'first_seen' in row:
+            target['first_seen'] = min(float(target['first_seen']), float(row['first_seen']))
+        if 'last_seen' in target and 'last_seen' in row:
+            target['last_seen'] = max(float(target['last_seen']), float(row['last_seen']))
+        target.setdefault('merged_prefixes', []).append({
+            'label': label,
+            'packets': int(row['packets']),
+            'airtime_ms': float(row['airtime_ms']),
+        })
+        rows.remove(row)
+    rows.sort(key=lambda r: float(r.get('airtime_ms') or 0.0), reverse=True)
+
+
+def _label_node_rows(
+    conn: sqlite3.Connection,
+    rows: list[dict[str, Any]],
+    label_field: str,
+    names: dict[str, str],
+) -> None:
+    """Attach names, short labels and the advert slice to per-address ledger rows.
+
+    A full public key becomes a contact name where the tracking has one; a short
+    key or the reserved unattributed bucket stays as it is, because a prefix that
+    could belong to several keys is not an identity the page may claim.  A prefix
+    becomes a name only when it matches EXACTLY one tracked contact — a prefix that
+    could belong to several stays a prefix, because guessing an identity from
+    truncated bytes is how a table starts lying.
+
+    The advert slice is a percent of that address's own airtime.  None (not 0) when
+    the slice was never recorded: a share of traffic older than the column is
+    unknown, and a 0 would claim a station that never advertised.
+    """
+    for row in rows:
+        label = (row[label_field] or '').lower()
+        row['name'] = None
+        if re.fullmatch(r'[0-9a-f]{64}', label):
+            row['name'] = names.get(label)
+            row['short'] = label[:6]
+        elif re.fullmatch(r'[0-9a-f]{4,6}', label):
+            try:
+                matches = conn.execute(
+                    "SELECT name FROM complete_contact_tracking "
+                    "WHERE public_key LIKE ?",
+                    (label + '%',),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                matches = []
+            if len(matches) == 1:
+                row['name'] = matches[0]['name']
+            row['short'] = label
+        else:
+            row['short'] = None
+        row['unattributed'] = label == UNATTRIBUTED_SENDER
+        advert_ms = row.get('advert_ms')
+        airtime_ms = row.get('airtime_ms') or 0.0
+        row['advert_percent'] = (
+            round(float(advert_ms) / float(airtime_ms) * 100.0, 1)
+            if advert_ms is not None and airtime_ms > 0
+            else None
+        )
+
+
 class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin, CleanupSchedulerMixin, ChannelMonitorMixin, ChannelAdminMixin, DatabaseAdminMixin, ContactTrackingMixin, MeshEvidenceMixin, MultibyteRolloutMixin, FeedSubscriptionsMixin):
     """Complete web interface using Flask-SocketIO 5.x best practices"""
 
@@ -264,6 +369,9 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         'dashboard_snapshot',
         'occupancy_samples',
         'occupancy_senders',
+        'occupancy_emitters',
+        'occupancy_sender_days',
+        'occupancy_emitter_days',
     }
 
     def __init__(self, db_path="meshcore_bot.db", repeater_db_path=None, config_path="config.ini"):
@@ -466,6 +574,29 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         self._start_dashboard_refresher()
 
         self.logger.info("BotDataViewer initialized with Flask-SocketIO 5.x best practices")
+
+    def _occupancy_enabled_now(self) -> bool:
+        """The ``[Channel_Occupancy] enabled`` setting as the file states it right now.
+
+        ``self.occupancy.enabled`` is the viewer's boot copy, and a hot config reload
+        reboots neither this process nor that copy. A page that tells the reader to set
+        the flag has to answer from the file, not from a setting that may have moved
+        under it: the recording the reader can start or stop is governed by the file.
+        An unreadable file falls back to the boot copy — the honest answer there is
+        "as far as this process can tell", not a toggled guess.
+        """
+        try:
+            with open(self.config_path, encoding='utf-8') as handle:
+                text = handle.read()
+            fresh = configparser.ConfigParser(interpolation=None)
+            fresh.read_string(text)
+            raw = fresh.get('Channel_Occupancy', 'enabled', fallback=None)
+        except (OSError, configparser.Error):
+            return self.occupancy.enabled
+        if raw is None:
+            # No section and no flag: the same default the writer applies, off.
+            return False
+        return str(raw).strip().lower() in ('1', 'true', 'yes', 'on')
 
     def _setup_logging(self):
         """Setup logging; file handler only when [Logging] log_file is set.
@@ -2673,6 +2804,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             """
             with self._with_db_connection() as conn:
                 snapshot = self.occupancy.read_live(conn)
+                enabled_now = self._occupancy_enabled_now()
                 payload = {
                     'age_seconds': snapshot['age_seconds'],
                     'stale': snapshot['stale'],
@@ -2681,11 +2813,13 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     # snapshot happens to carry: the page tells the reader to set it, so
                     # it has to report the setting in force. The stored value is history —
                     # numbers written while recording was on stay numbers from that window
-                    # even if recording has since been turned off.
-                    'enabled': self.occupancy.enabled,
+                    # even if recording has since been turned off. The setting is read from
+                    # the file at request time, because the viewer keeps only a boot copy
+                    # and a hot config reload never reaches this process.
+                    'enabled': enabled_now,
                 }
                 stored = snapshot['fields'].get('enabled')
-                if stored is not None and stored != self.occupancy.enabled:
+                if stored is not None and stored != enabled_now:
                     # Saying the two apart is what keeps the page honest: a reader who sees
                     # numbers under a "recording is off" note has to be able to tell which
                     # is the current setting and which is the snapshot.
@@ -2695,7 +2829,86 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                         limit = int(request.args.get('limit', 10))
                     except (TypeError, ValueError):
                         limit = 10
-                    payload['top_senders'] = self.occupancy.top_senders(conn, limit)
+                    # The history selector on the page governs the two tables too.
+                    # A cumulative counter shown under a "24h" label is a misreading
+                    # waiting to happen, so when the reader asks for a period the rows
+                    # come from the day tables summed over it; without `days` the
+                    # cumulative ledgers answer, as they always did.
+                    share_days: Optional[int] = None
+                    days_arg = request.args.get('days')
+                    if days_arg is not None:
+                        try:
+                            share_days = max(1, min(int(days_arg), 90))
+                        except (TypeError, ValueError):
+                            share_days = None
+                    if share_days is None:
+                        senders = self.occupancy.top_senders(conn, limit)
+                        emitters = self.occupancy.top_emitters(conn, limit)
+                        relays = self.occupancy.top_relays(conn, limit)
+                    else:
+                        cutoff_day = self.occupancy.window_cutoff_day(share_days)
+                        senders = self.occupancy.top_senders_window(conn, cutoff_day, limit)
+                        emitters = self.occupancy.top_emitters_window(conn, cutoff_day, limit)
+                        relays = self.occupancy.top_relays_window(conn, cutoff_day, limit)
+                        payload['share_window_days'] = share_days
+
+                    _fold_prefix_rows(conn, emitters, 'emitter', 'occupancy_emitters')
+                    _fold_prefix_rows(conn, relays, 'relay', 'occupancy_relays')
+                    # Resolve a full public key to a contact name where the tracking has
+                    # one; a short key or the reserved unattributed bucket stays as it is,
+                    # because a prefix that could belong to several keys is not an identity
+                    # the page may claim.
+                    keys = [
+                        row['sender'] for row in senders
+                        if re.fullmatch(r'[0-9a-f]{64}', row['sender'] or '')
+                    ] + [
+                        row['emitter'] for row in emitters
+                        if re.fullmatch(r'[0-9a-f]{64}', row['emitter'] or '')
+                    ] + [
+                        row['relay'] for row in relays
+                        if re.fullmatch(r'[0-9a-f]{64}', row['relay'] or '')
+                    ]
+                    names: dict[str, str] = {}
+                    if keys:
+                        placeholders = ', '.join('?' for _ in keys)
+                        try:
+                            name_rows = conn.execute(
+                                f"SELECT public_key, name FROM complete_contact_tracking "
+                                f"WHERE public_key IN ({placeholders})",
+                                keys,
+                            ).fetchall()
+                            names = {str(r['public_key']).lower(): r['name'] for r in name_rows}
+                        except sqlite3.OperationalError:
+                            pass
+                    for row in senders:
+                        key = (row['sender'] or '').lower()
+                        row['name'] = names.get(key)
+                        row['short'] = key[:6] if re.fullmatch(r'[0-9a-f]{64}', key) else None
+                        row['unattributed'] = key == UNATTRIBUTED_SENDER
+                        # The advert slice as a percent of that sender's own airtime.
+                        # None (not 0) when the slice was never recorded — a share of
+                        # traffic older than the column is unknown, and a 0 would claim
+                        # a talker who never advertised.
+                        advert_ms = row.get('advert_ms')
+                        airtime_ms = row.get('airtime_ms') or 0.0
+                        row['advert_percent'] = (
+                            round(float(advert_ms) / float(airtime_ms) * 100.0, 1)
+                            if advert_ms is not None and airtime_ms > 0
+                            else None
+                        )
+                    payload['top_senders'] = senders
+
+                    _label_node_rows(conn, emitters, 'emitter', names)
+                    payload['top_emitters'] = emitters
+
+                    # The third ledger: the first node address of each flood path, the
+                    # gateway through which a relayed copy entered this mesh.  A relayed
+                    # copy always carries one, so an entry relay is never unattributed
+                    # the way a sender can be — but it is still only an address, and it
+                    # becomes a name only under the same one-match rule.  These rows are
+                    # not people and must never be added to the other two tables.
+                    _label_node_rows(conn, relays, 'relay', names)
+                    payload['top_relays'] = relays
 
             if request.args.get('format') == 'text':
                 # Only scalar fields, one per line: the sender list would become a comma

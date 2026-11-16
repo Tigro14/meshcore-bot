@@ -51,6 +51,9 @@
     .oc-bar span { display: block; height: 100%; }
     .oc-seg-rx { background-color: var(--oc-rx); }
     .oc-seg-tx { background-color: var(--oc-tx); }
+    /* The bar clamps at the card width, but the share does not clamp: an outlined bar
+       says "more than fits", and the raw figure next to it carries the real value. */
+    .oc-bar-over { outline: 1px solid var(--oc-rx); }
 
     .oc-empty {
         color: var(--text-muted);
@@ -93,7 +96,12 @@
         SF/BW/coding rate. Real occupancy (CAD, LBT) belongs to a radio driver, and a repeater's
         own occupancy comes from that repeater's API. The two shares are kept apart on purpose:
         <strong>rx</strong> is what this node hears — a local observation, not the airtime of the
-        whole channel — and <strong>tx</strong> is what the bot spends itself.
+        whole channel — and <strong>tx</strong> is what the bot spends itself. Every heard copy is
+        counted, flood repetitions included, because on one shared channel each repetition is its
+        own transmission: a share above 100% is a fact about parallel traffic (each radio senses
+        the carrier near itself, not across the mesh), not an overflow. <strong>≥ channel</strong>
+        is the floor for the whole shared medium — heard copies plus the shallower copies each
+        flood tree proves — and it is a floor, never a ceiling.
     </p>
 
     <!-- Live windows -->
@@ -145,11 +153,11 @@
         <div class="card-body">
             <div class="row g-3 mb-3">
                 <div class="col-md-2">
-                    <div class="oc-figure-label">rx airtime</div>
+                    <div class="oc-figure-label">rx airtime %</div>
                     <div class="oc-figure" id="oc-total-rx">-</div>
                 </div>
                 <div class="col-md-2">
-                    <div class="oc-figure-label">tx airtime</div>
+                    <div class="oc-figure-label">tx airtime %</div>
                     <div class="oc-figure" id="oc-total-tx">-</div>
                 </div>
                 <div class="col-md-2">
@@ -157,11 +165,11 @@
                     <div class="oc-figure" id="oc-packets">-</div>
                 </div>
                 <div class="col-md-2">
-                    <div class="oc-figure-label">p50 rx</div>
+                    <div class="oc-figure-label">p50 rx %</div>
                     <div class="oc-figure" id="oc-p50">-</div>
                 </div>
                 <div class="col-md-2">
-                    <div class="oc-figure-label">p95 rx</div>
+                    <div class="oc-figure-label">p95 rx %</div>
                     <div class="oc-figure" id="oc-p95">-</div>
                 </div>
             </div>
@@ -171,9 +179,11 @@
                 A gap is not a zero: a period with no packet is absent from the result, so the
                 line breaks there rather than dropping to 0. A bucket that was observed and held
                 nothing on air stays a zero — those are two different facts, and a chart that
-                draws the first as the second shows a cliff that reads as an outage. Percentiles
-                are nearest-rank over the stored buckets, which is not the same measurement as
-                the instant windows above.
+                draws the first as the second shows a cliff that reads as an outage. All figures
+                and the chart speak percent: the rx/tx figures are percent of the time buckets
+                were actually written (unwritten periods stay unknown, not silent), p50/p95 are
+                the nearest-rank occupancy of a single bucket, and each column of the chart is
+                the occupancy of its own span.
             </p>
         </div>
     </div>
@@ -191,6 +201,7 @@
                             <th>Sender</th>
                             <th>Airtime</th>
                             <th>Packets</th>
+                            <th>Advert</th>
                             <th>Last seen</th>
                         </tr>
                     </thead>
@@ -199,8 +210,115 @@
             </div>
             <p class="small text-muted mt-2 mb-0">
                 Ranked by airtime, not by packet count: a talker sending many small packets can
-                cost more than one sending a long message. Senders show once a packet is recorded,
-                so this reflects the retention window, not all time.
+                cost more than one sending a long message. Every heard copy counts, flood
+                repetitions included, and the traffic this radio cannot trace to a sender sits in
+                the unattributed row — the table therefore adds up to the whole heard channel,
+                and its total can exceed the wall-clock span. Attributed senders are the ones
+                whose packets carry their identity: adverts, which name their advertiser in
+                the clear, the bot itself, and messages this radio's own decryption names an
+                author for — copies not yet written to the table move out of the unknown then,
+                never rows already written; the write holds a tracked copy for sixty seconds
+                so a late decryption can still claim it. Open channels name no author at all:
+                the radio opens them with a shared key and reports none, so that anonymity is
+                structural, not a gap in this measurement. Traffic this radio cannot decrypt
+                stays unknown.
+                The Advert column is the share of that sender's airtime spent on adverts —
+                the presence traffic every MeshCore node broadcasts — and a dash means the
+                share is unknown because that sender predates the split.
+                The table follows the history period selected above: each row sums that
+                station's day rows inside the window, aligned to whole UTC days, so a small
+                number here is not a quiet station — absence in this table is not silence on
+                the channel. The day-by-day detail reaches back only to when this breakdown
+                was introduced, so a long window understates traffic older than that; the
+                station's lifetime totals stay on its detail page.
+                <em>Attribution par notre propre déchiffrement, avant écriture seulement ;
+                l'attente de soixante secondes couvre le déchiffrement tardif ; l'anonymat des
+                canaux ouverts est structurel, pas une faille de mesure. Le reste demeure
+                inconnu. Couvert par la période choisie.</em>
+            </p>
+        </div>
+    </div>
+
+    <!-- Emitter share: who physically put the heard copies on the air -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="h5 mb-0"><i class="fas fa-tower-broadcast me-2"></i>Emitters by airtime</h2>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Emitter</th>
+                            <th>Airtime</th>
+                            <th>Packets</th>
+                            <th>Advert</th>
+                            <th>Last seen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="oc-emitters"></tbody>
+                </table>
+            </div>
+            <p class="small text-muted mt-2 mb-0">
+                Who occupies the channel, relay repeaters included: each heard copy is charged
+                to the station that physically transmitted it, named on the wire by MeshCore's
+                flood path, whose last entry is that station. A 4- or 6-digit label is a node
+                address, the first bytes of a relay key, shown as a name only when exactly one
+                known contact matches it. This table and the senders table above hold the same
+                copies once per fact — carrier and emitter are two different stations — so they
+                must never be summed. Like the senders table, this one covers the history
+                period selected above, aligned to whole UTC days, and its day detail reaches
+                back only to when this breakdown was introduced.
+                MeshCore writes a relay's node address 2 bytes wide in short packets and 3
+                bytes wide in extended ones, so one relay can stand under two labels; when
+                the ledger knows only one longer address under a shorter one, the short
+                copies are folded into that row and the cell names the labels it merged.
+                Where the ledger knows two longer addresses, the short row stays on its own:
+                the fold would pick a station the wire did not name.
+                <em>Couvert par la période choisie.</em>
+            </p>
+        </div>
+    </div>
+
+    <!-- Entry relays: where the relayed copies entered this mesh -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="h5 mb-0"><i class="fas fa-arrow-right-to-bracket me-2"></i>Entry relays by airtime</h2>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Entry relay</th>
+                            <th>Airtime</th>
+                            <th>Packets</th>
+                            <th>Advert</th>
+                            <th>Last seen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="oc-relays"></tbody>
+                </table>
+            </div>
+            <p class="small text-muted mt-2 mb-0">
+                Where the relayed copies entered this mesh: MeshCore's flood path names the
+                hops a copy passed through, and its FIRST entry is the first relay that
+                repeated it — the gateway that carried the copy to this radio's side of the
+                network. It is not the author: a multicast names its writer nowhere on the
+                wire, and the writer's own antenna usually sits behind this first hop, not
+                equal to it. It is not the emitter either: the emitter table above reads the
+                path from its other end, the last hop that carried the copy here. Copies
+                heard directly passed through no relay and belong to no row here, so this
+                table is deliberately smaller than the other two; all three hold the same
+                copies once per fact and must never be summed. The labels are node
+                addresses — the first bytes of a relay key — shown as a name only when
+                exactly one known contact matches; when the ledger knows only one longer
+                address under a shorter one, the short copies fold into that row and the
+                cell names the labels it merged. Like the other tables, this one covers the
+                history period selected above, aligned to whole UTC days.
+                <em>Premier relais du chemin d'inondation : la porte d'entrée des copies
+                répétées, jamais leur auteur ni l'antenne émettrice. Les copies reçues en
+                direct n'entrent pas ici, et les trois tableaux ne se cumulent jamais.</em>
             </p>
         </div>
     </div>
@@ -247,13 +365,15 @@
 
         async loadLive() {
             try {
-                const resp = await fetch('/api/telemetry/occupancy?limit=10', {
+                const resp = await fetch('/api/telemetry/occupancy?limit=10&days=' + this.days, {
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 if (!resp.ok) throw new Error('Request failed (' + resp.status + ')');
                 const data = await resp.json();
                 this.renderLive(data);
                 this.renderSenders(data.top_senders || []);
+                this.renderEmitters(data.top_emitters || []);
+                this.renderRelays(data.top_relays || []);
             } catch (err) {
                 // A failed request is not evidence that recording is off, so the claim from
                 // the last response has to be retracted here: otherwise the page goes on
@@ -310,11 +430,16 @@
                 const rx = data[name + '_rx_percent'] || 0;
                 const tx = data[name + '_tx_percent'] || 0;
                 const seconds = data[name + '_seconds'] || 0;
+                const floor = data[name + '_rx_floor_percent'];
+                const floorText = (floor === undefined || floor === null) ? ''
+                    : '<span class="small" title="Floor of the whole shared channel: every copy a heard flood tree proves, including the copies that ran out of earshot. Above 100% when repetitions run in parallel; never a ceiling.">'
+                        + '≥ ' + floor.toFixed(1) + '% channel</span>';
                 return '<div class="oc-window-row">'
                     + '<div class="oc-window-name">' + escapeHtml(name) + ' (' + seconds + ' s)</div>'
-                    + '<div class="oc-bar"><span class="oc-seg-rx" style="width:' + Math.min(rx, 100) + '%"></span></div>'
+                    + '<div class="oc-bar' + (rx > 100 ? ' oc-bar-over' : '') + '"><span class="oc-seg-rx" style="width:' + Math.min(rx, 100) + '%"></span></div>'
                     + '<span class="small">' + rx.toFixed(1) + '% rx</span>'
                     + '<span class="small">' + tx.toFixed(1) + '% tx</span>'
+                    + floorText
                     + '</div>';
             }).join('');
         }
@@ -328,11 +453,26 @@
             el('ocChartError').style.display = hasData ? 'none' : 'block';
             el('oc-chart').style.display = hasData ? 'block' : 'none';
 
-            el('oc-total-rx').textContent = hasData ? (data.total_rx_ms / 1000).toFixed(1) + ' s' : '-';
-            el('oc-total-tx').textContent = hasData ? (data.total_tx_ms / 1000).toFixed(1) + ' s' : '-';
             el('oc-packets').textContent = hasData ? data.packets : '-';
-            el('oc-p50').textContent = data.p50_rx_ms == null ? '-' : data.p50_rx_ms.toFixed(1) + ' ms';
-            el('oc-p95').textContent = data.p95_rx_ms == null ? '-' : data.p95_rx_ms.toFixed(1) + ' ms';
+
+            /* Everything on this card speaks percent of time, because seconds read as
+               an inventory nobody compares: what a reader wants to know is how much of
+               the channel was spoken. The denominator for the totals is the time the
+               recorder actually wrote buckets for — unwritten periods are unknown, not
+               silent — and the percentile figures convert exactly: a nearest-rank
+               percentile of a linear rescaling is the rescaling of the percentile, and
+               every stored bucket is sample_seconds wide. */
+            const observedSeconds = buckets.length * sampleSeconds;
+            const shareOfObserved = (millis) => observedSeconds
+                ? ((millis / (observedSeconds * 1000)) * 100).toFixed(1) + ' %'
+                : '-';
+            const shareOfBucket = (millis) => millis == null
+                ? '-'
+                : ((millis / (sampleSeconds * 1000)) * 100).toFixed(1) + ' %';
+            el('oc-total-rx').textContent = hasData ? shareOfObserved(data.total_rx_ms) : '-';
+            el('oc-total-tx').textContent = hasData ? shareOfObserved(data.total_tx_ms) : '-';
+            el('oc-p50').textContent = shareOfBucket(data.p50_rx_ms);
+            el('oc-p95').textContent = shareOfBucket(data.p95_rx_ms);
 
             if (!hasData) return;
 
@@ -393,15 +533,112 @@
         renderSenders(rows) {
             const host = el('oc-senders');
             if (!rows.length) {
-                host.innerHTML = '<tr><td colspan="4" class="oc-empty">No sender recorded yet.</td></tr>';
+                host.innerHTML = '<tr><td colspan="5" class="oc-empty">No sender recorded yet.</td></tr>';
                 return;
             }
-            host.innerHTML = rows.map((row) => '<tr>'
-                + '<td><code>' + escapeHtml(row.sender) + '</code></td>'
-                + '<td>' + escapeHtml(row.airtime_ms.toFixed(1)) + ' ms</td>'
-                + '<td>' + escapeHtml(row.packets) + '</td>'
-                + '<td>' + escapeHtml(new Date(row.last_seen * 1000).toLocaleString()) + '</td>'
-                + '</tr>').join('');
+            host.innerHTML = rows.map((row) => {
+                let identity;
+                if (row.unattributed) {
+                    // The label stays with the English page; the line under it is the
+                    // reader's own language and sits in the cell, because a hover-only
+                    // explanation is invisible on a phone — and this row is the one
+                    // whose meaning is not obvious from its name. The sentence is one
+                    // JS literal with no apostrophe, so a test can read it from the
+                    // served page without unescaping it, and it stays under 15 words.
+                    identity = '<em>Unattributed</em>'
+                        + '<div class="small text-muted">Contenu sans identité émettrice sur le fil : messages, requêtes, inconnus. Chaque copie compte.</div>';
+                } else if (row.name) {
+                    identity = escapeHtml(row.name) + ' <code class="small">' + escapeHtml(row.short || '') + '</code>';
+                } else {
+                    identity = '<code title="' + escapeHtml(row.sender) + '">' + escapeHtml(row.short || row.sender) + '</code>';
+                }
+                return '<tr>'
+                    + '<td>' + identity + '</td>'
+                    + '<td>' + escapeHtml(formatSeconds(row.airtime_ms / 1000)) + '</td>'
+                    + '<td>' + escapeHtml(row.packets) + '</td>'
+                    + '<td>' + (row.advert_percent == null
+                        ? '<span class="text-muted">&mdash;</span>'
+                        : escapeHtml(row.advert_percent) + '%') + '</td>'
+                    + '<td>' + escapeHtml(new Date(row.last_seen * 1000).toLocaleString()) + '</td>'
+                    + '</tr>';
+            }).join('');
+        }
+
+        renderEmitters(rows) {
+            const host = el('oc-emitters');
+            if (!rows.length) {
+                host.innerHTML = '<tr><td colspan="5" class="oc-empty">No emitter recorded yet.</td></tr>';
+                return;
+            }
+            host.innerHTML = rows.map((row) => {
+                let identity;
+                if (row.unattributed) {
+                    // Same rule as the senders table: the meaning of this row is not
+                    // obvious from its name, so the reader's language sits in the cell
+                    // rather than behind a hover. One JS literal, no apostrophe, under
+                    // 15 words, so a test can read it from the served page.
+                    identity = '<em>Unattributed</em>'
+                        + '<div class="small text-muted">Aucun nom émetteur sur le fil : non décodé ou inconnu. Chaque copie compte.</div>';
+                } else if (row.name) {
+                    // Resolved from a node-address prefix only because exactly one
+                    // known contact matched it; the prefix stays next to the name so
+                    // the reader can see which bytes the claim rests on.
+                    identity = escapeHtml(row.name) + ' <code class="small">' + escapeHtml(row.short || '') + '</code>';
+                } else {
+                    identity = '<code title="' + escapeHtml(row.emitter) + '">' + escapeHtml(row.short || row.emitter) + '</code>';
+                }
+                if (row.merged_prefixes && row.merged_prefixes.length) {
+                    // The fold is stated in the cell, not hidden behind the numbers:
+                    // the reader sees which short labels are inside this row and why.
+                    const labels = row.merged_prefixes.map((m) => m.label).join(', ');
+                    identity += '<div class="small text-muted">Inclus les copies ' + escapeHtml(labels)
+                        + ' : même relais, adresse tronquée à 2 octets.</div>';
+                }
+                return '<tr>'
+                    + '<td>' + identity + '</td>'
+                    + '<td>' + escapeHtml(formatSeconds(row.airtime_ms / 1000)) + '</td>'
+                    + '<td>' + escapeHtml(row.packets) + '</td>'
+                    + '<td>' + (row.advert_percent == null
+                        ? '<span class="text-muted">&mdash;</span>'
+                        : escapeHtml(row.advert_percent) + '%') + '</td>'
+                    + '<td>' + escapeHtml(new Date(row.last_seen * 1000).toLocaleString()) + '</td>'
+                    + '</tr>';
+            }).join('');
+        }
+
+        renderRelays(rows) {
+            const host = el('oc-relays');
+            if (!rows.length) {
+                host.innerHTML = '<tr><td colspan="5" class="oc-empty">No entry relay recorded yet.</td></tr>';
+                return;
+            }
+            host.innerHTML = rows.map((row) => {
+                let identity;
+                if (row.name) {
+                    // Resolved from a node-address prefix only because exactly one
+                    // known contact matched it; the prefix stays next to the name so
+                    // the reader can see which bytes the claim rests on.
+                    identity = escapeHtml(row.name) + ' <code class="small">' + escapeHtml(row.short || '') + '</code>';
+                } else {
+                    identity = '<code title="' + escapeHtml(row.relay) + '">' + escapeHtml(row.short || row.relay) + '</code>';
+                }
+                if (row.merged_prefixes && row.merged_prefixes.length) {
+                    // The fold is stated in the cell, not hidden behind the numbers:
+                    // the reader sees which short labels are inside this row and why.
+                    const labels = row.merged_prefixes.map((m) => m.label).join(', ');
+                    identity += '<div class="small text-muted">Inclus les copies ' + escapeHtml(labels)
+                        + ' : même relais, adresse tronquée à 2 octets.</div>';
+                }
+                return '<tr>'
+                    + '<td>' + identity + '</td>'
+                    + '<td>' + escapeHtml(formatSeconds(row.airtime_ms / 1000)) + '</td>'
+                    + '<td>' + escapeHtml(row.packets) + '</td>'
+                    + '<td>' + (row.advert_percent == null
+                        ? '<span class="text-muted">&mdash;</span>'
+                        : escapeHtml(row.advert_percent) + '%') + '</td>'
+                    + '<td>' + escapeHtml(new Date(row.last_seen * 1000).toLocaleString()) + '</td>'
+                    + '</tr>';
+            }).join('');
         }
     }
 

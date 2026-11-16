@@ -1,8 +1,9 @@
 """Channel message steps, mixed into MessageHandler.
 
-handle_channel_message stays on MessageHandler; these are its parts: the sender in the text, signal values, the route from the correlated RF row, the scope packet, the flood_scopes allowlist and the sender's full key.
+handle_channel_message stays on MessageHandler; these are its parts: the sender in the text, signal values, the route from the correlated RF row, the scope packet, the flood_scopes allowlist, the sender's full key and the airtime attribution note drawn from it.
 """
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -296,3 +297,44 @@ class ChannelMessageMixin:
                 sender_pubkey = contact.get("public_key", sender_pubkey)
                 self.logger.debug(f"Found full public key for {sender_id}: {sender_pubkey[:16]}...")
         return sender_pubkey
+
+    def _note_message_author(
+        self,
+        rf_data: dict[str, Any] | None,
+        payload: dict[str, Any],
+        author_key: str,
+    ) -> None:
+        """Let a decrypted message attribute its correlated RF copy's airtime.
+
+        The occupancy ingestion decodes RF rows before the radio's decryption
+        names a message's author, so those copies enter the ledger unattributed.
+        A message event is the radio testifying it decrypted this packet and the
+        network authenticated who wrote it — the same proof class as an advert's
+        signature — so when the correlated RF row carries the packet's identity,
+        the note hands that identity to the occupancy ledger, which applies it
+        only to copies it has not written yet. A fallback correlation names no
+        packet (#80), and a prefix shared by several contacts names no author;
+        either way the copies stay unattributed.
+        """
+        if not rf_data_is_correlated(rf_data):
+            return
+        packet_hash = str((rf_data or {}).get("packet_hash") or "").strip()
+        if not packet_hash:
+            return
+        bot = getattr(self, "bot", None)
+        occupancy = getattr(bot, "occupancy", None)
+        if occupancy is None or not getattr(occupancy, "enabled", False):
+            return
+        prefix = str(payload.get("pubkey_prefix") or "").strip().lower()
+        if not prefix or not re.fullmatch(r"[0-9a-f]{2,63}", prefix):
+            return
+        contacts = getattr(getattr(bot, "meshcore", None), "contacts", None) or {}
+        if sum(1 for c in contacts.values() if str(c.get("public_key", "")).lower().startswith(prefix)) != 1:
+            return
+        full_key = str(author_key or "").strip()
+        if not full_key or full_key == prefix:
+            return
+        try:
+            occupancy.note_author(packet_hash, full_key)
+        except Exception as exc:  # a ledger note must never break message handling
+            self.logger.debug("occupancy: author note skipped: %s", exc)

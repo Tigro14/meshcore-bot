@@ -56,7 +56,7 @@ admin_commands = repeater,webviewer,reload,channelpause
 test = "ack @[{sender}]{phrase_part} | {connection_info} | Received at: {timestamp}"
 # Optional: set [Test_Command] response_format to override this for test/t (see config.ini.example).
 ping = "Pong!"
-pong = "Ping!"
+# "pong" is never answered (two bots on one channel echo the pair forever).
 help = "Bot Help: test (or t), ping, version, help, hello, cmd, advert, wx, aqi, sun, moon, solar, hfcond, satpass, prefix, path, sports, dice, roll, stats | More: 'help <command>'"
 
 [Logging]

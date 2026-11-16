@@ -39,6 +39,188 @@ mesh running SF11 reports an airtime no packet on the channel has ever had.
 A single combined percentage would present one node's hearing as the whole channel's
 airtime, so the API reports them apart and nothing here adds them.
 
+Every heard copy is counted separately, flood repetitions included: on the one shared
+radio channel each retransmission occupies the medium on its own. The sums can
+therefore exceed the window they are measured over — an rx share of 130% is a fact
+about parallel traffic, not an overflow. Each radio senses the carrier only near
+itself, so two relays can put the same packet on air at the same moment out of each
+other's hearing; the collision or the blend happens somewhere neither of them can
+observe locally. That is the CSMA/CD paradox: carrier sense is local, the channel is
+global, and a local share capped at 100% would hide the only sign of a saturated
+mesh. Nothing in the pipeline clamps the ratio; the chart bar clamps at the card
+width and says "more than fits" when it does.
+
+## The channel floor
+
+The rx share is what this antenna heard. A copy heard deep in a flood tree also
+*proves* the copies that came before it: a packet received with a four-entry path was
+put on air at least four times before it arrived, whether or not those earlier copies
+ever reached this antenna — some of them ran in parallel elsewhere, out of earshot.
+Each window therefore also carries `rx_floor_ms` and `rx_floor_percent`: the heard
+copies at their measured cost, plus one priced copy for every shallower depth of a
+heard tree that no heard copy carries. The shallower copies are priced from the
+deepest heard one — each hop adds a path entry to the payload, a path entry being 2
+or 3 bytes depending on the packet's transport size, and a copy recorded with its own
+measured width is priced with that width rather than the fallback — and the
+modulation model does the rest.
+
+It is a floor, never a ceiling: parallel branches of the tree that no heard copy
+proves are additional and unprovable, so they stay out. A copy with no packet hash
+counts for itself alone: without an identity its repeats cannot be matched to a tree,
+and pricing an unprovable tree from an unknown would dress absence of evidence up as
+measurement.
+
+## The sender share
+
+`occupancy_senders` ranks senders by airtime, every heard copy included, and the
+table adds up to the whole heard channel. Attribution is what the wire carries, not
+what a guess could supply:
+
+| Row | Identity from |
+| --- | --- |
+| adverts | the advertised node's full 32-byte key, which is the first bytes of the payload: MeshCore signs adverts rather than encrypting them, so an advert relayed on a transport channel still names its advertiser |
+| the bot itself | its own full key, recorded at transmission time |
+| `unattributed` | everything else: the packet types that name no origin on the wire, message traffic above all |
+
+A two-byte routing prefix is never used as a sender: it belongs to several keys, and a
+wrong identity in a table read as evidence is worse than an admitted unknown. The advert
+rule has a size floor rather than only a hex-shape check, because the head bytes of any
+readable payload are hex-shaped and a made-up key would be read as a station; the floor
+is what the advert structure actually needs (key + signature + name). On live traffic
+299 of the last 300 adverts carried a head key that resolves to a tracked contact. The
+reserved `unattributed` row is a bucket, not a station — it carries the airtime but is
+excluded from the talker count, which stays a count of identities this radio can name.
+Because every copy counts, the table's total can exceed the wall-clock span, exactly
+like the rx share does.
+
+One more honest source sits behind the `unattributed` row: this radio's own decryption.
+When the radio decrypts a message, the event names its author — the network authenticated
+that identity, the same proof class as an advert's signature — and when the message can be
+tied to a specific logged RF copy (a correlated row, never a fallback, see #80) and the
+author's key prefix completes to exactly one known contact, the copies of that packet whose
+airtime has not been written yet move out of the bucket, by packet hash. What has already
+been flushed stays `unattributed`: relabeling written rows would make the ledger claim a
+knowledge this station did not have at the time. So the bucket shrinks from the moment a
+message is understood onward, and never behind it. Undecryptable traffic — what this
+radio's keys do not open — stays in the bucket, named as unknown.
+
+The writer drains faster than the radio decrypts: the RF copy is recorded on the packet
+event, and the decryption that names the author can reach this listener seconds later. A
+tracked increment therefore waits in memory for `attribution_grace_sec` seconds (60 by
+default) past the newest copy heard under its packet identity before the flush writes it,
+and the shutdown flush closes that grace early so nothing stays behind. On MeshCore open
+channels the wait usually changes nothing: the channel key is shared and the delivery
+event the radio exposes names no author at all, so that anonymity is structural, not a
+gap in this measurement — the bucket is its honest ceiling. The grace exists for the
+traffic where an identity does exist: what this radio decrypts with its own keys.
+
+Each row also carries an **advert slice**: the part of that sender's airtime spent on
+ADVERT payloads, kept apart because adverts are what a station costs for being present
+on the mesh, not for talking — a repeater that floods adverts constantly racks up
+airtime without being chatty. A row written before the slice existed keeps it `NULL`,
+never 0: the split was not recorded for that traffic, and a 0% there would claim a
+station that never advertised. Once such a row is written again the slice counts from
+that write onward, so its stated share is a floor over the row's retained history.
+The page renders the share as a percent, and a dash where it is unknown.
+
+## The emitter share: who occupies the channel
+
+`occupancy_senders` answers who WROTE the payload. `occupancy_emitters` answers the
+other question, and for channel occupancy the closer one: whose antenna put THIS copy
+on the air. MeshCore's flood routing answers it on the wire — every relay appends its
+node address to the path, the leading bytes of the relay's public key, 2 or 3 bytes
+depending on the packet's transport size — and the LAST entry is the station that
+carried the copy this radio heard. On sampled live traffic every path prefix resolved
+to a tracked repeater, and the last entry of a copy heard at −43 dBm resolved to a
+repeater a few metres from the antenna: the nearest relay is visible as an emitter even
+though it writes no payload of its own.
+
+| Emitter label | From |
+| --- | --- |
+| the path's last node address (4 or 6 hex digits) | a relayed copy — the last entry is its transmitter |
+| a full public key | a copy that arrived with no path, the sender's own antenna; and a transmission the bot made, charged to its own key |
+| `unattributed` | copies the wire names no one for: undecoded traffic, direct copies whose only sender bytes are truncated, and TRACE paths, whose entries are per-hop SNR hashes, not node addresses |
+
+The label stays as the wire sent it. The reader (`top_emitters`) turns a node address
+into a contact name only when exactly one tracked contact begins with those bytes; an
+ambiguous prefix stays bytes, because naming a prefix that could belong to several
+stations is a coin flip presented as a fact. A transmission is its own emitter, and an
+advert repeated by a relay spends the relay's presence budget too — the advert slice is
+kept per emitter exactly as it is per sender.
+
+The same relay can nonetheless stand in the ledger under two labels: MeshCore writes a
+node address **2 bytes wide in short packets and 3 bytes wide in extended ones**, so
+one antenna appears as `6201` on some copies and `62010a` on others. Two rows for one
+relay read as two emitters, so the reader folds the short label into the longer one —
+but only when the longer address is the only emitter address the ledger knows under
+that prefix, and the folded labels are listed in the row (`merged_prefixes`) rather
+than absorbed silently. With two longer addresses heard, the 2-byte copies cannot be
+told apart, and folding them into either would attribute copies to a station the wire
+did not name; the short row stays alone. The fold is a view rule: the ledger keeps the
+labels at the widths the wire sent them.
+
+The two ledgers hold the same copies once per fact each — carrier and emitter are two
+different stations — so they must never be summed: a sum would bill the channel twice.
+Their value is precisely that they disagree: a repeater near the antenna can occupy
+most of this channel without ever appearing in the senders table, because relaying
+carries other stations' payloads. `occupancy_emitters.advert_ms` is NOT NULL, unlike
+the senders' column: the split is known from this table's first write, so there is no
+legacy row for a zero to hide an unknown behind.
+
+## The entry-relay share: where relayed copies entered the mesh
+
+The same flood path answers a third question per copy, read from its other end: the
+**FIRST** node address is the first relay that repeated the packet — the gateway
+through which the copy entered the mesh, as far as this radio can prove.
+`occupancy_relays` (migration 39) keeps that fact apart from the other two.
+
+It is important about what it is not. It is not the author: a multicast's routing
+header carries the channel's transport code and one address per relay, never the
+writing station's address, and the writer's own antenna usually sits behind the first
+relay, not equal to it. It is not the emitter either: that is the path's LAST entry,
+the antenna that carried the copy here. A one-hop path is the only case where the two
+are the same node. And a copy heard **directly** passed through no relay at all, so it
+belongs to no row here: `entry_relay_label()` returns None rather than inventing a hop
+the wire did not carry, and its airtime is already accounted by the emitter ledger.
+This table is therefore deliberately smaller than the other two, and absence from it
+is not silence.
+
+| Entry-relay label | From |
+| --- | --- |
+| the path's first node address (4 or 6 hex digits) | a relayed copy — the first entry is its gateway |
+| *(no row)* | a copy heard directly: it entered nothing; and TRACE paths, whose entries are per-hop SNR hashes, not node addresses |
+
+The label rules are the emitter's rules unchanged: the ledger stores the node address
+at the width the wire sent it, the reader resolves it to a contact name only when
+exactly one tracked contact begins with those bytes, and the 2-byte/3-byte fold applies
+with the same uniqueness condition (`merged_prefixes` names what was merged).
+
+Three ledgers, three facts about every relayed copy — writer, gateway, antenna — and
+one airtime charge each. They must never be summed with one another; their value is
+that they answer three different questions, and a gateway that carries everyone's
+traffic can top this table without ever speaking for itself.
+
+## Per-period shares: the day tables
+
+`occupancy_senders`, `occupancy_emitters` and `occupancy_relays` are cumulative: each
+row answers "since first seen, within retention", and nothing can cut a cumulative
+total back to a window. A page whose history selector offers 24 h–90 d while its
+tables show those counters invites exactly that misreading, so the same samples also
+write three finer grains — `occupancy_sender_days`, `occupancy_emitter_days` and
+`occupancy_relay_days`, one row per station per **UTC day** — and the flush builds
+each cumulative row as the sum of the day rows it just wrote, so the two grains cannot
+drift apart. Any window is then a sum over whole
+days: `window_cutoff_day` aligns it to the day boundary, and the oldest day
+overlapping the window counts whole, because part of a day nobody measured cannot be
+priced.
+
+The day rows start the day the breakdown starts. Traffic already inside the
+cumulative tables before it cannot be distributed across days after the fact —
+inventing that distribution would fabricate per-day facts nobody recorded — so a long
+window understates traffic older than the breakdown, and the page says so rather than
+letting the number speak. A window with no day row for a station is that station
+absent from what this radio recorded in it, not a measured zero.
+
 ## Storage conventions
 
 Three rules that come from the dashboard rollups and are worth knowing before reading a
@@ -70,6 +252,47 @@ The snapshot's **age** is part of the answer. Without an age, a quiet channel an
 that stopped recording look identical. The reader marks the snapshot `stale` once it is
 older than twice the bucket size (at least 120 s).
 
+## The local network view
+
+The airtime sums answer *how much* was on air. Each window also carries *who and what*
+this node heard:
+
+| Figure | How it is counted | What it cannot claim |
+| --- | --- | --- |
+| talkers | distinct rx senders inside the window whose packets carried an identity | Who was talking but not heard from here; and the unattributed bucket, which is heard airtime, not a station. |
+| unnamed copies | rx copies inside the window charged to the reserved unattributed sender bucket | A station. It is heard airtime without a name, stated so the packet total reconciles with the talkers count. |
+| emitter addresses | distinct emitter LABELS of the rx copies heard inside the window — the flood path's last node address, a full key for a direct hear | Stations: one relay can stand under its 2-byte and its 3-byte address, and a prefix names a crowd as readily as a node. The unattributed bucket adds no label. |
+| repeats | hashed packets heard ÷ unique packet hashes | The full flood. Hashes cover only what this node heard, so the factor is a **floor** on the repetitions, not a census. |
+| avg hops | mean `path_length` of the heard packets whose path was readable | Transit vs local for packets whose path did not decode. |
+| channel floor | heard copies plus the shallower copies each heard tree proves (see above) | Parallel branches no heard copy proves. A floor, never a ceiling. |
+
+The mesh reply states the first five as one line, in the reader's language, and each
+clause agrees with its own number: `1 talker, 1 unnamed copy, 1 emitter address` /
+`1 expéditeur identifié, 1 copie sans identité, 1 adresse émettrice`. The fr clause says
+*expéditeurs identifiés* and not *émetteurs* on purpose: in this feature *émetteur* names
+the station whose antenna carried a copy, which is a different fact from who wrote the
+payload — that label is what made a correct count read as a broken measurement when it sat
+next to a larger packet total. Three counts, three questions, never added together, and a
+count the window does not hold is left out rather than shown as 0.
+
+The repetition factor is what a flood router leaves behind: the same packet heard over
+several paths arrives several times with the same hash, so a window reading x2.5 was
+hearing the network repeat itself. The hop depth says how far the heard traffic came
+from — everything at 0 is a purely local pocket, a mean of 2 is traffic crossing the
+mesh.
+
+An unknown stays unknown, same rule as the airtime: a window that heard no hashable
+packet carries *no* repetition factor rather than x1.0 (that would claim a network
+without repeats from the absence of evidence), and a packet without path information is
+left out of the hop mean rather than averaged in as 0 hops.
+
+These counts are deliberately **not stored in the buckets**. The buckets hold sums and
+counts because those re-aggregate across windows; cardinalities do not — the same talker
+in two buckets is one talker, and a reader summing the column would over-count exactly
+the busy senders the figure exists to rank. The network view therefore lives in the
+ring buffer and in the live snapshot, and its retention is the ring buffer's
+(`max_samples`), not the bucket retention.
+
 ## Configuration
 
 ```ini
@@ -81,6 +304,7 @@ window_seconds = 60
 slow_window_seconds = 900
 half_life_seconds = 300
 max_samples = 5000
+attribution_grace_sec = 60
 use_device_modulation = true
 spreading_factor = 9
 bandwidth_khz = 125
@@ -89,19 +313,36 @@ preamble_symbols = 8
 ```
 
 Recording happens on the packet path that fills `packet_stream`, so it runs when the web
-viewer's writer is running. Retention is the usual `[Data_Retention]` pair
-(`occupancy_samples_retention_days`, `occupancy_senders_retention_days`) applied by the
+viewer's writer is running. Retention is the usual `[Data_Retention]` keys
+(`occupancy_samples_retention_days`, `occupancy_senders_retention_days`,
+`occupancy_emitters_retention_days`, `occupancy_relays_retention_days`) applied by the
 hourly cleanup scheduler; pruning is what makes a "last 30 days" chart actually mean 30
-days.
+days. The three per-station ledgers age on the same rule so a reader comparing them is
+never handed a young table against an old one, and the day tables age on the same keys
+as their ledgers — a selected window cannot reach further back than the totals it
+describes.
 
 ## Reading it
 
 The Web Viewer page `/airtime` draws all of this — the windows, the history chart,
-the percentiles and the sender share — from the two routes below, which are what it
-reads. The mesh command `airtime` answers with one window and the top talkers, from the
-same numbers; the page is the whole picture, the command is the short version.
+the percentiles, the sender share, the emitter share and the entry-relay share — from
+the two routes below, which are what it reads. The mesh command `airtime` answers with one window, the network view and this
+radio's own transmitted airtime over the last 7 rolling days, from the same numbers;
+the page is the whole picture, the command is the short version. The command names only
+this radio because it is the only sender the bot has complete knowledge of: heard
+adverts carry their advertiser's key and reach the senders table, but message traffic
+names no sender on the wire, so the per-sender view of the channel belongs to the page,
+not to the reply. The command reply is telegraphic and built to fit one channel body,
+counted in **bytes** because an accented reply overflows the wire before it overflows a
+character count. The budget is what the sender's own reply path reports: 155 minus the
+radio's name and `": "`, and a further 10 when the reply leaves on a regional flood
+scope — a regional radio answers from a smaller body than the same radio answering
+globally. When the body runs out of room the stations clause goes first,
+then the reply is split at line boundaries — the network line is part of the answer, so
+it is never dropped quietly, and a sender line that is dropped is announced as dropped
+rather than cut mid-way.
 
-`GET /api/telemetry/occupancy` — the live windows and the sender share:
+`GET /api/telemetry/occupancy` — the live windows, the network view and the sender share:
 
 ```json
 {
@@ -110,9 +351,44 @@ same numbers; the page is the whole picture, the command is the short version.
   "stale": false,
   "sf": 11, "bw_khz": 125.0, "coding_rate": 8, "preamble": 8,
   "window_rx_percent": 6.4,
-  "window_tx_percent": 0.7
+  "window_tx_percent": 0.7,
+  "window_rx_floor_percent": 11.1,
+  "window_distinct_senders": 3,
+  "window_unattributed_packets": 12,
+  "window_emitter_labels": 2,
+  "window_dup_factor": 2.4,
+  "window_avg_hops": 1.5
 }
 ```
+
+`window_dup_factor` and `window_avg_hops` are absent evidence rather than zero when no
+heard packet carried a hash or a path; in the `text` format they render as an empty
+value, not as `0`.
+
+The `top_senders` rows carry the stored columns (`sender`, `airtime_ms`, `packets`,
+`advert_ms`, `first_seen`, `last_seen`) plus what the route resolves for the page:
+`name` and `short` for a full public key that the contact tracking knows,
+`unattributed` for the reserved bucket, and `advert_percent` — the slice as a percent
+of that sender's own airtime, `null` when the slice is unknown.
+
+The `top_emitters` rows carry the same shape for the emitter ledger: `emitter` (a
+label, not necessarily a key), the same stored columns, and the same resolved
+`name`, `short`, `unattributed` and `advert_percent` — with `name` set for a node
+address only when exactly one tracked contact begins with those bytes. The two lists
+are two facts about the same copies; they must never be summed.
+
+The `top_relays` rows carry that shape for the entry-relay ledger: `relay` is always a
+node-address prefix — a flood path never carries a full key, and a direct copy never
+reaches this table — so `unattributed` is never set here, and `name` follows the same
+one-match rule. A relay row's absence is not silence: direct copies belong to no row
+by construction. The three lists hold the same copies once per fact each — writer,
+gateway, antenna — and must never be summed with one another.
+
+All three lists follow the page's history selector when the request carries `?days=N`
+(clamped to 1–90): the rows are then the day tables summed over that window,
+day-aligned, and the payload says which window it answers with
+`"share_window_days"`. Without `days` the cumulative ledgers answer, as they always
+did, and no `share_window_days` key is present.
 
 `GET /api/telemetry/occupancy/history?days=7` — buckets as sums and counts, plus the
 nearest-rank percentiles. Only buckets that were written appear in `buckets`.
@@ -125,7 +401,11 @@ probe: the payload carries aggregate counters and sender keys that
 
 `enabled` is the setting as the reader knows it, not the value the snapshot happened to
 be written under: recording can have been on when the snapshot was written and off now,
-which is two facts. When they disagree the payload also carries `snapshot_enabled`, and
+which is two facts. The viewer re-reads `enabled` from `config.ini` on every request and
+only falls back to the copy it read at boot when the file cannot be read — a hot config
+reload never reaches the running viewer process, and a page that tells the reader to set
+the flag has to answer from the file the reader would edit. When the setting and the
+snapshot disagree the payload also carries `snapshot_enabled`, and
 the page says the same thing on screen — the setting is off now, and the figures shown
 were written while it was on, with the age saying how long ago. A request that fails is
 not evidence about the setting either, so the page takes back its claim rather than

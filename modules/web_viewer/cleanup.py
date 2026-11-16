@@ -110,6 +110,22 @@ class CleanupSchedulerMixin:
             for table, column, days in (
                 ('occupancy_samples', 'bucket_ts', self._config_int('Data_Retention', 'occupancy_samples_retention_days', 30)),
                 ('occupancy_senders', 'last_seen', self._config_int('Data_Retention', 'occupancy_senders_retention_days', 90)),
+                # The emitter ledger ages on the same rule as the sender one: both are
+                # cumulative per-station facts about the same traffic, and a reader
+                # comparing them must not be handed a young table against an old one.
+                ('occupancy_emitters', 'last_seen', self._config_int('Data_Retention', 'occupancy_emitters_retention_days', 90)),
+                # The day tables age on the same keys as their cumulative ledgers: a
+                # window the reader selects cannot reach further back than the
+                # cumulative row it describes, or the two views of one station
+                # disagree about how far the history goes.
+                ('occupancy_sender_days', 'day_ts', self._config_int('Data_Retention', 'occupancy_senders_retention_days', 90)),
+                ('occupancy_emitter_days', 'day_ts', self._config_int('Data_Retention', 'occupancy_emitters_retention_days', 90)),
+                # The entry-relay ledger ages on the same rule as the other two
+                # per-station ledgers: all three describe the same traffic from
+                # different facts, and a reader comparing them must not be handed
+                # tables of different ages.
+                ('occupancy_relays', 'last_seen', self._config_int('Data_Retention', 'occupancy_relays_retention_days', 90)),
+                ('occupancy_relay_days', 'day_ts', self._config_int('Data_Retention', 'occupancy_relays_retention_days', 90)),
             ):
                 if table not in existing:
                     continue

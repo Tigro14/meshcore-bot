@@ -10,6 +10,7 @@ zero.
 from __future__ import annotations
 
 import configparser
+import re
 from unittest.mock import patch
 
 import pytest
@@ -64,6 +65,127 @@ class TestAirtimePage:
         body = viewer.app.test_client().get("/airtime").data.decode()
         assert "rx" in body and "tx" in body
         assert "the two shares are kept apart" in body.lower() or "kept apart" in body.lower()
+
+    def test_page_owns_parallel_traffic_and_the_floor(self, viewer):
+        """A share above 100% is a fact about one shared channel, and the floor is a floor.
+
+        Flood repetitions are separate transmissions, and a heard tree proves copies
+        that never reached this antenna; a page that clamped the share would hide the
+        only sign that the channel is saturated.
+        """
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert "flood repetitions included" in body
+        assert "floor" in body.lower() and "ceiling" in body.lower()
+        assert "≥ " in body
+
+    def test_senders_table_names_the_unattributed_bucket(self, viewer):
+        """Every heard copy is accounted for; a row with no identity admits it instead of inventing a name."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert "unattributed row" in body.lower()
+        assert "Unattributed" in body
+
+    def test_the_unattributed_row_explains_itself_in_the_cell(self, viewer):
+        """The bucket's name is not its meaning, and hover-only text is invisible on a phone.
+
+        The gloss sits under the label, in the reader's language, and has to stay short
+        enough not to turn a table cell into a paragraph — hence the 15-word cap.
+        """
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        gloss = (
+            "Contenu sans identité émettrice sur le fil : messages, requêtes, "
+            "inconnus. Chaque copie compte."
+        )
+        assert gloss in body
+        assert len([word for word in re.split(r"[\s']+", gloss) if word]) <= 15
+
+    def test_senders_table_shares_out_the_advert_part(self, viewer):
+        """Presence traffic and talking traffic are different costs inside one sender.
+
+        A repeater flooding adverts racks up airtime without being chatty, so the
+        table shows each sender's advert share; a sender predating the split shows a
+        dash there, because a 0% would claim it never advertised.
+        """
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert "<th>Advert</th>" in body
+        assert "advert_percent" in body
+        assert "share of that sender's airtime spent on adverts" in body
+
+    def test_emitters_table_charges_the_channel_to_the_transmitter(self, viewer):
+        """Occupancy asks who puts copies on the air, and MeshCore answers on the wire.
+
+        The flood path's last node address names the relay that physically carried
+        each heard copy; the page has to show that ledger next to the senders', say
+        the two must never be summed, and keep a node address a prefix unless exactly
+        one tracked contact matches it.
+        """
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert "Emitters by airtime" in body
+        assert 'id="oc-emitters"' in body
+        assert "top_emitters" in body
+        assert "must never be summed" in body
+        assert "shown as a name only when exactly one" in body
+
+    def test_the_emitter_row_without_a_name_explains_itself_in_the_cell(self, viewer):
+        """Same rule as the senders' unattributed row: the meaning sits in the cell,
+        in the reader's language, short enough not to turn a table row into a block."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        gloss = (
+            "Aucun nom émetteur sur le fil : non décodé ou inconnu. "
+            "Chaque copie compte."
+        )
+        assert gloss in body
+        assert len([word for word in re.split(r"[\s']+", gloss) if word]) <= 15
+
+    def test_the_tables_follow_the_selected_history_period(self, viewer):
+        """A station table beside a 24h–90d selector must say which period it sums:
+        a cumulative counter under a period label invents a quietness (or a share)
+        the data never recorded, so both captions name the window and its limits."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert "The table follows the history period selected above" in body
+        assert "this one covers the history" in body
+        # Day-aligned, and honest about how far back day detail goes.
+        assert "aligned to whole UTC days" in body
+        assert "reaches back only to when this breakdown" in body
+
+    def test_the_emitter_caption_explains_the_two_address_widths(self, viewer):
+        """One relay, two labels: the wire names it 2 or 3 bytes wide depending on
+        the packet, and a reader who does not know that sees two emitters where the
+        mesh has one. The fold rule belongs on the page, in the caption and in the
+        cell, not only in the code."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert "2 bytes wide in short packets" in body
+        assert "the fold would pick a station the wire did not name" in body
+        # The cell itself states which short labels were merged, in the reader's language.
+        assert "même relais, adresse tronquée à 2 octets" in body
+
+    def test_relays_table_names_where_relayed_copies_entered_the_mesh(self, viewer):
+        """The flood path answers a third question: its FIRST entry is the gateway a
+        relayed copy entered the mesh through. The page has to show that ledger, say
+        it is neither the author nor the emitter, say direct copies are absent from
+        it on purpose, and keep the three tables unsummed."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert "Entry relays by airtime" in body
+        assert 'id="oc-relays"' in body
+        assert "top_relays" in body
+        assert "renderRelays" in body
+        assert "FIRST entry is the first relay" in body
+        assert "It is not the author" in body
+        assert "belong to no row here" in body
+
+    def test_the_relay_caption_keeps_the_three_ledgers_apart(self, viewer):
+        """Three tables of the same copies: one fact each, never a sum.
+
+        The emitter caption already forbids summing two tables; with a third, the
+        relay caption carries the same rule and the same unique-match condition on
+        prefix labels, so no table can silently resolve an address the wire only
+        half-named."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        relay_caption = body.split('id="oc-relays"', 1)[1].split("</p>", 1)[0]
+        assert "must never be summed" in relay_caption
+        assert "exactly one known contact matches" in relay_caption
+        assert "aligned to whole UTC days" in relay_caption
+        # The French half of the caption, for the reader who never switches language.
+        assert "jamais leur auteur ni l'antenne émettrice" in relay_caption
 
     def test_chart_draws_an_absent_bucket_as_a_gap(self, viewer):
         """A window with no written bucket must not render as 0.0."""

@@ -46,6 +46,9 @@ ping
 
 **Response:** `Pong!`
 
+`pong` is **not** answered, and setting `pong = …` in `[Keywords]` does nothing: two bots on
+one channel would otherwise answer each other's `Ping!`/`Pong!` until the channel is saturated.
+
 ---
 
 ### `help`
@@ -907,11 +910,11 @@ list of strings. The request times out after 10 seconds, and responses are cache
 
 ### `airtime`
 
-Estimated channel airtime for the rolling window, and the top talkers. `occupancy` reaches
-the same command.
+Estimated channel airtime for the rolling window, the local network view, and this
+radio's own airtime share over the past week. `occupancy` reaches the same command.
 
 **Usage:**
-- `airtime` - One window, and the talkers ranked by airtime
+- `airtime` - One window, the network view, and this radio's airtime share
 
 **Examples:**
 ```
@@ -919,23 +922,37 @@ airtime
 ```
 
 **Response:** The modulation the estimate is built from, the rx and tx percentages of one
-window with the packet count, and up to three talkers ranked by airtime rather than by
-packet count.
+window with the packet count, a network line — talkers heard, the copies heard without an
+identity on the wire, the emitter addresses the flood path proved carried those copies,
+the repetition factor the flood router leaves behind (hashed packets heard over unique
+packet hashes), the average hop depth of heard traffic, and stations heard in the last
+24 h — and one sender line: this radio's own transmitted airtime over the last 7 rolling
+days, suffixed `/7d`. That is the only *airtime share* the reply can name: a packet this
+node hears carries its route, not its sender — the sender's identity is inside the
+encrypted payload, and the decryption that recovers it names the writer without pricing
+the copy — so a talkers list of shares beyond this radio would be a guess. When the stored
+buckets cover less than the week, the suffix says how much they actually cover instead of
+claiming seven days.
 
 The figures are an **estimate from the modulation** (SF/BW/CR/preamble), not a measurement:
 the bot is a client of a radio over serial, BLE or TCP and cannot see whether the channel
 was busy, only how long a packet of a given size occupies it. rx and tx are reported apart
-and never added, because one node's hearing is not the whole channel's airtime. The same
-caution, and the retention rules, are in [channel-occupancy.md](channel-occupancy.md),
-which is also where the web page `/airtime` reads these numbers from.
+and never added, because one node's hearing is not the whole channel's airtime. The network
+line stays a **view** too: hashes and hops cover only what this node heard, so the repeat
+factor is a floor on the flooding, not a census of it, and an unknown is left out rather
+than rendered as x1 or 0 hops. The same caution, and the retention rules, are in
+[channel-occupancy.md](channel-occupancy.md), which is also where the web page `/airtime`
+reads these numbers from.
 
 **Config:** `[Airtime_Command] enabled` (default true) gates the command. The data comes
 from `[Channel_Occupancy]`, which is off by default, so with recording off the command says
 there is nothing to read instead of answering 0%.
 
-The reply is kept inside one message body. When the talker list does not fit, it is dropped
-and the reply says so: a name cut mid-way would read as a different node, and a list that
-quietly disappears reads as an empty channel.
+The reply is kept inside one message body. When the body runs out of room the stations
+clause goes first; when the talker list does not fit, it is dropped and the reply says so:
+a name cut mid-way would read as a different node, and a list that quietly disappears
+reads as an empty channel. The network line is never dropped quietly — a reply that cannot
+fit whole travels in pieces, split at line boundaries.
 
 ---
 
