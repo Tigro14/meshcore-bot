@@ -16,6 +16,7 @@ from contextlib import closing, contextmanager, suppress
 from pathlib import Path
 from typing import Optional
 
+from ..channel_occupancy import UNATTRIBUTED_SENDER, emitter_label, entry_relay_label
 from ..db_retention import (
     delete_timestamp_rows_in_chunks,
     retention_delete_settings,
@@ -519,21 +520,101 @@ class BotIntegration:
         sender = (
             packet_data.get('sender_pubkey')
             or packet_data.get('sender')
-            or routing_info.get('from_prefix')
+            or self._advert_sender(packet_data)
         )
+        if not str(sender or '').strip():
+            # Every heard copy still pays its airtime: an unidentifiable packet goes
+            # to the reserved unattributed bucket so the senders table adds up to the
+            # channel as a whole, repetitions included, instead of quietly losing the
+            # traffic this radio cannot name. A short path prefix is not a substitute:
+            # two-byte prefixes collide across keys, and a wrong identity is worse
+            # than an admitted unknown.
+            sender = UNATTRIBUTED_SENDER
+        # The hash and the path are what turn the airtime sums into a network view.
+        # rf_log attaches packet_hash to the decoded packet and carries path_length
+        # in routing_info; a packet that never decoded carries neither, and record()
+        # keeps that as "unknown", not as one identity or as zero hops.
+        packet_hash = packet_data.get('packet_hash') or routing_info.get('packet_hash')
+        hops = routing_info.get('path_length')
+        if hops is None:
+            hops = packet_data.get('path_len', packet_data.get('hops'))
+        # The flood path is also the emitter's name: MeshCore appends one node
+        # address per relay, so the last entry is the station whose antenna put
+        # this copy on the air.  TRACE paths hold per-hop SNR hashes, not node
+        # addresses, and emitter_label refuses to read an identity out of those.
+        # The per-hop path width comes from this packet's own routing info (MeshCore
+        # paths are 2 or 3 bytes wide), so the floor prices missing copies with the
+        # width that was actually on the wire rather than an assumption.
+        path = packet_data.get('path')
+        if not isinstance(path, list) or not path:
+            path = None
+        width: Optional[int] = None
         try:
-            occupancy.record(payload_bytes, kind=kind, sender=str(sender or '').strip() or None)
+            if hops and routing_info.get('path_byte_length'):
+                width = int(routing_info['path_byte_length']) // int(hops)
+        except (TypeError, ValueError):
+            width = None
+        try:
+            occupancy.record(
+                payload_bytes,
+                kind=kind,
+                sender=str(sender).strip(),
+                packet_hash=packet_hash,
+                hops=hops,
+                # The payload type says whether this airtime was presence traffic,
+                # whatever identity ended up carrying it — an unattributed advert is
+                # still an advert, and its slice belongs to the unattributed row.
+                advert=str(packet_data.get('payload_type_name') or '').upper() == 'ADVERT',
+                emitter=emitter_label(path, str(sender or '').strip() or None, hops),
+                # The same path read from its other end: the first relay that
+                # repeated the packet is where the copy entered the mesh, as far
+                # as this radio can prove.  Not the author — a multicast names
+                # its writer nowhere on the wire — and a copy heard directly has
+                # no relay at all, which entry_relay_label reports as None.
+                entry_relay=entry_relay_label(path),
+                path_bytes_per_hop=width,
+            )
         except Exception as e:
             self.bot.logger.debug("occupancy: packet not recorded: %s", e)
 
-    def _flush_occupancy(self, conn) -> None:
+    @staticmethod
+    def _advert_sender(packet_data: dict) -> Optional[str]:
+        """The advertised key carried by an ADVERT payload, or None.
+
+        MeshCore signs adverts rather than encrypting them, so an advert puts the
+        advertised node's full 32-byte public key at the front of its payload and its
+        name at the end — on live traffic 299 of the last 300 adverts had a head key
+        that resolves to a tracked contact, including the ones relayed on a transport
+        channel. An advertising station therefore pays for its own airtime by name.
+
+        Transport codes are not a confidentiality flag: they name the transport
+        channel a packet was relayed on, and the advert inside stays in the clear.
+        The size floor is what keeps the rule honest — a payload too short to hold a
+        key plus its signature cannot supply an identity, because then the head bytes
+        of anything hex-shaped could be read as a station.
+        """
+        if packet_data.get('payload_type_name') != 'ADVERT':
+            return None
+        payload_hex = str(packet_data.get('payload_hex') or '').strip().lower()
+        try:
+            payload_bytes = int(packet_data.get('payload_bytes') or len(payload_hex) // 2)
+        except (TypeError, ValueError):
+            payload_bytes = len(payload_hex) // 2
+        if payload_bytes < 97:
+            # 32-byte key + 64-byte signature + at least one name byte.
+            return None
+        key = payload_hex[:64]
+        return key if re.fullmatch(r'[0-9a-f]{64}', key) else None
+
+    def _flush_occupancy(self, conn, force: bool = False) -> None:
         """Refresh the modulation, then write what the windows hold.
 
         Runs at the writer's own cadence, inside the transaction the flush already
         opened.  The modulation is read once per batch rather than once per packet: a
         radio reconfigured live changes the estimate for the next packet, and reading
         it per packet would make a single packet's airtime depend on when the reader
-        happened to look.
+        happened to look.  `force` closes the attribution grace early, for the
+        shutdown flush which is this process's last write.
         """
         occupancy = getattr(self.bot, 'occupancy', None)
         if occupancy is None or not occupancy.enabled:
@@ -543,7 +624,7 @@ class BotIntegration:
         if not self._occupancy_tables_exist(conn):
             return
         try:
-            occupancy.flush(conn)
+            occupancy.flush(conn, force=force)
         except Exception as e:
             self.bot.logger.warning("occupancy: flush failed: %s", e)
 
@@ -878,6 +959,15 @@ class BotIntegration:
         if self._drain_thread and self._drain_thread.is_alive():
             self._drain_thread.join(timeout=self.shutdown_join_timeout_sec)
         self._flush_write_queue()
+        # The attribution grace must not outlive the process.  This is the last
+        # write the occupancy ledger will ever get, so nothing may stay held in
+        # memory waiting for a note that can no longer arrive.
+        with suppress(Exception):
+            import sqlite3
+
+            db_path = self._get_web_viewer_db_path()
+            with closing(sqlite3.connect(str(db_path), timeout=self.sqlite_connect_timeout_sec)) as conn:
+                self._flush_occupancy(conn, force=True)
         # Close HTTP session to clean up connections
         if hasattr(self, 'http_session') and self.http_session:
             with suppress(Exception):

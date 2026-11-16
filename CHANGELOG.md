@@ -221,7 +221,178 @@ semantic versioning.
   "no region". `Filters → Region code` narrows the list to the flagged contacts. See
   `docs/web-viewer.md`.
 
+- The `airtime` command now reports a **local network view** next to the airtime estimate:
+  distinct talkers heard in the window, a repetition factor (hashed packets heard over
+  unique packet hashes — what the MeshCore flood router leaves behind when it repeats a
+  packet over several paths), the average hop depth of heard traffic, and the number of
+  stations heard in the last 24 h from the contact tracking the contacts page already
+  runs. Airtime alone does not answer whether the mesh is congested: the same rx
+  percentage can be a handful of distinct nodes or one node's traffic heard many times,
+  and the repeat factor is what tells them apart. The counts come from rx samples only —
+  the bot's own transmissions are not talkers on the network it hears, and its own cost
+  stays the separate tx share. Unknown stays unknown: no hashed packet heard means no
+  repetition factor rather than x1, a packet whose path did not decode is left out of
+  the hop mean rather than averaged in as 0 hops, and a failed or absent stations read
+  drops the clause rather than claiming 0 stations. The cardinalities are deliberately
+  not written to `occupancy_samples` — distinct senders and unique hashes do not
+  re-aggregate across buckets, and a reader summing them would over-count exactly the
+  busy senders the figures exist to rank — so they live in the ring buffer and in the
+  `occupancy.live` snapshot, which the `/api/telemetry/occupancy` payload now carries
+  (`window_distinct_senders`, `window_dup_factor`, `window_avg_hops`, per window). The
+  reply still fits one channel body: when it runs out of room the stations clause goes
+  first, and the network line is never dropped quietly — a reply that cannot fit whole
+  travels split at line boundaries. `docs/channel-occupancy.md`.
+
+- The `/airtime` page accounts for the whole channel instead of only what one node happened
+  to hear. Its **Senders by airtime** table is complete: every heard copy counts, flood
+  repetitions included, a sender is named from the full public key its packet carries — an
+  advert puts its advertiser's key in the clear, because MeshCore signs adverts rather than
+  encrypting them — and anything the wire cannot trace to an identity lands in a reserved
+  **Unattributed** row, glossed inside the cell in the reader's language rather than only on
+  hover, so the table adds up to the heard channel. A 1-2 byte routing prefix is never used
+  as a sender identity, and the advert rule has a size floor (key + signature + name) so no
+  hex-shaped head bytes become a made-up station. Each window also carries a **channel
+  floor** (`rx_floor_ms` / `rx_floor_percent`): a heard flood copy that carries a path proves
+  the shallower copies that ran out of earshot, priced from the deepest heard copy with that
+  packet's own per-hop path width when it was recorded (2 or 3 bytes, not an assumption). Sense is
+  local and the channel is global, so parallel repetitions are real — a share above 100% is
+  reported, never clamped; only the bar's width clamps, and it is badged as over. That is the
+  CSMA/CD paradox this page now shows instead of hiding. Each row also carries the sender's
+  **advert share** as a percent — adverts are what a station costs for being present on the
+  mesh, not for talking — so a repeater that floods adverts reads as presence overhead rather
+  than as a chatty user. The slice is a stored column (`occupancy_senders.advert_ms`,
+  migration 36) and a row written before it existed shows a dash, never 0%: the split was not
+  recorded for that traffic. `docs/channel-occupancy.md`.
+- The `/airtime` page also answers who occupies the channel, relays included: an **Emitters
+  by airtime** table backed by a second ledger (`occupancy_emitters`, migration 37) charging
+  each heard copy to the station that physically transmitted it. MeshCore names that station
+  on the wire: every relay appends its node address — the first 2–3 bytes of its public key —
+  and the last entry is the antenna that carried this copy. The label is that node address, a
+  full key when the copy arrived directly, and the reserved unattributed bucket when the wire
+  names nobody; `GET /api/telemetry/occupancy` (`top_emitters`) resolves a label to a contact
+  name only when exactly one tracked contact matches its bytes, and an ambiguous prefix stays
+  bytes. The two tables hold the same copies once per fact — carrier and emitter are different
+  stations, and a repeater beside the antenna can top the emitters' table without ever
+  appearing in the senders' — so they are separate ledgers, never summed, aging on the same
+  retention rule (`occupancy_emitters_retention_days`). `advert_ms` is NOT NULL here because
+  the split is known from the table's first write. The same relay can still appear twice:
+  MeshCore writes node addresses 2 bytes wide in short packets and 3 in extended ones,
+  so the emitters view folds a 2-byte label into the only 3-byte address the ledger
+  knows under it (`merged_prefixes` names the folded labels in the row); where two longer
+  addresses were heard, the short row stays alone — the fold would pick a station the
+  wire did not name. `docs/channel-occupancy.md`.
+- The **Senders by airtime** and **Emitters by airtime** tables now follow the History
+  selector (24h/7/14/30/90d) instead of showing lifetime counters under a period label —
+  a cumulative total read as "last 24 h" invents quietness and wrong shares. Each sample
+  also writes a per-station per-UTC-day row (`occupancy_sender_days`,
+  `occupancy_emitter_days`, migration 38), and the flush aggregates each cumulative row
+  from those day rows, so the two grains cannot drift. `GET /api/telemetry/occupancy?days=N`
+  sums them over the window, day-aligned, and answers with `share_window_days`; without
+  `days` the cumulative ledgers still answer. Day detail reaches back only to when this
+  breakdown was introduced — history already accumulated is never redistributed across
+  days after the fact, which would fabricate per-day facts nobody recorded — and the
+  captions say so; a station with no day row in the window is absent, not a measured zero.
+  The day tables age on the same retention keys as their ledgers. `docs/channel-occupancy.md`.
+- The senders table can now name message authors, from one source only: this radio's own
+  decryption. When the radio decrypts a message, the event names its author — the network
+  authenticated that identity, the same proof class as an advert's signature — so when the
+  message correlates to a specific logged RF copy (a fallback names no packet, #80) and the
+  author's key prefix completes to exactly one known contact, `ChannelOccupancy.note_author()`
+  keeps that packet hash → full key and the copies of that packet not yet flushed leave the
+  `unattributed` bucket before anything is written; copies heard later under a noted hash are
+  attributed at record time. The writer drains every half second while the decryption can
+  reach this listener seconds after the RF copy, so `flush()` holds a tracked increment for
+  `attribution_grace_sec` seconds (60) past the newest copy heard under that packet identity,
+  and the shutdown flush closes that grace early. On MeshCore open channels the delivery
+  event names no author at all — that anonymity is structural, not a measurement gap, and
+  the bucket is its honest ceiling. Written rows are never relabeled — that would make the
+  ledger claim a knowledge this station did not have at the time — undecryptable traffic
+  stays unknown, an ambiguous prefix names nobody, and the emitter ledger (whose antenna
+  carried the copy) is kept apart from the author fact. The hash→author cache is bounded,
+  and the mesh `airtime` reply is unchanged.
+- The `/airtime` page answers a third question per copy — where it entered the mesh — with an
+  **Entry relays by airtime** table backed by a third ledger (`occupancy_relays`,
+  `occupancy_relay_days`, migration 39). The same flood path already read for the emitter
+  answers it from its other end: its FIRST node address is the first relay that repeated the
+  copy, the gateway through which the copy entered this mesh as far as this radio can prove.
+  It is neither the author — a multicast's routing header carries the channel transport code
+  and relay addresses, never the writing station's address — nor the emitter (the last entry).
+  Copies heard directly passed through no relay and get no row: `entry_relay_label()` returns
+  None rather than inventing a hop the wire did not carry. `ChannelOccupancy.record()` takes
+  `entry_relay`; the API (`top_relays`, also day-summed over `?days=N`) and the page keep the
+  same honesty rules as the emitters table — labels are 4- or 6-digit node-address prefixes,
+  resolved to a name only when exactly one tracked contact matches, and the 2-byte/3-byte
+  fold applies (`merged_prefixes`). The three ledgers hold the same copies once per fact —
+  writer, gateway, antenna — and must never be summed; the relay table is deliberately smaller
+  than the other two because direct copies are absent by construction. It ages on the same
+  rule (`occupancy_relays_retention_days`, 90). `docs/channel-occupancy.md`.
+
 ### Changed
+
+- The `pong` keyword is no longer answered. `load_keywords` now drops the keys named in
+  `SUPPRESSED_KEYWORDS` (`modules/command_manager.py`) while reading the config, so a
+  `[Keywords] pong = …` line left in an already-deployed `config.ini` cannot re-arm it — no
+  operator edit is needed for the fix to land. The keyword pass answers any `[Keywords]` key no
+  plugin owns, so a bare `pong` on a shared channel drew a reply from every bot on it, and with
+  unpunctuated responses (`pong = "Ping"`, `ping = "Pong"`) two bots on one channel re-armed each
+  other's keyword and traded answers until the channel was saturated. `ping` is untouched and
+  still answers `Pong!`; the line was also removed from the shipped configs
+  (`modules/templates/default_config.ini`, `config.ini.example`, `config.ini.quickstart`).
+
+- The `airtime` command answers telegraphically: `Airtime modelled SF9/125kHz CR4/5 / 60s rx
+  11.6% tx 1.1% 12 pkt / net: 3 talkers, repeats x3.5, avg 2 hops, 7 stations/24h / this radio:
+  12m/7d` (fr: `Airtime estimé … réseau : … cette radio : …`). No fact left the reply — the
+  words around them shrank, and the one word `modelled`/`estimé` carries the not-measured
+  disclosure on its own. The ladder that trades lines against the body budget now compares
+  **bytes**, not characters, which is what the channel actually counts: an accented fr reply
+  that fits the character count used to overflow the wire and be split mid-answer by the radio.
+  On a live-shaped body for an 8-character radio name the answer now travels in one message
+  where the old wording needed two. On the live regional-scope reply the budget is 10 bytes
+  smaller still — regional flood scope costs them — and the complete honest reply there lands
+  15 bytes over it, so it travels as two line-boundary chunks rather than a trimmed answer.
+
+- The `airtime` reply's network line was relabelled and completed after a live answer read
+  as a contradiction: `réseau : 1 émetteurs, répétés x1 …` beside `2 pkt`. Nothing was
+  miscounted — the number counts **named talkers** of the 60 s window — but the fr catalogue
+  called them `émetteurs`, which is this feature's name for a different fact (the station
+  whose antenna carried a copy), and the copies the window heard without an identity were
+  invisible, so 1 talker beside 2 packets looked like a broken measurement. The clause is
+  now `{n} expéditeurs identifiés`, the unattributed copies are stated beside it
+  (`{n} unnamed copies` / `{n} copies sans identité`), and the window carries a genuine
+  per-window emitter count — distinct emitter LABELS among the heard copies, prefixes
+  included, never the unattributed bucket — as `{n} emitter addresses` /
+  `{n} adresses émettrices`. `window_airtime()` gained `rx_emitter_labels` and the snapshot
+  `window_emitter_labels`. The three counts answer three questions and are never summed;
+  an absent count stays absent rather than rendering as 0. Each clause agrees with its own
+  number (the singular lives under `<key>_one`, and a language without one keeps the plural
+  rather than printing a catalogue key in the reply), because `1 émetteurs` beside `2 pkt`
+  is exactly how the line started looking broken. Naming three counts instead of one
+  mislabelled one costs bytes: the fr network line is 129 B with the stations clause where
+  the old one spent 68 B, so a busy fr window's reply travels as three line-boundary
+  messages where it used to need two — the same trade the telegraphic wording already made,
+  in favour of the answer rather than of one message.
+
+- `ChannelOccupancy.record()` takes `packet_hash`, `hops`, `advert` (the last marks the packet
+  as presence traffic so the sender ledger can keep its advert slice apart), `emitter` (the
+  station whose antenna carried this copy, per `emitter_label`: the flood path's last node
+  address for a relayed copy, the sender's full key for a direct one or a transmission, the
+  unattributed bucket otherwise) and `path_bytes_per_hop` (the width one relay adds to this
+  packet's path, 2 or 3 bytes) as optional keyword arguments — and the rolling windows,
+  `fields()` and the `occupancy.live` snapshot carry
+  the per-window network counts alongside the airtime sums (`..._distinct_senders`,
+  `..._dup_factor`, `..._avg_hops`, ...); `GET /api/telemetry/occupancy` passes them
+  through. Additive: an older payload simply lacks the keys, and the values are absent
+  rather than zero when the window holds no evidence. The web viewer's capture path now
+  hands the packet hash and path length it already had to the recorder.
+
+- The airtime sender ledger records identities rather than routing hints: `occupancy_senders`
+  rows are keyed by the sender's full public key — the transmission tracker writes the radio's
+  own key (`own_public_key`), the web capture path attributes an advert to the key its payload
+  names, and heard traffic with no identity goes to the reserved `unattributed` bucket. The
+  prefix is now only a fallback for the bot's own transmissions, used when the radio's key is
+  not known yet. Rows an older build wrote under a 2-byte prefix are left as they are: a prefix
+  belongs to several keys, so merging it into one of them would invent an identity for history
+  the bot cannot reconstruct, and the reader shows such a row by its prefix.
 
 - The `{bbs_messages_today}`, `{bbs_pending_messages}` and `{bbs_users_with_pending}`
   scheduled-message placeholders are gone: `_get_mesh_info` no longer collects BBS
@@ -470,7 +641,14 @@ semantic versioning.
   screen was written while it was on, with the age saying how long ago. The other defect was
   the error path: the note is re-evaluated only on a successful response, so a failed request
   left the previous claim standing beside an error saying the request failed. A failed request
-  now takes the claim back, since it is not evidence about the setting.
+  now takes the claim back, since it is not evidence about the setting. A third defect kept
+  the "setting in force" stale even once it was reported: the viewer read `enabled` into its
+  occupancy reader at boot, and a hot config reload restarts neither that process nor that
+  copy, so a flag turned on in `config.ini` could keep the page claiming off until the bot
+  restarted. The API now re-reads the flag from `config.ini` on every request — the file is
+  what governs the recording, and the page's advice points the reader at that file — falling
+  back to the boot copy only when the file cannot be read, because an unreadable file is not
+  evidence that the setting is off either.
 
 - The `airtime` reply wrote the coding rate the wrong way round: the catalog string was
   `CR{cr}/5`, which puts the denominator above the 4, so a bot recording CR 4/8 answered

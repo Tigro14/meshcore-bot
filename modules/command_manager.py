@@ -76,6 +76,18 @@ from .plugin_loader import PluginLoader
 from .security_utils import sanitize_name, validate_safe_path
 from .utils import check_internet_connectivity_async, decode_escape_sequences, format_keyword_response_with_placeholders
 
+# ``[Keywords]`` keys the bot never answers, whatever the config says.
+#
+# "pong" is the echo leg of the ping/pong pair. The keyword pass in
+# ``check_keywords`` answers any ``[Keywords]`` key no plugin owns, so a bare
+# "pong" on a shared channel gets a reply from every bot on it. Worse, the
+# replies re-arm the other bot: an unpunctuated ``pong = "Ping"`` matches the
+# ``ping`` keyword next time round, and two bots trade answers until the channel
+# is saturated. Cutting the pong leg breaks the cycle, and it has to be cut in
+# code: configs already deployed on other operators' nodes still carry the line,
+# and shipping it in the templates would put it back for everyone.
+SUPPRESSED_KEYWORDS = frozenset({"pong"})
+
 
 def _call_with_optional_user_id(method: Any, user_id: str | None) -> Any:
     """Call a cooldown hook with ``user_id`` when it accepts one.
@@ -619,18 +631,28 @@ class CommandManager:
     def load_keywords(self) -> dict[str, str]:
         """Load keywords from config.
 
+        Keys named in ``SUPPRESSED_KEYWORDS`` are dropped here rather than at
+        match time, so they stay out of every consumer of ``self.keywords``
+        (the keyword pass, the help fallback text) instead of being answered
+        and re-filtered per message.
+
         Returns:
             Dict[str, str]: Dictionary mapping keywords to response strings.
         """
         keywords = {}
         if self.bot.config.has_section('Keywords'):
             for keyword, response in self.bot.config.items('Keywords'):
+                keyword = keyword.lower()
+                if keyword in SUPPRESSED_KEYWORDS:
+                    # Silent by design: a config that predates the suppression is
+                    # expected, not an operator error worth a line per reload.
+                    continue
                 # Strip quotes from the response if present
                 if response.startswith('"') and response.endswith('"'):
                     response = response[1:-1]
                 # Decode escape sequences (e.g., \n for newlines)
                 response = decode_escape_sequences(response)
-                keywords[keyword.lower()] = response
+                keywords[keyword] = response
         return keywords
 
     def load_custom_syntax(self) -> dict[str, str]:

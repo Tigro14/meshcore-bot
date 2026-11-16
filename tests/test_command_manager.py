@@ -104,6 +104,17 @@ class TestLoadKeywords:
         manager = make_manager(cm_bot)
         assert "\n" in manager.keywords["multiline"]
 
+    def test_load_keywords_drops_suppressed_pong(self, cm_bot):
+        """'pong' stays out of the keyword map even when an old config still sets it.
+
+        Two bots on one channel answer each other's ping/pong pair until the
+        channel is saturated, so the pong leg is dead config by design.
+        """
+        cm_bot.config.set("Keywords", "pong", "Ping!")
+        manager = make_manager(cm_bot)
+        assert "pong" not in manager.keywords
+        assert manager.keywords["ping"] == "Pong!"
+
     def test_load_keywords_empty_section(self, cm_bot):
         cm_bot.config.remove_section("Keywords")
         cm_bot.config.add_section("Keywords")
@@ -237,6 +248,19 @@ class TestCheckKeywords:
         msg = mock_message(content="ping", channel="general", is_dm=False)
         matches = manager.check_keywords(msg)
         assert any(trigger == "ping" for trigger, _ in matches)
+
+    def test_suppressed_pong_gets_no_answer(self, cm_bot):
+        """A bare 'pong' stays unanswered even when the config still maps it.
+
+        The keyword pass would otherwise answer it on any monitored channel, and
+        a second bot on that channel turns the pair into an echo loop.
+        """
+        cm_bot.config.set("Keywords", "pong", "Ping!")
+        manager = make_manager(cm_bot)
+        for content in ("pong", "PONG", "pong and then some"):
+            msg = mock_message(content=content, channel="general", is_dm=False)
+            assert manager.check_keywords(msg) == [], content
+        assert manager.check_keywords(mock_message(content="pong", is_dm=True)) == []
 
     def test_prefix_required_blocks_bare_keyword(self, cm_bot):
         cm_bot.config.set("Bot", "command_prefix", "!")
