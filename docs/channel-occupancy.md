@@ -263,6 +263,7 @@ this node heard:
 | unnamed copies | rx copies inside the window charged to the reserved unattributed sender bucket | A station. It is heard airtime without a name, stated so the packet total reconciles with the talkers count. |
 | emitter addresses | distinct emitter LABELS of the rx copies heard inside the window — the flood path's last node address, a full key for a direct hear | Stations: one relay can stand under its 2-byte and its 3-byte address, and a prefix names a crowd as readily as a node. The unattributed bucket adds no label. |
 | repeats | hashed packets heard ÷ unique packet hashes | The full flood. Hashes cover only what this node heard, so the factor is a **floor** on the repetitions, not a census. |
+| copy cost | of the hashed rx airtime (`rx_hashed_ms`), the slice spent on copies after the first one this station heard for that identity (`rx_copy_ms`) — each copy priced at its own modulation | The network's first emission. The baseline is this station's hearing, bounded by `copy_horizon_seconds`: "first" means first heard inside a horizon, so a packet re-flooded more than a horizon apart counts as a new first occurrence. The two baselines differ by a bounded, per-identity offset, never by an invented zero. And it covers hashed airtime only: an unhashable packet cannot be matched to a copy of itself, so it sits outside the measure. |
 | avg hops | mean `path_length` of the heard packets whose path was readable | Transit vs local for packets whose path did not decode. |
 | channel floor | heard copies plus the shallower copies each heard tree proves (see above) | Parallel branches no heard copy proves. A floor, never a ceiling. |
 
@@ -284,9 +285,32 @@ mesh.
 An unknown stays unknown, same rule as the airtime: a window that heard no hashable
 packet carries *no* repetition factor rather than x1.0 (that would claim a network
 without repeats from the absence of evidence), and a packet without path information is
-left out of the hop mean rather than averaged in as 0 hops.
+left out of the hop mean rather than averaged in as 0 hops. The copy share follows the
+same rule: `copy_percent` divides by the hashed airtime only — unhashable packets sit
+outside it — and is *absent*, not 0%, when no hashed packet was heard. A share of 0% is
+itself an answer: this station heard identities and none of them repeated.
 
-These counts are deliberately **not stored in the buckets**. The buckets hold sums and
+Two windows of the same length are also compared: each window carries `previous` —
+the equal-length window immediately before it, read from the same ring buffer — and a
+`trend` over it, but only while the buffer can cover both. A fresh start has no
+previous window, and a previous window with no samples is absent evidence, not a quiet
+baseline: both answer `insufficient_history` rather than turning a boot into a flood.
+And each window says what the buffer can prove about it: `truncated` is true when
+hashed traffic was heard but the ring buffer no longer reaches back over the whole
+window — the repeats and the copy cost are then bounds, and the mesh reply and the page
+mark them as such (`≥`, `(bounded)`) instead of dropping them.
+
+The copy cost is classified when the sample is recorded, while the writer's identity
+memory is warm, and rides along in the sample and the bucket as precomputed sums.
+Unlike the cardinalities, those sums re-aggregate: a reader adding buckets gets a
+correct sum of sums. That is why `rx_hashed_ms` and `rx_copy_ms` are the one part of
+the network view that **is** written to the buckets. Buckets written before the
+columns existed carry NULL, and a history period that spans them reports the copy share
+as unknown rather than as a ratio over part of the period — an invented average is as
+dishonest as an invented zero.
+
+These counts are deliberately **not stored in the buckets** — with the one exception
+of the copy cost, whose two sums do re-aggregate (see above). The buckets hold sums and
 counts because those re-aggregate across windows; cardinalities do not — the same talker
 in two buckets is one talker, and a reader summing the column would over-count exactly
 the busy senders the figure exists to rank. The network view therefore lives in the
@@ -304,6 +328,7 @@ window_seconds = 60
 slow_window_seconds = 900
 half_life_seconds = 300
 max_samples = 5000
+copy_horizon_seconds = 3600
 attribution_grace_sec = 60
 use_device_modulation = true
 spreading_factor = 9
@@ -321,6 +346,13 @@ days. The three per-station ledgers age on the same rule so a reader comparing t
 never handed a young table against an old one, and the day tables age on the same keys
 as their ledgers — a selected window cannot reach further back than the totals it
 describes.
+
+`copy_horizon_seconds` is the copy-cost baseline: an identity stays "already heard"
+that long, so copies of it inside the horizon are charged to the flood and a re-flood
+after it counts as a new first occurrence. It bounds both the writer's identity memory
+and the error the baseline can make — two occurrences of one identity more than a
+horizon apart are charged as two first copies, a constant offset per identity, never an
+invented zero.
 
 ## Reading it
 
@@ -357,13 +389,20 @@ rather than cut mid-way.
   "window_unattributed_packets": 12,
   "window_emitter_labels": 2,
   "window_dup_factor": 2.4,
-  "window_avg_hops": 1.5
+  "window_avg_hops": 1.5,
+  "window_copy_percent": 41.3,
+  "window_truncated": false,
+  "window_prev_rx_ms": 1980.4
 }
 ```
 
 `window_dup_factor` and `window_avg_hops` are absent evidence rather than zero when no
 heard packet carried a hash or a path; in the `text` format they render as an empty
-value, not as `0`.
+value, not as `0`. `window_copy_percent` follows the same rule — `null` when no hashed
+packet was heard — and `window_truncated` says when the repeats and the copy share are
+bounds rather than a census. `window_prev_rx_ms` is the rx airtime of the equal window
+one length back, `null` when the ring buffer does not reach that far: a monitoring
+agent comparing snapshots gets the trend without keeping state of its own.
 
 The `top_senders` rows carry the stored columns (`sender`, `airtime_ms`, `packets`,
 `advert_ms`, `first_seen`, `last_seen`) plus what the route resolves for the page:
@@ -391,7 +430,16 @@ day-aligned, and the payload says which window it answers with
 did, and no `share_window_days` key is present.
 
 `GET /api/telemetry/occupancy/history?days=7` — buckets as sums and counts, plus the
-nearest-rank percentiles. Only buckets that were written appear in `buckets`.
+nearest-rank percentiles. Only buckets that were written appear in `buckets`. Each
+bucket also carries `rx_hashed_ms` and `rx_copy_ms` — `NULL` for buckets written before
+that split was recorded — and the payload states the period's `copy_percent` (all or
+nothing: `null` when any bucket in the range predates the split, because a ratio over
+part of the period is an invented period figure). The payload also carries `previous`:
+the equal-length period before this one, in the same shape, kept as its own object so
+the reader can tell "nothing happened before" (the range was recorded and held nothing)
+from "nothing was recorded before" (the range predates retention). The `/airtime` page
+draws the comparison from it and states a change only when both periods hold recorded
+buckets.
 
 Both accept `?format=text`, which renders one field per line for a monitoring agent.
 Only scalar fields are rendered that way; the bucket list and the sender list are not,

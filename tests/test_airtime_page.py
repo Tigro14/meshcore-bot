@@ -193,6 +193,35 @@ class TestAirtimePage:
         assert "spanGaps: false" in body
         assert "null" in body
 
+    def test_page_prices_the_flood_copies_and_bounds_the_claim(self, viewer):
+        """Counting repeats is half the answer; the page also has to price them.
+
+        The copy share is measured over identity-covered airtime only, and the
+        recorder's ring buffer bounds it: both limits belong on the page, and a
+        period predating the split reads as unknown, never as a calm channel.
+        """
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert 'id="oc-copy"' in body
+        assert "identity-covered rx airtime" in body
+        assert "flood-free channel" in body
+        assert "identity-covered airtime spent on copies" in body
+        assert "_copy_percent" in body
+        assert "(bounded)" in body
+        assert "bounds, not a census" in body
+
+    def test_the_history_trend_compares_equal_periods_only(self, viewer):
+        """A change against an unrecorded past is an invented change.
+
+        The line under the chart states a difference only when the equal period
+        before holds recorded buckets; otherwise it says so instead of letting a
+        fresh start read as a sudden flood.
+        """
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert 'id="ocTrend"' in body
+        assert "Compared with the equal period before" in body
+        assert "no change can be stated against an unrecorded past" in body
+        assert "previous" in body
+
     def test_page_script_carries_a_csp_nonce(self, viewer):
         resp = viewer.app.test_client().get("/airtime")
         body = resp.data.decode()

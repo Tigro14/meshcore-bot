@@ -342,6 +342,7 @@
       "network_emitters": "{n} adresses émettrices",
       "network_emitters_one": "{n} adresse émettrice",
       "network_repeats": "répétés x{dup}",
+      "network_copies": "copies {op}{pct}% de l'airtime identifié",
       "network_hops": "moy. {hops} sauts",
       "network_stations": "{stations} stations/{hours}h",
       "radio_share": "cette radio : {entry}",

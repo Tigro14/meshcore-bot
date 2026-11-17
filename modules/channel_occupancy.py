@@ -38,6 +38,18 @@ exist to rank. The network view therefore lives in the ring buffer and in the li
 snapshot, and its retention is the ring buffer's (`max_samples`), not the bucket
 retention. And it stays a *view*: hashes cover only what this node heard, so the
 repetition factor is a floor on the flooding, not a census of it.
+
+The one exception is the **copy cost**: the airtime of every heard copy *after the
+first one this station heard* for a packet identity, each copy priced at its own
+modulation. Unlike the cardinalities it is a sum, so it does belong in the buckets
+(`rx_hashed_ms`, `rx_copy_ms`): a reader re-aggregating history wants what the
+flood costs the channel, not only how many copies it left behind. "First" is
+relative to this station's hearing with a horizon (`copy_horizon_seconds`): a
+packet re-flooded more than a horizon after the last copy heard counts as a new
+first occurrence, so the cost is measured per occurrence rather than per packet
+since boot. Rows written before the columns exist carry NULL, and every figure
+built from them reports unknown rather than rendering the gap as a zero-copy
+channel.
 """
 
 from __future__ import annotations
@@ -143,6 +155,21 @@ AUTHOR_CACHE_CAPACITY = 4096
 # race.  Past the grace the increment is written as it was heard, unattributed,
 # and its window closes: a flushed day row is history.
 ATTRIBUTION_GRACE_SEC = 60.0
+
+# How long a packet identity stays "already heard" for the copy cost. A copy of
+# a hash not heard inside the horizon is the FIRST of a new occurrence: the
+# flood's cost is measured per occurrence, not per packet since boot — a beacon
+# heard once a minute never pays a copy, while a packet hammered ten times in a
+# minute pays nine. The horizon bounds the memory the writer keeps and the
+# error it can make: two occurrences of one identity more than a horizon apart
+# are charged as two first copies, a constant offset per identity the reader
+# can see, never an invented zero.
+COPY_HORIZON_SECONDS = 3600.0
+
+# How many identities the copy memory holds. It only needs the hashes still
+# inside the horizon; past that the oldest leave first, and an evicted identity
+# only means its next copy is charged as a first again.
+COPY_MEMORY_CAPACITY = 4096
 
 
 def emitter_label(
@@ -340,6 +367,8 @@ class ChannelOccupancy:
         # How long `flush` holds a tracked unattributed increment so a late
         # decryption can still claim it (see `note_author`).
         self.attribution_grace_sec = self._float("attribution_grace_sec", ATTRIBUTION_GRACE_SEC)
+        # How long a packet identity stays "already heard" for the copy cost.
+        self.copy_horizon_seconds = self._float("copy_horizon_seconds", COPY_HORIZON_SECONDS)
 
         # Modulation. The device values win over the configured ones when the device
         # reports them, because a bot configured for SF9 on a mesh running SF11
@@ -355,10 +384,16 @@ class ChannelOccupancy:
         # packet_hash, hops). Bounded, otherwise a busy mesh grows it for the
         # whole process lifetime.
         # (monotonic stamp, airtime ms, kind, sender key, packet hash, hops, payload
-        #  bytes, path bytes-per-hop, emitter label)
-        self._samples: deque[tuple[float, float, str, Optional[str], Optional[str], Optional[int], int, Optional[int], Optional[str]]] = deque(
+        #  bytes, path bytes-per-hop, emitter label, copy ms)
+        # `copy ms` is the copy cost classified at record time (see `_copy_seen`):
+        # this copy's airtime when an earlier copy of the same identity was heard
+        # inside the horizon, 0.0 for the first copy of an occurrence.
+        self._samples: deque[tuple[float, float, str, Optional[str], Optional[str], Optional[int], int, Optional[int], Optional[str], float]] = deque(
             maxlen=self.max_samples
         )
+        # When this instance started recording: the farthest back an
+        # overflow-free ring buffer can prove it heard everything.
+        self._started_at = time.monotonic()
         self._bucket: dict[str, Any] = {}
         # Pending per-sender increments since the last flush, keyed by
         # (sender, UTC day): airtime_ms, packets and the advert slice of that
@@ -385,6 +420,11 @@ class ChannelOccupancy:
         # event (see `note_author`). Bounded: a busy mesh sees thousands of
         # identities, and an entry earns its keep only until the next flush.
         self._authors: dict[str, str] = {}
+        # hash → monotonic time of the newest copy heard, so the copy cost can be
+        # classified at record time and stored as bucket sums: the windows and the
+        # history then re-aggregate a precomputed fact instead of carrying
+        # identity state into every query.
+        self._copy_seen: dict[str, float] = {}
         # The unattributed increments still pending, kept per packet identity so
         # `note_author` can move them to the author before they are ever written:
         # airtime_ms, packets, advert_ms and the wall time of the newest copy
@@ -580,6 +620,25 @@ class ChannelOccupancy:
             if advert:
                 pending[2] += airtime_ms
 
+        # The copy cost is classified here, while the identity memory is warm, and
+        # rides along in the sample as a precomputed number: every copy of an
+        # identity heard after the first one this station heard inside
+        # `copy_horizon_seconds` charges this copy's airtime to the flood. The
+        # baseline is this station's hearing, not the network's first emission —
+        # the two differ by a bounded, per-identity offset, and saying so beats
+        # pretending a window can see a transmission it never heard.
+        copy_ms = 0.0
+        if kind == "rx" and packet_id:
+            heard_at = time.monotonic()
+            last_heard = self._copy_seen.get(packet_id)
+            if last_heard is not None and heard_at - last_heard <= self.copy_horizon_seconds:
+                copy_ms = airtime_ms
+            self._copy_seen[packet_id] = heard_at
+            if len(self._copy_seen) > COPY_MEMORY_CAPACITY:
+                # dict keeps insertion order, so the first key is the identity the
+                # writer has remembered longest.
+                self._copy_seen.pop(next(iter(self._copy_seen)), None)
+
         # The window clock is monotonic, but a sample written to a bucket is placed on
         # the wall clock, so the two must be tied at record time. The payload and the
         # hop count ride along so the channel floor can price the copies of a flood
@@ -595,9 +654,17 @@ class ChannelOccupancy:
                 max(0, int(payload_bytes)),
                 path_bytes_per_hop,
                 emitter_key,
+                copy_ms,
             )
         )
-        self._add_bucket(now_wall, airtime_ms, kind, payload_bytes)
+        self._add_bucket(
+            now_wall,
+            airtime_ms,
+            kind,
+            payload_bytes,
+            copy_ms=copy_ms,
+            hash_ms=airtime_ms if packet_id else 0.0,
+        )
 
         return airtime_ms
 
@@ -666,7 +733,15 @@ class ChannelOccupancy:
     def _bucket_ts(self, now_wall: float) -> int:
         return int(now_wall // self.sample_seconds) * self.sample_seconds
 
-    def _add_bucket(self, now_wall: float, airtime_ms: float, kind: str, payload_bytes: int) -> None:
+    def _add_bucket(
+        self,
+        now_wall: float,
+        airtime_ms: float,
+        kind: str,
+        payload_bytes: int,
+        copy_ms: float = 0.0,
+        hash_ms: float = 0.0,
+    ) -> None:
         ts = self._bucket_ts(now_wall)
         if not self._bucket or self._bucket["bucket_ts"] != ts:
             # Only the current bucket is kept: the flush writes it, and a long-running
@@ -679,6 +754,8 @@ class ChannelOccupancy:
                 "tx_ms": 0.0,
                 "packets": 0,
                 "rx_bytes": 0,
+                "rx_hashed_ms": 0.0,
+                "rx_copy_ms": 0.0,
             }
 
         if kind == "tx":
@@ -686,14 +763,22 @@ class ChannelOccupancy:
         else:
             self._bucket["rx_ms"] += airtime_ms
             self._bucket["rx_bytes"] += max(0, int(payload_bytes))
+            self._bucket["rx_hashed_ms"] += hash_ms
+            self._bucket["rx_copy_ms"] += copy_ms
         self._bucket["packets"] += 1
 
     # ------------------------------------------------------------------
     # Windows
     # ------------------------------------------------------------------
 
-    def window_airtime(self, seconds: float) -> dict[str, Any]:
+    def window_airtime(self, seconds: float, offset: float = 0.0) -> dict[str, Any]:
         """Sum of the samples inside a rolling window, split by kind, plus network counts.
+
+        `offset` slides the window back instead of ending it now: `offset=seconds`
+        answers for the window immediately before the current one, which is what
+        the previous-period comparison needs. The window then covers
+        ``(now-offset-seconds, now-offset]``; it is up to the caller to know
+        whether the ring buffer still reaches that far (see `_buffer_horizon`).
 
         The airtime sums cover both kinds, as always. The network counts (senders,
         hashes, hops) cover rx samples only: they answer "who and what was on air
@@ -734,15 +819,19 @@ class ChannelOccupancy:
         per_hash: dict[str, list[tuple[Optional[int], float, int, Optional[int]]]] = {}
         unknown_hash_ms = 0.0
         emitter_labels: set[str] = set()
+        hash_ms = 0.0
+        copy_ms = 0.0
         for entry in self._samples:
-            seen, airtime_ms, kind, sender, packet_hash, hops, payload_bytes, hop_width, emitter = entry
-            if now - seen > seconds:
+            seen, airtime_ms, kind, sender, packet_hash, hops, payload_bytes, hop_width, emitter, entry_copy_ms = entry
+            age = now - seen
+            if age > offset + seconds or age < offset:
                 continue
             kept += 1
             if kind == "tx":
                 tx += airtime_ms
                 continue
             rx += airtime_ms
+            copy_ms += entry_copy_ms
             if sender:
                 if sender == UNATTRIBUTED_SENDER:
                     unattributed += 1
@@ -752,6 +841,7 @@ class ChannelOccupancy:
                 emitter_labels.add(emitter)
             if packet_hash:
                 hash_known += 1
+                hash_ms += airtime_ms
                 hashes.add(packet_hash)
                 per_hash.setdefault(packet_hash, []).append((hops, airtime_ms, payload_bytes, hop_width))
             else:
@@ -771,6 +861,8 @@ class ChannelOccupancy:
             "rx_hops_sum": hops_sum,
             "rx_hops_known": hops_known,
             "rx_floor_ms": self._rx_floor_ms(per_hash, unknown_hash_ms),
+            "rx_hashed_ms": hash_ms,
+            "rx_copy_ms": copy_ms,
         }
 
     def _rx_floor_ms(self, per_hash: dict[str, list[tuple[Optional[int], float, int, Optional[int]]]], unknown_hash_ms: float) -> float:
@@ -842,10 +934,19 @@ class ChannelOccupancy:
         reason. ``distinct_senders`` counts identities this radio could name: the
         reserved unattributed bucket is heard airtime, not a station, and it is
         reported separately in ``unattributed_packets``.
+
+        ``copy_percent`` is the share of the HASH-COVERED rx airtime that copies
+        after the first one this station heard cost: ``rx_copy_ms`` over
+        ``rx_hashed_ms``. It deliberately divides by the hashed airtime and not by
+        all of ``rx_ms`` — a packet with no identity cannot be matched to a copy of
+        itself, so charging it to either side of the split would invent a number.
+        It is None when no hashed packet was heard: an unknown copy share rendered
+        as 0% would claim a flood-free channel from the absence of evidence.
         """
         unique = totals["rx_unique_packets"]
         hash_known = totals["rx_hash_known"]
         hops_known = totals["rx_hops_known"]
+        hashed_ms = totals["rx_hashed_ms"]
         return {
             "distinct_senders": totals["rx_senders"],
             "unattributed_packets": totals["rx_unattributed"],
@@ -856,14 +957,78 @@ class ChannelOccupancy:
             "hops_known": hops_known,
             "avg_hops": round(totals["rx_hops_sum"] / hops_known, 1) if hops_known else None,
             "rx_floor_ms": round(totals["rx_floor_ms"], 2),
+            "rx_hashed_ms": round(hashed_ms, 2),
+            "rx_copy_ms": round(totals["rx_copy_ms"], 2),
+            "copy_percent": round(totals["rx_copy_ms"] / hashed_ms * 100.0, 2) if hashed_ms > 0 else None,
+        }
+
+    def _buffer_horizon(self) -> float:
+        """How far back the ring buffer can still answer, in seconds.
+
+        Two different limits, and the honest one is the smaller: the process
+        cannot have recorded before it started, and a full deque has already
+        dropped samples. Only the full deque loses evidence — if it never
+        overflowed, every sample the process heard is still in it, so the
+        process start is the horizon. Once it is full the oldest sample left on
+        record bounds the answer instead, and a window reaching past that is
+        bounded, not census.
+        """
+        now = time.monotonic()
+        if self._samples and len(self._samples) >= self.max_samples:
+            return now - self._samples[0][0]
+        return now - self._started_at
+
+    def _previous_view(self, previous: dict[str, Any]) -> dict[str, Any]:
+        """The comparison window, in the same shape a reader expects of a window."""
+        return {
+            "rx_ms": round(previous["rx_ms"], 2),
+            "samples": previous["samples"],
+            **self._network_counts(previous),
+        }
+
+    def _trend(self, totals: dict[str, Any], previous: Optional[dict[str, Any]]) -> dict[str, Any]:
+        """Change over the equal-length window immediately before this one.
+
+        ``insufficient_history`` when the previous window is not there or held
+        no sample: a window with no samples because the buffer never reached it
+        is absent evidence, and rendering it as a quiet baseline turns a fresh
+        start into a sudden flood. The copy-share delta is percentage points of
+        hashed airtime, and None when either side has no hashed packets to
+        divide by.
+        """
+        if previous is None or previous["samples"] == 0:
+            return {"status": "insufficient_history"}
+        delta = totals["rx_ms"] - previous["rx_ms"]
+        share_delta = None
+        if totals["rx_hashed_ms"] > 0 and previous["rx_hashed_ms"] > 0:
+            share_delta = round(
+                (totals["rx_copy_ms"] / totals["rx_hashed_ms"]
+                 - previous["rx_copy_ms"] / previous["rx_hashed_ms"]) * 100.0,
+                2,
+            )
+        return {
+            "status": "comparable",
+            "rx_delta_ms": round(delta, 2),
+            "rx_delta_percent": round(delta / previous["rx_ms"] * 100.0, 1) if previous["rx_ms"] > 0 else None,
+            "copy_share_delta_pp": share_delta,
         }
 
     def windows(self) -> dict[str, dict[str, Any]]:
-        """Rolling windows as percentages of their own duration, with the network view."""
+        """Rolling windows as percentages of their own duration, with the network view.
+
+        Each window also says what the ring buffer can prove about it:
+        ``truncated`` when hashed traffic was seen but the buffer does not reach
+        back over the whole window — the repetition factor and the copy cost are
+        then bounds, not census — and the ``previous`` window next to a ``trend``
+        over it, with an honest status when the buffer cannot cover two windows
+        of this length.
+        """
+        horizon = self._buffer_horizon()
         result: dict[str, dict[str, Any]] = {}
         for name, seconds in self.window_seconds.items():
             totals = self.window_airtime(seconds)
             duration_ms = seconds * 1000.0
+            previous = self.window_airtime(seconds, offset=seconds) if horizon >= 2 * seconds else None
             result[name] = {
                 "seconds": seconds,
                 "rx_ms": round(totals["rx_ms"], 2),
@@ -875,6 +1040,9 @@ class ChannelOccupancy:
                 "rx_floor_percent": round(totals["rx_floor_ms"] / duration_ms * 100.0, 2) if duration_ms else 0.0,
                 "samples": totals["samples"],
                 **self._network_counts(totals),
+                "truncated": totals["rx_hash_known"] > 0 and horizon < seconds,
+                "previous": self._previous_view(previous) if previous is not None else None,
+                "trend": self._trend(totals, previous),
             }
         return result
 
@@ -899,6 +1067,7 @@ class ChannelOccupancy:
             "preamble": mod["preamble"],
             "samples": len(self._samples),
         }
+        horizon = self._buffer_horizon()
         for name in WINDOW_NAMES:
             seconds = self.window_seconds[name]
             totals = self.window_airtime(seconds)
@@ -913,6 +1082,13 @@ class ChannelOccupancy:
             )
             for key, value in self._network_counts(totals).items():
                 fields[f"{name}_{key}"] = value
+            # What the ring buffer can prove about this window, and the same
+            # window one length back when the buffer reaches that far: a
+            # monitoring agent comparing snapshots gets the trend without
+            # keeping state of its own.
+            fields[f"{name}_truncated"] = totals["rx_hash_known"] > 0 and horizon < seconds
+            previous = self.window_airtime(seconds, offset=seconds) if horizon >= 2 * seconds else None
+            fields[f"{name}_prev_rx_ms"] = round(previous["rx_ms"], 2) if previous is not None else None
         fields["half_life_seconds"] = self.half_life_seconds
         fields["ewma_rx_ms"] = round(ewma["rx_ms"], 2)
         fields["ewma_tx_ms"] = round(ewma["tx_ms"], 2)
@@ -941,13 +1117,18 @@ class ChannelOccupancy:
         row = self._bucket
         conn.execute(
             """
-            INSERT INTO occupancy_samples (bucket_ts, sample_seconds, rx_ms, tx_ms, packets, rx_bytes)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO occupancy_samples (
+                bucket_ts, sample_seconds, rx_ms, tx_ms, packets, rx_bytes,
+                rx_hashed_ms, rx_copy_ms
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(bucket_ts, sample_seconds) DO UPDATE SET
                 rx_ms = max(rx_ms, excluded.rx_ms),
                 tx_ms = max(tx_ms, excluded.tx_ms),
                 packets = max(packets, excluded.packets),
-                rx_bytes = max(rx_bytes, excluded.rx_bytes)
+                rx_bytes = max(rx_bytes, excluded.rx_bytes),
+                rx_hashed_ms = max(rx_hashed_ms, excluded.rx_hashed_ms),
+                rx_copy_ms = max(rx_copy_ms, excluded.rx_copy_ms)
             """,
             (
                 row["bucket_ts"],
@@ -956,6 +1137,8 @@ class ChannelOccupancy:
                 row["tx_ms"],
                 row["packets"],
                 row["rx_bytes"],
+                row["rx_hashed_ms"],
+                row["rx_copy_ms"],
             ),
         )
 
@@ -1124,7 +1307,8 @@ class ChannelOccupancy:
 
         rows = conn.execute(
             """
-            SELECT bucket_ts, sample_seconds, rx_ms, tx_ms, packets, rx_bytes
+            SELECT bucket_ts, sample_seconds, rx_ms, tx_ms, packets, rx_bytes,
+                   rx_hashed_ms, rx_copy_ms
             FROM occupancy_samples
             WHERE bucket_ts >= ? AND bucket_ts <= ?
             ORDER BY bucket_ts ASC
@@ -1133,6 +1317,15 @@ class ChannelOccupancy:
         ).fetchall()
 
         buckets = [dict(row) for row in rows]
+        # The copy columns arrived with migration 40: a bucket written before it
+        # carries NULL, and NULL is not a zero-copy bucket. A whole-period copy
+        # figure is therefore only stated when every bucket in the range knows
+        # the split — a ratio over part of the period presented as a period
+        # figure is an invented average. Per-bucket values ride along either
+        # way so the reader can split known from unknown at its own grain.
+        copies_known = bool(buckets) and all(b["rx_hashed_ms"] is not None for b in buckets)
+        total_hashed_ms = sum(b["rx_hashed_ms"] or 0.0 for b in buckets) if copies_known else None
+        total_copy_ms = sum(b["rx_copy_ms"] or 0.0 for b in buckets) if copies_known else None
         return {
             "start_time": int(start_ts),
             "end_time": int(end_ts),
@@ -1141,6 +1334,13 @@ class ChannelOccupancy:
             "total_rx_ms": round(sum(b["rx_ms"] for b in buckets), 2),
             "total_tx_ms": round(sum(b["tx_ms"] for b in buckets), 2),
             "packets": sum(b["packets"] for b in buckets),
+            "total_rx_hashed_ms": round(total_hashed_ms, 2) if total_hashed_ms is not None else None,
+            "total_rx_copy_ms": round(total_copy_ms, 2) if total_copy_ms is not None else None,
+            "copy_percent": (
+                round(total_copy_ms / total_hashed_ms * 100.0, 2)
+                if copies_known and total_hashed_ms > 0
+                else None
+            ),
             **{
                 f"p{int(q * 100)}_rx_ms": nearest_rank_percentile([b["rx_ms"] for b in buckets], q)
                 for q in self.quantiles

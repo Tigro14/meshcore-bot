@@ -10,6 +10,7 @@ import configparser
 import json
 import logging
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -364,6 +365,179 @@ class TestNetworkView:
         network_keys = {"distinct_senders", "hash_known", "unique_packets", "dup_factor", "hops_known", "avg_hops"}
         window_fields = {key.split("_", 1)[1] for key in occupancy.fields() if key.startswith("window_")}
         assert network_keys <= window_fields
+
+
+# ---------------------------------------------------------------------------
+# Copy cost: what the flood's repetitions take off the channel
+# ---------------------------------------------------------------------------
+
+
+class TestCopyCost:
+    """The airtime of the copies after the first one this station heard.
+
+    `dup_factor` counts copies; the copy cost prices them. The rules these
+    checks protect: the first copy of an occurrence is free, every later copy
+    pays its own modulation, identity-less traffic sits outside the measure
+    (unknown, never 0%), and a window the ring buffer cannot cover is a bound,
+    not a census.
+    """
+
+    def test_first_copy_is_free_and_the_second_pays_its_own_airtime(self, occupancy):
+        first = occupancy.record(30, kind="rx", sender="alice", packet_hash="aabbccddeeff0011")
+        second = occupancy.record(80, kind="rx", sender="bob", packet_hash="aabbccddeeff0011")
+        totals = occupancy.window_airtime(60.0)
+        assert totals["rx_copy_ms"] == pytest.approx(second)
+        assert totals["rx_hashed_ms"] == pytest.approx(first + second)
+        window = occupancy.windows()["window"]
+        assert window["rx_copy_ms"] == pytest.approx(round(second, 2))
+        assert window["copy_percent"] == pytest.approx(round(second / (first + second) * 100.0, 2))
+
+    def test_tx_copies_pay_no_copy_cost(self, occupancy):
+        """The bot's own retransmissions cost airtime but not a heard-copy charge."""
+        occupancy.record(30, kind="tx", sender="bot", packet_hash="aabbccddeeff0011")
+        occupancy.record(30, kind="tx", sender="bot", packet_hash="aabbccddeeff0011")
+        totals = occupancy.window_airtime(60.0)
+        assert totals["rx_copy_ms"] == 0.0
+        assert totals["rx_hashed_ms"] == 0.0
+
+    def test_identity_less_traffic_sits_outside_the_measure(self, occupancy):
+        """A copy of an unhashable packet cannot be matched to itself.
+
+        The share is unknown, not 0%: a rendered zero would claim a flood-free
+        channel from the absence of evidence.
+        """
+        occupancy.record(30, kind="rx", sender="alice")
+        occupancy.record(30, kind="rx", sender="bob")
+        window = occupancy.windows()["window"]
+        assert window["rx_hashed_ms"] == 0.0
+        assert window["copy_percent"] is None
+
+    def test_the_horizon_makes_a_re_flood_a_new_first_occurrence(self, occupancy):
+        """Two occurrences of one identity a horizon apart pay once each.
+
+        The baseline is this station's hearing, not the network's first
+        emission; charging every copy since boot would make a once-a-minute
+        beacon pay a copy forever, and the error is a bounded, per-identity
+        offset rather than an invented number.
+        """
+        occupancy.copy_horizon_seconds = 10.0
+        monotonic = {"now": 10_000.0}
+        occupancy._started_at = monotonic["now"]
+        with patch.object(occupancy_module.time, "monotonic", side_effect=lambda: monotonic["now"]):
+            occupancy.record(30, kind="rx", packet_hash="aabbccddeeff0011")
+            monotonic["now"] += 5.0
+            occupancy.record(30, kind="rx", packet_hash="aabbccddeeff0011")
+            monotonic["now"] += 20.0
+            occupancy.record(30, kind="rx", packet_hash="aabbccddeeff0011")
+            totals = occupancy.window_airtime(3600.0)
+        assert totals["rx_hashed_ms"] == pytest.approx(totals["rx_copy_ms"] * 3.0)
+
+    def test_the_copy_memory_stays_bounded(self, occupancy):
+        """A busy mesh sees thousands of identities; the memory keeps the horizon, not all of them."""
+        with patch.object(occupancy_module, "COPY_MEMORY_CAPACITY", 2):
+            for index in range(10):
+                occupancy.record(30, kind="rx", packet_hash=f"{index:016x}")
+        assert len(occupancy._copy_seen) <= 2
+
+    def test_the_truncated_flag_tracks_what_the_buffer_can_prove(self, occupancy):
+        """A window the ring buffer cannot cover is bounded, not census.
+
+        Two limits, honest at each one: a process younger than the window never
+        heard what came before it, and an overflowed deque has dropped copies
+        it can no longer count.
+        """
+        occupancy.record(30, kind="rx", sender="alice", packet_hash="aabbccddeeff0011")
+        occupancy.record(30, kind="rx", sender="bob", packet_hash="aabbccddeeff0011")
+        assert occupancy.windows()["window"]["truncated"] is True
+        occupancy._started_at = time.monotonic() - 3600.0
+        assert occupancy.windows()["window"]["truncated"] is False
+        occupancy.max_samples = 2
+        occupancy.record(30, kind="rx", sender="carol", packet_hash="aabbccddeeff0011")
+        assert occupancy.windows()["window"]["truncated"] is True
+
+    def test_the_previous_window_compares_equal_lengths(self, occupancy):
+        """The window one length back, plus a stated change over it."""
+        monotonic = {"now": 10_000.0}
+        occupancy._started_at = 9_000.0
+        with patch.object(occupancy_module.time, "monotonic", side_effect=lambda: monotonic["now"]):
+            monotonic["now"] = 9_930.0
+            occupancy.record(30, kind="rx", packet_hash="1122334455667788")
+            monotonic["now"] = 9_995.0
+            occupancy.record(90, kind="rx", packet_hash="aabbccddeeff0011")
+            window = occupancy.windows()["window"]
+        assert window["previous"] is not None
+        assert window["previous"]["samples"] == 1
+        assert window["trend"]["status"] == "comparable"
+        assert window["trend"]["rx_delta_ms"] == pytest.approx(round(window["rx_ms"] - window["previous"]["rx_ms"], 2))
+
+    def test_an_empty_previous_window_is_absent_evidence_not_a_quiet_channel(self, occupancy):
+        """A fresh start with samples now must not read as a sudden flood.
+
+        The previous window either cannot be covered or holds no sample, and
+        both answer `insufficient_history`: zero samples is absent evidence,
+        not a quiet baseline.
+        """
+        occupancy.record(30, kind="rx", sender="alice", packet_hash="aabbccddeeff0011")
+        window = occupancy.windows()["window"]
+        assert window["previous"] is None
+        assert window["trend"]["status"] == "insufficient_history"
+        occupancy._started_at = time.monotonic() - 3600.0
+        window = occupancy.windows()["window"]
+        assert window["previous"]["samples"] == 0
+        assert window["trend"]["status"] == "insufficient_history"
+
+    def test_the_copy_fields_reach_the_live_snapshot(self, occupancy):
+        occupancy.record(30, kind="rx", sender="alice", packet_hash="aabbccddeeff0011")
+        fields = occupancy.fields()
+        assert "window_copy_percent" in fields
+        assert "window_rx_copy_ms" in fields
+        assert "window_truncated" in fields
+        assert "window_prev_rx_ms" in fields
+
+    def test_the_bucket_stores_the_hashed_and_copy_sums(self, occupancy, conn):
+        """Copy cost is a sum, so it belongs in the buckets the cardinalities cannot enter."""
+        first = occupancy.record(30, kind="rx", sender="alice", packet_hash="aabbccddeeff0011", at=1_700_000_000.0)
+        second = occupancy.record(80, kind="rx", sender="bob", packet_hash="aabbccddeeff0011", at=1_700_000_001.0)
+        occupancy.flush(conn)
+        stored = conn.execute(
+            "SELECT rx_hashed_ms, rx_copy_ms FROM occupancy_samples"
+        ).fetchone()
+        assert stored["rx_hashed_ms"] == pytest.approx(first + second)
+        assert stored["rx_copy_ms"] == pytest.approx(second)
+
+    def test_history_states_the_copy_share_when_every_bucket_knows_it(self, occupancy, conn):
+        occupancy.record(30, kind="rx", packet_hash="aabbccddeeff0011", at=1_700_000_000.0)
+        occupancy.record(30, kind="rx", packet_hash="aabbccddeeff0011", at=1_700_000_030.0)
+        occupancy.flush(conn)
+        history = occupancy.history(conn, 1_699_999_900.0, 1_700_000_120.0)
+        assert history["total_rx_hashed_ms"] is not None
+        assert history["total_rx_copy_ms"] is not None
+        assert history["copy_percent"] is not None
+
+    def test_history_keeps_the_copy_share_unknown_across_the_split(self, occupancy, conn):
+        """A bucket written before migration 40 carries NULL, and NULL is not zero copies."""
+        occupancy.record(30, kind="rx", packet_hash="aabbccddeeff0011", at=1_700_000_000.0)
+        occupancy.record(30, kind="rx", packet_hash="aabbccddeeff0011", at=1_700_000_030.0)
+        occupancy.flush(conn)
+        conn.execute(
+            "INSERT INTO occupancy_samples (bucket_ts, sample_seconds, rx_ms, tx_ms, packets, rx_bytes) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (1_699_999_940, 60, 1000.0, 0.0, 1, 30),
+        )
+        conn.commit()
+        history = occupancy.history(conn, 1_699_999_900.0, 1_700_000_120.0)
+        assert history["total_rx_hashed_ms"] is None
+        assert history["copy_percent"] is None
+        known = [b for b in history["buckets"] if b["rx_hashed_ms"] is not None]
+        assert known, "the per-bucket values ride along so the reader can split known from unknown"
+
+    def test_migration_40_adds_the_copy_columns_as_nullable(self, conn):
+        columns = {
+            row[1]: row[2]
+            for row in conn.execute("PRAGMA table_info(occupancy_samples)")
+        }
+        assert columns["rx_hashed_ms"] == "REAL"
+        assert columns["rx_copy_ms"] == "REAL"
 
 
 # ---------------------------------------------------------------------------
@@ -1844,6 +2018,31 @@ class TestApi:
         assert len(payload["buckets"]) == 1
         assert payload["p50_rx_ms"] is not None
         assert payload["p95_rx_ms"] is not None
+
+    def test_history_carries_the_equal_period_before(self, occupancy, conn, viewer):
+        """The reader comparing periods must not have to fetch twice, and the
+        previous period arrives as its own object: an empty one is absent
+        evidence, and only the reader who sees the range can say so."""
+        _write_snapshot(occupancy, conn)
+        payload = json.loads(viewer.app.test_client().get("/api/telemetry/occupancy/history?days=30").get_data())
+        previous = payload["previous"]
+        assert previous["end_time"] == payload["start_time"]
+        assert previous["start_time"] == payload["start_time"] - 30 * 86400
+        # Nothing was recorded before the snapshot's bucket: absent, not quiet.
+        assert previous["buckets"] == []
+        # The snapshot's bucket knows the split (its packet carried no identity,
+        # so the share is unknown, while the column is not NULL): the reader can
+        # tell "measured, no identified traffic" from "not recorded".
+        assert payload["buckets"][0]["rx_hashed_ms"] == 0.0
+        assert payload["copy_percent"] is None
+
+    def test_history_text_format_states_the_previous_period(self, occupancy, conn, viewer):
+        _write_snapshot(occupancy, conn)
+        text = viewer.app.test_client().get(
+            "/api/telemetry/occupancy/history?days=30&format=text").get_data(as_text=True)
+        parsed = dict(line.split("=", 1) for line in text.splitlines())
+        assert parsed["previous_buckets"] == "0"
+        assert "copy_percent" in parsed
 
     def test_history_days_is_clamped(self, viewer):
         client = viewer.app.test_client()
