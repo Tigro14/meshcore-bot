@@ -195,7 +195,7 @@ from modules.feed_parse import (  # noqa: F401
 )
 from modules.repeater_manager import RepeaterManager, validate_repeater_tables
 from modules.security_utils import SafeUrlPolicy, create_safe_requests_session, safe_requests_request  # noqa: F401
-from modules.utils import resolve_path
+from modules.utils import get_config_timezone, resolve_path
 from modules.web_viewer.channel_monitor import (
     ChannelMonitorMixin,
     admin_qr_for,
@@ -511,6 +511,8 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         # packet_stream would report a different number than the writer, because the
         # writer's window is a rolling monotonic window, not a table scan.
         self.occupancy = ChannelOccupancy(self.config, self.logger)
+        from modules.airtime_analysis import AirtimeReader
+        self.airtime_reader = AirtimeReader()
 
         # Configure CORS for SocketIO — default to same-origin (no cross-origin)
         cors_raw = self.config.get('Web_Viewer', 'cors_allowed_origins', fallback='').strip()
@@ -1158,6 +1160,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             # visible on /api/contacts, nothing private.
             '/api/telemetry/occupancy',
             '/api/telemetry/occupancy/history',
+            '/api/telemetry/occupancy/analysis',
             '/api/contacts',
             '/api/contact-detail',
             '/api/mesh/nodes',
@@ -2918,6 +2921,20 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             else:
                 response = jsonify(payload)
             response.headers['Cache-Control'] = 'private, max-age=30'
+            return response
+
+        @self.app.route('/api/telemetry/occupancy/analysis')
+        @self._api_errors('Error reading passive airtime analysis')
+        def api_airtime_analysis():
+            """Versioned metadata-only estimates for the existing UI and future tools."""
+            from modules.airtime_analysis import WINDOWS
+            window = request.args.get('window', '24h')
+            if window not in WINDOWS:
+                return jsonify({'error': 'window must be 1h, 24h or 7d'}), 400
+            with self._with_db_connection() as conn:
+                payload = self.airtime_reader.read(conn, window)
+            response = jsonify(payload)
+            response.headers['Cache-Control'] = 'private, max-age=15'
             return response
 
         @self.app.route('/api/telemetry/occupancy/history')
@@ -6423,6 +6440,9 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         @self.app.route('/airtime')
         def airtime_page():
             """Channel airtime page: the modelled windows, the history buckets, the sender share."""
+            if request.args.get('view') == 'network':
+                _, zone = get_config_timezone(self.config, self.logger)
+                return render_template('airtime_passive.html', airtime_timezone=zone)
             return render_template('airtime.html')
         @self.app.route('/time')
         def time_page():

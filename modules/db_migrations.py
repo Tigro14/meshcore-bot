@@ -1313,6 +1313,21 @@ def _m0039_occupancy_relays(cursor: sqlite3.Cursor) -> None:
 
 MigrationEntry = tuple[int, str, Callable[[sqlite3.Cursor], None]]
 
+def _m0040_passive_airtime_attribution(cursor: sqlite3.Cursor) -> None:
+    from modules.airtime_analysis import create_tables
+    create_tables(cursor)
+
+
+def _m0041_passive_airtime_scope(cursor: sqlite3.Cursor) -> None:
+    from modules.airtime_forwarding import create_context_tables
+    create_context_tables(cursor)
+
+
+def _m0042_passive_airtime_capture(cursor: sqlite3.Cursor) -> None:
+    from modules.airtime_capture import create_tables
+    create_tables(cursor)
+
+
 MIGRATIONS: list[MigrationEntry] = [
     (1, "initial schema", _m0001_initial_schema),
     (2, "feed_subscriptions: output_format, message_send_interval_seconds", _m0002_feed_subscriptions_output_format),
@@ -1353,6 +1368,9 @@ MIGRATIONS: list[MigrationEntry] = [
     (37, "occupancy_emitters", _m0037_occupancy_emitters),
     (38, "occupancy sender/emitter day tables", _m0038_occupancy_day_tables),
     (39, "occupancy relays: where relayed copies entered the mesh", _m0039_occupancy_relays),
+    (40, "metadata-only passive airtime attribution", _m0040_passive_airtime_attribution),
+    (41, "opaque scope context for passive forwarding scenarios", _m0041_passive_airtime_scope),
+    (42, "local passive airtime capture intervals", _m0042_passive_airtime_capture),
 ]
 
 

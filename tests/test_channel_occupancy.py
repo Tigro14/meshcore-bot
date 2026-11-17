@@ -1858,3 +1858,22 @@ class TestApi:
         assert client.get("/api/telemetry/occupancy").status_code == 200
         assert client.get("/api/telemetry/occupancy/history").status_code == 200
         assert client.get("/api/plugins").status_code == 401
+
+
+def test_passive_ingestion_uses_the_writer_transaction(occupancy, conn):
+    """Metadata import may not commit a half-written packet batch on its own."""
+    integration = _integration(_make_bot(occupancy))
+    conn.execute('BEGIN')
+    with patch('modules.airtime_analysis.ingest_stream') as ingest, \
+         patch('modules.airtime_quality.write_observer_metadata'):
+        integration._flush_occupancy(conn)
+        ingest.assert_called_once()
+        assert conn.in_transaction
+    conn.rollback()
+
+
+def test_passive_table_probe_returns_the_first_success(occupancy, conn):
+    """The initial batch must not be skipped while populating the probe cache."""
+    integration = _integration(_make_bot(occupancy))
+    assert integration._occupancy_tables_exist(conn) is True
+    assert integration._occupancy_tables_exist(conn) is True

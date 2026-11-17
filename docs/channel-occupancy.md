@@ -423,3 +423,171 @@ leaving it standing beside the error.
 
 It cannot tell you whether the channel was clear, whether a packet was collided, or
 whether a repeater was hearing you. For that you need a repeater's own counters.
+
+## Passive repeater estimates and received-copy analysis
+
+The **Network estimates** link on `/airtime` selects `/airtime?view=network` on
+that same route. It adds the compact Baliz view without removing the existing
+local-accounting screen, three ledgers, channel floor, API or radio command.
+The new view currently uses French labels. Its calendar markers use `[Bot] timezone`, not a hard-coded deployment timezone.
+
+### Recording and API
+
+With `[Channel_Occupancy] enabled = true` and the web-viewer writer running,
+existing `packet_stream` events are incrementally imported in batches of at most
+1,000. The extra tables contain timestamps, full-frame lengths, SHA-256 payload
+fingerprints, paths, modulation, public node identities and opaque scope context.
+They do not duplicate message bodies, raw frames, channel secrets or payloads.
+An author is resolved from an advert or an RF-linked decoded-message event;
+conflicting identities remain unknown. Unknown and ambiguous prefixes are not
+silently assigned to a contact.
+
+Migrations **40–42** append metadata attribution, scope context and local capture
+intervals after the existing schema. Metadata uses
+`Data_Retention.occupancy_samples_retention_days` (default 30 days); capture
+intervals are pruned to 30 days. Historical import uses the modulation known
+when importing, because older packet logs do not record the historical profile.
+
+`GET /api/telemetry/occupancy/analysis?window=1h|24h|7d` returns a read-only model
+with `schema_version=1` and `method.version=6`, cached per window for 15 seconds.
+It carries separate `local`, `traffic`, `authors`, `repeaters`, `receptions`,
+`forwarding_model`, `coverage`, `quality` and `limitations` fields. An unavailable
+estimate is `null`, not a claim of zero traffic. The route follows the public,
+metadata-only telemetry policy of the existing occupancy endpoints.
+
+### Frame airtime and local occupation
+
+For each consistent RF frame:
+
+```text
+L = 2 + transport_header_bytes + path_bytes + payload_bytes
+transport_header_bytes = 4 for TRANSPORT_* routes, otherwise 0
+fingerprint = SHA256(payload_type + ':' + complete_payload_hex)
+```
+
+A supplied raw-frame length must agree with `L`. The existing
+`channel_occupancy.lora_airtime_ms` prices the complete frame, including preamble,
+using the recorded SF, bandwidth, coding rate and preamble length. It implements
+the Semtech LoRa symbol formula (explicit header and CRC by default; automatic
+low-data-rate optimization at symbol duration >=16.38 ms). This is a calculated
+airtime, not a hardware busy-channel or CAD measurement.
+
+**Every received RF copy counts** in local occupation. The average is received
+frame airtime divided by the available retained observation span in the selected
+period; packet rate uses that same denominator. Average packet size is the mean
+complete-frame byte length, not the application text length. A five-minute peak
+is calculated independently of chart aggregation. These are receiver-side
+observations, not the occupancy of every location in the mesh and not a shared
+10% duty-cycle budget. Overlapping transmissions cannot be inferred as a union
+of physically busy time from decoded packets alone.
+
+### Reconstructing a repeater's transmissions
+
+Only `FLOOD` / `TRANSPORT_FLOOD` paths are emission evidence. `TRACE` is excluded;
+a direct-route path describes future routing instructions rather than a history.
+For a flood path `A -> B -> C`, the observer directly heard C, while A and B are
+inferred upstream transmitters. Each hop is resolved only when its 1-, 2- or
+3-byte prefix matches exactly one known repeater/room server. A known author
+also supplies the original emission. Frame airtime is recalculated at each
+stage, since each forwarding hop adds path bytes.
+
+Multiple received branches can share one upstream transmission. Evidence is
+grouped by full payload fingerprint, path prefix, route, bytes per hop and radio
+profile. For each inferred stage:
+
+```text
+latest_possible_end = received_frame_end - downstream_frames_airtime
+possible_end_interval = [latest_possible_end - 60 s, latest_possible_end]
+```
+
+Compatible intervals are intersected to count one shared inferred emission.
+Every directly heard emission is retained: two direct anchors never merge.
+An inferred emission is timestamped at the resulting upper endpoint. The
+60-second forwarding-delay allowance is an explicit modelling assumption;
+unobserved same-path retries can still be merged, and inferred timestamps can
+move traffic across an hourly boundary. This is reconstruction, not a complete
+TX counter.
+
+### Duty-cycle calculation
+
+For a repeater `r` at time `t`, the current estimate is:
+
+```text
+DC_r(t) = 100 * sum(airtime_ms of r's reconstructed emissions in (t-3600, t])
+                    / 3,600,000
+```
+
+The denominator always remains a full hour; it is not scaled up from the short
+history available after startup. For example, **36 s attributed in the last hour
+= 1% duty cycle**; **360 s = 10% = 6 min/h for that individual emitter**.
+The current duty estimate is independent of the graph's selected range.
+`last_hour_direct_percent` and `last_hour_inferred_percent` expose its components.
+The event-based rolling-hour maximum over the selected period includes a
+one-hour lookbehind so the first candidate window is not truncated at the page
+filter. This is distinct from an average over a day or a five-minute burst.
+
+Contacts adds this reconstructed rolling-hour estimate to repeater rows/cards.
+No attributable emission yields `null` / N/D rather than proof of silence.
+The network overview hides directly evidenced first links by default; the
+**Afficher les premiers liens** checkbox restores all of them. This is only a
+presentation filter, applied to neither stored observations nor model totals.
+
+### Expected retransmission scenario
+
+The separately labelled **Scénario** supplements reconstruction with a bounded
+one-hop forwarding model. It learns directed links and forwarding envelopes
+from history **before** the evaluation window: up to seven days, at least six
+hours of history, at least three supporting packets and recent evidence within
+one day. Payloads reused in the evaluation do not train their own prediction.
+Known scope, wire profile, payload class and observed hop depth must support
+an opportunity. Unresolved scope conflicts remain unknown.
+
+An expected forwarding opportunity is matched against reconstructed evidence;
+only unmatched supported opportunities add hypothetical airtime. At most one
+additional forwarding per original packet/relay is modelled. Predictions never
+seed further predictions. `scenario_hour_percent` stays distinct from the
+reconstructed `last_hour_percent`; the overview explicitly labels a scenario
+when that larger estimate is displayed. This does not establish packet loss,
+FDR/PDR, a repeater's configured flood limit or a compliance verdict. There is no
+inverse-FDR multiplier or extrapolation of unseen source traffic.
+
+### Received copies and source roles
+
+Within the selected period the first received copy of each strong fingerprint
+is the baseline; all subsequent received copies are additional. The displayed
+percentage is **airtime-weighted**, not a packet-count fraction:
+
+```text
+additional_share = 100 * additional_received_airtime / all_received_airtime
+repeat_factor = received_packets / distinct_payload_fingerprints
+```
+
+Copies remain included in occupation and in directly observed emission counts.
+Useful flood forwarding is also a copy: this percentage must not be called
+"waste" or the duplicate ratio of the entire network. Input truncation makes
+the affected ratios unavailable rather than publishing a partial ratio as exact.
+
+Authors are ranked by reconstructed original-plus-relay radio cost. The details
+also provide two independent receiver-side roles: the first flood relay where
+the copy entered the mesh and the final emitter heard at this observer. These
+ledgers answer different questions and must not be added together. Unidentified
+identities retain an explicit share.
+
+### Coverage and presentation
+
+A local health recorder joins consecutive healthy writer/radio ticks only.
+Restarts, reconnects, stale health, queue loss and clock discontinuities break
+continuity. This confirms pipeline availability, not perfect RF reception.
+Internal gaps are never filled as silence. A gray baseline dash means a fully
+covered bucket with zero received frames; missing data stays blank.
+
+The chart overlays occupation bars and packets/minute, with aggregation adapted
+to the selected period: 1-minute bins for 1 h, 15-minute bins for 24 h and
+1-hour bins for 7 days. Tooltip values use the same bins. Local midnight markers
+and 00:00 axis ticks follow the configured timezone, including DST.
+
+Copy-share trends require two equal, closed and continuously captured windows,
+ending at a fresh confirmed capture boundary. Incomplete/truncated observation
+is explicitly non-comparable. A single receiver still misses distant traffic,
+collisions and undecodable frames: none of these estimates proves regulatory
+compliance or describes the whole mesh's RF occupation.

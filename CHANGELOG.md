@@ -8,6 +8,12 @@ semantic versioning.
 
 ### Added
 
+- Optional network-estimate view on `/airtime?view=network`: passive flood-path
+  reconstruction of repeater duty cycle, bounded forwarding scenarios, received-copy
+  analysis, adaptive occupation/packet-rate chart and Contacts duty badges. Adds a
+  versioned metadata-only analysis API and append-only migrations 40–42; preserves
+  existing Airtime accounting, ledgers and radio command. See `docs/channel-occupancy.md`.
+
 - Web viewer gains a **Channels** page at `/channels`, on the anonymous allowlist: the channels
   this bot knows — monitored, held by the radio, or only listed by the bot (`[Channels_List]`,
   `decode_hashtag_channels`), each badged with which of those it is — as a card grid with its
