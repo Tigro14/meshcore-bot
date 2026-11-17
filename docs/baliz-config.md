@@ -18,6 +18,9 @@ des données est donnée uniquement sur demande explicite. Aucun ajout de source
 n'est fait aux autres réponses. La commande directe `test` reste désactivée,
 tandis que sa fonction interne reste accessible à l'assistant.
 
+Le 17 novembre, le profil reprend les réponses sur canal limitées à `#bretagne`
+et les alertes de vigilance séparées par département.
+
 ## Vigilance météo
 
 `vigi` sans argument vérifie les **quatre départements bretons (22, 29, 35, 56)**.
@@ -34,13 +37,13 @@ Le profil active la surveillance horaire des départements `29,22,35,56` dans
 changement. Le retour au vert est annoncé une fois après une vigilance diffusée.
 Voir le [fonctionnement du service](vigilance-service.md#change-driven-alerts).
 
-`group_similar_alerts = true` regroupe les départements dont les vigilances et
-horaires correspondent. Avec `false`, les alertes sont séparées par département :
+`group_similar_alerts = false` conserve les alertes séparées par département :
 nom et numéro en en-tête, journées dues réunies si la taille radio le permet,
 une ligne par phénomène avec ses horaires, sans ligne vide entre les journées.
 Les différences de niveau restent explicites et aucun créneau n’est tronqué.
-La destination temporaire `#meteo` reste locale ; le profil public conserve
-`#bretagne`.
+L’option `true` permet de regrouper les départements dont les vigilances et
+horaires correspondent. La destination temporaire `#meteo` reste locale ;
+le profil public conserve `#bretagne`.
 
 ## Relevé des batteries
 
@@ -52,9 +55,9 @@ leur historique de tension.
 ## Identité et fonctionnement conservés
 
 - Nom `[BOT] Baliz`, français, fuseau `Europe/Paris` et coordonnées de Morlaix.
-- Canaux surveillés : `#bzh-bot`, `Aar29`, `#bretagne` ; réponses aux DM et
-  limite de 10 sauts conservées. Ce sont les noms des canaux déjà présents
-  sur le companion : le profil ne crée pas les canaux et ne fournit pas leurs clés.
+- Réponses sur canal limitées à `#bretagne` ; réponses aux DM et limite de
+  10 sauts conservées. Le profil ne crée pas les canaux sur le companion et
+  ne fournit pas leurs clés.
 - Prompt système LLM intégral, sans reformulation, modèle `qwen3.5:2b-q4_K_M`, endpoint
   `http://192.168.0.104:11434/v1/chat/completions`, budget de 100 tokens et
   délai de 300 secondes. Historique de 600 secondes / 5 tours, contexte réseau,
@@ -163,8 +166,8 @@ de la source est signalée une fois ; les réponses hors ligne sont explicitemen
 historiques et ne déclenchent aucune nouvelle alerte météo. Le passage à un bulletin
 périmé et le rétablissement des mises à jour sont également signalés une fois.
 
-Le profil conserve `group_similar_alerts = true`, comme sur le serveur. Désactiver
-cette option permet d’utiliser les résumés par département décrits plus haut.
+Le profil conserve `group_similar_alerts = false`, comme sur le serveur : les
+alertes utilisent les résumés par département décrits plus haut.
 Le délai de rappel reste propre à chaque département et journée. Ces options
 sont désactivées dans l’exemple générique de Tigro.
 

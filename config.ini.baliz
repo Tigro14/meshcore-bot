@@ -83,7 +83,7 @@ schedule = 0 3 * * *
 
 [Channels]
 startup_flood_scope = fr-bre
-monitor_channels = #bzh-bot,Aar29,#bretagne
+monitor_channels = #bretagne
 respond_to_dms = true
 max_response_hops = 10
 
@@ -702,6 +702,6 @@ alert_levels = Jaune,Orange,Rouge
 notify_on_change = true
 reminder_interval = 86400
 offline_cache = true
-group_similar_alerts = true
+group_similar_alerts = false
 include_tomorrow = true
 silence_mesh_output = false

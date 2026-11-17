@@ -16,6 +16,25 @@
 
 Les mises à jour de Tigro sont intégrées dans Baliz en conservant ses particularités. Publier une version de production ne remplace pas `main`, ne réécrit pas l'historique et ne supprime pas les branches de travail existantes.
 
+## Alignement avec le LXC103 — 17 novembre 2026
+
+La source installée reste `611cd5cb29235ba77481e61e9d66db79a6d3b562`, déjà
+publiée dans `baliz` par la PR #25. Les 312 fichiers contrôlés (310 fichiers
+applicatifs, `requirements.txt` et `config.ini.example`) sont identiques à
+GitHub. Le service et la radio sont opérationnels.
+
+Les deux profils publics reprennent les changements de réglage constatés :
+`Channels.monitor_channels = #bretagne` et
+`Vigilance_Service.group_similar_alerts = false`. Les réponses aux DM restent
+activées ; la vigilance continue de couvrir les quatre départements bretons.
+La destination temporaire `#meteo` reste locale ; le profil public conserve
+`#bretagne` pour les alertes.
+
+La publication passe par `sync/lxc103-production-20261117` vers `baliz` et
+`sync/baliz-identity-production-20261117` vers `config/baliz-identity`.
+Elle conserve `main` et ne modifie ni ne redémarre le serveur. Voir la
+[validation](validation/baliz-production-sync-20261117.md).
+
 ## Mise à jour des alertes — 15 novembre 2026
 
 La source installée est `1b23c8215d8de191184d3da21e0487b57aa7949c`.
