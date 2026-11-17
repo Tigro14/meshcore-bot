@@ -89,10 +89,10 @@ admin surface. Everything not on the public allowlist redirects to `/login` (pag
   Airtime, BBS statistics, the Time synchronization page (`/time`, read-only:
   add/delete/toggle/Run Now are hidden for anonymous visitors), the Channels page
   (`/channels`, see below) and Infos. The read-only GET APIs these pages fetch are public too
-  (`/api/contacts`, `/api/regions`, `/api/bbs`, `/api/channels/view`,
+  (`/api/contacts`, `/api/regions`, `/api/bbs`, `/api/channels/published`,
   `/api/telemetry/occupancy*`, `/api/clock-sync-targets-admin`, `/api/packets/by-hash/<hash>`);
   their payloads carry mesh-visible data only — counts, names, key prefixes, drift and battery
-  badges, packet ciphertext with radio metadata, never channel keys, config or unpublished
+  badges, packet ciphertext with radio metadata, never unpublished channel keys, config or unpublished
   message bodies.
 - **Admin login required**: Logs, the Settings dropdown (Radio, Scheduled Messages,
   Greeter, Feeds, Region Warnings, Channels, Plugins, Config), the Multibyte monitor, the Time target
@@ -435,18 +435,14 @@ next hourly tick.
 - The monitored channels (`[Channels] monitor_channels`) as a card grid, each with the
   MeshCore "Add Channel" QR code a visitor can scan from the MeshCore mobile app
   (`meshcore://channel/add?name=…&secret=…`), plus a button to copy the URI
-- Public page: it is on the anonymous allowlist, so it works without a login, and the QR
-  exposure is limited accordingly
-  - Hashtag channels are always encoded: their secret is the first 16 bytes of
-    `SHA256("#name")`, which anyone can derive from the published name, so the QR leaks
-    nothing new
-  - A custom (non-hashtag) channel's secret *is* its private key. Its QR is only given to
-    an anonymous visitor when the operator marked that channel publishable on the Radio page;
-    otherwise the channel is left out of the anonymous feed entirely rather than shown
-    name-only, because a join nobody can complete is worse than no join
-  - An authenticated operator also sees the private keys of unpublished custom channels
-  - The `Public` channel is never encoded: its key is fixed by MeshCore rather than
-    hashtag-derived, and it is not this bot's channel to distribute
+- The page opens without a login dialog. Anonymous visitors see only radio channels
+  marked published on the Radio page, including for hashtag channels. Published custom
+  keys are shared only through this explicit publication setting.
+- An already authenticated operator sees every radio channel immediately, including
+  unpublished channels and their join keys. The browser first requests the protected
+  `/channels/settings/view` feed and falls back to `/api/channels/published` if denied.
+  Responses are not stored in the browser cache.
+- The `Public` channel is excluded from the anonymous join cards.
 - Only channels assigned to radio slots appear on the Baliz Channels page. Names from
   `[Channels_List]` or `[Web_Viewer] decode_hashtag_channels` do not become join cards unless
   they are also configured on the radio. Their existing catalog/decoding use is unchanged
@@ -456,6 +452,34 @@ next hourly tick.
   see [Channel Monitoring Settings](#channel-monitoring-settings)
 - QR codes are drawn in the browser by the vendored `qrcode-generator` library, so the page
   needs no network access and no server-side image generation
+
+#### Authentication handled by Caddy
+
+If the viewer has no internal password, its private routes rely on the reverse proxy.
+Do not exempt `/api/channels/view`, `/channels/settings*`, or other channel settings APIs
+from authentication. Only `/channels` and `/api/channels/published` should be public.
+The published feed never upgrades access based on headers or disabled internal auth.
+
+For a Caddy `@admin` path matcher that already includes `/channels/settings*` and
+`/api/channels/*`, add this condition inside that matcher (alongside `path`):
+
+```caddy
+not path /api/channels/published
+```
+
+Remove a broad `/channels*` protection if present; keep `/channels/settings*` protected.
+At site scope, before the authentication handler, add:
+
+```caddy
+@channelsProbe path /channels/settings/view
+header @channelsProbe -WWW-Authenticate
+```
+
+This exact probe remains authenticated: an anonymous request still receives 401, but
+without the header that would open a browser password dialog. The settings page keeps
+its usual challenge. Existing browser credentials are sent automatically on the probe.
+Apply and verify these proxy rules before deploying the page's automatic probe.
+Never strip the challenge from the whole site or expose the full feed publicly.
 
 ### Channel Monitoring Settings
 - Edits `[Channels] monitor_channels` in `config.ini`, the list of channels the bot answers on
@@ -525,13 +549,15 @@ The viewer also provides JSON API endpoints:
   `outgoing_flood_scope_override`, and queue a hot config reload. Returns the
   reload's `channel_operations` id so the caller can poll
   `/api/channel-operations/<id>` for what the bot actually did
-- `GET /api/channels/view` - The `/channels` page payload: radio-held channels only,
-  with their join QR (`qr.name`, `qr.secret`, `qr.uri`), monitoring/publication flags and
-  a `share_reason` when a channel carries no QR. Catalog-only, decode-only and unassigned
-  monitored names are excluded from this feed. Public, so the QRs are
-  consent-limited: hashtag channels always, custom channels only when published on the Radio
-  page, `Public` never. An authenticated operator's response adds `is_admin: true` and the
-  private keys of unpublished custom channels
+- `GET /api/channels/published` - Anonymous join-card feed. Only published radio-held
+  channels are returned; unpublished names, metadata and keys are omitted. Catalog-only
+  and decode-only entries are excluded. Always returns `is_admin: false`.
+- `GET /channels/settings/view` - Protected automatic probe used by `/channels`.
+  Authenticated operators receive all radio channels and their join keys. External auth
+  deployments must protect this path and suppress only its password challenge header.
+- `GET /api/channels/view` - Existing channel feed retained for compatibility. With internal
+  auth it respects the session; without internal auth it returns the full operator view
+  and must remain protected by the reverse proxy.
 - `GET /api/channels/settings` - Admin only. `[Channels] monitor_channels` as a
   list, the merged channel view (which entries the radio holds and in which slot),
   and `limit`, the free-slot count `[Bot] max_channels` allows

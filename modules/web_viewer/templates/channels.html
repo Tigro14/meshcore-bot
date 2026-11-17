@@ -184,14 +184,32 @@
         return card;
     }
 
+    async function loadChannelData() {
+        // The proxy keeps this probe protected but suppresses WWW-Authenticate
+        // on denied responses. Cached credentials work without asking visitors
+        // to log in; the published feed is always safe for anonymous access.
+        for (const path of ['/channels/settings/view', '/api/channels/published']) {
+            const resp = await fetch(path, {
+                credentials: 'same-origin',
+                cache: 'no-store',
+                redirect: 'error',
+                headers: {'X-Requested-With': 'XMLHttpRequest'}
+            }).catch(() => null);
+            if (!resp || !resp.ok) continue;
+            try {
+                const data = await resp.json();
+                if (Array.isArray(data.channels)) return data;
+            } catch {
+                // An unavailable admin view must not hide the public channels.
+            }
+        }
+        throw new Error('Channels unavailable');
+    }
+
     async function load() {
         let data;
         try {
-            const resp = await fetch('/api/channels/view', {
-                headers: {'X-Requested-With': 'XMLHttpRequest'}
-            });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            data = await resp.json();
+            data = await loadChannelData();
         } catch (error) {
             console.error('Error loading channels:', error);
             el('ch-loading').textContent = 'Chargement impossible.';

@@ -452,3 +452,83 @@ class TestChannelProvisioning:
         body = _post_settings(viewer, ["public"]).get_json()
         assert body["provisioned"] == []
         assert not _operations(viewer, "add")
+
+
+class TestPublishedChannelsFeed:
+    def _seed(self, viewer):
+        _seed_channels(viewer, [
+            (0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf")),
+            (1, "#hidden", "hashtag", hashtag_secret("#hidden")),
+            (2, "opendata", "custom", "ef" * 16),
+            (3, "secreto", "custom", PRIVATE_CUSTOM_KEY),
+        ])
+        _publish(viewer, "#fr-idf")
+        _publish(viewer, "opendata", "ef" * 16)
+
+    @pytest.mark.parametrize("fixture_name", ["viewer", "gated_viewer"])
+    def test_only_published_radio_channels_are_returned(self, request, fixture_name):
+        viewer = request.getfixturevalue(fixture_name)
+        self._seed(viewer)
+        response = _client(viewer).get("/api/channels/published")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["is_admin"] is False
+        assert {channel["name"] for channel in data["channels"]} == {"#fr-idf", "opendata"}
+        assert all(channel["published"] and channel["on_radio"] for channel in data["channels"])
+        assert PRIVATE_CUSTOM_KEY not in response.get_data(as_text=True)
+        assert "secreto" not in response.get_data(as_text=True)
+        assert "#hidden" not in response.get_data(as_text=True)
+        assert response.headers["Cache-Control"] == "private, no-store"
+
+    def test_client_headers_cannot_upgrade_the_public_feed(self, viewer):
+        self._seed(viewer)
+        response = _client(viewer).get("/api/channels/published", headers={
+            "Authorization": "Basic ZmFrZTpmYWtl", "X-Forwarded-User": "admin",
+            "X-Admin": "true",
+        })
+        assert response.get_json()["is_admin"] is False
+        assert PRIVATE_CUSTOM_KEY not in response.get_data(as_text=True)
+
+    def test_real_admin_still_gets_all_radio_channels_from_the_existing_feed(self, gated_viewer):
+        self._seed(gated_viewer)
+        client = _login(gated_viewer)
+        all_channels = client.get("/api/channels/view")
+        assert all_channels.get_json()["is_admin"] is True
+        assert len(all_channels.get_json()["channels"]) == 4
+        assert PRIVATE_CUSTOM_KEY in all_channels.get_data(as_text=True)
+        public = client.get("/api/channels/published")
+        assert public.get_json()["is_admin"] is False
+        assert PRIVATE_CUSTOM_KEY not in public.get_data(as_text=True)
+
+    def test_hidden_monitored_names_are_not_leaked_in_public_metadata(self, viewer):
+        self._seed(viewer)
+        viewer.config.set("Channels", "monitor_channels", "secreto,#fr-idf")
+        data = _client(viewer).get("/api/channels/published").get_json()
+        assert data["monitor_channels"] == ["#fr-idf"]
+        assert _operations(viewer) == []
+
+
+class TestAuthenticatedChannelsProbe:
+    _seed = TestPublishedChannelsFeed._seed
+    def test_probe_denies_anonymous_access_without_redirect(self, gated_viewer):
+        self._seed(gated_viewer)
+        response = _client(gated_viewer).get("/channels/settings/view")
+        assert response.status_code == 401
+        assert response.is_json
+        assert "Location" not in response.headers
+        assert "WWW-Authenticate" not in response.headers
+        assert PRIVATE_CUSTOM_KEY not in response.get_data(as_text=True)
+
+    def test_probe_accepts_existing_admin_session(self, gated_viewer):
+        self._seed(gated_viewer)
+        response = _login(gated_viewer).get("/channels/settings/view")
+        assert response.status_code == 200
+        assert response.get_json()["is_admin"] is True
+        assert len(response.get_json()["channels"]) == 4
+        assert response.headers["Cache-Control"] == "private, no-store"
+
+    def test_probe_does_not_trust_client_identity_headers(self, gated_viewer):
+        response = _client(gated_viewer).get("/channels/settings/view", headers={
+            "Authorization": "Basic ZmFrZTpmYWtl", "X-Forwarded-User": "admin",
+        })
+        assert response.status_code == 401
