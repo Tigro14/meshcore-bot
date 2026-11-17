@@ -1488,7 +1488,7 @@
         keyStoreStarted = true;
         try {
             // Fetch the channels the operator has agreed to publish.
-            const response = await fetch('/api/channels/live');
+            const response = await fetch('/api/channels');
             const data = await response.json();
 
             let radioChannels = 0;

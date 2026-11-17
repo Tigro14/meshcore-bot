@@ -1020,6 +1020,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             # /channels page feed. Names plus hashtag-derived secrets; a custom
             # channel's key only appears for channels the operator published.
             '/api/channels/view',
+            '/api/channels/published',
             '/api/banner-status',
             '/api/stats',
             '/api/dashboard/summary',
@@ -1101,7 +1102,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 return
             if request.method in ('POST', 'OPTIONS') and path in _PUBLIC_API_POST_PATHS:
                 return
-            if path.startswith(('/api/', '/radio/api/')):
+            if path.startswith(('/api/', '/radio/api/')) or path == '/channels/settings/view':
                 return make_response(jsonify({'error': 'Admin authentication required'}), 401)
             return redirect(url_for('login', next=path))
 
@@ -5292,9 +5293,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             """Whether the current request is an authenticated operator (or auth is off)."""
             return not self.web_viewer_password or bool(session.get('authenticated_admin'))
 
-        @self.app.route('/api/channels/view')
-        @self._api_errors('Error getting channels view')
-        def api_channels_view():
+        def _channels_view_payload(*, published_only=False):
             """Payload for the /channels page: names, join QR codes, monitoring state.
 
             Only channels assigned to radio slots are displayed. The internal catalog
@@ -5306,12 +5305,14 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             channel's key is only handed to an anonymous visitor when the operator
             opted that channel into web publication on the Radio page.
             """
-            is_admin = _channels_is_admin()
+            is_admin = False if published_only else _channels_is_admin()
             view = self._monitor_view()
 
             channels = []
             for channel in view['channels']:
                 if not channel.get('on_radio'):
+                    continue
+                if published_only and not channel.get('live_messages_visible'):
                     continue
                 name = normalize_name(channel.get('name'))
                 if not name:
@@ -5343,11 +5344,36 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     ),
                 })
 
-            return jsonify({
+            response = jsonify({
                 'channels': channels,
-                'monitor_channels': view['monitor_channels'],
+                'monitor_channels': (
+                    [channel['name'] for channel in channels if channel['monitored']]
+                    if published_only else view['monitor_channels']
+                ),
                 'is_admin': is_admin,
             })
+            response.headers['Cache-Control'] = 'private, no-store'
+            return response
+
+        @self.app.route('/api/channels/view')
+        @self._api_errors('Error getting channels view')
+        def api_channels_view():
+            return _channels_view_payload()
+
+        @self.app.route('/channels/settings/view')
+        @self._api_errors('Error getting authenticated channels view')
+        def channels_authenticated_view():
+            # With external authentication, protect this path like /channels/settings.
+            # The proxy must suppress its Basic Auth challenge on this exact path
+            # so a background request cannot open a browser password dialog.
+            return _channels_view_payload()
+
+        @self.app.route('/api/channels/published')
+        @self._api_errors('Error getting published channels')
+        def api_channels_published():
+            # This route is safe to exempt from proxy authentication. Never infer
+            # administrator access here from disabled app auth or client headers.
+            return _channels_view_payload(published_only=True)
 
         @self.app.route('/api/channels/settings')
         @self._api_errors('Error getting channel monitor settings')
