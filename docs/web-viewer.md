@@ -447,12 +447,11 @@ next hourly tick.
   - An authenticated operator also sees the private keys of unpublished custom channels
   - The `Public` channel is never encoded: its key is fixed by MeshCore rather than
     hashtag-derived, and it is not this bot's channel to distribute
-- A monitored channel the radio does not subscribe to yet is still listed, with its hashtag QR
-  available, since the QR is derived from the name alone
-- Channels the bot only *lists* are listed here too, and badged `décodé`: the names of the
-  `[Channels_List]` section it publishes through the `channels` command, and
-  `[Web_Viewer] decode_hashtag_channels`. The radio holds no slot for them, so the page says so
-  rather than letting a card with a QR read as a monitored channel
+- Only channels assigned to radio slots appear on the Baliz Channels page. Names from
+  `[Channels_List]` or `[Web_Viewer] decode_hashtag_channels` do not become join cards unless
+  they are also configured on the radio. Their existing catalog/decoding use is unchanged
+- Monitored names with no radio slot remain available in the monitoring settings editor,
+  but are not offered as subscribed channels on the join page
 - Editing the list happens on `/channels/settings` (in the Settings dropdown, admin only);
   see [Channel Monitoring Settings](#channel-monitoring-settings)
 - QR codes are drawn in the browser by the vendored `qrcode-generator` library, so the page
@@ -526,11 +525,10 @@ The viewer also provides JSON API endpoints:
   `outgoing_flood_scope_override`, and queue a hot config reload. Returns the
   reload's `channel_operations` id so the caller can poll
   `/api/channel-operations/<id>` for what the bot actually did
-- `GET /api/channels/view` - The `/channels` page payload: every monitored, radio-held and
-  bot-listed channel with its join QR (`qr.name`, `qr.secret`, `qr.uri`),
-  `monitored`/`on_radio`/`decoded`/`published` flags, and a `share_reason` when a channel
-  carries no QR. `decoded` marks a name that comes from `[Channels_List]` or
-  `[Web_Viewer] decode_hashtag_channels` rather than from a radio slot. Public, so the QRs are
+- `GET /api/channels/view` - The `/channels` page payload: radio-held channels only,
+  with their join QR (`qr.name`, `qr.secret`, `qr.uri`), monitoring/publication flags and
+  a `share_reason` when a channel carries no QR. Catalog-only, decode-only and unassigned
+  monitored names are excluded from this feed. Public, so the QRs are
   consent-limited: hashtag channels always, custom channels only when published on the Radio
   page, `Public` never. An authenticated operator's response adds `is_admin: true` and the
   private keys of unpublished custom channels

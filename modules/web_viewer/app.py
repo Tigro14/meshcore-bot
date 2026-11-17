@@ -5297,9 +5297,9 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         def api_channels_view():
             """Payload for the /channels page: names, join QR codes, monitoring state.
 
-            The merged list is monitored names first, then the radio's own slots, then the
-            names the bot only lists (`[Channels_List]`, ``decode_hashtag_channels``); the
-            ``monitored``/``on_radio``/``decoded`` flags tell the page which group a card is in.
+            Only channels assigned to radio slots are displayed. The internal catalog
+            and extra decode-only names stay available to their existing consumers,
+            but do not become join cards on this page.
 
             Public surface: a hashtag channel's QR secret is derivable from its
             name, so publishing it leaks nothing the name list does not.  A custom
@@ -5311,6 +5311,8 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
 
             channels = []
             for channel in view['channels']:
+                if not channel.get('on_radio'):
+                    continue
                 name = normalize_name(channel.get('name'))
                 if not name:
                     continue

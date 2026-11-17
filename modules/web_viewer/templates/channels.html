@@ -60,17 +60,13 @@
     <div class="col-12">
         <h1 class="mb-1"><i class="fas fa-hashtag"></i> Canaux</h1>
         <p class="text-muted mb-3">
-            Les canaux connus de ce bot, avec le code d'ajout MeshCore de chacun. Scannez-le
+            Les canaux configurés sur la radio de Baliz, avec leur code d'ajout MeshCore. Scannez-le
             dans l'application MeshCore (Canaux, puis «&nbsp;+&nbsp;» →
             «&nbsp;Scanner un code QR&nbsp;»), ou copiez le lien vers un téléphone&nbsp;: un
             navigateur d'ordinateur n'ouvre pas les liens <code>meshcore://</code>.
         </p>
         <p class="text-muted small mb-4">
-            Un badge dit ce que le bot fait de chaque canal&nbsp;: «&nbsp;surveillé&nbsp;» — il y
-            répond&nbsp;; «&nbsp;sur la radio&nbsp;» — le nœud y est abonné&nbsp;;
-            «&nbsp;décodé&nbsp;» — le bot en connaît la clé (liste de canaux de la commande
-            <code>channels</code> et canaux de décodage de la configuration), mais le nœud n'y a
-            pas de slot.
+            Le badge «&nbsp;surveillé&nbsp;» indique les canaux sur lesquels Baliz répond.
             Seuls les canaux dièse et les canaux personnalisés que l'opérateur a publiés sur le
             web ont un code visible ici. Le canal Public n'est pas distribué.
         </p>
@@ -124,12 +120,6 @@
             radio.textContent = 'sur la radio';
             radio.title = 'Le nœud tient un slot pour ce canal.';
             badges.appendChild(radio);
-        } else if (channel.decoded) {
-            const decoded = document.createElement('span');
-            decoded.className = 'badge bg-warning text-dark';
-            decoded.textContent = 'décodé';
-            decoded.title = 'Le bot connaît la clé de ce canal, mais le nœud n\'y a pas de slot.';
-            badges.appendChild(decoded);
         }
         if (channel.published) {
             const published = document.createElement('span');
