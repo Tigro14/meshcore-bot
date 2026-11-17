@@ -165,6 +165,10 @@
                     <div class="oc-figure" id="oc-packets">-</div>
                 </div>
                 <div class="col-md-2">
+                    <div class="oc-figure-label">Copies</div>
+                    <div class="oc-figure" id="oc-copy" title="Share of the identity-covered rx airtime spent on copies after the first one this radio heard. Unhashable packets sit outside this measure, and a dash means the split was not recorded for this period.">-</div>
+                </div>
+                <div class="col-md-2">
                     <div class="oc-figure-label">p50 rx %</div>
                     <div class="oc-figure" id="oc-p50">-</div>
                 </div>
@@ -175,6 +179,7 @@
             </div>
             <div id="ocChartError" class="oc-empty" style="display:none"></div>
             <canvas id="oc-chart" height="140"></canvas>
+            <p class="small text-muted mt-2 mb-0" id="ocTrend" style="display:none"></p>
             <p class="small text-muted mt-3 mb-0">
                 A gap is not a zero: a period with no packet is absent from the result, so the
                 line breaks there rather than dropping to 0. A bucket that was observed and held
@@ -183,7 +188,13 @@
                 and the chart speak percent: the rx/tx figures are percent of the time buckets
                 were actually written (unwritten periods stay unknown, not silent), p50/p95 are
                 the nearest-rank occupancy of a single bucket, and each column of the chart is
-                the occupancy of its own span.
+                the occupancy of its own span. The Copies figure is the share of the
+                identity-covered airtime the flood spent on repetitions after the first copy
+                this radio heard — a dash means the period predates that split, not a
+                flood-free channel. The line under the chart compares this period with the
+                equal one before it, and states a change only when both periods hold recorded
+                buckets; hover on a column gives its own copy share and the change against the
+                column one period back, when the two line up.
             </p>
         </div>
     </div>
@@ -434,12 +445,24 @@
                 const floorText = (floor === undefined || floor === null) ? ''
                     : '<span class="small" title="Floor of the whole shared channel: every copy a heard flood tree proves, including the copies that ran out of earshot. Above 100% when repetitions run in parallel; never a ceiling.">'
                         + '≥ ' + floor.toFixed(1) + '% channel</span>';
+                // The copy share is measured over identity-covered airtime only,
+                // and the recorder's buffer bounds it: when the buffer no longer
+                // covers the whole window, the repetitions it saw are a floor,
+                // so the chip says the figure is bounded instead of census.
+                const copy = data[name + '_copy_percent'];
+                let copyText = (copy === undefined || copy === null) ? ''
+                    : '<span class="small" title="Share of the identity-covered airtime spent on copies after the first one this radio heard. Unhashable packets sit outside this measure.">'
+                        + copy.toFixed(1) + '% copies</span>';
+                if (data[name + '_truncated']) {
+                    copyText += ' <span class="small oc-stale" title="The recorder buffer no longer covers this whole window: the copy and repetition figures are bounds, not a census.">(bounded)</span>';
+                }
                 return '<div class="oc-window-row">'
                     + '<div class="oc-window-name">' + escapeHtml(name) + ' (' + seconds + ' s)</div>'
                     + '<div class="oc-bar' + (rx > 100 ? ' oc-bar-over' : '') + '"><span class="oc-seg-rx" style="width:' + Math.min(rx, 100) + '%"></span></div>'
                     + '<span class="small">' + rx.toFixed(1) + '% rx</span>'
                     + '<span class="small">' + tx.toFixed(1) + '% tx</span>'
                     + floorText
+                    + copyText
                     + '</div>';
             }).join('');
         }
@@ -454,6 +477,9 @@
             el('oc-chart').style.display = hasData ? 'block' : 'none';
 
             el('oc-packets').textContent = hasData ? data.packets : '-';
+            el('oc-copy').textContent = (data.copy_percent === null || data.copy_percent === undefined)
+                ? '-'
+                : data.copy_percent.toFixed(1) + ' %';
 
             /* Everything on this card speaks percent of time, because seconds read as
                an inventory nobody compares: what a reader wants to know is how much of
@@ -474,33 +500,105 @@
             el('oc-p50').textContent = shareOfBucket(data.p50_rx_ms);
             el('oc-p95').textContent = shareOfBucket(data.p95_rx_ms);
 
+            /* The comparison with the equal period before is stated only when both
+               periods hold recorded buckets: an unrecorded past is absent evidence,
+               and calling it a quiet baseline turns a fresh start into a flood. */
+            const trend = el('ocTrend');
+            const previous = data.previous || null;
+            const prevBuckets = previous && previous.buckets ? previous.buckets : [];
+            const pp = (v) => (v >= 0 ? '+' : '') + v.toFixed(1);
+            if (hasData && previous && prevBuckets.length) {
+                const prevObserved = prevBuckets.length * (previous.sample_seconds || sampleSeconds);
+                const rate = (millis, seconds) => seconds ? millis / (seconds * 1000) * 100 : 0;
+                const nowRate = rate(data.total_rx_ms, observedSeconds);
+                const beforeRate = rate(previous.total_rx_ms, prevObserved);
+                let sentence = 'Compared with the equal period before: rx went from '
+                    + beforeRate.toFixed(1) + '% to ' + nowRate.toFixed(1)
+                    + '% of observed time (' + pp(nowRate - beforeRate) + ' points).';
+                if (data.copy_percent != null && previous.copy_percent != null) {
+                    sentence += ' Copies went from ' + previous.copy_percent.toFixed(1) + '% to '
+                        + data.copy_percent.toFixed(1) + '% of identified airtime ('
+                        + pp(data.copy_percent - previous.copy_percent) + ' points).';
+                }
+                trend.textContent = sentence;
+                trend.style.display = 'block';
+            } else if (hasData) {
+                trend.textContent = 'The equal period before holds no recorded buckets: no change can be stated against an unrecorded past.';
+                trend.style.display = 'block';
+            } else {
+                trend.textContent = '';
+                trend.style.display = 'none';
+            }
+
             if (!hasData) return;
 
             /* Aggregate to a readable number of columns. Sums can be re-aggregated
                the way means cannot, so a coarser step is the same measurement rather
                than a rounded one. A column with no written bucket stays a gap: "nothing
-               seen" and "observed and empty" are two different facts. */
+               seen" and "observed and empty" are two different facts. The copy split is
+               all-or-nothing per column for the same reason it is per period: a column
+               holding one pre-split bucket reports unknown rather than a ratio over
+               part of its own time. */
             const maxColumns = 120;
-            const duration = Math.max(data.end_time - data.start_time, sampleSeconds);
-            const step = Math.max(sampleSeconds, Math.ceil(duration / maxColumns));
-            const groups = new Map();
-            buckets.forEach((bucket) => {
-                const index = Math.floor((bucket.bucket_ts - data.start_time) / step);
-                const group = groups.get(index) || { rx: 0, tx: 0 };
-                group.rx += bucket.rx_ms;
-                group.tx += bucket.tx_ms;
-                groups.set(index, group);
-            });
+            const span = Math.max(data.end_time - data.start_time, sampleSeconds);
+            const step = Math.max(sampleSeconds, Math.ceil(span / maxColumns));
+            const groupBuckets = (rows, origin) => {
+                const groups = new Map();
+                rows.forEach((bucket) => {
+                    const index = Math.floor((bucket.bucket_ts - origin) / step);
+                    const group = groups.get(index) || { rx: 0, tx: 0, hashed: 0, copy: 0, hashKnown: true };
+                    group.rx += bucket.rx_ms;
+                    group.tx += bucket.tx_ms;
+                    if (bucket.rx_hashed_ms == null) {
+                        group.hashKnown = false;
+                    } else {
+                        group.hashed += bucket.rx_hashed_ms;
+                        group.copy += bucket.rx_copy_ms || 0;
+                    }
+                    groups.set(index, group);
+                });
+                return groups;
+            };
+            const groups = groupBuckets(buckets, data.start_time);
+            /* Indexing the previous period by its own origin (start - span) lines
+               each of its columns up with the current column exactly one span later:
+               both grids share the step and sit span apart, so column i of one faces
+               column i of the other whenever both were written. */
+            const prevGroups = groupBuckets(prevBuckets, data.start_time - span);
 
             const rxPoints = [];
             const txPoints = [];
-            const columnCount = Math.floor(duration / step) + 1;
+            const columnCount = Math.floor(span / step) + 1;
+            // Rebuilt on every render and read back by the tooltip callback through
+            // the controller, so a refresh updates what hovering says.
+            this.columnInfo = [];
             for (let index = 0; index < columnCount; index += 1) {
                 const group = groups.get(index);
+                const prev = prevGroups.get(index);
                 const x = data.start_time + index * step;
                 const percentOfColumn = (millis) => millis / (step * 1000) * 100;
                 rxPoints.push({ x: x, y: group ? percentOfColumn(group.rx) : null });
                 txPoints.push({ x: x, y: group ? percentOfColumn(group.tx) : null });
+                const lines = [];
+                if (group && !group.hashKnown) {
+                    lines.push('copies: the split was not recorded for this column');
+                } else if (group && group.hashed > 0) {
+                    lines.push('copies: ' + (group.copy / group.hashed * 100).toFixed(1) + '% of identified airtime');
+                } else if (group) {
+                    lines.push('copies: no identified traffic in this column');
+                }
+                if (group && prev) {
+                    lines.push('rx: ' + percentOfColumn(group.rx).toFixed(1) + '% vs '
+                        + percentOfColumn(prev.rx).toFixed(1) + '% one period back ('
+                        + pp(percentOfColumn(group.rx - prev.rx)) + ' points)');
+                    if (group.hashKnown && prev.hashKnown && group.hashed > 0 && prev.hashed > 0) {
+                        const nowShare = group.copy / group.hashed * 100;
+                        const beforeShare = prev.copy / prev.hashed * 100;
+                        lines.push('copies: ' + nowShare.toFixed(1) + '% vs ' + beforeShare.toFixed(1)
+                            + '% (' + pp(nowShare - beforeShare) + ' points)');
+                    }
+                }
+                this.columnInfo[index] = { lines: lines };
             }
 
             const style = getComputedStyle(document.documentElement);
@@ -514,11 +612,22 @@
                 this.chart.update();
                 return;
             }
+            const self = this;
             this.chart = new Chart(el('oc-chart'), {
                 type: 'line',
                 data: { datasets: datasets },
                 options: {
                     responsive: true,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                afterBody: (items) => {
+                                    const info = self.columnInfo && self.columnInfo[items[0].dataIndex];
+                                    return info ? info.lines : [];
+                                },
+                            },
+                        },
+                    },
                     scales: {
                         x: {
                             type: 'linear',

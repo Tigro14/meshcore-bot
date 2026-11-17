@@ -2937,8 +2937,15 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             days = max(1, min(days, 90))
 
             end_ts = time.time()
+            start_ts = end_ts - days * 86400
             with self._with_db_connection() as conn:
-                payload = self.occupancy.history(conn, end_ts - days * 86400, end_ts)
+                payload = self.occupancy.history(conn, start_ts, end_ts)
+                # The equal-length period before this one, kept as its own object
+                # so the reader can tell "nothing happened before" (the range was
+                # recorded and held nothing) from "nothing was recorded before"
+                # (the range predates retention) — the two are different facts and
+                # only the first one makes a trend comparable.
+                payload['previous'] = self.occupancy.history(conn, start_ts - days * 86400, start_ts)
 
             if request.args.get('format') == 'text':
                 summary = {
@@ -2951,6 +2958,9 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     'packets': payload['packets'],
                     'p50_rx_ms': payload['p50_rx_ms'],
                     'p95_rx_ms': payload['p95_rx_ms'],
+                    'copy_percent': payload['copy_percent'],
+                    'previous_total_rx_ms': payload['previous']['total_rx_ms'],
+                    'previous_buckets': len(payload['previous']['buckets']),
                 }
                 response = self.app.response_class(render_key_value(summary), mimetype='text/plain')
             else:

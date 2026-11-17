@@ -309,6 +309,10 @@ SECTIONS: dict[str, SectionMeta] = {
         "fast_window_seconds": KeyMeta(type="float", default="10"),
         "window_seconds": KeyMeta(type="float", default="60"),
         "slow_window_seconds": KeyMeta(type="float", default="900"),
+        # How long a packet identity stays "already heard": copies of it inside
+        # the horizon are charged to the flood's copy cost, a re-flood after the
+        # horizon is a new first occurrence.
+        "copy_horizon_seconds": KeyMeta(type="float", default="3600"),
         # Fallback modulation, used only when the device does not report its own.
         "spreading_factor": KeyMeta(type="int", default="9"),
         "bandwidth_khz": KeyMeta(type="int", default="125"),

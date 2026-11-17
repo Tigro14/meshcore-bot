@@ -326,6 +326,31 @@ semantic versioning.
   writer, gateway, antenna — and must never be summed; the relay table is deliberately smaller
   than the other two because direct copies are absent by construction. It ages on the same
   rule (`occupancy_relays_retention_days`, 90). `docs/channel-occupancy.md`.
+- The network view now **prices the flood instead of only counting it**. The repetition
+  factor answers how many copies were heard; the **copy cost** answers what they cost:
+  the airtime of every heard copy *after the first one this station heard* for that
+  packet identity, each copy at its own modulation. The baseline is this station's
+  hearing with a horizon — an identity stays "already heard" for `copy_horizon_seconds`
+  (`Channel_Occupancy`, 3600), so a beacon heard once a minute never pays a copy while a
+  packet hammered ten times in a minute pays nine, and the difference from the network's
+  first emission is a bounded, per-identity offset rather than an invented zero. The
+  classification happens at record time while the writer's bounded identity memory is
+  warm, and rides to the buckets as two sums (`occupancy_samples.rx_hashed_ms`,
+  `rx_copy_ms`, migration 40) — unlike the cardinalities, sums re-aggregate, so history
+  can state the share for a whole period. It is measured over identity-covered airtime
+  only: an unhashable packet cannot be matched to a copy of itself, so `copy_percent`
+  divides by `rx_hashed_ms` and is unknown, not 0%, when no hashed packet was heard; a
+  period spanning pre-migration buckets (NULL, never zero) also reports unknown rather
+  than a ratio over part of itself. Each window says what the ring buffer can prove:
+  `truncated` when it no longer covers the whole window — repeats and copy share are
+  then bounds, marked `≥` in the mesh reply and `(bounded)` on the page — and a previous
+  equal-length window plus a trend, `insufficient_history` when the buffer cannot cover
+  two windows: an empty previous window is absent evidence, not a quiet baseline, and
+  the line under the history chart states a change only when both periods hold recorded
+  buckets. `GET /api/telemetry/occupancy/history` carries the previous period as its own
+  `previous` payload object. Adapted from Camousse88's Baliz fork PR #32, keeping the
+  local model: three ledgers unsummed, NULL never rendered as zero.
+  `docs/channel-occupancy.md`.
 
 ### Changed
 
