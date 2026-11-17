@@ -353,7 +353,7 @@ test('the existing detail table switches roles without mixing author and receive
     const roles={entry_relays:[{name:'First relay',received_packets:4,rx_airtime_ms:2500,
         categories:{messages:2,adverts:2,other:0}}],emitters:[{name:'Last relay',received_packets:4,rx_airtime_ms:2500,
         categories:{messages:2,adverts:2,other:0}}],unknown_emitter:{name:'Unknown emitter',received_packets:1,
-        rx_airtime_ms:200,categories:{messages:0,adverts:0,other:1}}};
+        rx_airtime_ms:200,prefix:null,identification:'unknown',categories:{messages:0,adverts:0,other:1}}};
     instance.render({...data,receptions:{roles}},hourly);
     elements.get('airtime-role').value='entry_relays';instance.renderDetails();
     assert.match(elements.get('airtime-source-details').innerHTML,/First relay/);
@@ -363,6 +363,7 @@ test('the existing detail table switches roles without mixing author and receive
     elements.get('airtime-role').value='emitters';instance.renderDetails();
     assert.match(elements.get('airtime-source-details').innerHTML,/Last relay/);
     assert.match(elements.get('airtime-source-details').innerHTML,/Unknown emitter/);
+    assert.doesNotMatch(elements.get('airtime-source-details').innerHTML,/Préfixe inconnu/);
     assert.doesNotMatch(elements.get('airtime-source-details').innerHTML,/First relay/);
 });
 

@@ -442,7 +442,7 @@
             el('airtime-source-details').innerHTML = sources.filter(matches).slice(0, 200).map(source => {
                 const note = isAuthor && known(source.cost_reconstruction_coverage_percent)
                     ? 'Coût connu pour ' + number(source.cost_reconstructed_packets) + ' / ' + number(source.distinct_packets) + ' paquets'
-                    : ({ambiguous: 'Préfixe ambigu', unknown: 'Préfixe inconnu', unconfirmed_relay_role: 'Rôle non confirmé'}[source.identification] || '');
+                    : source.prefix ? ({ambiguous: 'Préfixe ambigu', unknown: 'Préfixe inconnu', unconfirmed_relay_role: 'Rôle non confirmé'}[source.identification] || '') : '';
                 return '<tr><td>' + escapeHtml(source.name) + (note ? '<small class="d-block text-muted">' + escapeHtml(note) + '</small>' : '')
                     + '</td><td>' + radioTime(isAuthor ? source.reconstructed_radio_airtime_ms : source.rx_airtime_ms)
                     + '</td>' + ['messages', 'adverts', 'other'].map(kind => '<td>'
