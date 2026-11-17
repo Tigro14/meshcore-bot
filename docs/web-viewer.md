@@ -468,14 +468,19 @@ not path /api/channels/published
 ```
 
 Remove a broad `/channels*` protection if present; keep `/channels/settings*` protected.
-At site scope, before the authentication handler, add:
+At site scope, add this error handler (merge into an existing handler if present):
 
 ```caddy
-@channelsProbe path /channels/settings/view
-header @channelsProbe -WWW-Authenticate
+handle_errors {
+    @silentChannelsProbe path /channels/settings/view
+    header @silentChannelsProbe -WWW-Authenticate
+    respond "{err.status_code} {err.status_text}" {err.status_code}
+}
 ```
 
-This exact probe remains authenticated: an anonymous request still receives 401, but
+Basic Auth failures enter Caddy's error routes, so a normal-route `header` directive
+alone does not suppress the challenge. This exact probe remains authenticated:
+an anonymous request still receives 401, but
 without the header that would open a browser password dialog. The settings page keeps
 its usual challenge. Existing browser credentials are sent automatically on the probe.
 Apply and verify these proxy rules before deploying the page's automatic probe.
