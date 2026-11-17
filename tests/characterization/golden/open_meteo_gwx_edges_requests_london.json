@@ -2,12 +2,8 @@
  "model-omitted-default-connection": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
    ],
    [
     "error",
@@ -26,22 +22,18 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-default-http": {
   "logs": [
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ],
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -56,7 +48,7 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-default-json": {
@@ -96,17 +88,13 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5<commands.gwx.gust[('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
+  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
  },
  "model-omitted-default-timeout": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ],
    [
     "error",
@@ -125,18 +113,14 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-multiday-connection": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
    ],
    [
     "error",
@@ -155,22 +139,18 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-multiday-http": {
   "logs": [
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ],
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -185,7 +165,7 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-multiday-json": {
@@ -230,12 +210,8 @@
  "model-omitted-multiday-timeout": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ],
    [
     "error",
@@ -254,18 +230,14 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-tomorrow-connection": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
    ],
    [
     "error",
@@ -284,22 +256,18 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-tomorrow-http": {
   "logs": [
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ],
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -314,7 +282,7 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-omitted-tomorrow-json": {
@@ -354,17 +322,13 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9<commands.gwx.gust[('value', 19)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 19)]>"
  },
  "model-omitted-tomorrow-timeout": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ],
    [
     "error",
@@ -383,18 +347,14 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-default-connection": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
    ],
    [
     "error",
@@ -414,22 +374,18 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-default-http": {
   "logs": [
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ],
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -445,7 +401,7 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-default-json": {
@@ -487,17 +443,13 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5<commands.gwx.gust[('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
+  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
  },
  "model-override-default-timeout": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ],
    [
     "error",
@@ -517,18 +469,14 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-multiday-connection": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
    ],
    [
     "error",
@@ -548,22 +496,18 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-multiday-http": {
   "logs": [
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ],
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -579,7 +523,7 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-multiday-json": {
@@ -626,12 +570,8 @@
  "model-override-multiday-timeout": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ],
    [
     "error",
@@ -651,18 +591,14 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-tomorrow-connection": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
    ],
    [
     "error",
@@ -682,22 +618,18 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-tomorrow-http": {
   "logs": [
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ],
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -713,7 +645,7 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "model-override-tomorrow-json": {
@@ -755,17 +687,13 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9<commands.gwx.gust[('value', 19)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 19)]>"
  },
  "model-override-tomorrow-timeout": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ],
    [
     "error",
@@ -785,18 +713,14 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-default-connection": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
    ],
    [
     "error",
@@ -816,22 +740,18 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-default-http": {
   "logs": [
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ],
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -847,7 +767,7 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-default-json": {
@@ -889,17 +809,13 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5<commands.gwx.gust[('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
+  "text": "<commands.gwx.periods.overnight>: ⛅<commands.gwx.weather_descriptions.2> 14°C ↙️<common.wind_directions.SW>5 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 11)]> <commands.gwx.humidity[('value', 78)]> | <common.temp_high_label>:20°C <common.temp_low_label>:13°C"
  },
  "no-override-default-timeout": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ],
    [
     "error",
@@ -919,18 +835,14 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-multiday-connection": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
    ],
    [
     "error",
@@ -950,22 +862,18 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-multiday-http": {
   "logs": [
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ],
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -981,7 +889,7 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-multiday-json": {
@@ -1028,12 +936,8 @@
  "no-override-multiday-timeout": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ],
    [
     "error",
@@ -1053,18 +957,14 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-tomorrow-connection": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge connection lost"
    ],
    [
     "error",
@@ -1084,22 +984,18 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-tomorrow-http": {
   "logs": [
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ],
    [
     "warning",
-    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Error fetching weather from Open-Meteo: 503"
+    "Error fetching weather from Open-Meteo: HTTP 503 - "
    ]
   ],
   "params": {
@@ -1115,7 +1011,7 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  },
  "no-override-tomorrow-json": {
@@ -1157,17 +1053,13 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9<commands.gwx.gust[('value', 19)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 9 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 19)]>"
  },
  "no-override-tomorrow-timeout": {
   "logs": [
    [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
-   ],
-   [
-    "warning",
-    "Temporary Open-Meteo connection failure; retrying (%s/%s)"
+    "error",
+    "Error fetching Open-Meteo weather: edge timeout"
    ],
    [
     "error",
@@ -1187,7 +1079,7 @@
    "timezone": "auto",
    "wind_speed_unit": "kmh"
   },
-  "requests": 3,
+  "requests": 2,
   "text": "<commands.gwx.error_fetching>"
  }
 }

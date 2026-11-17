@@ -16,6 +16,11 @@ export default [
         L: "readonly",
         escapeHtml: "writable",
         socket: "writable",
+        // Vendored UMD library (static/vendor/qrcode-generator/qrcode.js), loaded
+        // with a plain <script src> by the channels page.
+        qrcode: "readonly",
+        // Declared by static/js/channel_operations.js; pages that load it call it.
+        MeshCoreChannelOps: "readonly",
         // Declared in base.html; page scripts that extend it read it.
         IS_ADMIN: "readonly",
       },

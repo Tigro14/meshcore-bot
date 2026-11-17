@@ -15,7 +15,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 🌦️80% 4.20mm"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> 🌦️80% 4.20mm"
  },
  "gust-equal-wind-plus3": {
   "logs": [],
@@ -33,7 +33,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 🌦️80% 4.20mm"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> 🌦️80% 4.20mm"
  },
  "null-high": {
   "logs": [],
@@ -87,7 +87,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10<commands.gwx.gust[('value', 20)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 20)]>"
  },
  "precipitation_probability_max-empty": {
   "logs": [],
@@ -105,7 +105,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10<commands.gwx.gust[('value', 20)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 20)]>"
  },
  "precipitation_probability_max-missing": {
   "logs": [],
@@ -123,7 +123,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10<commands.gwx.gust[('value', 20)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 20)]>"
  },
  "precipitation_probability_max-one": {
   "logs": [],
@@ -141,7 +141,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10<commands.gwx.gust[('value', 20)]>"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 20)]>"
  },
  "precipitation_sum-empty": {
   "logs": [],
@@ -159,7 +159,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10<commands.gwx.gust[('value', 20)]> 🌦️80%"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 20)]> 🌦️80%"
  },
  "precipitation_sum-missing": {
   "logs": [],
@@ -177,7 +177,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10<commands.gwx.gust[('value', 20)]> 🌦️80%"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 20)]> 🌦️80%"
  },
  "precipitation_sum-one": {
   "logs": [],
@@ -195,7 +195,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10<commands.gwx.gust[('value', 20)]> 🌦️80%"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> <commands.gwx.gust[('unit', '<services.weather_service.wind_speed_units.kmh>'), ('value', 20)]> 🌦️80%"
  },
  "wind-below3": {
   "logs": [],
@@ -231,7 +231,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 🌦️80% 4.20mm"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> 🌦️80% 4.20mm"
  },
  "wind_gusts_10m_max-missing": {
   "logs": [],
@@ -249,7 +249,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 🌦️80% 4.20mm"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> 🌦️80% 4.20mm"
  },
  "wind_gusts_10m_max-one": {
   "logs": [],
@@ -267,7 +267,7 @@
    "wind_speed_unit": "kmh"
   },
   "requests": 1,
-  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 🌦️80% 4.20mm"
+  "text": "<commands.gwx.periods.tomorrow>: ☁️<commands.gwx.weather_descriptions.3> <common.temp_high_label>:21°C <common.temp_low_label>:14°C 10 <services.weather_service.wind_speed_units.kmh> 🌦️80% 4.20mm"
  },
  "wind_speed_10m_max-empty": {
   "logs": [],

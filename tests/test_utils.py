@@ -25,6 +25,7 @@ from modules.utils import (
     is_valid_timezone,
     message_hop_count,
     node_ids_from_path_string,
+    normalize_country_name,
     parse_location_string,
     parse_path_string,
     parse_trace_payload_route_hashes,
@@ -132,6 +133,25 @@ class TestParseLocationString:
         city, second, kind = parse_location_string("Stockholm, Sweden")
         assert city == "Stockholm"
         assert second is not None
+
+    def test_iso2_country_is_not_a_state(self):
+        # "FR" must never read as a state: it would send "Paris" through the
+        # US major-city list (Paris, TX) for a [Weather] default_country = FR.
+        city, second, kind = parse_location_string("Paris, FR")
+        assert city == "Paris"
+        assert kind == "country"
+        assert second == "France"
+
+    def test_iso2_country_without_pycountry(self):
+        # Production may run the base wheel (no [geo] extra); the alpha-2
+        # fallback table keeps "City, FR" a country there too.
+        with patch("modules.utils.PYCOUNTRY_AVAILABLE", False):
+            city, second, kind = parse_location_string("Paris, FR")
+            assert city == "Paris"
+            assert kind == "country"
+            assert second == "France"
+            assert normalize_country_name("FR") == ("FR", "France")
+            assert normalize_country_name("QQ") == (None, None)
 
 
 class TestCalculateDistance:

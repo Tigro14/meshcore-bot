@@ -41,7 +41,16 @@ from ..nws_alerts import SERVICE_SPECIAL_RULES, entry_nws_headline, entry_summar
 from ..nws_coverage import NWSNoCoverageCache
 from ..url_shortener import shorten_url_sync
 from ..utils import format_temperature_high_low, get_config_timezone
-from ..weather_common import load_open_meteo_model, load_open_meteo_units
+from ..weather_common import (
+    OPEN_METEO_CACHE_FRESH_HOURS,
+    OPEN_METEO_CACHE_MAX_AGE_HOURS,
+    load_open_meteo_model,
+    load_open_meteo_units,
+    open_meteo_cache_is_usable,
+    read_open_meteo_cache,
+    select_open_meteo_model,
+    store_open_meteo_payload,
+)
 from .base_service import BaseServicePlugin
 
 # Try to import MQTT client (use paho-mqtt like packet capture service)
@@ -739,28 +748,58 @@ class WeatherService(BaseServicePlugin):
                 'timezone': 'auto',
                 'forecast_days': 2  # Today and tomorrow
             }
-            if self.weather_model:
-                params['models'] = self.weather_model
+            # Metropolitan-France positions get the Météo-France AROME model for
+            # this two-day forecast unless the config pins another one.
+            model = select_open_meteo_model(
+                self.weather_model,
+                latitude=self.my_position_lat,
+                longitude=self.my_position_lon,
+                forecast_days=params['forecast_days'],
+            )
+            if model:
+                params['models'] = model
 
-            try:
-                response, data = await asyncio.to_thread(
-                    self._get_api_json,
-                    api_url,
-                    params=params,
-                    timeout=10,
-                )
-                if not response.ok:
-                    self.logger.warning(f"Error fetching weather from Open-Meteo: HTTP {response.status_code}")
-                    return ForecastFetchResult(
-                        self._translate('services.weather_service.error_fetching'),
-                        retryable=response.status_code in TRANSIENT_FORECAST_HTTP_STATUSES,
+            # A response cached within the fresh window answers without touching the
+            # API; when the API fails, a same-day cached response is served instead
+            # of an error (and instead of scheduling a retry).
+            db_manager = getattr(self.bot, 'db_manager', None)
+            cached_data, cached_age = read_open_meteo_cache(self.logger, db_manager, params)
+            data = None
+            if cached_data is not None and open_meteo_cache_is_usable(cached_data, cached_age, OPEN_METEO_CACHE_FRESH_HOURS):
+                self.logger.debug(f"Daily forecast served from cache ({cached_age:.1f} h old)")
+                data = cached_data
+
+            if data is None:
+                retryable = False
+                try:
+                    response, fetched = await asyncio.to_thread(
+                        self._get_api_json,
+                        api_url,
+                        params=params,
+                        timeout=10,
                     )
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                self.logger.warning(f"Timeout/connection error fetching weather: {e}")
-                return ForecastFetchResult(
-                    self._translate('services.weather_service.error_fetching'),
-                    retryable=True,
-                )
+                    if response.ok:
+                        data = fetched
+                        store_open_meteo_payload(self.logger, db_manager, params, data)
+                    else:
+                        self.logger.warning(
+                            "Error fetching weather from Open-Meteo: HTTP "
+                            f"{response.status_code} - "
+                            f"{(response.text if isinstance(response.text, str) else '')[:180]}"
+                        )
+                        retryable = response.status_code in TRANSIENT_FORECAST_HTTP_STATUSES
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    self.logger.warning(f"Timeout/connection error fetching weather: {e}")
+                    retryable = True
+                if data is None:
+                    if cached_data is not None and open_meteo_cache_is_usable(cached_data, cached_age, OPEN_METEO_CACHE_MAX_AGE_HOURS):
+                        self.logger.warning(f"Daily forecast served from cache ({cached_age:.1f} h old) after the API failed")
+                        data = cached_data
+                    else:
+                        return ForecastFetchResult(
+                            self._translate('services.weather_service.error_fetching'),
+                            retryable=retryable,
+                        )
 
             # Extract current conditions
             current = data.get('current', {})
@@ -793,7 +832,8 @@ class WeatherService(BaseServicePlugin):
                     f'services.weather_service.wind_speed_units.{self.wind_speed_unit}',
                     self.wind_speed_unit,
                 )
-                forecast_text += f" {wind_direction}{wind_speed}{wind_unit_label}"
+                # Space before the unit, as in gwx: "N6 km/h", not "N6km/h".
+                forecast_text += f" {wind_direction}{wind_speed} {wind_unit_label}"
 
             today_high = int(daily['temperature_2m_max'][0])
             today_low = int(daily['temperature_2m_min'][0])
@@ -1264,9 +1304,11 @@ class WeatherService(BaseServicePlugin):
 
         broker_host = "blitzortung.ha.sed.pl"
         broker_port = 1883
-        topic = "blitzortung/1.1/#"
+        # Per-geohash wildcards: the relay refuses "blitzortung/1.1/#" with SUBACK 0x80.
+        from .blitzortung_service import _mqtt_topics_for_area
+        topics = _mqtt_topics_for_area(self.blitz_area)
 
-        self.logger.info(f"Connecting to Blitzortung MQTT broker: {broker_host}:{broker_port}")
+        self.logger.info(f"Connecting to Blitzortung MQTT broker: {broker_host}:{broker_port} ({len(topics)} topics)")
 
         while self._running:
             try:
@@ -1301,6 +1343,19 @@ class WeatherService(BaseServicePlugin):
 
                 client.on_message = on_message
 
+                def on_subscribe(client, userdata, mid, granted_qos):
+                    # A broker can accept CONNECT but refuse SUBSCRIBE (granted
+                    # QoS >= 0x80); without this the service silently receives
+                    # nothing while logging "Connected".
+                    try:
+                        denied = [q for q in granted_qos if int(q) >= 0x80]
+                    except (TypeError, ValueError):
+                        denied = []
+                    if denied:
+                        self.logger.warning(f"Blitzortung MQTT subscription {mid} refused by broker (granted_qos={granted_qos})")
+
+                client.on_subscribe = on_subscribe
+
                 # Connect and subscribe (non-blocking to avoid blocking event loop)
                 loop = asyncio.get_running_loop()
                 try:
@@ -1312,14 +1367,14 @@ class WeatherService(BaseServicePlugin):
 
                 # Subscribe is non-blocking, but wrap it anyway for consistency
                 try:
-                    client.subscribe(topic)
+                    client.subscribe([(t, 0) for t in topics])
                 except Exception as subscribe_error:
                     self.logger.debug(f"Subscribe() call failed: {subscribe_error}")
                     raise
 
                 client.loop_start()
 
-                self.logger.info(f"Connected to Blitzortung MQTT, subscribed to {topic}")
+                self.logger.info(f"Connected to Blitzortung MQTT, subscribed to {', '.join(topics)}")
 
                 # Keep connection alive
                 while self._running:

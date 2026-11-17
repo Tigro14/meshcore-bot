@@ -651,7 +651,6 @@ heard_window_days = 30
 prefix_free_days = 30
 post_process_delay_seconds = 0.5
 post_process_timeout_seconds = 15.0
-include_prefix_free_hint = true
 cooldown_minutes_per_prefix = 60
 notify_external_on_all_new_repeaters = false
 silence_mesh_output = false

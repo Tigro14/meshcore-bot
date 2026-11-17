@@ -234,6 +234,52 @@ async def test_process_silence_mesh_output_skips_channel_message():
     mock_ext.assert_called_once()
 
 
+# ── geohash topic construction ───────────────────────────────────────────────
+
+
+def test_geohash_encode_known_values():
+    from modules.service_plugins.blitzortung_service import _geohash_encode
+
+    assert _geohash_encode(22.7788, -75.922, 6) == "dk4186"
+    assert _geohash_encode(47.5, 15.6, 5) == "u27n4"
+
+
+def test_mqtt_topics_cover_bbox_center():
+    from modules.service_plugins.blitzortung_service import (
+        _geohash_encode,
+        _mqtt_topics_for_area,
+    )
+
+    area = {"min_lat": 22.0, "min_lon": -76.8, "max_lat": 23.5, "max_lon": -75.0}
+    topics = _mqtt_topics_for_area(area)
+    assert topics
+    assert all(t.startswith("blitzortung/1.1/") and t.endswith("/#") for t in topics)
+
+    # A strike at the bbox center must match one of the wildcard subscriptions.
+    center = _geohash_encode(22.7788, -75.922, 3)
+    assert f"blitzortung/1.1/{'/'.join(center)}/#" in topics
+
+
+def test_mqtt_topics_never_use_shallow_wildcard():
+    """The relay refuses 'blitzortung/1.1/#' (SUBACK 0x80); topics need >=3 levels."""
+    from modules.service_plugins.blitzortung_service import _mqtt_topics_for_area
+
+    area = {"min_lat": 47.0, "min_lon": 15.0, "max_lat": 48.0, "max_lon": 16.5}
+    topics = _mqtt_topics_for_area(area)
+    assert "blitzortung/1.1/#" not in topics
+    for t in topics:
+        levels = t.split("/")
+        assert levels[:3] == ["blitzortung", "1.1", ""] or len(levels) >= 6
+
+
+def test_mqtt_topics_large_bbox_falls_back_to_coarse_cells():
+    from modules.service_plugins.blitzortung_service import _mqtt_topics_for_area
+
+    area = {"min_lat": 0.0, "min_lon": -30.0, "max_lat": 45.0, "max_lon": 20.0}
+    topics = _mqtt_topics_for_area(area)
+    assert 1 <= len(topics) <= 24
+
+
 # ── Weather_Service deconfliction ──────────────────────────────────────────────
 
 

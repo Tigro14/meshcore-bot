@@ -206,6 +206,8 @@ active before the upgrade.
 
 Add `--install-extras` to install the optional profanity-filter and geocoding
 packages without being prompted, which is what you want for an unattended upgrade.
+The geocoding extras are installed by default even without that flag; use
+`--no-extras` to skip every optional package.
 
 Before upgrading, keep a separate backup of your configuration and database. The
 installer preserves:
@@ -251,7 +253,8 @@ country and US-state normalization:
 pip install -e ".[geo]"
 ```
 
-The standalone installer also offers the geocoding extras interactively.
+The standalone installer installs these extras by default, and skips them only if
+you decline the prompt or pass `--no-extras`.
 
 ### Optional Sender-Language Detection
 

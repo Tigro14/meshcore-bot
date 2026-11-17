@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import sqlite3
+import stat
 from contextlib import closing, contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -67,6 +68,18 @@ def _fake_setup_logging(self: BotDataViewer) -> None:
     if not self.logger.handlers:
         self.logger.addHandler(logging.NullHandler())
     self.logger.propagate = False
+
+
+def _viewer_without_threads(db_path: str, config_path: str) -> BotDataViewer:
+    """Build a viewer over an existing config without logging or background threads."""
+    with (
+        patch.object(BotDataViewer, "_setup_logging", _fake_setup_logging),
+        patch.object(BotDataViewer, "_start_database_polling", lambda self: None),
+        patch.object(BotDataViewer, "_start_log_tailing", lambda self: None),
+        patch.object(BotDataViewer, "_start_cleanup_scheduler", lambda self: None),
+        patch.object(BotDataViewer, "_start_dashboard_refresher", lambda self: None),
+    ):
+        return BotDataViewer(db_path=db_path, config_path=config_path)
 
 
 # ---------------------------------------------------------------------------
@@ -1505,18 +1518,17 @@ class TestRoleBasedAccess:
     """Public allowlist vs fail-closed admin when web_viewer_password is set."""
 
     def test_public_pages_accessible_without_auth(self, auth_client):
-        public_pages = ["/", "/mesh", "/contacts", "/regions", "/airtime", "/bbs", "/time", "/infos"]
+        public_pages = ["/", "/mesh", "/contacts", "/realtime", "/regions", "/airtime", "/bbs", "/time", "/infos"]
         for page in public_pages:
             resp = auth_client.get(page)
             assert resp.status_code == 200, f"{page} should be accessible without auth"
 
     def test_public_pages_in_anonymous_navbar(self, auth_client):
-        """The five newly public pages must appear in the navbar for anonymous visitors."""
+        """The public pages must appear in the navbar for anonymous visitors."""
         html = auth_client.get("/").get_data(as_text=True)
-        for page in ("/regions", "/airtime", "/bbs", "/time", "/infos"):
+        for page in ("/realtime", "/regions", "/airtime", "/bbs", "/time", "/infos"):
             assert f'href="{page}"' in html, f"{page} should be in the anonymous navbar"
         # Admin-only entries stay hidden.
-        assert 'href="/realtime"' not in html
         assert 'href="/logs"' not in html
 
     def test_public_page_apis_accessible_without_auth(self, auth_client):
@@ -1568,15 +1580,29 @@ class TestRoleBasedAccess:
         )
         assert resp.status_code == 401
 
-    def test_realtime_is_admin_only(self, auth_client):
-        """The live socket is admin-only, so the page is too; the nav hides it."""
-        resp = auth_client.get("/realtime", follow_redirects=False)
-        assert resp.status_code == 302
-        assert "login" in resp.headers["Location"]
-        assert 'href="/realtime"' not in auth_client.get("/").get_data(as_text=True)
+    def test_realtime_is_public(self, auth_client):
+        """Realtime is on the anonymous read surface; its socket admits anonymous
+        clients and its streams carry consent-filtered traffic only."""
+        resp = auth_client.get("/realtime")
+        assert resp.status_code == 200
+        assert 'href="/realtime"' in auth_client.get("/").get_data(as_text=True)
         auth_client.post("/login", data={"password": "secret123"})
         assert auth_client.get("/realtime").status_code == 200
         assert 'href="/realtime"' in auth_client.get("/").get_data(as_text=True)
+
+    def test_anonymous_live_socket_only_on_realtime(self, auth_client):
+        """base.html opens the shared live socket for anonymous sessions only on
+        /realtime; every other anonymously-readable page keeps the admin gate so
+        its page scripts never subscribe to streams the server would withhold."""
+        realtime = auth_client.get("/realtime").get_data(as_text=True)
+        assert 'data-is-admin="false"' in realtime
+        assert 'data-live-socket="true"' in realtime
+        for page in ("/", "/contacts", "/mesh"):
+            html = auth_client.get(page).get_data(as_text=True)
+            assert 'data-is-admin="false"' in html
+            assert 'data-live-socket="false"' in html
+        auth_client.post("/login", data={"password": "secret123"})
+        assert 'data-is-admin="true"' in auth_client.get("/contacts").get_data(as_text=True)
 
     def test_admin_pages_require_auth(self, auth_client):
         admin_pages = ["/logs", "/config", "/plugins", "/radio", "/greeter", "/feeds", "/schedule", "/time/admin"]
@@ -1732,9 +1758,49 @@ class TestRoleBasedAccess:
         assert other_sock.is_connected()
         other_sock.disconnect()
 
-    def test_anonymous_socket_rejected(self, auth_viewer, auth_client):
+    def test_anonymous_socket_connects_to_traffic_streams(self, auth_viewer, auth_client):
+        """Realtime is public, so anonymous sockets connect; the log stream is
+        the stream that stays admin-gated."""
         sock = auth_viewer.socketio.test_client(auth_viewer.app, flask_test_client=auth_client)
+        assert sock.is_connected()
+        sock.emit("subscribe_logs")
+        # The handler answers with an error and drops the connection, so the
+        # events have to be read from the test client's queue, not get_received().
         assert not sock.is_connected()
+        names = [event["name"] for event in sock.queue]
+        assert "error" in names and "log_line" not in names
+
+    def test_admin_socket_can_subscribe_logs(self, auth_viewer, auth_client):
+        auth_client.post("/login", data={"password": "secret123"})
+        sock = auth_viewer.socketio.test_client(auth_viewer.app, flask_test_client=auth_client)
+        assert sock.is_connected()
+        sock.emit("subscribe_logs")
+        assert sock.is_connected()
+        sock.get_received()
+        sock.disconnect()
+
+    def test_admin_login_survives_a_viewer_restart(self, auth_viewer):
+        """A restart must not invalidate the session cookie the old process signed.
+
+        SECRET_KEY used to be drawn afresh on every start, so `systemctl restart` dropped
+        every admin session: the contacts page quietly lost its star/geocode/delete actions
+        and nothing told the operator why.
+        """
+        with auth_viewer.app.test_client() as browser:
+            browser.post("/login", data={"password": "secret123"})
+            assert browser.get("/logs").status_code == 200
+            signed_cookie = browser.get_cookie("session").value
+
+        restarted = _viewer_without_threads(auth_viewer.db_path, auth_viewer.config_path)
+        with restarted.app.test_client() as returning_browser:
+            returning_browser.set_cookie("session", signed_cookie)
+            assert returning_browser.get("/logs").status_code == 200
+
+    def test_session_key_is_a_private_file_beside_the_local_overlay(self, auth_viewer):
+        """The key is kept where the bot keeps its other machine-local state: 0600, gitignored."""
+        key_path = auth_viewer.local_dir / "web_viewer_session.key"
+        assert key_path.read_text(encoding="utf-8").strip() == auth_viewer.app.config["SECRET_KEY"]
+        assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
 
 
 # ===========================================================================
@@ -2559,9 +2625,26 @@ class TestPacketsByHashRoute:
     def test_rejects_bad_input(self, client, path):
         assert client.get(path).status_code == 400
 
-    def test_requires_admin_when_a_password_is_set(self, auth_client):
-        resp = auth_client.get(f"/api/packets/by-hash/{self.HASH}?near={self.NEAR}")
-        assert resp.status_code == 401
+    def test_anonymous_can_read_when_a_password_is_set(self, auth_client, auth_viewer):
+        """Realtime is public, so its late packet lookup is too — ciphertext
+        and metadata only, like the socket's packet stream."""
+        _insert_packet_stream_rows(auth_viewer.db_path, [
+            (self.NEAR - 1, json.dumps({
+                "packet_hash": self.HASH, "snr": 9.5, "payload_type_name": "GRP_TXT",
+                "decrypted": True, "text": "secret text", "sender": "someone",
+            }), "packet"),
+        ])
+        try:
+            resp = auth_client.get(f"/api/packets/by-hash/{self.HASH}?near={self.NEAR}")
+            assert resp.status_code == 200
+            body = resp.get_json()
+            assert [p["snr"] for p in body["packets"]] == [9.5]
+            assert "secret text" not in json.dumps(body)
+            assert "someone" not in json.dumps(body)
+        finally:
+            with closing(sqlite3.connect(auth_viewer.db_path)) as conn:
+                conn.execute("DELETE FROM packet_stream")
+                conn.commit()
 
     def test_realtime_looks_up_a_missing_packet_on_open(self, client):
         html = client.get("/realtime").get_data(as_text=True)

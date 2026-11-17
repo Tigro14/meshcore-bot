@@ -38,6 +38,15 @@ La migration 33 ajoute une table indépendante : la synchronisation des canaux d
 la radio n'efface pas les préférences d'affichage.
 
 
+La page publique **Channels** (`/channels`) propose aussi des QR codes d’ajout.
+Les canaux hashtag utilisent une clé dérivée de leur nom public. Le QR d’un canal
+personnalisé ne peut être présenté aux visiteurs que lorsque sa publication est
+autorisée ; le canal `Public` n’est pas proposé. Voir [web-viewer.md](web-viewer.md).
+
+La page Real-time est accessible sans connexion, mais les messages et commandes
+des canaux masqués restent filtrés avant diffusion et replay. Les réponses privées
+restent réservées aux administrateurs, tout comme le flux des logs Socket.IO.
+
 ## Logs : métadonnées, pas archive de conversations
 
 La réception, le traitement, les envois de canal et le LLM ne recopient plus le

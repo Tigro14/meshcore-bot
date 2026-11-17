@@ -126,8 +126,11 @@ Sends forecast to `weather_channel` at configured time:
 
 **Example Output:**
 ```
-🌤️ Daily Weather: Seattle: ☀️Clear 68°F NNE8mph | Tomorrow: 🌧️Light Rain 55-72°F
+🌤️ Daily Weather: Seattle: ☀️Clear 68°F NNE 8 mph | Tomorrow: 🌧️Light Rain 55-72°F
 ```
+
+Strings follow `[Localization] language` (`Météo du jour` in French); strings
+a locale does not define fall back to English.
 
 **Data Includes:**
 - Current conditions with emoji

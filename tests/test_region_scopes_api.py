@@ -278,7 +278,8 @@ class TestRegionScopesSave:
     def test_the_local_overlay_wins_when_it_owns_the_section(self, viewer, tmp_path):
         """Writing the base copy would be silently overridden at merge time."""
         local_dir = tmp_path / "local"
-        local_dir.mkdir()
+        # The viewer already created local/ for its session key.
+        local_dir.mkdir(exist_ok=True)
         (local_dir / "config.ini").write_text(
             "[Channels]\nflood_scopes = #old\n", encoding="utf-8")
 

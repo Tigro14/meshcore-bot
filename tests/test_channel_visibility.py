@@ -287,3 +287,61 @@ def test_packet_history_keeps_raw_radio_data_without_server_decrypted_text(socke
     assert "HIDDEN" not in json.dumps(data)
     assert data["raw_hex"] == "deadbeef" and data["path"] == ["aa", "bb"]
     assert data["snr"] == -4.5 and data["decoded"]["payload_hex"] == "aabbcc"
+
+
+@pytest.mark.usefixtures("managed_socketio_clients")
+def test_live_command_stream_is_tiered_between_admin_and_anonymous(socketio_viewer):
+    """Realtime's socket admits anonymous clients; private bot replies stay admin."""
+    viewer = socketio_viewer
+    viewer.web_viewer_password = "configured-password"
+    visible = add_channel(viewer, name="#visible", key="cd" * 16, visible=True)
+    public_cmd = message(visible, "#visible") | {"user_input": "public q", "response": "public a"}
+    dm_cmd = dict(is_dm=True, channel="DM", user_input="SECRET ASK", response="SECRET REPLY")
+
+    flask_client = viewer.app.test_client()
+    flask_client.post("/login", data={"password": "configured-password"})
+    admin_sock = flask_socketio.SocketIOTestClient(viewer.app, viewer.socketio, flask_test_client=flask_client)
+    anon_sock = flask_socketio.SocketIOTestClient(viewer.app, viewer.socketio)
+    assert admin_sock.is_connected()
+    assert anon_sock.is_connected()
+    admin_sock.emit("subscribe_commands")
+    anon_sock.emit("subscribe_commands")
+    admin_sock.get_received()
+    anon_sock.get_received()
+
+    viewer._handle_command_data(public_cmd)
+    viewer._handle_command_data(dm_cmd)
+
+    anon_events = [e for e in anon_sock.get_received() if e["name"] == "command_data"]
+    admin_events = [e for e in admin_sock.get_received() if e["name"] == "command_data"]
+    assert len(anon_events) == 1 and anon_events[0]["args"][0]["channel"] == "#visible"
+    assert "SECRET" not in json.dumps(anon_events)
+    assert len(admin_events) == 2
+
+
+@pytest.mark.usefixtures("managed_socketio_clients")
+def test_anonymous_command_replay_excludes_private_bot_replies(socketio_viewer):
+    """History replay uses the same tier: consented commands reach anonymous
+    subscribers, private replies only admins."""
+    viewer = socketio_viewer
+    viewer.web_viewer_password = "configured-password"
+    visible = add_channel(viewer, name="#visible", key="cd" * 16, visible=True)
+    rows = [
+        message(visible, "#visible") | {"user_input": "public q", "response": "public a"},
+        dict(is_dm=True, channel="DM", user_input="SECRET ASK", response="SECRET REPLY"),
+    ]
+    with sqlite3.connect(viewer.db_path) as conn:
+        conn.executemany(
+            "INSERT INTO packet_stream(timestamp,data,type) VALUES(?,?,?)",
+            [(time.time() + i, json.dumps(row), "command") for i, row in enumerate(rows)],
+        )
+    flask_client = viewer.app.test_client()
+    flask_client.post("/login", data={"password": "configured-password"})
+    admin_sock = flask_socketio.SocketIOTestClient(viewer.app, viewer.socketio, flask_test_client=flask_client)
+    anon_sock = flask_socketio.SocketIOTestClient(viewer.app, viewer.socketio)
+    admin_sock.emit("subscribe_commands")
+    anon_sock.emit("subscribe_commands")
+    admin_events = [e for e in admin_sock.get_received() if e["name"] == "command_data"]
+    anon_events = [e for e in anon_sock.get_received() if e["name"] == "command_data"]
+    assert len(anon_events) == 1 and "SECRET" not in json.dumps(anon_events)
+    assert len(admin_events) == 2
