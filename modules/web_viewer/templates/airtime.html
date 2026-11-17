@@ -59,9 +59,11 @@
     </div>
     <section class="card mb-3" aria-labelledby="airtime-activity-title">
         <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-1">
-            <h2 class="h6 mb-0" id="airtime-activity-title">Activité reçue</h2><small class="text-muted" id="airtime-volume"></small>
+            <h2 class="h6 mb-0" id="airtime-activity-title">Activité reçue</h2>
         </div>
         <div class="card-body">
+            <p class="small mb-1" id="airtime-volume"></p>
+            <p class="small text-muted mb-3" id="airtime-repetition-trend"></p>
             <p class="small text-muted mb-0" id="airtime-chart-empty" hidden>Aucune observation exploitable.</p>
             <div class="d-flex flex-wrap gap-3 small text-muted mb-2" aria-label="Légende du graphique">
                 <span><span style="display:inline-block;width:10px;height:10px;background:#7ca4cf;border-radius:2px;margin-right:5px"></span>Occupation du canal (%)</span>
@@ -109,8 +111,14 @@
                     <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Répéteur</th><th>DC reconstitué · 1 h</th><th>DC scénario · 1 h</th><th>Pic sur 1 h</th></tr></thead><tbody id="airtime-relay-details"></tbody></table></div>
                 </div>
                 <div class="tab-pane fade" id="airtime-pane-sources" role="tabpanel" aria-labelledby="airtime-tab-sources">
-                    <p class="small text-muted">Paquets distincts sur la période, copies dédupliquées.</p>
-                    <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Nœud</th><th>Messages</th><th>Annonces</th><th>Autres</th><th>Total</th></tr></thead><tbody id="airtime-source-details"></tbody></table></div>
+                    <label class="form-label small" for="airtime-role">Lecture du trafic</label>
+                    <select class="form-select form-select-sm mb-2" id="airtime-role">
+                        <option value="authors">Auteurs des paquets</option>
+                        <option value="entry_relays">Premiers relais des chemins</option>
+                        <option value="emitters">Émetteurs entendus</option>
+                    </select>
+                    <p class="small text-muted" id="airtime-role-note"></p>
+                    <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Nœud</th><th id="airtime-cost-label">Coût radio estimé</th><th>Messages</th><th>Annonces</th><th>Autres</th><th id="airtime-count-label">Paquets distincts</th></tr></thead><tbody id="airtime-source-details"></tbody></table></div>
                 </div>
                 <div class="tab-pane fade" id="airtime-pane-model" role="tabpanel" aria-labelledby="airtime-tab-model">
                     <p class="small text-muted" id="airtime-model-context"></p>
@@ -131,6 +139,11 @@
     const known = value => typeof value === 'number' && Number.isFinite(value);
     const number = value => Number(value).toLocaleString('fr-FR', {maximumFractionDigits: 3});
     const pct = value => known(value) ? number(value) + ' %' : 'N/D';
+    const radioTime = value => known(value) ? number(value / 1000) + ' s' : 'N/D';
+    const rankSources = sources => sources.slice().sort((a, b) =>
+        Number(known(b.reconstructed_radio_airtime_ms))-Number(known(a.reconstructed_radio_airtime_ms))
+        || (b.reconstructed_radio_airtime_ms ?? 0)-(a.reconstructed_radio_airtime_ms ?? 0)
+        || b.distinct_packets-a.distinct_packets);
     const timeZone = 'Europe/Paris';
     const parisTime = new Intl.DateTimeFormat('fr-FR', {timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
     const parisDate = new Intl.DateTimeFormat('fr-FR', {timeZone, day: '2-digit', month: '2-digit'});
@@ -152,6 +165,7 @@
             el('airtime-period').addEventListener('change', () => this.load());
             el('airtime-refresh').addEventListener('click', () => this.load());
             el('airtime-search').addEventListener('input', () => this.renderDetails());
+            el('airtime-role').addEventListener('change', () => this.renderDetails());
             el('airtime-show-first-link').addEventListener('change', () => this.renderDuty());
             document.querySelectorAll('[data-airtime-detail]').forEach(button =>
                 button.addEventListener('click', () => this.openDetails(button.dataset.airtimeDetail)));
@@ -239,15 +253,36 @@
             el('airtime-packet-size').textContent = 'Taille moyenne : ' + (known(meanSize)
                 ? meanSize.toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' octets' : 'N/D');
             this.renderDuty();
-            el('airtime-volume').textContent = number(data.traffic.distinct_packets) + ' paquets distincts';
+            const receptions = data.receptions;
+            el('airtime-volume').textContent = number(data.traffic.distinct_packets) + ' paquets distincts'
+                + (known(receptions?.received_packets) ? ' · ' + number(receptions.received_packets) + ' réceptions' : '')
+                + (known(receptions?.additional_received_airtime_percent)
+                    ? ' · ' + pct(receptions.additional_received_airtime_percent) + ' de l’airtime reçu en copies supplémentaires' : '')
+                + (receptions?.status === 'truncated' ? ' · Données partielles' : '');
+            const comparison = receptions?.comparison;
+            const previousCopies = comparison?.previous?.additional_received_airtime_percent;
+            const delta = comparison?.additional_airtime_change_points;
+            const signed = value => known(value) ? (value > 0 ? '+' : '') + number(value) + ' %' : 'N/D';
+            el('airtime-repetition-trend').title = known(comparison?.end_time)
+                ? 'Comparaison de deux périodes de même durée, jusqu’au '
+                    + new Date(comparison.end_time * 1000).toLocaleString('fr-FR', {timeZone}) : '';
+            el('airtime-repetition-trend').textContent = comparison?.status === 'comparable' && known(delta)
+                ? 'Évolution : airtime reçu ' + signed(comparison.received_airtime_change_percent)
+                    + ' · paquets distincts ' + signed(comparison.distinct_packets_change_percent)
+                    + ' · copies ' + (delta > 0 ? '+' : '') + number(delta) + ' points.'
+                : known(previousCopies) ? 'Période précédente : ' + pct(previousCopies)
+                    + ' en copies supplémentaires · Écoute incomplète, évolution non comparable.'
+                    : 'Les copies incluent les retransmissions du flood. Évolution : historique insuffisant.';
             this.renderChart(data);
-            const authors = (data.authors || []).slice().sort((a, b) => b.distinct_packets-a.distinct_packets);
+            const authors = rankSources(data.authors || []);
             el('airtime-source-list').innerHTML = authors.slice(0, 5).map(author =>
                 '<div class="airtime-row d-flex justify-content-between gap-3"><span class="airtime-name">' + escapeHtml(author.name)
-                + '</span><span class="airtime-count">' + number(author.distinct_packets) + ' paquets</span></div>').join('')
+                + '</span><span class="airtime-count text-end">' + radioTime(author.reconstructed_radio_airtime_ms)
+                + '<small class="d-block text-muted">' + number(author.distinct_packets) + ' paquets</small></span></div>').join('')
                 || '<p class="small text-muted">Aucune source identifiable.</p>';
             const unknown = data.traffic.distinct_packets ? data.traffic.unattributed_author_packets / data.traffic.distinct_packets * 100 : null;
-            el('airtime-source-note').textContent = known(unknown) ? 'Origine non identifiée : ' + pct(unknown) + ' des paquets.' : 'Origine des paquets non disponible.';
+            el('airtime-source-note').textContent = 'Classement par coût radio reconstitué. '
+                + (known(unknown) ? 'Origine non identifiée : ' + pct(unknown) + ' des paquets.' : 'Origine des paquets non disponible.');
             const model = data.forwarding_model;
             el('airtime-model-note').textContent = model?.status === 'partial_scenario'
                 ? 'Modélisation partielle : ' + number(model.evaluation.modelled_packets) + ' / ' + number(model.evaluation.distinct_packets) + ' paquets.'
@@ -288,7 +323,8 @@
             const points = series.map(point => {
                 const start = point.start_time ?? point.end_time - bucketSeconds;
                 return {x: (start + point.end_time) / 2, y: point.percent, start, end: point.end_time, coverage: point.coverage,
-                    meanSize: point.rx_mean_frame_bytes};
+                    meanSize: point.rx_mean_frame_bytes, distinct: point.distinct_packets,
+                    additionalShare: point.additional_received_airtime_percent};
             });
             const dataset = {type: 'bar', yAxisID: 'y', order: 1, label: 'Occupation du canal', data: points,
                 backgroundColor: '#7ca4cf', hoverBackgroundColor: '#497fb8', borderWidth: 0,
@@ -351,8 +387,13 @@
                     label: item => item.dataset.yAxisID === 'packets' ? 'Paquets/min : ' + number(item.parsed.y)
                         : 'Occupation : ' + pct(item.parsed.y),
                     afterBody: items => {
-                        const size = items[0]?.raw.meanSize;
-                        return known(size) ? 'Taille moyenne : ' + size.toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' octets' : '';
+                        const point = items[0]?.raw;
+                        const lines = [];
+                        if (known(point?.meanSize)) lines.push('Taille moyenne : '
+                            + point.meanSize.toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' octets');
+                        if (known(point?.distinct)) lines.push('Paquets distincts : ' + number(point.distinct));
+                        if (known(point?.additionalShare)) lines.push('Airtime en copies supplémentaires : ' + pct(point.additionalShare));
+                        return lines.join('\n');
                     },
                 }}},
                 scales: {x: {type: 'linear', offset: false, min: data.start_time, max: data.end_time,
@@ -384,11 +425,30 @@
             el('airtime-relay-details').innerHTML = this.rows.filter(matches).slice(0, 200).map(node => '<tr><td>' + escapeHtml(node.name)
                 + '</td><td>' + pct(node.observed) + '</td><td>' + pct(node.scenario) + '</td><td>' + pct(node.peak_hour_percent)
                 + '</td></tr>').join('') || empty(4);
-            const authors = (this.data.authors || []).slice();
+            const authors = rankSources(this.data.authors || []);
             if (this.data.traffic.unknown_author?.distinct_packets) authors.push(this.data.traffic.unknown_author);
-            el('airtime-source-details').innerHTML = authors.filter(matches).slice(0, 200).map(author => '<tr><td>' + escapeHtml(author.name)
-                + '</td>' + ['messages', 'adverts', 'other'].map(kind => '<td>' + number(author.categories[kind].distinct_packets) + '</td>').join('')
-                + '<td>' + number(author.distinct_packets) + '</td></tr>').join('') || empty(5);
+            const role = el('airtime-role').value || 'authors';
+            const roles = this.data.receptions?.roles;
+            const sources = role === 'authors' ? authors : (roles?.[role] || []).slice();
+            if (role === 'emitters' && roles?.unknown_emitter?.received_packets) sources.push(roles.unknown_emitter);
+            const isAuthor = role === 'authors';
+            el('airtime-cost-label').textContent = isAuthor ? 'Coût radio estimé' : 'Airtime reçu';
+            el('airtime-count-label').textContent = isAuthor ? 'Paquets distincts' : 'Copies reçues';
+            el('airtime-role-note').textContent = isAuthor
+                ? 'Émission initiale et relais reconstitués à partir des chemins reçus. N/D : coût non reconstituable.'
+                : (role === 'entry_relays' ? 'Premier relais des chemins flood reçus. Les réceptions sans relais sont exclues.'
+                    : 'Dernier relais des chemins flood reçus, ou auteur identifié entendu sans relais.')
+                    + ' Les identités ambiguës restent des préfixes. Les totaux des différentes lectures ne s’additionnent pas.';
+            el('airtime-source-details').innerHTML = sources.filter(matches).slice(0, 200).map(source => {
+                const note = isAuthor && known(source.cost_reconstruction_coverage_percent)
+                    ? 'Coût connu pour ' + number(source.cost_reconstructed_packets) + ' / ' + number(source.distinct_packets) + ' paquets'
+                    : ({ambiguous: 'Préfixe ambigu', unknown: 'Préfixe inconnu', unconfirmed_relay_role: 'Rôle non confirmé'}[source.identification] || '');
+                return '<tr><td>' + escapeHtml(source.name) + (note ? '<small class="d-block text-muted">' + escapeHtml(note) + '</small>' : '')
+                    + '</td><td>' + radioTime(isAuthor ? source.reconstructed_radio_airtime_ms : source.rx_airtime_ms)
+                    + '</td>' + ['messages', 'adverts', 'other'].map(kind => '<td>'
+                        + number(isAuthor ? source.categories[kind].distinct_packets : source.categories[kind]) + '</td>').join('')
+                    + '<td>' + number(isAuthor ? source.distinct_packets : source.received_packets) + '</td></tr>';
+            }).join('') || empty(6);
             const model = this.data.forwarding_model;
             const valid = model?.status === 'partial_scenario';
             el('airtime-model-context').textContent = valid ? number(model.expected_packets) + ' retransmissions attendues · '

@@ -308,7 +308,7 @@ def test_event_sweep_matches_brute_force_with_fractional_times_and_duplicates():
 def test_report_describes_refined_method_without_changing_schema(conn):
     r = report(conn)
     assert r['schema_version'] == 1
-    assert r['method']['version'] == 5
+    assert r['method']['version'] == 6
     assert r['method']['branch_dedup'] == 'causal_path_intervals'
     assert r['method']['peak_window'] == 'event_timestamps'
     assert r['method']['peak_resolution_seconds'] is None

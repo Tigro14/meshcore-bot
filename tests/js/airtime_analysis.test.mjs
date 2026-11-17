@@ -114,7 +114,7 @@ test('insufficient capture never becomes a quiet-network zero; historical covera
     instance.render({...data,coverage:{available_seconds:3600}},hourly);
     assert.equal(elements.get('airtime-rx-note').textContent,'Moyenne sur 1 h disponibles');
 });
-test('source order is distinct originals rather than received copies and search covers every detail tab',()=>{
+test('source order falls back to distinct originals when radio costs are unavailable and search covers every detail tab',()=>{
     const {instance,elements}=viewer();
     const authors=[{...data.authors[0],name:'High copies',distinct_packets:1,received_packets:200},
         {...data.authors[0],name:'More originals',distinct_packets:5,received_packets:5}];
@@ -317,4 +317,61 @@ test('occupation and packet averages follow the selected period while duty stays
     assert.equal(elements.get('airtime-packet-rate').textContent,'N/D');
     instance.render({...data,local:{...data.local,rx_packets_per_minute:.000099}},hourly);
     assert.equal(elements.get('airtime-packet-rate').textContent,'< 0,001');
+});
+
+test('source ranking uses reconstructed radio cost rather than message or received-copy counts',()=>{
+    const {instance,elements}=viewer();
+    const authors=[{...data.authors[0],name:'Many small',distinct_packets:20,reconstructed_radio_airtime_ms:500},
+        {...data.authors[0],name:'Few costly',distinct_packets:2,reconstructed_radio_airtime_ms:2000},
+        {...data.authors[0],name:'Unknown cost',distinct_packets:99,reconstructed_radio_airtime_ms:null}];
+    instance.render({...data,authors},hourly);
+    const list=elements.get('airtime-source-list').innerHTML;
+    assert.ok(list.indexOf('Few costly')<list.indexOf('Many small'));
+    assert.ok(list.indexOf('Many small')<list.indexOf('Unknown cost'));
+    assert.match(list,/2 s/);
+    assert.match(list,/Unknown cost.*N\/D/);
+});
+
+test('copy summary and tooltip use weighted airtime without adding a graph dataset',()=>{
+    const {instance,elements}=viewer();
+    const receptions={received_packets:100,additional_received_airtime_percent:68,status:'available',comparison:{status:'insufficient_history'}};
+    const series=[{start_time:1000,end_time:1300,percent:2,rx_packets_per_minute:1,distinct_packets:4,
+        additional_received_airtime_percent:68,rx_mean_frame_bytes:80}];
+    instance.render({...data,receptions,local:{...data.local,rx_series:series}},hourly);
+    assert.match(elements.get('airtime-volume').textContent,/3 paquets distincts · 100 réceptions · 68 %/);
+    assert.equal(instance.chart.data.datasets.length,2);
+    const text=instance.chart.options.plugins.tooltip.callbacks.afterBody([{raw:instance.chart.data.datasets[0].data[0]}]);
+    assert.match(text,/Paquets distincts : 4/);
+    assert.match(text,/copies supplémentaires : 68 %/);
+    instance.render({...data,receptions:{...receptions,status:'truncated',additional_received_airtime_percent:null}},hourly);
+    assert.doesNotMatch(elements.get('airtime-volume').textContent,/%/);
+    assert.match(elements.get('airtime-volume').textContent,/partielles/);
+});
+
+test('the existing detail table switches roles without mixing author and receiver-side costs',()=>{
+    const {instance,elements}=viewer();
+    const roles={entry_relays:[{name:'First relay',received_packets:4,rx_airtime_ms:2500,
+        categories:{messages:2,adverts:2,other:0}}],emitters:[{name:'Last relay',received_packets:4,rx_airtime_ms:2500,
+        categories:{messages:2,adverts:2,other:0}}],unknown_emitter:{name:'Unknown emitter',received_packets:1,
+        rx_airtime_ms:200,categories:{messages:0,adverts:0,other:1}}};
+    instance.render({...data,receptions:{roles}},hourly);
+    elements.get('airtime-role').value='entry_relays';instance.renderDetails();
+    assert.match(elements.get('airtime-source-details').innerHTML,/First relay/);
+    assert.doesNotMatch(elements.get('airtime-source-details').innerHTML,/Last relay|Auteur non identifiable/);
+    assert.equal(elements.get('airtime-cost-label').textContent,'Airtime reçu');
+    assert.equal(elements.get('airtime-count-label').textContent,'Copies reçues');
+    elements.get('airtime-role').value='emitters';instance.renderDetails();
+    assert.match(elements.get('airtime-source-details').innerHTML,/Last relay/);
+    assert.match(elements.get('airtime-source-details').innerHTML,/Unknown emitter/);
+    assert.doesNotMatch(elements.get('airtime-source-details').innerHTML,/First relay/);
+});
+
+test('evolution states incomplete observation rather than inventing a trend',()=>{
+    const {instance,elements}=viewer();
+    const comparison={status:'incomplete_observation',previous:{additional_received_airtime_percent:40},additional_airtime_change_points:null};
+    instance.render({...data,receptions:{comparison}},hourly);
+    assert.match(elements.get('airtime-repetition-trend').textContent,/non comparable/);
+    instance.render({...data,receptions:{comparison:{...comparison,status:'comparable',additional_airtime_change_points:10,
+        distinct_packets_change_percent:2,received_airtime_change_percent:30}}},hourly);
+    assert.match(elements.get('airtime-repetition-trend').textContent,/airtime reçu \+30 %.*distincts \+2 %.*copies \+10 points/);
 });

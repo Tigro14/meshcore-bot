@@ -6,6 +6,14 @@ semantic versioning.
 
 ## [Unreleased]
 
+### Baliz Airtime
+
+- Show received copies and their airtime-weighted share alongside distinct packets.
+  Rank sources by reconstructed radio cost, and switch the existing detail table between
+  authors, first flood relays and heard emitters. Compare traffic and repetition trends
+  only across continuously observed periods. Keep the existing two-series chart, per-node
+  duty-cycle estimates and private settings protections. No new page, radio query or migration.
+
 ### Baliz compatibility
 
 - Integrate Tigro main `d3ba8888`: private staged BBS notifications, current contact names in BBS statistics and public read-only viewer pages. Append notification stamps as migration 36 without changing Baliz migrations 1–35, the public profile, assistant, DM/clock handling or map. Preserve the French Time guide and mobile layout.

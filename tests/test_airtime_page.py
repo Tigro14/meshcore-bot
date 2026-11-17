@@ -114,7 +114,7 @@ class TestPassiveAirtimeAPI:
         assert all(bucket['percent'] is None for bucket in data['local']['rx_series'])
         assert data['method']['compliance'] == 'not_determined'
         assert data['repeaters'] == []
-        assert data['method']['version'] == 5
+        assert data['method']['version'] == 6
         assert data['forwarding_model']['status'] == 'insufficient_training'
         assert data['forwarding_model']['is_fdr'] is False
         assert data['local_load']['estimated_percent'] is None

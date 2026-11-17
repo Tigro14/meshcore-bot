@@ -18,10 +18,11 @@ from typing import Any
 from modules.airtime_capture import listening_intervals
 from modules.airtime_forwarding import build_forwarding_model, empty_forwarding_model, ingest_context
 from modules.airtime_quality import local_load, observer_metadata, recent_receptions, reception_history, rolling_peak
+from modules.airtime_repetitions import closed_period_comparison, received_insights
 from modules.channel_occupancy import lora_airtime_ms
 
 SCHEMA_VERSION = 1
-METHOD_VERSION = 5
+METHOD_VERSION = 6
 DEDUP_SECONDS = 60
 MAX_ROWS = 100000
 WINDOWS = {'1h': 3600, '24h': 86400, '7d': 604800}
@@ -338,8 +339,12 @@ def _traffic_summary(packets: dict[str, dict], costs: dict[str, dict], contacts:
     traffic['identified_author_packets'] = len(packets) - unknown['distinct_packets']
     traffic['cost_unreconstructed_packets'] = len(packets) - traffic['cost_reconstructed_packets']
     traffic['unknown_author'] = unknown
+    for item in [*authors.values(), unknown]:
+        item['cost_reconstruction_coverage_percent'] = round(item['cost_reconstructed_packets']
+            / item['distinct_packets']*100, 6) if item['distinct_packets'] else None
     return traffic, sorted(authors.values(), key=lambda item: (
-        item['distinct_packets'], item['reconstructed_radio_airtime_ms'] or 0.0), reverse=True)
+        item['reconstructed_radio_airtime_ms'] is not None,
+        item['reconstructed_radio_airtime_ms'] or 0.0, item['distinct_packets']), reverse=True)
 
 
 def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: str = '24h',
@@ -368,6 +373,9 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                    'capture_continuity': 'healthy_local_pipeline_heartbeats',
                    'capture_max_interval_seconds': 75,
                    'rx_packet_basis': 'local_receptions_including_copies',
+                   'received_copy_baseline': 'first_local_reception_in_selected_period',
+                   'received_copy_share': 'airtime_weighted_local_receptions',
+                   'source_ranking': 'reconstructed_radio_airtime',
                    'rx_packet_size': 'complete_meshcore_frame_bytes'},
         'limitations': ['local_receiver_only', 'unheard_transmissions_not_counted',
                         'known_prefix_uniqueness_not_identity_proof', 'same_path_retries_may_be_merged_when_inferred',
@@ -396,6 +404,9 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
     capture = listening_intervals(conn, start, now)
     report['local'].update(reception_history([], start, now, capture))
     report['local']['rx_last_five_minutes'] = recent_receptions([], now, capture)
+    report['receptions'] = received_insights([], contacts, {}, start=start, end=now,
+                                              bins=report['local']['rx_series'])
+    report['receptions']['comparison'] = {'status': 'insufficient_history'}
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='airtime_observations'").fetchone():
         return report
     retained_from = conn.execute('SELECT MIN(observed_at) FROM airtime_observations').fetchone()[0]
@@ -435,6 +446,12 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
             if author_candidates:
                 author_methods[fingerprint].add('correlated_decoded_message')
     resolved_authors = {fp: next(iter(keys)) if len(keys) == 1 else None for fp, keys in author_keys.items()}
+    report['receptions'] = received_insights(rows, contacts, resolved_authors, start=start, end=now,
+        bins=report['local']['rx_series'], truncated=report['coverage']['truncated'])
+    report['receptions']['comparison'] = {'status': 'insufficient_history'}
+    for point, copies in zip(report['local']['rx_series'], report['receptions']['series'], strict=True):
+        point['distinct_packets'] = copies['distinct_packets']
+        point['additional_received_airtime_percent'] = copies['additional_received_airtime_percent']
     packets: dict[str, dict] = {}
     path_packets: set[str] = set()
     identified_path_packets: set[str] = set()
@@ -574,6 +591,9 @@ def build_report(conn: sqlite3.Connection, *, now: float | None = None, window: 
                         node['trend'] = {'status': 'partial_observations',
                             'change_percent': round((node['airtime_ms']/before['airtime_ms']-1)*100, 3),
                             'previous_airtime_ms': before['airtime_ms']}
+    if _comparison:
+        report['receptions']['comparison'] = closed_period_comparison(
+            conn, now=now, seconds=seconds, retained_from=retained_from, limit=MAX_ROWS)
     return report
 
 
