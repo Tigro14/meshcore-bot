@@ -170,6 +170,7 @@ def _apply_werkzeug_websocket_fix() -> None:
 _apply_werkzeug_websocket_fix()
 
 from modules.config_snapshot import config_to_redacted_sections
+from modules.config_validation import PUBLIC_CHANNEL_OVERRIDE_KEY
 
 # Imported for the feed helpers that moved to modules.web_viewer.feeds; kept so
 # modules.web_viewer.app.<name> (and patches of it) keep resolving.
@@ -195,6 +196,16 @@ from modules.multibyte_detection import compute_path_encoding_badge
 from modules.repeater_manager import RepeaterManager, validate_repeater_tables
 from modules.security_utils import SafeUrlPolicy, create_safe_requests_session, safe_requests_request  # noqa: F401
 from modules.utils import get_config_timezone, resolve_path
+from modules.web_viewer.channel_monitor import (
+    ChannelMonitorMixin,
+    admin_qr_for,
+    is_public,
+    lookup_key,
+    monitor_channel_limit,
+    normalize_name,
+    parse_names,
+    public_qr_for,
+)
 from modules.web_viewer.channels import ChannelAdminMixin
 from modules.web_viewer.cleanup import CleanupSchedulerMixin
 from modules.web_viewer.config_panels import CONFIG_PANELS, PANEL_CATEGORIES
@@ -220,7 +231,7 @@ from modules.web_viewer.socket_clients import SocketClientsMixin
 from modules.web_viewer.tracking import ContactTrackingMixin
 
 
-class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin, CleanupSchedulerMixin, ChannelAdminMixin, DatabaseAdminMixin, ContactTrackingMixin, MeshEvidenceMixin, MultibyteRolloutMixin, FeedSubscriptionsMixin):
+class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin, CleanupSchedulerMixin, ChannelMonitorMixin, ChannelAdminMixin, DatabaseAdminMixin, ContactTrackingMixin, MeshEvidenceMixin, MultibyteRolloutMixin, FeedSubscriptionsMixin):
     """Complete web interface using Flask-SocketIO 5.x best practices"""
 
     # Whitelist of allowed tables for security
@@ -286,8 +297,11 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             static_folder=os.path.join(os.path.dirname(__file__), 'static'),
             static_url_path='/static'
         )
-        import secrets as _secrets
-        self.app.config['SECRET_KEY'] = _secrets.token_hex(32)
+        # Flask signs the admin session cookie with this key. A key drawn afresh on every
+        # start invalidates every cookie the viewer already signed, so a restart — a deploy,
+        # a reboot, a crash-restart — logged every logged-in admin out with no message. The
+        # key is created once and kept in local/ (0600, gitignored) beside the local overlay.
+        self.app.config['SECRET_KEY'] = self._load_or_create_session_secret()
         self.app.config['SESSION_COOKIE_HTTPONLY'] = True
         self.app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
         self.app.config['PERMANENT_SESSION_LIFETIME'] = 86400  # 24 hours
@@ -579,6 +593,43 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         self._base_sections = base_sections
         self._local_sections = local_sections
         return base_parser
+
+    def _load_or_create_session_secret(self) -> str:
+        """Return the viewer's session-signing key, creating it on the first run.
+
+        The key lives at ``<local_dir>/web_viewer_session.key`` with mode 0600, beside the
+        local config overlay and outside git. Keeping it there is what lets an admin login
+        survive a restart: the cookie a previous process signed still verifies here. If the
+        file cannot be read or written (read-only install, permission slip) the viewer still
+        starts on a key for this run only and says so in the log.
+        """
+        key_path = self.local_dir / "web_viewer_session.key"
+        try:
+            stored = key_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            stored = ""
+        except OSError as exc:
+            self.logger.warning(f"Could not read the session key at {key_path}: {exc}")
+            return secrets.token_hex(32)
+
+        # 32 hex characters is what token_hex(32) writes; anything shorter is a truncated
+        # or hand-edited file, so it is replaced rather than trusted.
+        if len(stored) >= 32:
+            return stored
+
+        secret = secrets.token_hex(32)
+        try:
+            self.local_dir.mkdir(parents=True, exist_ok=True)
+            fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                os.fchmod(handle.fileno(), 0o600)
+                handle.write(secret + "\n")
+        except OSError as exc:
+            self.logger.warning(
+                f"Could not write the session key at {key_path}: {exc}. "
+                "Admin logins will not survive a restart."
+            )
+        return secret
 
     def _get_version_info(self) -> dict[str, str | None]:
         """Get version info for footer via centralized version resolver. Never raises."""
@@ -942,14 +993,17 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             '/api/stream_data',
         ])
 
-        # Issue #240 public HTML surface. Realtime is admin-only: its live socket
-        # is, so an anonymous visit would only ever show an empty page.
+        # Issue #240 public HTML surface. Realtime joins the public surface: its
+        # live socket now admits anonymous clients, and every stream it reads is
+        # consent-filtered — messages and commands only for channels the operator
+        # published, packets as ciphertext plus radio metadata (never server-side
+        # plaintext). The log stream stays admin-only.
         # Read-only explainers (regions, airtime, time, infos, bbs) join the
         # public surface: every card they render is fed by the public GET APIs
         # below, and their write controls are hidden from anonymous visitors.
         _PUBLIC_PAGE_PATHS = frozenset([
-            '/', '/contacts', '/mesh',
-            '/regions', '/airtime', '/bbs', '/time', '/infos',
+            '/', '/contacts', '/mesh', '/realtime',
+            '/regions', '/airtime', '/bbs', '/time', '/infos', '/channels',
         ])
 
         # Anonymous-safe GET APIs: mesh-visible / aggregate data only. No channel
@@ -963,6 +1017,9 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             # and only their names — never the channel keys the admin route serves.
             '/api/channels',
             '/api/channels/live',
+            # /channels page feed. Names plus hashtag-derived secrets; a custom
+            # channel's key only appears for channels the operator published.
+            '/api/channels/view',
             '/api/banner-status',
             '/api/stats',
             '/api/dashboard/summary',
@@ -991,6 +1048,12 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             # POST/PUT/DELETE and the per-target history/run-now routes stay admin.
             '/api/clock-sync-targets-admin',
         ])
+
+        # Read-only GET helpers with a parameterized path, matched by prefix.
+        # /api/packets/by-hash/<hash> is Realtime's late packet lookup; its
+        # payload is passed through encrypted_packet_view, like the socket's
+        # packet stream: ciphertext and radio metadata, never plaintext.
+        _PUBLIC_API_GET_PREFIXES = ('/api/packets/by-hash/',)
 
         # Read-only POST helpers used by public Contacts / Mesh info panels.
         _PUBLIC_API_POST_PATHS = frozenset([
@@ -1033,6 +1096,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             # body, so they are as safe as the GET they shadow.
             if request.method in ('GET', 'HEAD', 'OPTIONS') and (
                 path in _PUBLIC_PAGE_PATHS or path in _PUBLIC_API_GET_PATHS
+                or path.startswith(_PUBLIC_API_GET_PREFIXES)
             ):
                 return
             if request.method in ('POST', 'OPTIONS') and path in _PUBLIC_API_POST_PATHS:
@@ -1070,6 +1134,14 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             response.headers['X-Content-Type-Options'] = 'nosniff'
             response.headers['X-Frame-Options'] = 'SAMEORIGIN'
             response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+            # Rendered pages carry no fingerprint and no version query on their
+            # assets, so a page a browser kept from an earlier deployment can show a
+            # navigation bar from before that deployment — the Channels link stayed
+            # invisible on a live bot days after it shipped, while every asset was
+            # fresh (Werkzeug serves static/ with an ETag).  Revalidate each page;
+            # endpoints that want real caching set their own Cache-Control below.
+            if 'text/html' in (response.content_type or ''):
+                response.headers.setdefault('Cache-Control', 'no-cache')
             # Every script, stylesheet and font is served from static/ (see
             # static/vendor/README.md); the only external hosts are the map tiles.
             # The highest-risk admin screens have migrated their inline handlers
@@ -1089,6 +1161,8 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 'region_warnings_page',
                 'regions_page',
                 'airtime_page',
+                'channels_page',
+                'channel_settings_page',
                 'logs',
                 'multibyte_rollout',
                 'mesh',
@@ -1232,6 +1306,16 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         def region_warnings_page():
             """Regional flood scope monitoring and warning settings."""
             return render_template('region_warnings.html')
+
+        @self.app.route('/channels')
+        def channels_page():
+            """Public channels page: the monitored channels and their MeshCore add QR code."""
+            return render_template('channels.html')
+
+        @self.app.route('/channels/settings')
+        def channel_settings_page():
+            """Monitored-channels settings ([Channels] monitor_channels)."""
+            return render_template('channel_settings.html')
 
         @self.app.route('/feeds')
         def feeds():
@@ -3315,8 +3399,11 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             far less for packets than for messages. The hash is only inside the
             row's JSON, so ``near`` (the message's epoch time) bounds the scan to
             the timestamp index. Rows come back marked as replayed, like the
-            socket replay's.
+            socket replay's. The route is anonymous-readable, so each row passes
+            through ``encrypted_packet_view`` exactly like the socket's packets.
             """
+            from modules.web_viewer.channel_visibility import encrypted_packet_view
+
             if not PACKET_HASH_RE.fullmatch(packet_hash):
                 return jsonify({'error': 'Invalid packet hash'}), 400
             try:
@@ -3346,7 +3433,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 if isinstance(data, dict):
                     data['stream_ts'] = row['timestamp']
                     data['replayed'] = True
-                    packets.append(data)
+                    packets.append(encrypted_packet_view(data))
             return jsonify({'packets': packets})
 
         # ── Export ──────────────────────────────────────────────────────────
@@ -4429,7 +4516,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
 
         # ── Region scopes ([Channels] flood_scopes) ──────────────────────────
 
-        def _region_scope_target_path():
+        def _channels_section_target_path():
             """Where a [Channels] write lands: the local overlay wins if it has
             the section, because that is the copy the merged config reads last."""
             return (
@@ -4488,7 +4575,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     })
             channel_overrides.sort(key=lambda entry: entry['channel'].lower())
 
-            target = _region_scope_target_path()
+            target = _channels_section_target_path()
             if target == self.local_config_path:
                 target_label = os.path.join(
                     os.path.basename(os.path.dirname(target)), os.path.basename(target)
@@ -4579,7 +4666,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 # viewer started, and it would silently win over a base write.
                 self.config = self._load_merged_config()
                 store = get_settings_store(
-                    self.config, _region_scope_target_path(), self.db_manager
+                    self.config, _channels_section_target_path(), self.db_manager
                 )
                 result = store.write_values('Channels', {
                     'flood_scopes': flood_scopes_value,
@@ -5198,6 +5285,190 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             """Get all feed subscriptions for a specific channel"""
             feeds = self._get_feeds_by_channel(channel_idx)
             return jsonify({'feeds': feeds})
+
+        # ── Channels page + monitored-channels settings ───────────────────────
+
+        def _channels_is_admin() -> bool:
+            """Whether the current request is an authenticated operator (or auth is off)."""
+            return not self.web_viewer_password or bool(session.get('authenticated_admin'))
+
+        @self.app.route('/api/channels/view')
+        @self._api_errors('Error getting channels view')
+        def api_channels_view():
+            """Payload for the /channels page: names, join QR codes, monitoring state.
+
+            The merged list is monitored names first, then the radio's own slots, then the
+            names the bot only lists (`[Channels_List]`, ``decode_hashtag_channels``); the
+            ``monitored``/``on_radio``/``decoded`` flags tell the page which group a card is in.
+
+            Public surface: a hashtag channel's QR secret is derivable from its
+            name, so publishing it leaks nothing the name list does not.  A custom
+            channel's key is only handed to an anonymous visitor when the operator
+            opted that channel into web publication on the Radio page.
+            """
+            is_admin = _channels_is_admin()
+            view = self._monitor_view()
+
+            channels = []
+            for channel in view['channels']:
+                name = normalize_name(channel.get('name'))
+                if not name:
+                    continue
+                qr = (admin_qr_for if is_admin else public_qr_for)(channel)
+                is_public_channel = is_public(name)
+                if not is_admin:
+                    if is_public_channel:
+                        # The Public channel is conventional, not ours to hand out.
+                        continue
+                    if not channel['hashtag'] and qr is None:
+                        # Non-hashtag, not consented: its name alone is not
+                        # joinable and its key stays private.
+                        continue
+                channels.append({
+                    'name': name,
+                    'hashtag': channel['hashtag'],
+                    'public': is_public_channel,
+                    'type': channel.get('type') or 'hashtag',
+                    'monitored': bool(channel.get('monitored')),
+                    'on_radio': bool(channel.get('on_radio')),
+                    # Names the bot only lists (its `channels` command section and its
+                    # decode list): no slot, so the page has to say which group a card is in.
+                    'decoded': bool(channel.get('decode_only')),
+                    'published': bool(channel.get('live_messages_visible')),
+                    'qr': qr,
+                    'share_reason': None if qr else (
+                        'public_channel' if is_public_channel else 'private_key'
+                    ),
+                })
+
+            return jsonify({
+                'channels': channels,
+                'monitor_channels': view['monitor_channels'],
+                'is_admin': is_admin,
+            })
+
+        @self.app.route('/api/channels/settings')
+        @self._api_errors('Error getting channel monitor settings')
+        def api_channels_settings_get():
+            """Monitored-channels view for the Settings page."""
+            # Re-read from disk so the page reflects edits made elsewhere.
+            self.config = self._load_merged_config()
+            return jsonify(self._monitor_view())
+
+        @self.app.route('/api/channels/settings', methods=['POST'])
+        @self._api_errors('Error saving channel monitor settings')
+        def api_channels_settings_save():
+            """Persist [Channels] monitor_channels and queue a hot config reload.
+
+            Body: ``{"channels": [name, ...]}`` — the whole list, in order.
+            Monitored hashtag channels the radio is not subscribed to are queued
+            onto free slots in the same call, so a save from Settings is enough
+            to start hearing the channel.  Monitored custom channels are not
+            created here: their key has to be chosen deliberately on the Radio
+            page, which is also where a channel slot is removed.
+            """
+            data = request.get_json(silent=True) or {}
+            if 'channels' not in data:
+                return jsonify({'success': False, 'error': 'channels est requis'}), 400
+
+            names, errors = parse_names(data.get('channels'))
+            limit = monitor_channel_limit(self.config)
+            if len(names) > limit:
+                errors.append(
+                    f'au plus {limit} canaux (le nœud MeshCore expose '
+                    f'{limit} créneaux de canaux, voir [Bot] max_channels)'
+                )
+            if errors:
+                return jsonify({'success': False, 'error': '; '.join(errors)}), 400
+
+            if any(is_public(name) for name in names):
+                override_key = PUBLIC_CHANNEL_OVERRIDE_KEY
+                if (self.config.get('Bot', override_key, fallback='') or '').strip().lower() != 'true':
+                    return jsonify({
+                        'success': False,
+                        'error': (
+                            'Le canal Public est refusé par le bot sans la clef '
+                            f'"[{override_key}] = true" dans [Bot] de config.ini — '
+                            'le bot refuserait de démarrer avec cette liste.'
+                        ),
+                    }), 400
+
+            value = ','.join(names)
+            target_path = _channels_section_target_path()
+            try:
+                store = get_settings_store(self.config, target_path, self.db_manager)
+                result = store.write_values('Channels', {'monitor_channels': value})
+            except IniValueError as exc:
+                return jsonify({'success': False, 'error': str(exc)}), 400
+            except Exception:
+                self.logger.exception("Error saving monitored channels")
+                return jsonify({'success': False, 'error': 'Erreur interne — voir les journaux du serveur'}), 500
+
+            backup_path = result.get('backup_path', '') if isinstance(result, dict) else ''
+            reload_op_id = _queue_config_reload_id()
+            reload_queued = reload_op_id is not None
+
+            # Auto-provision the monitored hashtag channels the radio is not
+            # subscribed to yet.  Same queue the Radio page uses, so the bot
+            # claims and executes them one at a time.
+            missing = self._missing_hashtag_channels(names)
+            used_indices = {
+                channel['channel_idx'] for channel in self._get_channels()
+                if channel.get('channel_idx') is not None
+            }
+            free_indices = [i for i in range(limit) if i not in used_indices]
+            provisioned: list[dict[str, Any]] = []
+            not_provisioned: list[str] = []
+            for name in missing:
+                if not free_indices:
+                    not_provisioned.append(name)
+                    continue
+                channel_idx = free_indices.pop(0)
+                used_indices.add(channel_idx)
+                try:
+                    add_result = self._add_channel_for_web(channel_idx, name)
+                except Exception:
+                    self.logger.exception("Failed to queue channel add for %s", name)
+                    not_provisioned.append(name)
+                    continue
+                if add_result.get('success'):
+                    provisioned.append({
+                        'name': name,
+                        'channel_idx': channel_idx,
+                        'operation_id': add_result.get('operation_id'),
+                    })
+                else:
+                    self.logger.warning(
+                        "Could not queue channel add for %s: %s",
+                        name, add_result.get('error'),
+                    )
+                    not_provisioned.append(name)
+
+            custom_monitored = [
+                name for name in names
+                if not name.startswith('#') and not is_public(name)
+            ]
+            radio_keys = {lookup_key(name) for name in names}
+            radio_only = [
+                normalize_name(channel.get('name')) for channel in self._get_channels()
+                if normalize_name(channel.get('name')) and lookup_key(channel.get('name')) not in radio_keys
+            ]
+
+            self.logger.info(
+                "Monitored channels saved (%d channels, %d queued on radio, reload=%s)",
+                len(names), len(provisioned), reload_queued,
+            )
+            return jsonify({
+                'success': True,
+                'monitor_channels': names,
+                'backup_path': backup_path,
+                'reload_queued': reload_queued,
+                'reload_operation_id': reload_op_id,
+                'provisioned': provisioned,
+                'not_provisioned': not_provisioned,
+                'custom_monitored': custom_monitored,
+                'radio_only': radio_only,
+            })
 
         @self.app.route('/api/radio/status')
         @self._api_errors('Error getting radio status')

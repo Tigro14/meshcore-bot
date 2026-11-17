@@ -16,6 +16,31 @@
 
 Les mises à jour de Tigro sont intégrées dans Baliz en conservant ses particularités. Publier une version de production ne remplace pas `main`, ne réécrit pas l'historique et ne supprime pas les branches de travail existantes.
 
+## Intégration de Tigro main — 17 novembre 2026
+
+La branche `sync/tigro-main-20261117` intègre les 35 commits de Tigro depuis
+`d3ba8888` jusqu’à `5c3ef93b18df74c5a32fc7295abc7c2d1eb2b28a` dans `baliz`.
+
+- Cache Open-Meteo avec repli en cas d’échec, sélection des modèles Météo-France
+  pour la métropole, nouvelle tentative des requêtes et unités du vent explicites.
+- Libellés français du bulletin météo quotidien et géocodage amélioré.
+- Page Channels et QR codes d’ajout de canal, édition des canaux surveillés dans
+  Settings, QR d’ajout de contact et sessions web conservées après redémarrage.
+- Page Real-time publique avec filtrage des canaux, réponses privées et journaux
+  réservés aux administrateurs. Nouveaux liens réseau dans Infos.
+- Corrections Blitzortung MQTT, alertes de collision de préfixe et installation
+  des dépendances de géocodage.
+
+L’assistant Baliz, la vigilance bretonne, Airtime, Clock Sync et les migrations
+sont conservés. Les bulletins fournis à l’assistant conservent leur lieu pour
+empêcher une reformulation vers une autre ville. Le profil garde ses activations
+et réglages ; seule l’option supprimée `include_prefix_free_hint` est retirée.
+Cette suppression est répercutée dans `config/baliz-identity`.
+
+Publication GitHub uniquement : le LXC103 reste à
+`611cd5cb29235ba77481e61e9d66db79a6d3b562`. `main` n’est pas modifiée.
+Voir la [validation de l’intégration](validation/baliz-tigro-main-20261117.md).
+
 ## Alignement avec le LXC103 — 17 novembre 2026
 
 La source installée reste `611cd5cb29235ba77481e61e9d66db79a6d3b562`, déjà

@@ -60,9 +60,15 @@ Read the [upgrade guide](upgrade.md) before upgrading an existing installation.
 
 ### Optional feature packages
 
-Two feature sets are not installed by default because most bots do not need them:
-the profanity filter (`better-profanity`, `unidecode`) and geocoding extras
-(`pycountry`, `us`). A fresh install and a `--upgrade` both prompt for each one.
+The geocoding extras (`pycountry`, `us`) are installed unless you decline them:
+without them a two-letter country such as a `[Weather] default_country = FR`, or a
+`City, FR` query, is not recognized as a country and the city is looked up through
+the US major-city list, so `Paris, FR` becomes Paris, Texas. They are pure-Python
+data packages and add no compiled dependency.
+
+The profanity filter (`better-profanity`, `unidecode`) stays opt-in because it
+rewrites the messages the bot relays. A fresh install and a `--upgrade` prompt for
+each set, geocoding defaulting to yes and the profanity filter to no.
 
 For an unattended run, install both without prompting:
 
@@ -70,8 +76,15 @@ For an unattended run, install both without prompting:
 sudo ./install-service.sh --upgrade --install-extras
 ```
 
+Skip every optional package instead:
+
+```bash
+sudo ./install-service.sh --upgrade --no-extras
+```
+
 `--install-extras` also works alongside `--update-venv`, which otherwise keeps
-whatever is already in the virtual environment and does not prompt:
+whatever is already in the virtual environment and does not prompt; it still adds
+the geocoding extras when the existing environment is missing them:
 
 ```bash
 sudo ./install-service.sh -u --update-venv --install-extras

@@ -32,9 +32,16 @@ from ...utils import (  # noqa: F401  format_temperature_high_low and get_nomina
 from ...weather_common import (
     _ARROWS_8,
     _COMPASS_16,
+    OPEN_METEO_CACHE_FRESH_HOURS,
+    OPEN_METEO_CACHE_MAX_AGE_HOURS,
+    OPEN_METEO_HOURLY_FRESH_HOURS,
     WeatherCommandMixin,
     load_open_meteo_model,
     load_open_meteo_units,
+    open_meteo_cache_is_usable,
+    read_open_meteo_cache,
+    select_open_meteo_model,
+    store_open_meteo_payload,
 )
 from ..base_command import BaseCommand
 
@@ -368,6 +375,7 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         parts, option_word, option_type, option_days = self._split_option_only(parts, GWX_MULTIDAY_MAX_DAYS)
 
         # If no location specified, check custom MQTT then WXSIM default sources
+        using_default_city = False
         if len(parts) < 2:
             mqtt_topic = self._get_custom_mqtt_weather_topic(None)
             if mqtt_topic:
@@ -385,6 +393,11 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             if location_str is None:
                 await self.send_response(message, self.translate('commands.gwx.usage'))
                 return True
+            # A default city stands in for a sender who named no place, so the
+            # reply names it: the user never typed it and cannot infer it from
+            # "Ce soir: …". A companion or bot position arrives as coordinates
+            # and keeps its reverse-lookup label instead.
+            using_default_city = location_str == self._default_city_query()
             parts = [parts[0], location_str]
 
         if option_word:
@@ -426,7 +439,9 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             self.record_execution(message.sender_id)
 
             # Get weather data for the location
-            weather_data = await self.get_weather_for_location(location, forecast_type, num_days, message)
+            weather_data = await self.get_weather_for_location(
+                location, forecast_type, num_days, message, default_location=using_default_city
+            )
 
             return await self._send_weather_reply(message, weather_data, forecast_type)
 
@@ -435,7 +450,7 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             await self.send_response(message, self.translate('commands.gwx.error', error=str(e)))
             return True
 
-    async def get_weather_for_location(self, location: str, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None) -> Union[str, tuple[str, str, str]]:
+    async def get_weather_for_location(self, location: str, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, default_location: bool = False) -> Union[str, tuple[str, str, str]]:
         """Get weather data for any global location.
 
         Args:
@@ -443,6 +458,8 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             forecast_type: "default", "tomorrow", "multiday", or "hourly".
             num_days: Number of days for multiday forecast (2–16).
             message: The MeshMessage for dynamic length calculation.
+            default_location: The location is [Weather] default_city standing in
+                for a request that named no place; the reply names it.
 
         Geocoding and the Open-Meteo fetch are both blocking HTTP, so the whole
         body runs on a worker thread; inline it stalled every other coroutine for
@@ -452,7 +469,7 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             Union[str, Tuple[str, str, str]]: Format string or tuple for multi-message response.
         """
         return await asyncio.to_thread(
-            self._get_weather_for_location_sync, location, forecast_type, num_days, message
+            self._get_weather_for_location_sync, location, forecast_type, num_days, message, default_location
         )
 
     def _get_weather_for_location_sync(
@@ -461,6 +478,7 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         forecast_type: str = "default",
         num_days: int = 7,
         message: MeshMessage = None,
+        default_location: bool = False,
     ) -> Union[str, tuple[str, str, str]]:
         """Blocking body of :meth:`get_weather_for_location` (runs off the event loop)."""
         try:
@@ -471,7 +489,8 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
 
             lat, lon, address_info, geocode_result = result
             return self._weather_for_point(
-                location, lat, lon, address_info, geocode_result, forecast_type, num_days, message
+                location, lat, lon, address_info, geocode_result, forecast_type, num_days, message,
+                default_location=default_location,
             )
 
         except Exception as e:
@@ -488,14 +507,17 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         forecast_type: str = "default",
         num_days: int = 7,
         message: MeshMessage = None,
+        default_location: bool = False,
     ) -> Union[str, tuple[str, str, str]]:
         """The Open-Meteo reply for a place already geocoded, labeled when the label adds information.
 
         Also wx's answer for a place outside NWS coverage ([Weather] openmeteo_fallback).
+        ``default_location`` forces the label for a bare request answered from
+        [Weather] default_city: the sender never typed that name.
         """
         # Format location name for display, when it tells the user something
         location_display = ""
-        if (self._location_label_adds_information(location, address_info)
+        if (default_location or self._location_label_adds_information(location, address_info)
                 or isinstance(getattr(message, "capture_sink", None), list)):
             # The assistant needs the provider's actual place to ground its prose.
             location_display = self._format_location_display(address_info, geocode_result, location)
@@ -511,14 +533,17 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         # Get weather forecast from Open-Meteo based on type
         # Pass location_prefix_len so weather formatting can account for it
         current = {}
+        # The geocoded country decides the automatic Météo-France model selection
+        # when the request covers France.
+        country_code = (address_info or {}).get('country_code') or None
         if forecast_type == "tomorrow":
-            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="tomorrow", message=message, location_prefix_len=location_prefix_len)
+            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="tomorrow", message=message, location_prefix_len=location_prefix_len, country_code=country_code)
         elif forecast_type == "multiday":
-            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="multiday", num_days=num_days, message=message, location_prefix_len=location_prefix_len)
+            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="multiday", num_days=num_days, message=message, location_prefix_len=location_prefix_len, country_code=country_code)
         elif forecast_type == "hourly":
-            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="hourly", message=message, location_prefix_len=location_prefix_len)
+            weather_text = self.get_open_meteo_weather(lat, lon, forecast_type="hourly", message=message, location_prefix_len=location_prefix_len, country_code=country_code)
         else:
-            weather_text, current = self._get_open_meteo_weather_with_conditions(lat, lon, message=message, location_prefix_len=location_prefix_len)
+            weather_text, current = self._get_open_meteo_weather_with_conditions(lat, lon, message=message, location_prefix_len=location_prefix_len, country_code=country_code)
 
         # Check if it's an error (translated error message)
         error_fetching = self.translate('commands.gwx.error_fetching')
@@ -828,7 +853,7 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         }
         return state_map.get(state, state)
 
-    def get_open_meteo_weather(self, lat: float, lon: float, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, location_prefix_len: int = 0) -> str:
+    def get_open_meteo_weather(self, lat: float, lon: float, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, location_prefix_len: int = 0, country_code: str = None) -> str:
         """Get weather forecast from Open-Meteo API.
 
         Args:
@@ -838,16 +863,67 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             num_days: Number of days for multiday forecast (2–16).
             message: The MeshMessage for dynamic length calculation.
             location_prefix_len: Length of location prefix (e.g., "City, CC: ") that will be added later.
+            country_code: Geocoded country code ("fr"), when known; it decides the
+                automatic Météo-France model selection for France.
 
         Returns:
             str: Formatted weather string or error message.
         """
         weather, _ = self._get_open_meteo_weather_with_conditions(
-            lat, lon, forecast_type, num_days, message, location_prefix_len
+            lat, lon, forecast_type, num_days, message, location_prefix_len, country_code
         )
         return weather
 
-    def _get_open_meteo_weather_with_conditions(self, lat: float, lon: float, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, location_prefix_len: int = 0) -> tuple[str, dict]:
+    _OPEN_METEO_RETRY_BACKOFF_SECONDS = 2
+
+    def _fetch_open_meteo_payload(self, api_url: str, params: dict) -> Optional[dict]:
+        """One Open-Meteo payload, retried and model-degraded where that helps.
+
+        A network error or 5xx/429 gets one retry after a short backoff (this
+        fetch already runs on a worker thread, so sleeping is off the event
+        loop). A 4xx against an explicit ``models`` value — Météo-France
+        refusing a point outside its domain, or a model that does not carry
+        one of the requested variables — gets one retry with the model
+        dropped, letting Open-Meteo pick its own best_match. 4xx bodies name
+        Open-Meteo's own reason ("No data is available for this location", …),
+        so the body is logged next to the status code instead of the bare
+        status alone.
+        """
+        network_retry_done = False
+        model_retry_done = 'models' not in params
+        model_dropped = False
+        request_params = dict(params)
+        while True:
+            try:
+                response = requests.get(api_url, params=request_params, timeout=self.url_timeout)
+            except Exception as e:
+                self.logger.error(f"Error fetching Open-Meteo weather: {e}")
+                if network_retry_done:
+                    return None
+                network_retry_done = True
+                time.sleep(self._OPEN_METEO_RETRY_BACKOFF_SECONDS)
+                continue
+            if response.ok:
+                data = response.json()
+                if model_dropped:
+                    self.logger.info("Open-Meteo answered after the configured model was dropped")
+                return data
+            self.logger.warning(
+                f"Error fetching weather from Open-Meteo: HTTP {response.status_code} - "
+                f"{(response.text if isinstance(response.text, str) else '')[:180]}"
+            )
+            if not model_retry_done and response.status_code < 500:
+                request_params = {k: v for k, v in params.items() if k != 'models'}
+                model_retry_done = True
+                model_dropped = True
+                continue
+            if not network_retry_done and (response.status_code >= 500 or response.status_code == 429):
+                network_retry_done = True
+                time.sleep(self._OPEN_METEO_RETRY_BACKOFF_SECONDS)
+                continue
+            return None
+
+    def _get_open_meteo_weather_with_conditions(self, lat: float, lon: float, forecast_type: str = "default", num_days: int = 7, message: MeshMessage = None, location_prefix_len: int = 0, country_code: str = None) -> tuple[str, dict]:
         """Return the reply and current conditions from the same Open-Meteo request."""
         # Get max message length dynamically, then subtract location prefix length
         max_length = self.get_max_message_length(message) if message else 130
@@ -878,18 +954,37 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
                 'timezone': 'auto',
                 'forecast_days': forecast_days
             }
-            if self.weather_model:
-                params['models'] = self.weather_model
+            model = select_open_meteo_model(
+                self.weather_model,
+                latitude=lat,
+                longitude=lon,
+                forecast_days=forecast_days,
+                country_code=country_code,
+            )
+            if model:
+                params['models'] = model
             if forecast_type == "hourly":
                 params['hourly'] += ',precipitation_probability,is_day'
 
-            response = self._request_open_meteo(api_url, params)
+            # A response cached within the fresh window answers the identical request
+            # without touching the API; when the API fails, any same-day response
+            # inside the fallback window is served instead of an error.
+            cached_data, cached_age = read_open_meteo_cache(self.logger, self.db_manager, params)
+            fresh_limit = OPEN_METEO_HOURLY_FRESH_HOURS if forecast_type == "hourly" else OPEN_METEO_CACHE_FRESH_HOURS
+            data = None
+            if cached_data is not None and open_meteo_cache_is_usable(cached_data, cached_age, fresh_limit):
+                self.logger.debug(f"Serving Open-Meteo forecast from cache ({cached_age:.1f} h old)")
+                data = cached_data
 
-            if not response.ok:
-                self.logger.warning(f"Error fetching weather from Open-Meteo: {response.status_code}")
-                return self.translate('commands.gwx.error_fetching'), {}
-
-            data = response.json()
+            if data is None:
+                data = self._fetch_open_meteo_payload(api_url, params)
+                if data is not None:
+                    store_open_meteo_payload(self.logger, self.db_manager, params, data)
+                elif cached_data is not None and open_meteo_cache_is_usable(cached_data, cached_age, OPEN_METEO_CACHE_MAX_AGE_HOURS):
+                    self.logger.warning(f"Serving Open-Meteo forecast from cache ({cached_age:.1f} h old) after the API failed")
+                    data = cached_data
+                else:
+                    return self.translate('commands.gwx.error_fetching'), {}
 
             if forecast_type == "tomorrow":
                 return self.format_tomorrow_forecast(data, max_length), {}
@@ -947,10 +1042,17 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             parts.append(f"{int(temperature)}°")
             speed = value('wind_speed_10m')
             direction = value('wind_direction_10m')
+            # Hourly lines keep their wind bare: a unit on every line would
+            # push whole hours out of the message, and the reply's other
+            # lines already show the unit.
             if speed is not None and direction is not None:
                 parts.append(f"{self._without_arrow(self._degrees_to_direction(direction))}{int(speed)}")
             lines.append(" ".join(parts))
         return self._pack_hourly_lines(lines, max_length)
+
+    def _wind_unit_label(self) -> str:
+        """The configured wind_speed_unit as the catalog spells it: mph, km/h, m/s, kn."""
+        return self.translate(f'services.weather_service.wind_speed_units.{self.wind_speed_unit}')
 
     def _open_meteo_current(self, data: dict, max_length: int, temp_symbol: str) -> Optional[str]:
         """Current conditions for the default gwx reply, with extra conditions when they fit.
@@ -1010,12 +1112,15 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             feels_str = self.translate('commands.gwx.feels_like', value=feels_like, unit=temp_symbol)
             weather += f" {feels_str}"
 
-        # Add wind info (always show if >= 3 mph, show gusts if significant)
+        # Add wind info (always show if >= 3 mph, show gusts if significant).
+        # Every wind number carries its unit: a bare "⬆️N9G22" left the unit,
+        # and the 9 itself, to be guessed.
         if wind_speed is not None and wind_speed >= 3:
-            weather += f" {wind_direction}{wind_speed}"
+            wind_unit = self._wind_unit_label()
+            weather += f" {wind_direction}{wind_speed} {wind_unit}"
             if wind_gusts is not None and wind_gusts > wind_speed + 3:
-                gust_str = self.translate('commands.gwx.gust', value=wind_gusts)
-                weather += gust_str
+                gust_str = self.translate('commands.gwx.gust', value=wind_gusts, unit=wind_unit)
+                weather += f" {gust_str}"
 
         # Add humidity
         if humidity is not None:
@@ -1208,11 +1313,12 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             if len(daily.get('wind_speed_10m_max', [])) > 1:
                 wind_speed = int(daily['wind_speed_10m_max'][1])
                 if wind_speed >= 3:
-                    wind_info = f" {wind_speed}"
+                    wind_unit = self._wind_unit_label()
+                    wind_info = f" {wind_speed} {wind_unit}"
                     if len(daily.get('wind_gusts_10m_max', [])) > 1:
                         wind_gusts = int(daily['wind_gusts_10m_max'][1])
                         if wind_gusts > wind_speed + 3:
-                            gust_info = self.translate('commands.gwx.gust', value=wind_gusts)
+                            gust_info = f" {self.translate('commands.gwx.gust', value=wind_gusts, unit=wind_unit)}"
 
             # Get precipitation probability and amount
             precip_info = ""
@@ -1509,33 +1615,3 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             return int(code)
         except (ValueError, TypeError):
             return 0
-
-
-    def _request_open_meteo(self, api_url: str, params: dict) -> requests.Response:
-        """Fetch Open-Meteo data, retrying only temporary failures."""
-        attempts = 3
-        for attempt in range(attempts):
-            try:
-                response = requests.get(api_url, params=params, timeout=self.url_timeout)
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-                if attempt == attempts - 1:
-                    raise
-                self.logger.warning(
-                    "Temporary Open-Meteo connection failure; retrying (%s/%s)",
-                    attempt + 1,
-                    attempts - 1,
-                )
-            else:
-                if response.ok or (response.status_code != 429 and response.status_code < 500):
-                    return response
-                if attempt == attempts - 1:
-                    return response
-                self.logger.warning(
-                    "Temporary Open-Meteo HTTP %s; retrying (%s/%s)",
-                    response.status_code,
-                    attempt + 1,
-                    attempts - 1,
-                )
-            time.sleep(0.25 * (2 ** attempt))
-
-        raise RuntimeError("Open-Meteo retry loop ended unexpectedly")
