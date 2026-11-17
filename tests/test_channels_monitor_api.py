@@ -191,10 +191,10 @@ class TestChannelsViewFeed:
         assert entry["qr"]["secret"] == hashtag_secret("#fr-idf")
         assert entry["qr"]["uri"].startswith("meshcore://channel/add?name=fr-idf&secret=")
 
-    def test_a_hashtag_qr_is_offered_even_before_the_radio_subscribes(self, gated_viewer):
-        entry = _client(gated_viewer).get("/api/channels/view").get_json()["channels"][0]
-        assert entry["on_radio"] is False
-        assert entry["qr"]["secret"] == hashtag_secret("#fr-idf")
+    def test_a_monitored_name_is_not_offered_before_the_radio_subscribes(self, gated_viewer):
+        data = _client(gated_viewer).get("/api/channels/view").get_json()
+        assert data["channels"] == []
+        assert data["monitor_channels"] == ["#fr-idf"]
 
     def test_the_public_channel_is_never_in_the_anonymous_feed(self, gated_viewer):
         _seed_channels(gated_viewer, [(2, "Public", "custom", "11" * 16)])
@@ -227,21 +227,13 @@ class TestChannelsViewFeed:
     def test_anonymous_requests_are_not_flagged_admin(self, gated_viewer):
         assert _client(gated_viewer).get("/api/channels/view").get_json()["is_admin"] is False
 
-    def test_a_custom_channel_the_radio_has_no_key_for_has_no_qr(self, viewer):
-        """Monitored but not created yet: nothing scannable, and a reason why."""
-        resp = _client(viewer).post(
-            "/api/channels/settings",
-            json={"channels": ["secreto"]},
-            content_type="application/json",
-            headers={"X-Requested-With": "XMLHttpRequest"},
-        )
+    def test_a_custom_channel_without_a_radio_slot_stays_in_settings_only(self, viewer):
+        resp = _post_settings(viewer, ["secreto"])
         assert resp.status_code == 200
-        entry = next(
-            c for c in _client(viewer).get("/api/channels/view").get_json()["channels"]
-            if c["name"] == "secreto"
-        )
-        assert entry["qr"] is None
-        assert entry["share_reason"] == "private_key"
+        assert "secreto" not in {
+            c["name"] for c in _client(viewer).get("/api/channels/view").get_json()["channels"]
+        }
+        assert _client(viewer).get("/api/channels/settings").get_json()["monitor_channels"] == ["secreto"]
 
     def test_the_monitor_list_travels_with_the_channels(self, gated_viewer):
         data = _client(gated_viewer).get("/api/channels/view").get_json()
@@ -253,12 +245,7 @@ class TestChannelsViewFeed:
 # ---------------------------------------------------------------------------
 
 class TestListedDecodeOnlyChannels:
-    """[Channels_List] and [Web_Viewer] decode_hashtag_channels put names on the page that
-    the radio holds no slot for.  They stay on the page — the bot publishes them through its
-    ``channels`` command and derives their hashtag key — but the feed labels them with
-    ``decoded``, because a card with a QR on a public page must not read as a channel the bot
-    answers on.
-    """
+    """Join cards describe radio subscriptions, not the internal example catalog."""
 
     def _declare(self, viewer, tmp_path, keys):
         with open(tmp_path / "config.ini", "a", encoding="utf-8") as handle:
@@ -270,32 +257,36 @@ class TestListedDecodeOnlyChannels:
     def _feed(self, client):
         return {c["name"]: c for c in client.get("/api/channels/view").get_json()["channels"]}
 
-    def test_a_listed_channel_is_shared_with_a_derived_qr(self, gated_viewer, tmp_path):
-        self._declare(gated_viewer, tmp_path, ["weather"])
-        entry = self._feed(_client(gated_viewer))["#weather"]
-        assert entry["decoded"] is True
-        assert entry["monitored"] is False
-        assert entry["on_radio"] is False
-        assert entry["qr"]["secret"] == hashtag_secret("#weather")
+    @pytest.mark.parametrize("admin", [False, True])
+    def test_catalog_examples_are_not_shared_as_join_cards(self, gated_viewer, tmp_path, admin):
+        self._declare(gated_viewer, tmp_path, ["weather", "sports.sounders"])
+        client = _login(gated_viewer) if admin else _client(gated_viewer)
+        assert "#weather" not in self._feed(client)
+        assert "#sounders" not in self._feed(client)
+        # Keep the existing decoding/catalog data; merely viewing the page changes no slots.
+        assert "#weather" in {c["name"] for c in gated_viewer._get_channels()}
+        assert _operations(gated_viewer) == []
 
-    def test_a_categorized_key_is_shared_under_its_wire_name(self, gated_viewer, tmp_path):
-        self._declare(gated_viewer, tmp_path, ["sports.sounders"])
-        assert "#sounders" in self._feed(_client(gated_viewer))
+    def test_a_real_radio_subscription_is_kept_even_when_also_listed(self, gated_viewer, tmp_path):
+        _seed_channels(gated_viewer, [(0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf")),
+                                      (1, "#weather", "hashtag", hashtag_secret("#weather"))])
+        self._declare(gated_viewer, tmp_path, ["weather", "sports.sounders"])
+        entries = self._feed(_login(gated_viewer))
+        assert set(entries) == {"#fr-idf", "#weather"}
+        assert entries["#weather"]["on_radio"] is True
+        assert entries["#weather"]["decoded"] is False
+        assert entries["#weather"]["qr"]["secret"] == hashtag_secret("#weather")
 
-    def test_a_channel_the_radio_holds_is_not_flagged_decoded(self, gated_viewer, tmp_path):
-        _seed_channels(gated_viewer, [(0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf"))])
-        self._declare(gated_viewer, tmp_path, ["weather"])
-        entries = self._feed(_client(gated_viewer))
-        assert entries["#fr-idf"]["decoded"] is False
-        assert entries["#fr-idf"]["on_radio"] is True
-        assert entries["#weather"]["decoded"] is True
-
-    def test_a_listed_channel_that_is_also_monitored_reads_as_monitored(self, gated_viewer, tmp_path):
+    def test_monitor_settings_remain_available_before_a_radio_slot_exists(self, gated_viewer, tmp_path):
         self._declare(gated_viewer, tmp_path, ["fr-idf"])
-        entry = self._feed(_client(gated_viewer))["#fr-idf"]
-        assert entry["monitored"] is True
-        assert entry["decoded"] is True
-        assert entry["on_radio"] is False
+        assert "#fr-idf" not in self._feed(_login(gated_viewer))
+        settings = _login(gated_viewer).get("/api/channels/settings").get_json()
+        assert settings["monitor_channels"] == ["#fr-idf"]
+
+    def test_an_extra_decoder_name_without_a_slot_is_not_displayed(self, gated_viewer):
+        gated_viewer.config.set("Web_Viewer", "decode_hashtag_channels", "#decode-only")
+        assert "#decode-only" not in self._feed(_login(gated_viewer))
+        assert "#decode-only" in {c["name"] for c in gated_viewer._get_channels()}
 
 
 # ---------------------------------------------------------------------------
