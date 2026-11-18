@@ -22,6 +22,7 @@ import asyncio
 import codecs
 import contextlib
 import http.client
+import json
 import random
 import re
 import socket
@@ -97,6 +98,12 @@ _VIGILANCE_API_V3 = 'https://rwg.meteofrance.com/wsft/v3'
 # ten departments take about 20 s instead of under a second, which is nothing on an 8 h poll.
 # Configured by `request_delay`.
 _REQUEST_DELAY_SECONDS = 2.0
+
+# bot_metadata key holding a JSON map of department → epoch seconds of the last alert sent.
+# Namespaced because bot_metadata is shared across the whole bot. The throttle has to live
+# outside memory: the service runs under Restart=always, and a level that is already alerting
+# would otherwise re-fire on every start, the throttle being reset each time.
+_LAST_ALERT_METADATA_KEY = 'vigilance_last_alert_epochs'
 
 # Color codes used by the product: 1 is the lowest level.
 _COLOR_IDS = {1: 'Vert', 2: 'Jaune', 3: 'Orange', 4: 'Rouge'}
@@ -543,7 +550,10 @@ class VigilanceService(BaseServicePlugin):
     posts to a channel when Orange or Rouge vigilance is active.
 
     One alert per department that is at an alert level, each with its own throttle, so
-    a level in one department does not silence the alert of another one.
+    a level in one department does not silence the alert of another one. The throttle is
+    re-armed from bot_metadata on start: under Restart=always a restart lands minutes
+    after the last alert, and re-alerting the same level every time is how a whole
+    channel fills with duplicates.
 
     Config section: ``[Vigilance_Service]``
     """
@@ -663,7 +673,9 @@ class VigilanceService(BaseServicePlugin):
         self._poll_task: Optional[asyncio.Task] = None
         self._last_color: dict[str, Optional[str]] = {}
         self._last_bulletin_date: dict[str, datetime] = {}
-        self._last_alert_time: dict[str, float] = {}
+        # Re-armed from bot_metadata so a restart cannot silence the throttle and
+        # re-alert a level that is already alerting.
+        self._last_alert_time: dict[str, float] = self._load_last_alert_times()
 
         self.logger.info(
             "Vigilance service initialized: depts=%s channel=%s interval=%.0fs throttle=%ds "
@@ -747,6 +759,7 @@ class VigilanceService(BaseServicePlugin):
                 message = self._format_message(code, info)
                 await self._send_alert(message, info)
                 self._last_alert_time[code] = time.monotonic()
+                self._persist_last_alert_time(code)
                 self.logger.info("Vigilance alert sent for dept %s: %s", code, color)
 
     def _fetch_with_retry(self) -> Optional[dict[str, dict[str, Any]]]:
@@ -802,6 +815,65 @@ class VigilanceService(BaseServicePlugin):
     # ------------------------------------------------------------------
     # Alert logic
     # ------------------------------------------------------------------
+
+    def _read_last_alert_epochs(self) -> dict[str, float]:
+        """Read the persisted department -> epoch-seconds map, tolerating bad data."""
+        db_manager = getattr(self.bot, 'db_manager', None)
+        if db_manager is None:
+            return {}
+        raw = db_manager.get_metadata(_LAST_ALERT_METADATA_KEY)
+        if not isinstance(raw, str) or not raw:
+            return {}
+        try:
+            stored = json.loads(raw)
+        except ValueError:
+            self.logger.warning(
+                "Vigilance: unreadable %s in bot_metadata, starting unthrottled",
+                _LAST_ALERT_METADATA_KEY,
+            )
+            return {}
+        if not isinstance(stored, dict):
+            return {}
+        epochs: dict[str, float] = {}
+        for code, value in stored.items():
+            try:
+                epochs[str(code)] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return epochs
+
+    def _load_last_alert_times(self) -> dict[str, float]:
+        """Re-arm the throttle from the epochs persisted by the last alerts.
+
+        Stored as epoch seconds, converted back to monotonic references so the
+        in-run comparison keeps ignoring wall-clock changes. A clock that went
+        backwards since the alert is read as "it just fired".
+        """
+        now_real = time.time()
+        now_monotonic = time.monotonic()
+        return {
+            code: now_monotonic - max(0.0, now_real - epoch)
+            for code, epoch in self._read_last_alert_epochs().items()
+        }
+
+    def _persist_last_alert_time(self, code: str) -> None:
+        """Record the alert's epoch so the throttle outlives this run.
+
+        Entries older than the throttle are dropped: they can no longer hold an
+        alert back, and the map stays small no matter how many departments pass
+        through Orange over the months.
+        """
+        db_manager = getattr(self.bot, 'db_manager', None)
+        if db_manager is None:
+            return
+        now_real = time.time()
+        epochs = {
+            code: epoch
+            for code, epoch in self._read_last_alert_epochs().items()
+            if 0.0 <= now_real - epoch <= self.alert_throttle
+        }
+        epochs[code] = now_real
+        db_manager.set_metadata(_LAST_ALERT_METADATA_KEY, json.dumps(epochs))
 
     def _should_alert(self, code: str, info: dict[str, Any]) -> bool:
         color = info['color']

@@ -1,6 +1,7 @@
 """Tests for the Météo-France vigilance monitor (level sources, several departments, alert policy)."""
 
 import configparser
+import json
 import time
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -578,6 +579,60 @@ class TestAlertPolicy:
         message = svc._format_message("25", _info("Rouge", "Vigilance rouge :\n- " + "x" * 300))
         assert len(message) <= 180
         assert message.endswith("...")
+
+
+class TestThrottlePersistence:
+    """The throttle must outlive a restart: Restart=always used to re-alert the same level."""
+
+    def test_alert_records_the_epoch_in_metadata(self):
+        bot = _make_bot()
+        svc = VigilanceService(bot)
+        svc._persist_last_alert_time("25")
+        key, payload = bot.db_manager.set_metadata.call_args.args
+        assert key == "vigilance_last_alert_epochs"
+        assert abs(json.loads(payload)["25"] - time.time()) < 5
+
+    def test_persisted_throttle_holds_the_next_run(self):
+        bot = _make_bot()
+        bot.db_manager.get_metadata.return_value = json.dumps({"25": time.time() - 60})
+        svc = VigilanceService(bot)
+        assert svc._should_alert("25", _info("Rouge")) is False
+        assert svc._should_alert("60", _info("Rouge")) is True
+
+    async def test_check_and_alert_persists_after_sending(self):
+        bot = _make_bot()
+        svc = VigilanceService(bot)
+        svc.has_external_notification_targets = lambda: False
+        svc.get_mesh_flood_scope = lambda: None
+        svc.send_external_notifications = AsyncMock()
+        with patch(
+            "modules.service_plugins.vigilance_service.VigilanceService._fetch_with_retry",
+            return_value={"25": _info()},
+        ):
+            await svc._check_and_alert()
+        _, payload = bot.db_manager.set_metadata.call_args.args
+        assert "25" in json.loads(payload)
+
+    def test_entry_older_than_the_throttle_is_dropped_on_write(self):
+        bot = _make_bot()
+        bot.db_manager.get_metadata.return_value = json.dumps({"25": time.time() - 7200})
+        svc = VigilanceService(bot)
+        svc._persist_last_alert_time("60")
+        _, payload = bot.db_manager.set_metadata.call_args.args
+        assert "25" not in json.loads(payload)
+        assert "60" in json.loads(payload)
+
+    def test_corrupt_metadata_starts_unthrottled(self):
+        bot = _make_bot()
+        bot.db_manager.get_metadata.return_value = "not json"
+        svc = VigilanceService(bot)
+        assert svc._should_alert("25", _info("Rouge")) is True
+
+    def test_clock_backwards_since_the_alert_still_throttles(self):
+        bot = _make_bot()
+        bot.db_manager.get_metadata.return_value = json.dumps({"25": time.time() + 3600})
+        svc = VigilanceService(bot)
+        assert svc._should_alert("25", _info("Rouge")) is False
 
 
 class TestPollCheck:
