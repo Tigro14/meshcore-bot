@@ -501,6 +501,52 @@ were written while it was on, with the age saying how long ago. A request that f
 not evidence about the setting either, so the page takes back its claim rather than
 leaving it standing beside the error.
 
+## Passive airtime analysis
+
+The `/airtime` curve, duty-cycle estimates and modal detail tables are fed by a
+second, passive read model — `modules/airtime_analysis.py` and its companions
+(`airtime_capture`, `airtime_forwarding`, `airtime_quality`, `airtime_repetitions`),
+adopted from the [Baliz fork](https://github.com/Camousse88/meshcore-bot_Baliz/)
+(Camille Ballon). It reads the same `packet_stream` the writer already fills and
+maintains its own `airtime_observations` table: one row per distinct packet plus
+capture-continuity intervals, so silence is recorded as silence rather than as the
+absence of a row.
+
+It answers different questions from the three ledgers above. It reconstructs, per
+distinct packet, who authored it and which relay retransmissions the flood history
+implies, so it can estimate a repeater's duty cycle ("reconstructed" and "scenario"
+percentages against the 10 % reference, 6 min/h) — something the ledgers, which price
+each heard copy at its own airtime, never claim. The reconstruction is an estimate:
+no inference here proves duty-cycle compliance, and the payload carries its
+`schema_version` and `method.version` so a reader can tell which method produced a
+number. `GET /api/telemetry/occupancy/analysis?window=1h|24h|7d` serves it; unknowns
+are `null`, never 0.
+
+The two read models coexist on one page and are never summed: the analysis counts
+distinct packets and reconstructed relays, the ledgers count heard copies per fact.
+The analysis windows are rolling (`1h`/`24h`/`7d`); the ledgers are day-aligned.
+
+## The /airtime page
+
+The page is the Baliz design: French throughout, times displayed in Europe/Paris,
+unknowns shown as `N/D`, one chart (channel-occupation bars plus packets/min) up
+front, short top-five lists, and the station-ranking tables inside a modal. The
+period selector (`Dernière heure`, `Dernières 24 heures`, `7 derniers jours`) drives
+every card; a silence marker is drawn only where the recorder proves a complete
+window, so a gap never reads as a quiet channel.
+
+The **Registres par airtime** card keeps the three ledgers from this feature inside
+that design. Its own selector switches between the three registers (Auteurs des
+paquets, Premiers relais des chemins, Émetteurs entendus) without re-fetching, each
+row shows modelled airtime and its share of the channel's theoretical capacity over
+the period (the ceiling is one channel-second per elapsed second; above 100 % is
+parallel traffic priced once per copy), packets, the advert slice, and last-seen, and
+each table leads with its whole-ledger recap row — the sum covers the whole register,
+with the entry count saying where the page's top slice ends. Because the ledgers sit
+on whole UTC days while the selector labels a rolling window, the card states the
+span it actually answers for. The fold of truncated relay addresses, the unattributed
+buckets and the never-summed rule are all stated in the table itself.
+
 ## What this can be used for
 
 - Deciding whether a mesh is actually busy, or whether a channel looks busy only from

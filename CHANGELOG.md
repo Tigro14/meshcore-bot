@@ -8,6 +8,25 @@ semantic versioning.
 
 ### Added
 
+- Web viewer `/airtime` adopts the design and the passive airtime model behind it from the
+  [Baliz fork](https://github.com/Camousse88/meshcore-bot_Baliz/) (Camille Ballon's work): a
+  French page built around one curve (channel-occupation bars plus packets/min), duty-cycle
+  estimates for repeaters reconstructed from flood history against a 10 % reference, and
+  station-ranking tables inside a modal, served by
+  `GET /api/telemetry/occupancy/analysis?window=1h|24h|7d`. That read model is metadata-only
+  and versioned (`schema_version`, `method.version`): it maintains its own
+  `airtime_observations` and capture-interval tables from `packet_stream`
+  (`modules/airtime_analysis.py`, `airtime_capture`, `airtime_forwarding`, `airtime_quality`,
+  `airtime_repetitions`), records capture continuity so silence is stored as silence rather
+  than as an absent row, and keeps every unknown a `null` — no inference there proves
+  duty-cycle compliance. The three by-airtime ledgers — authors, entry relays, heard
+  emitters — are kept inside that design as a **Registres par airtime** card: its own
+  selector switches registers without refetching, each row keeps its modelled airtime and
+  its share of the channel's theoretical capacity (one channel-second per elapsed second;
+  above 100 % is parallel traffic priced once per copy), each table leads with its
+  whole-ledger recap, and because those ledgers sit on whole UTC days while the selector
+  labels a rolling window, the card states the span it actually answers for. The two read
+  models coexist on one page and are never summed. `docs/channel-occupancy.md`.
 - Web viewer gains a **Channels** page at `/channels`, on the anonymous allowlist: the channels
   this bot knows — monitored, held by the radio, or only listed by the bot (`[Channels_List]`,
   `decode_hashtag_channels`), each badged with which of those it is — as a card grid with its
