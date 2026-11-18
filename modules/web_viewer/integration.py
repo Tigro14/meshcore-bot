@@ -348,6 +348,46 @@ class BotIntegration:
         while not self._drain_stop.is_set():
             self._drain_stop.wait(timeout=self.DRAIN_INTERVAL)
             self._flush_write_queue()
+            self._record_listening_health()
+
+    def _record_listening_health(self) -> None:
+        """Track the existing RX pipeline, including silence, without querying radio."""
+        import sqlite3
+
+        from modules.airtime_capture import ListeningRecorder
+
+        mono = time.monotonic()
+        previous = getattr(self, '_last_listening_tick', None)
+        if previous is not None and mono-previous < 30:
+            return
+        self._last_listening_tick = mono
+        occupancy = getattr(self.bot, 'occupancy', None)
+        if occupancy is None or occupancy.enabled is not True or self.is_shutting_down:
+            self._listening_recorder = None
+            return
+        recorder = getattr(self, '_listening_recorder', None)
+        if recorder is None:
+            recorder = self._listening_recorder = ListeningRecorder()
+        wall = time.time()
+        health = getattr(self.bot, '_last_health_update', None)
+        ready = (self.bot.connected is True and
+                 getattr(getattr(self.bot, 'meshcore', None), 'is_connected', None) is True and
+                 getattr(self.bot, 'is_radio_zombie', None) is False and
+                 isinstance(health, (int, float)) and 0 <= wall-health <= 75 and
+                 self._write_queue.empty())
+        try:
+            db_path = self._get_web_viewer_db_path()
+            if not Path(db_path).is_file():
+                return
+            with closing(sqlite3.connect(str(db_path), timeout=2)) as conn:
+                if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='airtime_capture_intervals'").fetchone():
+                    return
+                connected_at = getattr(self.bot, 'connection_time', None)
+                loss_at = max(getattr(self, '_capture_loss_at', 0), connected_at if isinstance(connected_at, (int, float)) else 0)
+                recorder.record(conn, wall, mono, ready, loss_at)
+        except Exception as exc:
+            recorder.previous = None
+            self.bot.logger.debug('airtime: capture continuity unavailable: %s', exc)
 
     def _requeue_rows(self, rows: list[tuple]) -> None:
         """Restore rows to the queue after a failed flush (FIFO). Logs if the queue stays full."""
@@ -356,6 +396,7 @@ class BotIntegration:
                 self._write_queue.put(row, timeout=self.requeue_put_timeout_sec)
             except queue.Full:
                 remaining = len(rows) - i
+                self._capture_loss_at = time.time()
                 self.bot.logger.error(
                     "packet_stream: could not re-queue %d row(s) after flush failure; data may be lost",
                     remaining,
@@ -437,6 +478,7 @@ class BotIntegration:
             try:
                 self._write_queue.put(item, timeout=self._WRITE_QUEUE_PUT_TIMEOUT_SEC)
             except queue.Full:
+                self._capture_loss_at = time.time()
                 self.bot.logger.warning(
                     "packet_stream write queue full (%s/%s items) after flush retry; dropping %s",
                     self._write_queue.qsize(),
@@ -639,6 +681,14 @@ class BotIntegration:
             return
         try:
             occupancy.flush(conn, force=force)
+            from modules.airtime_analysis import ingest_stream
+            from modules.airtime_forwarding import analysis_scope_keys
+            from modules.airtime_quality import write_observer_metadata
+            write_observer_metadata(conn, getattr(getattr(self.bot, 'meshcore', None), 'self_info', None))
+            scope_keys = getattr(getattr(self.bot, 'command_manager', None), 'flood_scope_keys', None)
+            known_scopes = analysis_scope_keys(getattr(self.bot, 'config', None), scope_keys if isinstance(scope_keys, dict) else {})
+            ingest_stream(conn, occupancy.modulation(), scope_keys=known_scopes)
+            conn.commit()
         except Exception as e:
             self.bot.logger.warning("occupancy: flush failed: %s", e)
 
@@ -660,6 +710,7 @@ class BotIntegration:
         except Exception:
             supported = False
         self._occupancy_tables_supported = supported
+        return supported
 
     @staticmethod
     def _packet_dims_from_data(packet_data: dict) -> tuple:
@@ -790,6 +841,7 @@ class BotIntegration:
                 'channel_visibility_id': self._channel_visibility_identity(message),
                 'timestamp': time.time(),
                 'sender': getattr(message, 'sender_id', ''),
+                'sender_pubkey': (message.sender_pubkey if isinstance(getattr(message, 'sender_pubkey', None), str) else None),
                 'channel': getattr(message, 'channel', ''),
                 'content': self._on_air_content(message),
                 'snr': str(getattr(message, 'snr', '')),
