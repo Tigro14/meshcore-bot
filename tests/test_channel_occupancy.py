@@ -1577,6 +1577,48 @@ class TestRecordingHooks:
         assert {row["emitter"] for row in occupancy.top_emitters(conn)} == {"62010a", UNATTRIBUTED_SENDER}
         assert [row["relay"] for row in occupancy.top_relays(conn)] == ["b06d1c"]
 
+    def test_a_direct_packet_transport_code_never_becomes_a_path_label(self, occupancy, conn):
+        """A direct packet has no route info: what looks like a one-entry path is its
+        transport codes, and reading a node out of them invents an identity.
+
+        Verified on live traffic: one TRANSPORT_DIRECT ACK with path ["62016C"]
+        wrote a phantom emitter and entry relay, and the two 6-char addresses it
+        put under "6201" froze the prefix fold for the real node there.  The
+        airtime is still charged — only the invented labels are refused.
+        """
+        integration = _integration(_make_bot(occupancy))
+        key = "aabbccdd" + "0" * 56
+        integration._record_occupancy(
+            {
+                "routing_info": {"payload_length": 30, "path_length": 1},
+                "route_type_name": "TRANSPORT_DIRECT",
+                "payload_type_name": "ACK",
+                "sender_pubkey": key,
+                "path": ["62016C"],
+            },
+            "rx",
+        )
+        occupancy.flush(conn)
+        assert {row["emitter"] for row in occupancy.top_emitters(conn)} == {key}
+        assert not list(occupancy.top_relays(conn))
+
+    def test_a_named_flood_still_feeds_both_labels(self, occupancy, conn):
+        """Gating the labels on flood route types must not lose the real flood path:
+        a route_type_name carried by a flooded copy changes nothing."""
+        integration = _integration(_make_bot(occupancy))
+        integration._record_occupancy(
+            {
+                "routing_info": {"payload_length": 30, "path_length": 2},
+                "route_type_name": "TRANSPORT_FLOOD",
+                "sender_pubkey": "alice",
+                "path": ["B06D1C", "62010A"],
+            },
+            "rx",
+        )
+        occupancy.flush(conn)
+        assert {row["emitter"] for row in occupancy.top_emitters(conn)} == {"62010a"}
+        assert [row["relay"] for row in occupancy.top_relays(conn)] == ["b06d1c"]
+
     def test_a_packet_without_path_info_keeps_the_counts_unknown(self, occupancy):
         """A packet that never decoded carries no hash and no path: the window stays silent,
         it does not report one shared identity or a zero-hop direct hear."""
