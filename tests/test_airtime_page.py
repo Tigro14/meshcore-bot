@@ -1,18 +1,15 @@
 """Tests for the /airtime page.
 
-The page reads two read models that must never be mixed: the passive analysis
-([airtime_analysis]) drives the curve, the duty estimates and the modal detail
-tables, while the three by-airtime ledgers ([Channel_Occupancy]) drive the
-"Registres par airtime" card. What these tests protect is the honesty of the
-rendering: modelled airtime is stated as modelled, an unknown is N/D rather
-than a zero, the three registers are never summed, and every period states the
-span it actually answers for.
+The page reads the passive analysis ([airtime_analysis]): it drives the curve, the
+duty estimates and the modal detail tables, and the modal's role tabs are where the
+station rankings live. What these tests protect is the honesty of the rendering:
+modelled airtime is stated as modelled, an unknown is N/D rather than a zero, the
+read models are never summed, and the numbers keep one rounding across the page.
 """
 
 from __future__ import annotations
 
 import configparser
-import re
 from unittest.mock import patch
 
 import pytest
@@ -58,14 +55,14 @@ class TestAirtimePage:
         body = response.data.decode()
         main, details = body.split('<div class="modal fade" id="airtime-details"', 1)
         assert main.count('<canvas') == 1
-        # The one visible table is the ledger card: everything else that
-        # ranks stations lives in the modal, over the analysis read model.
-        assert main.count('<table') == 1
+        # Nothing on the page body is a table: every ranking of stations lives in
+        # the modal, over the analysis read model.
+        assert main.count('<table') == 0
         assert 'Occupation moyenne du canal' in main
         assert 'Paquets reçus par minute' in main
         assert 'Duty cycle estimé' in main
         assert 'airtime-duty-list' in main and 'airtime-source-list' in main
-        assert 'Registres par airtime' in main
+        assert 'Registres par airtime' not in main
         assert details.count('<table') == 3
         assert 'airtime-search' in details
         assert 'Profil radio' in body
@@ -100,61 +97,35 @@ class TestAirtimePage:
         assert 'État de l’enregistrement indisponible.' in body
         assert 'Les données précédentes ne sont pas à jour.' in body
 
-    def test_the_ledger_card_states_modelled_airtime_and_never_sums_registers(self, viewer):
+    def test_the_page_states_modelled_airtime_and_unknown_never_zero(self, viewer):
         """The adopted design may not quietly drop the page's honesty contract."""
         body = viewer.app.test_client().get('/airtime').data.decode()
-        card = body.split('id="airtime-ledger-title"', 1)[1].split('</section>', 1)[0]
-        assert 'L’airtime est modélisé, pas mesuré.' in card
-        assert 'ne sont jamais additionnés' in card
-        assert 'N/D : valeur inconnue, jamais une mesure à zéro.' in card
+        assert 'L’airtime montré ici est modélisé à partir de la modulation, pas mesuré sur la porteuse.' in body
+        assert 'N/D : valeur inconnue, jamais une mesure à zéro.' in body
 
-    def test_the_ledger_card_switches_the_three_registers(self, viewer):
+    def test_the_by_airtime_ledger_card_left_the_page(self, viewer):
+        """The three registers were a second ranking of the same stations under a second
+        read model. The modal's role tabs answer the same question over one model, so the
+        card is gone rather than kept side by side with its tables to reconcile."""
         body = viewer.app.test_client().get('/airtime').data.decode()
-        assert 'airtime-ledger-role' in body
-        assert '<option value="authors">Auteurs des paquets</option>' in body
-        assert '<option value="entry_relays">Premiers relais des chemins</option>' in body
-        assert '<option value="emitters">Émetteurs entendus</option>' in body
-        # One fetch per period: the selector switches registers inside the page.
-        assert "/api/telemetry/occupancy?limit=10&days=" in body
-        assert "top_senders" in body and "top_emitters" in body and "top_relays" in body
-        assert "period_totals?.senders" in body
-        assert "period_totals?.relays" in body
-        assert "period_totals?.emitters" in body
+        for orphan in ('airtime-ledger-title', 'airtime-ledger-role', 'airtime-ledger-rows',
+                       'airtime-totals-row', 'renderLedgers', 'ledgerTotalsRow'):
+            assert orphan not in body
 
-    def test_each_ledger_table_leads_with_its_whole_period_recap(self, viewer):
+    def test_the_recording_banner_still_reads_the_recorder_not_the_analysis(self, viewer):
+        """The analysis read model does not know whether this process records: the banner
+        has to ask the recorder, and a historical page must say so rather than look live."""
         body = viewer.app.test_client().get('/airtime').data.decode()
-        assert 'airtime-totals-row' in body
-        assert '<strong>Tout le registre</strong>' in body
-        assert 'entrées' in body and 'listées' in body
-        assert 'if (!totals || totals.airtime_ms == null) return' in body
+        assert "/api/telemetry/occupancy?limit=1" in body
+        assert 'renderRecording(' in body
 
-    def test_page_states_the_span_the_ledgers_answer_for(self, viewer):
-        """The selector says "Dernières 24 heures" while the ledgers sit on whole UTC days."""
+    def test_the_page_rounds_everything_to_two_decimals(self, viewer):
+        """Mixed rounding across cards reads as two different measurements of one fact,
+        and a third decimal claims precision the modelled sums do not carry."""
         body = viewer.app.test_client().get('/airtime').data.decode()
-        assert 'id="airtime-ledger-span"' in body
-        assert 'Les tableaux répondent pour : ' in body
-        assert 'calés sur des jours UTC entiers.' in body
-
-    def test_every_ledger_row_shows_its_share_of_the_channel_capacity(self, viewer):
-        body = viewer.app.test_client().get('/airtime').data.decode()
-        assert 'pct(row.capacity_percent)' in body
-        assert 'le plafond est une seconde de canal par seconde écoulée' in body
-        assert 'au-delà de 100 %, des émissions parallèles' in body
-
-    def test_the_unattributed_rows_explain_themselves_in_the_cell(self, viewer):
-        """Both glosses sit in the cell, not behind a hover invisible on a phone."""
-        body = viewer.app.test_client().get('/airtime').data.decode()
-        for gloss in (
-            'Contenu sans identité émettrice sur le fil : messages, requêtes, inconnus. Chaque copie compte.',
-            'Aucun nom émetteur sur le fil : non décodé ou inconnu. Chaque copie compte.',
-        ):
-            assert gloss in body
-            assert len([word for word in re.split(r"[\s']+", gloss) if word]) <= 15
-
-    def test_the_fold_and_the_advert_slice_are_stated_in_the_table(self, viewer):
-        body = viewer.app.test_client().get('/airtime').data.decode()
-        assert 'même relais, adresse tronquée à 2 octets' in body
-        assert 'Annonces : part de l’airtime de la ligne passée en annonces' in body
+        assert "maximumFractionDigits: 2" in body
+        assert 'maximumFractionDigits: 1' not in body
+        assert 'maximumFractionDigits: 3' not in body
 
 
 class TestPassiveAirtimeAPI:

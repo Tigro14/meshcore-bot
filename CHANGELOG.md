@@ -19,14 +19,14 @@ semantic versioning.
   (`modules/airtime_analysis.py`, `airtime_capture`, `airtime_forwarding`, `airtime_quality`,
   `airtime_repetitions`), records capture continuity so silence is stored as silence rather
   than as an absent row, and keeps every unknown a `null` — no inference there proves
-  duty-cycle compliance. The three by-airtime ledgers — authors, entry relays, heard
-  emitters — are kept inside that design as a **Registres par airtime** card: its own
-  selector switches registers without refetching, each row keeps its modelled airtime and
-  its share of the channel's theoretical capacity (one channel-second per elapsed second;
-  above 100 % is parallel traffic priced once per copy), each table leads with its
-  whole-ledger recap, and because those ledgers sit on whole UTC days while the selector
-  labels a rolling window, the card states the span it actually answers for. The two read
-  models coexist on one page and are never summed. `docs/channel-occupancy.md`.
+  duty-cycle compliance. Station rankings are the modal's role tabs (authors, entry
+  relays, heard emitters) over that one read model; the page's earlier **Registres par
+  airtime** card — the three by-airtime ledgers rendered side by side with the analysis
+  tables, under a second read model and a second span — is retired rather than kept to
+  reconcile. The ledgers stay recorded and stay served by `GET /api/telemetry/occupancy`;
+  nothing renders them. The page shows one rounding, at most two decimals everywhere, and
+  a non-zero average too small for that floor is shown below it (`< 0,005`) rather than as
+  0. `docs/channel-occupancy.md`.
 - Web viewer gains a **Channels** page at `/channels`, on the anonymous allowlist: the channels
   this bot knows — monitored, held by the radio, or only listed by the bot (`[Channels_List]`,
   `decode_hashtag_channels`), each badged with which of those it is — as a card grid with its

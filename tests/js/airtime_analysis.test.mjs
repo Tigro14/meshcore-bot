@@ -42,7 +42,10 @@ test('only five rows appear in each main list; full names are escaped in all det
     assert.match(elements.get('airtime-relay-details').innerHTML,/&lt;script&gt;/);
     assert.doesNotMatch(elements.get('airtime-source-details').innerHTML,/<img/);
     assert.match(elements.get('airtime-source-details').innerHTML,/Auteur non identifiable/);
-    assert.match(elements.get('airtime-source-note').textContent,/33,333 %/);
+    // Two decimals, like everything else on the page: a third would claim a
+    // precision the counts behind it cannot carry (1 of 3 packets).
+    assert.match(elements.get('airtime-source-note').textContent,/33,33 %/);
+    assert.doesNotMatch(elements.get('airtime-source-note').textContent,/33,333/);
 });
 test('duty always uses the current hour independently of the selected activity period',()=>{
     const {instance,elements}=viewer();instance.render(data,hourly);
@@ -95,7 +98,7 @@ test('packet line shares bin centres with bars and its tooltip shows units and m
     const callbacks=instance.chart.options.plugins.tooltip.callbacks;
     assert.equal(callbacks.label({dataset:bars,parsed:{y:2}}),'Occupation : 2 %');
     assert.equal(callbacks.label({dataset:line,parsed:{y:.4}}),'Paquets/min : 0,4');
-    assert.equal(callbacks.afterBody([{raw:line.data[0]}]),'Taille moyenne : 63,8 octets');
+    assert.equal(callbacks.afterBody([{raw:line.data[0]}]),'Taille moyenne : 63,75 octets');
     assert.equal(callbacks.afterBody([{raw:line.data[2]}]),'');
     assert.equal(instance.chart.options.scales.packets.position,'right');
     assert.equal(instance.chart.options.plugins.legend.display,false);
@@ -297,7 +300,7 @@ test('occupation and packet averages follow the selected period while duty stays
     assert.equal(elements.get('airtime-rx').textContent,'0,2 %');
     assert.equal(elements.get('airtime-rx-note').textContent,'Moyenne sur 7 jours');
     assert.equal(elements.get('airtime-packet-rate').textContent,'0,8');
-    assert.equal(elements.get('airtime-packet-size').textContent,'Taille moyenne : 63,8 octets');
+    assert.equal(elements.get('airtime-packet-size').textContent,'Taille moyenne : 63,75 octets');
     assert.equal(elements.get('airtime-duty').textContent,'0,1 %');
     assert.equal(elements.get('airtime-peak').textContent,'4 %');
     assert.equal(elements.get('airtime-peak-note').textContent,'5 min se terminant le 13/11 à 09:34');
@@ -315,8 +318,10 @@ test('occupation and packet averages follow the selected period while duty stays
     instance.render({...data,coverage:{available_seconds:10},local:{...data.local,rx_packets_per_minute:6}},hourly);
     assert.equal(elements.get('airtime-rx').textContent,'N/D');
     assert.equal(elements.get('airtime-packet-rate').textContent,'N/D');
+    // A non-zero average that would round to 0 at the page's 2 decimals is shown
+    // as below the floor, not as 0: a 0 would read as a measured quiet channel.
     instance.render({...data,local:{...data.local,rx_packets_per_minute:.000099}},hourly);
-    assert.equal(elements.get('airtime-packet-rate').textContent,'< 0,001');
+    assert.equal(elements.get('airtime-packet-rate').textContent,'< 0,005');
 });
 
 test('source ranking uses reconstructed radio cost rather than message or received-copy counts',()=>{
@@ -375,51 +380,4 @@ test('evolution states incomplete observation rather than inventing a trend',()=
     instance.render({...data,receptions:{comparison:{...comparison,status:'comparable',additional_airtime_change_points:10,
         distinct_packets_change_percent:2,received_airtime_change_percent:30}}},hourly);
     assert.match(elements.get('airtime-repetition-trend').textContent,/airtime reçu \+30 %.*distincts \+2 %.*copies \+10 points/);
-});
-
-const ledgers={enabled:true,share_window_days:1,period_start_ts:1000,period_capacity_ms:86400000,
-    period_totals:{senders:{airtime_ms:1000,capacity_percent:0,packets:3,stations:7,advert_percent:40,last_seen:2000},
-        emitters:null,relays:{airtime_ms:null,packets:0,stations:0,advert_percent:null,last_seen:null}},
-    top_senders:[{sender:'a'.repeat(64),name:'Alice',short:'aaaaaa',airtime_ms:600,packets:2,advert_percent:50,last_seen:1900,capacity_percent:0.7},
-        {sender:'~',unattributed:true,airtime_ms:400,packets:1,advert_percent:null,last_seen:1800,capacity_percent:0}],
-    top_emitters:[{emitter:'6201',name:null,short:'6201',airtime_ms:500,packets:4,advert_percent:null,last_seen:1700,
-        capacity_percent:0.5,merged_prefixes:[{label:'62010a'}]}],
-    top_relays:[{relay:'62010a',name:'Baliz',short:'62010a',airtime_ms:300,packets:2,advert_percent:10,last_seen:1600,capacity_percent:0.3}]};
-
-test('each by-airtime ledger leads with its whole-ledger recap and states the span it answers for',()=>{
-    const {instance,elements}=viewer();
-    instance.renderLedgers(ledgers);
-    assert.match(elements.get('airtime-ledger-span').textContent,
-        /Les tableaux répondent pour : .*→ maintenant \(24 h\), calés sur des jours UTC entiers/);
-    const authors=elements.get('airtime-ledger-rows').innerHTML;
-    assert.match(authors,/<tr class="airtime-totals-row"><td><strong>Tout le registre<\/strong>/);
-    assert.match(authors,/7 entrées · 2 listées/);
-    assert.match(authors,/Tout le registre[\s\S]*?<td>1 s 0 %<\/td><td>3<\/td><td>40 %<\/td>/);
-    assert.match(authors,/Alice <code class="small">aaaaaa<\/code>/);
-    assert.match(authors,/0,6 s 0,7 %/);
-    assert.match(authors,/Non attribué/);
-    assert.match(authors,/Contenu sans identité émettrice sur le fil : messages, requêtes, inconnus\. Chaque copie compte\./);
-    assert.match(elements.get('airtime-ledger-note').textContent,/Qui a écrit le contenu/);
-});
-
-test('the ledger selector switches registers without refetch, keeps folds and unknowns unmeasured',()=>{
-    const {instance,elements}=viewer();
-    instance.renderLedgers(ledgers);
-    elements.get('airtime-ledger-role').value='emitters';instance.renderLedgerTable();
-    const emitters=elements.get('airtime-ledger-rows').innerHTML;
-    assert.doesNotMatch(emitters,/airtime-totals-row/);
-    assert.match(emitters,/<code title="6201">6201<\/code>/);
-    assert.match(emitters,/Inclus les copies 62010a : même relais, adresse tronquée à 2 octets/);
-    assert.match(emitters,/0,5 s 0,5 %<\/td><td>4<\/td><td>N\/D<\/td>/);
-    assert.match(elements.get('airtime-ledger-note').textContent,/dernier relais du chemin/);
-    elements.get('airtime-ledger-role').value='entry_relays';instance.renderLedgerTable();
-    const relays=elements.get('airtime-ledger-rows').innerHTML;
-    assert.match(relays,/Baliz <code class="small">62010a<\/code>/);
-    assert.doesNotMatch(relays,/airtime-totals-row/);
-    assert.match(elements.get('airtime-ledger-note').textContent,/ni l’auteur ni l’antenne émettrice/);
-    instance.renderLedgers({enabled:true});
-    assert.match(elements.get('airtime-ledger-rows').innerHTML,/Baliz/);
-    elements.get('airtime-ledger-role').value='authors';
-    instance.renderLedgers({...ledgers,top_senders:[],period_totals:{...ledgers.period_totals,senders:{airtime_ms:null}}});
-    assert.match(elements.get('airtime-ledger-rows').innerHTML,/Aucune entrée enregistrée pour cette période/);
 });

@@ -19,13 +19,6 @@
     .airtime-count { font-variant-numeric: tabular-nums; white-space: nowrap; }
     #airtime-details .modal-body { min-height: 250px; }
     #airtime-details td:first-child { overflow-wrap: anywhere; }
-    /* The recap row sums the whole ledger, not the rows below it: it is set
-       apart so a reader cannot mistake the top-of-table slice for the total. */
-    .airtime-totals-row td {
-        background: var(--bg-tertiary, #f1f3f5);
-        border-top: 2px solid var(--border-color, #adb5bd);
-        font-weight: 600;
-    }
     @media (max-width: 575px) {
         .airtime-chart { height: 190px; }
         .airtime-controls { width: 100%; }
@@ -98,25 +91,11 @@
             <div class="card-body"><div id="airtime-source-list"></div><p class="small text-muted mt-2 mb-0" id="airtime-source-note"></p></div>
         </div></section>
     </div>
-    <section class="card mb-3" aria-labelledby="airtime-ledger-title">
-        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <h2 class="h6 mb-0" id="airtime-ledger-title">Registres par airtime</h2>
-            <select class="form-select form-select-sm" id="airtime-ledger-role" aria-label="Registre affiché" style="max-width: 16rem;">
-                <option value="authors">Auteurs des paquets</option>
-                <option value="entry_relays">Premiers relais des chemins</option>
-                <option value="emitters">Émetteurs entendus</option>
-            </select>
-        </div>
-        <div class="card-body">
-            <p class="small text-muted mb-1" id="airtime-ledger-span"></p>
-            <p class="small mb-2" id="airtime-ledger-note"></p>
-            <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Nœud</th><th>Airtime · % du canal</th><th>Paquets</th><th>Annonces</th><th>Vue pour la dernière fois</th></tr></thead><tbody id="airtime-ledger-rows"></tbody></table></div>
-            <p class="small text-muted mb-0">L’airtime est modélisé, pas mesuré. Le % indique la part de la capacité théorique du canal sur la période : une radio reçoit un paquet à la fois, le plafond est une seconde de canal par seconde écoulée ; au-delà de 100 %, des émissions parallèles ont chacune coûté leur airtime. Annonces : part de l’airtime de la ligne passée en annonces. Les trois registres comptent les mêmes copies sous des faits différents et ne sont jamais additionnés. N/D : valeur inconnue, jamais une mesure à zéro.</p>
-        </div>
-    </section>
-    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 small text-muted mb-4">
-        <span id="airtime-model-note"></span><button class="btn btn-outline-secondary btn-sm" data-airtime-detail="model">Détails de la modélisation</button>
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 small text-muted mb-2">
+        <span id="airtime-model-note"></span>
+        <button class="btn btn-outline-secondary btn-sm" data-airtime-detail="model">Détails de la modélisation</button>
     </div>
+    <p class="small text-muted mb-4">L’airtime montré ici est modélisé à partir de la modulation, pas mesuré sur la porteuse. N/D : valeur inconnue, jamais une mesure à zéro.</p>
 </div>
 <div class="modal fade" id="airtime-details" tabindex="-1" aria-labelledby="airtime-details-title" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
@@ -160,7 +139,10 @@
     'use strict';
     const el = id => document.getElementById(id);
     const known = value => typeof value === 'number' && Number.isFinite(value);
-    const number = value => Number(value).toLocaleString('fr-FR', {maximumFractionDigits: 3});
+    // Two decimals everywhere on the page: a third one claims precision the
+    // modelled sums do not carry, and mixed rounding across cards reads as
+    // different measurements of the same fact.
+    const number = value => Number(value).toLocaleString('fr-FR', {maximumFractionDigits: 2});
     const pct = value => known(value) ? number(value) + ' %' : 'N/D';
     const radioTime = value => known(value) ? number(value / 1000) + ' s' : 'N/D';
     const rankSources = sources => sources.slice().sort((a, b) =>
@@ -170,7 +152,6 @@
     const timeZone = 'Europe/Paris';
     const parisTime = new Intl.DateTimeFormat('fr-FR', {timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
     const parisDate = new Intl.DateTimeFormat('fr-FR', {timeZone, day: '2-digit', month: '2-digit'});
-    const parisDateTime = new Intl.DateTimeFormat('fr-FR', {timeZone, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
     const parisMidnights = (start, end) => {
         const markers = [];
         // Scan UTC hours rather than adding 24 h: French days can last 23/25 h.
@@ -190,7 +171,6 @@
             el('airtime-refresh').addEventListener('click', () => this.load());
             el('airtime-search').addEventListener('input', () => this.renderDetails());
             el('airtime-role').addEventListener('change', () => this.renderDetails());
-            el('airtime-ledger-role').addEventListener('change', () => this.renderLedgerTable());
             el('airtime-show-first-link').addEventListener('change', () => this.renderDuty());
             document.querySelectorAll('[data-airtime-detail]').forEach(button =>
                 button.addEventListener('click', () => this.openDetails(button.dataset.airtimeDetail)));
@@ -214,16 +194,15 @@
                 const selectedRequest = this.request('/api/telemetry/occupancy/analysis?window=' + encodeURIComponent(period), this.controller.signal);
                 const results = await Promise.allSettled([selectedRequest,
                     period === '1h' ? selectedRequest : this.request('/api/telemetry/occupancy/analysis?window=1h', this.controller.signal),
-                    // The ledgers are day-aligned: "1 h" and "24 h" both answer over whole
-                    // UTC days, and the card states that span rather than the label clicked.
-                    this.request('/api/telemetry/occupancy?limit=10&days=' + (period === '7d' ? '7' : '1'), this.controller.signal)]);
+                    // Recording state only: the analysis read model does not know whether
+                    // the channel recorder in this process is on, and a historical page
+                    // has to say so rather than look like a live one.
+                    this.request('/api/telemetry/occupancy?limit=1', this.controller.signal)]);
                 if (sequence !== this.sequence) return;
                 if (results[0].status !== 'fulfilled') throw new Error('analysis unavailable');
                 const hourly = results[1].status === 'fulfilled' ? results[1].value : null;
                 this.render(results[0].value, hourly);
-                const live = results[2].status === 'fulfilled' ? results[2].value : null;
-                this.renderRecording(live);
-                this.renderLedgers(live);
+                this.renderRecording(results[2].status === 'fulfilled' ? results[2].value : null);
                 el('airtime-status').textContent = hourly
                     ? 'Actualisé à ' + new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})
                     : 'Activité actualisée · Duty cycle indisponible.';
@@ -243,85 +222,6 @@
             el('airtime-recording').textContent = live
                 ? 'Enregistrement désactivé. Les données affichées sont historiques.'
                 : 'État de l’enregistrement indisponible.';
-        }
-        renderLedgers(live) {
-            // The ledgers come from [Channel_Occupancy], not from the analysis read
-            // model: three separate registers of the same copies (who wrote, how each
-            // copy entered this mesh, which antenna emitted it). They coexist with the
-            // analysis tables above and are never added to them.
-            this.ledger = live?.top_senders || live?.period_totals ? live : null;
-            this.renderLedgerTable();
-        }
-        renderLedgerTable() {
-            if (!this.ledger) return;
-            const role = el('airtime-ledger-role').value || 'authors';
-            const ledgers = {
-                authors: {rows: this.ledger.top_senders || [], totals: this.ledger.period_totals?.senders,
-                    field: 'sender',
-                    note: 'Qui a écrit le contenu, d’après l’identité portée par le paquet.'},
-                entry_relays: {rows: this.ledger.top_relays || [], totals: this.ledger.period_totals?.relays,
-                    field: 'relay',
-                    note: 'Premier relais des copies flood reçues : c’est par lui qu’elles sont entrées dans ce maillage. Ce n’est ni l’auteur ni l’antenne émettrice.'},
-                emitters: {rows: this.ledger.top_emitters || [], totals: this.ledger.period_totals?.emitters,
-                    field: 'emitter',
-                    note: 'Antenne qui a physiquement émis chaque copie entendue : dernier relais du chemin, ou auteur reçu en direct.'},
-            };
-            const ledger = ledgers[role] || ledgers.authors;
-            el('airtime-ledger-note').textContent = ledger.note;
-            el('airtime-ledger-span').textContent = this.ledger.period_start_ts == null || this.ledger.period_capacity_ms == null
-                ? 'Période couverte par les registres indisponible.'
-                : 'Les tableaux répondent pour : ' + parisDateTime.format(new Date(this.ledger.period_start_ts * 1000))
-                    + ' → maintenant (' + number(this.ledger.period_capacity_ms / 3600000) + ' h), calés sur des jours UTC entiers.';
-            if (!ledger.rows.length) {
-                el('airtime-ledger-rows').innerHTML = '<tr><td colspan="5" class="text-muted">Aucune entrée enregistrée pour cette période.</td></tr>';
-                return;
-            }
-            el('airtime-ledger-rows').innerHTML = this.ledgerTotalsRow(ledger.totals, ledger.rows.length)
-                + ledger.rows.map(row => this.ledgerRow(row, ledger.field)).join('');
-        }
-        ledgerIdentity(row, field) {
-            if (row.unattributed) {
-                // The meaning of this row is not obvious from its name, so the
-                // explanation sits in the cell rather than behind a hover, which is
-                // invisible on a phone.
-                return '<em>Non attribué</em><div class="small text-muted">' + (field === 'sender'
-                    ? 'Contenu sans identité émettrice sur le fil : messages, requêtes, inconnus. Chaque copie compte.'
-                    : 'Aucun nom émetteur sur le fil : non décodé ou inconnu. Chaque copie compte.') + '</div>';
-            }
-            if (row.name) {
-                // A name appears only when exactly one known contact matches the
-                // address; the short label stays next to it so the reader can see
-                // which bytes the claim rests on.
-                return escapeHtml(row.name) + ' <code class="small">' + escapeHtml(row.short || '') + '</code>';
-            }
-            return '<code title="' + escapeHtml(row[field]) + '">' + escapeHtml(row.short || row[field]) + '</code>';
-        }
-        ledgerRow(row, field) {
-            let identity = this.ledgerIdentity(row, field);
-            if (row.merged_prefixes?.length) {
-                // The fold is stated in the cell, not hidden behind the numbers:
-                // the reader sees which short labels are inside this row and why.
-                identity += '<div class="small text-muted">Inclus les copies '
-                    + escapeHtml(row.merged_prefixes.map(m => m.label).join(', '))
-                    + ' : même relais, adresse tronquée à 2 octets.</div>';
-            }
-            return '<tr><td>' + identity + '</td><td>' + radioTime(row.airtime_ms) + ' ' + pct(row.capacity_percent)
-                + '</td><td>' + number(row.packets) + '</td><td>' + pct(row.advert_percent)
-                + '</td><td>' + (known(row.last_seen) ? parisDateTime.format(new Date(row.last_seen * 1000)) : 'N/D') + '</td></tr>';
-        }
-        ledgerTotalsRow(totals, shown) {
-            // The recap sums the whole ledger for the period, not the page's slice:
-            // a table truncated at its limit would otherwise understate the
-            // channel's load, so the entry count says where the slice ends. The
-            // percent is the ledger's distance to channel saturation; above 100%
-            // is oversubscription — parallel transmissions priced separately.
-            if (!totals || totals.airtime_ms == null) return '';
-            return '<tr class="airtime-totals-row"><td><strong>Tout le registre</strong>'
-                + '<div class="small text-muted">' + number(totals.stations) + ' entrées'
-                + (totals.stations > shown ? ' · ' + number(shown) + ' listées' : '') + '</div></td><td>'
-                + radioTime(totals.airtime_ms) + ' ' + pct(totals.capacity_percent) + '</td><td>'
-                + number(totals.packets) + '</td><td>' + pct(totals.advert_percent) + '</td><td>'
-                + (known(totals.last_seen) ? parisDateTime.format(new Date(totals.last_seen * 1000)) : 'N/D') + '</td></tr>';
         }
         dutyRows(data, hourly) {
             const rows = new Map();
@@ -355,10 +255,10 @@
                 : 'Pic sur 5 minutes indisponible';
             const packetRate = enoughHistory ? data.local.rx_packets_per_minute : null;
             el('airtime-packet-rate').textContent = known(packetRate)
-                ? (packetRate > 0 && packetRate < .001 ? '< 0,001' : number(packetRate)) : 'N/D';
+                ? (packetRate > 0 && packetRate < .005 ? '< 0,005' : number(packetRate)) : 'N/D';
             const meanSize = data.local.rx_mean_frame_bytes;
             el('airtime-packet-size').textContent = 'Taille moyenne : ' + (known(meanSize)
-                ? meanSize.toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' octets' : 'N/D');
+                ? meanSize.toLocaleString('fr-FR', {maximumFractionDigits: 2}) + ' octets' : 'N/D');
             this.renderDuty();
             const receptions = data.receptions;
             el('airtime-volume').textContent = number(data.traffic.distinct_packets) + ' paquets distincts'
@@ -497,7 +397,7 @@
                         const point = items[0]?.raw;
                         const lines = [];
                         if (known(point?.meanSize)) lines.push('Taille moyenne : '
-                            + point.meanSize.toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' octets');
+                            + point.meanSize.toLocaleString('fr-FR', {maximumFractionDigits: 2}) + ' octets');
                         if (known(point?.distinct)) lines.push('Paquets distincts : ' + number(point.distinct));
                         if (known(point?.additionalShare)) lines.push('Airtime en copies supplémentaires : ' + pct(point.additionalShare));
                         return lines.join('\n');

@@ -526,9 +526,12 @@ no inference here proves duty-cycle compliance, and the payload carries its
 number. `GET /api/telemetry/occupancy/analysis?window=1h|24h|7d` serves it; unknowns
 are `null`, never 0.
 
-The two read models coexist on one page and are never summed: the analysis counts
-distinct packets and reconstructed relays, the ledgers count heard copies per fact.
-The analysis windows are rolling (`1h`/`24h`/`7d`); the ledgers are day-aligned.
+The two read models are never summed: the analysis counts distinct packets and
+reconstructed relays over rolling windows (`1h`/`24h`/`7d`), the ledgers count heard
+copies per fact over whole UTC days. The /airtime page draws only the analysis; the
+ledgers stay recorded and stay served by `GET /api/telemetry/occupancy` (its
+`top_senders`, `top_relays`, `top_emitters` and `period_totals`), but nothing on the
+page renders them — see the page section below.
 
 ## The /airtime page
 
@@ -539,17 +542,21 @@ period selector (`Dernière heure`, `Dernières 24 heures`, `7 derniers jours`) 
 every card; a silence marker is drawn only where the recorder proves a complete
 window, so a gap never reads as a quiet channel.
 
-The **Registres par airtime** card keeps the three ledgers from this feature inside
-that design. Its own selector switches between the three registers (Auteurs des
-paquets, Premiers relais des chemins, Émetteurs entendus) without re-fetching, each
-row shows modelled airtime and its share of the channel's theoretical capacity over
-the period (the ceiling is one channel-second per elapsed second; above 100 % is
-parallel traffic priced once per copy), packets, the advert slice, and last-seen, and
-each table leads with its whole-ledger recap row — the sum covers the whole register,
-with the entry count saying where the page's top slice ends. Because the ledgers sit
-on whole UTC days while the selector labels a rolling window, the card states the
-span it actually answers for. The fold of truncated relay addresses, the unattributed
-buckets and the never-summed rule are all stated in the table itself.
+Every ranking of stations lives in the modal, over the analysis read model: its role
+tabs (authors, entry relays, emitters) and the "Voir tous" folds answer the same
+question the three by-airtime ledgers used to answer on this page, so the ledger card
+was retired rather than kept beside tables of the same stations under a second read
+model. The ledgers themselves — recorded daily, day-aligned, with the day's
+occupancy command reply built from them — are unchanged and still readable through
+`GET /api/telemetry/occupancy`; only their rendering left the page.
+
+The page keeps one rounding: every number is shown to at most two decimals, because
+a third decimal claims a precision the modelled sums do not carry and mixed rounding
+across cards reads as two different measurements of one fact. A non-zero average that
+would round to 0 at two decimals is shown below the floor (`< 0,005`), never as 0.
+The page also still fetches `GET /api/telemetry/occupancy?limit=1` for one field
+only: whether the recorder in this process is on. The analysis read model does not
+know that, and a historical page has to say so rather than look live.
 
 ## What this can be used for
 
