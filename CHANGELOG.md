@@ -562,6 +562,27 @@ semantic versioning.
 
 ### Fixed
 
+- **Vigilance Météo-France alerts re-fired on every bot restart**, so a channel filled with the
+  same Orange message every twenty minutes while `alert_throttle = 3600` sat untouched in the
+  config. The throttle lived only in `_last_alert_time`, a dict in the service instance, and the
+  first alert of a run is deliberately sent unthrottled — so under `Restart=always`, where a
+  restart lands seconds or minutes after the last one, every process start was entitled to one
+  fresh alert for each department already at an alert level. The cadence matched the restarts, not
+  the polling, which is why the configured interval looked honoured in the startup log while the
+  channel kept repeating. The last alert time of each department is now persisted as
+  `vigilance_last_alert_epochs` in `bot_metadata` and read back when the service starts, the way
+  `earthquake_service` already persists what it has posted: epochs are stored as wall-clock seconds
+  and converted to monotonic references on load, so the in-run comparison keeps ignoring clock
+  changes and a clock that went backwards reads as "it just fired". Entries older than
+  `alert_throttle` are dropped on write, so the map stays small, and unreadable metadata is logged
+  and starts the run unthrottled rather than silencing alerts.
+- The web viewer `/airtime` page now shows **unattributed traffic and each source's share of the
+  packets**, ported from the [Baliz fork](https://github.com/Camousse88/meshcore-bot_Baliz/)
+  (Camille Ballon's work, PR #33). The source ranking left the packets whose author the bot never
+  learned out of the top five entirely, so a channel where the origin is mostly unknown looked as
+  if its traffic came from a handful of named stations; the `unknown_author` row is now ranked with
+  the others, behind an **Afficher le trafic non identifié** switch that also controls the modal's
+  author table. Each row carries its share of the distinct packets alongside its count.
 - A viewer **restart logged every admin out**. `SECRET_KEY` was drawn from `secrets.token_hex()` on
   every start, so the session cookie the previous process signed stopped verifying: `systemctl
   restart`, a deploy or a reboot dropped the operator's login without a word, and on the contacts
