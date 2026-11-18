@@ -249,7 +249,10 @@ def _fold_prefix_rows(
     The uniqueness check reads the cumulative table, in cumulative and windowed
     reads alike: the ledger's knowledge of an address is not bounded by the window,
     and folding on less knowledge would report a different antenna depending on
-    the period the reader selected.
+    the period the reader selected.  When the one wider address is not among the
+    fetched rows, the short row is relabelled to it instead of absorbing it: the
+    prefix can only mean that address either way, and the rows' airtime is not
+    summed because this fetch never saw the partner row.
     """
     by_label = {(r[label_field] or '').lower(): r for r in rows}
     for row in list(rows):
@@ -266,8 +269,25 @@ def _fold_prefix_rows(
             wider = []
         if len(wider) != 1:
             continue
-        target = by_label.get(str(wider[0][label_field]).lower())
-        if target is None or target is row:
+        target_label = str(wider[0][label_field]).lower()
+        target = by_label.get(target_label)
+        if target is row:
+            continue
+        if target is None:
+            # The one wider address this prefix can mean is not among these rows:
+            # it sits below the fetch limit, or the selected window held no copy
+            # of it.  The prefix still can only mean that address, so it is
+            # relabelled to the wider one — without inventing the wider row's
+            # airtime, which this fetch does not carry — and the fold is still
+            # reported, because a relabelled row hides the precision it was
+            # recorded at otherwise.
+            row[label_field] = target_label
+            row.setdefault('merged_prefixes', []).append({
+                'label': label,
+                'packets': int(row['packets']),
+                'airtime_ms': float(row['airtime_ms']),
+            })
+            by_label[target_label] = row
             continue
         target['airtime_ms'] = float(target.get('airtime_ms') or 0.0) + float(row.get('airtime_ms') or 0.0)
         target['packets'] = int(target.get('packets') or 0) + int(row.get('packets') or 0)
@@ -2843,17 +2863,27 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                             share_days = None
                     if share_days is None:
                         senders = self.occupancy.top_senders(conn, limit)
-                        emitters = self.occupancy.top_emitters(conn, limit)
-                        relays = self.occupancy.top_relays(conn, limit)
+                        # The fold joins a 2-byte label to the one 3-byte address
+                        # it can mean, and that partner row is often small: on
+                        # live traffic 1,945 copies sat under `6201` and the only
+                        # address it can mean had 18.  Fetch a generous pool, fold,
+                        # then keep the page's limit — folding on the visible page
+                        # alone would leave the big row unlabelled.
+                        pool = max(limit * 8, 200)
+                        emitters = self.occupancy.top_emitters(conn, pool)
+                        relays = self.occupancy.top_relays(conn, pool)
                     else:
                         cutoff_day = self.occupancy.window_cutoff_day(share_days)
+                        pool = max(limit * 8, 200)
                         senders = self.occupancy.top_senders_window(conn, cutoff_day, limit)
-                        emitters = self.occupancy.top_emitters_window(conn, cutoff_day, limit)
-                        relays = self.occupancy.top_relays_window(conn, cutoff_day, limit)
+                        emitters = self.occupancy.top_emitters_window(conn, cutoff_day, pool)
+                        relays = self.occupancy.top_relays_window(conn, cutoff_day, pool)
                         payload['share_window_days'] = share_days
 
                     _fold_prefix_rows(conn, emitters, 'emitter', 'occupancy_emitters')
                     _fold_prefix_rows(conn, relays, 'relay', 'occupancy_relays')
+                    emitters = emitters[:limit]
+                    relays = relays[:limit]
                     # Resolve a full public key to a contact name where the tracking has
                     # one; a short key or the reserved unattributed bucket stays as it is,
                     # because a prefix that could belong to several keys is not an identity
