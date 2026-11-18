@@ -331,7 +331,7 @@
     },
     "airtime": {
       "description": "Occupation estimée du canal aujourd'hui : pic de la journée, moyennes de la dernière heure et du jour",
-      "reply": "Occupation estimée du canal (écoutée) — pic du jour : {peak}% · moyenne 1 h : {hour}% · moyenne du jour : {day}%",
+      "reply": "Occupation estimée du canal (écoutée) — pic du jour : {peak}% à {peak_at} · moyenne 1 h : {hour}% · moyenne du jour : {day}%",
       "no_samples": "Aucun échantillon d'airtime enregistré aujourd'hui - rien à afficher",
       "disabled": "Commande airtime désactivée. Mettez enabled = true dans [Airtime_Command].",
       "unavailable": "Airtime indisponible dans ce processus du bot.",

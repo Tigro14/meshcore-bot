@@ -364,7 +364,7 @@
     },
     "airtime": {
       "description": "Estimated channel occupancy today: day peak, last-hour and day averages",
-      "reply": "Estimated channel airtime (heard) — day peak: {peak}% · 1 h average: {hour}% · day average: {day}%",
+      "reply": "Estimated channel airtime (heard) — day peak: {peak}% at {peak_at} · 1 h average: {hour}% · day average: {day}%",
       "no_samples": "No airtime samples recorded today - nothing to show",
       "disabled": "Airtime command disabled. Set enabled = true in [Airtime_Command].",
       "unavailable": "Airtime unavailable in this bot process.",

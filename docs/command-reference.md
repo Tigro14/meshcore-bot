@@ -910,21 +910,24 @@ list of strings. The request times out after 10 seconds, and responses are cache
 
 ### `airtime`
 
-Modelled channel occupancy for today (UTC): the day's peak and the average share over
-the last hour and over the day. `occupancy` reaches the same command.
+Modelled channel occupancy for today (UTC): the day's peak and the hour it sat, and the
+average share over the last hour and over the day. `occupancy` reaches the same command.
 
 **Usage:**
-- `airtime` - Day peak, last-hour average, day average
+- `airtime` - Day peak and its hour, last-hour average, day average
 
 **Examples:**
 ```
 airtime
 ```
 
-**Response:** three figures and nothing else — the day's peak, the last hour's average
-and the day's average, all of them the rx share this radio hears. The peak is the worst
-bucket of the UTC day priced at that bucket's own capacity; the averages divide by the
-capacity **elapsed** (the day so far, the last hour), not by the buckets that happen to
+**Response:** three figures and nothing else — the day's peak and the hour it sat, the
+last hour's average and the day's average, all of them the rx share this radio hears.
+The peak is the worst bucket of the UTC day priced at that bucket's own capacity, and
+its hour is that same bucket's own `bucket_ts`, rendered in the `[Bot] timezone` like
+every other timed reply; the hour costs about ten bytes, which the channel body budget
+leaves room for. The averages divide by the capacity **elapsed** (the day so far, the
+last hour), not by the buckets that happen to
 exist, because the writer leaves an empty bucket absent and a denominator of existing
 buckets would let silence flatter itself by counting only busy minutes. A share above
 100 % is possible and is not clamped: parallel transmissions each cost their airtime.

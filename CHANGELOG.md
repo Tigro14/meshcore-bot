@@ -399,12 +399,17 @@ semantic versioning.
 
 ### Changed
 
-- The mesh command `airtime` answers three figures and nothing else: the day's peak, the
-  last hour's average and the day's average, all of them the rx share this radio hears.
-  The window line, the network view (talkers, unnamed copies, emitter addresses, repeat
-  factor, hop depth, stations/24 h) and this radio's weekly share line are gone from the
-  reply — that detail lives on the `/airtime` page, where there is room for it. The peak
-  is the worst UTC-day bucket priced at that bucket's own capacity; the averages divide by
+- The mesh command `airtime` answers three figures and nothing else: the day's peak and
+  the hour it sat, the last hour's average and the day's average, all of them the rx
+  share this radio hears. The peak's hour is the worst bucket's own `bucket_ts`, rendered
+  in the `[Bot] timezone` like every other timed reply — a worst minute the reader
+  cannot go and look at is half a fact — and it costs about ten bytes: the typical fr
+  reply lands at 121 against the live regional frame's 126, with the splitter still
+  catching an all-wide-digits reply that would spill. The window line, the network
+  view (talkers, unnamed copies, emitter addresses, repeat factor, hop depth,
+  stations/24 h) and this radio's weekly share line are gone from the reply — that
+  detail lives on the `/airtime` page, where there is room for it. The peak is the
+  worst UTC-day bucket priced at that bucket's own capacity; the averages divide
   the capacity **elapsed** rather than by the buckets that exist, because the writer
   leaves an empty bucket absent and a denominator of existing buckets would let silence
   flatter itself by counting only busy minutes; above 100 % is reported unclamped, since

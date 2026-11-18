@@ -1,8 +1,11 @@
 """Tests for the airtime command (modules/commands/airtime_command.py).
 
 What these protect is what the reply is allowed to claim: it answers exactly three
-figures — the day's peak, the last-hour average and the day average — and nothing
-else; the figures are stated as an estimate from the modulation; averages divide by
+figures — the day's peak and the hour it sat, the last-hour average and the day
+average — and nothing
+else; the figures are stated as an estimate from the modulation; the peak's hour is
+the worst bucket's own clock, rendered in the operator's configured timezone; averages
+divide by
 the capacity elapsed, not by the buckets that happen to exist, so silence prices as
 silence; a day with no sample recorded says so rather than answering 0 %; and a
 share above 100 % is reported as heard, because parallel transmissions each cost
@@ -46,11 +49,12 @@ def _translate(key, **kwargs):
     return entry.format(**kwargs) if kwargs else entry
 
 
-def _make_bot(bot_name='TestBot', *, row=None, raise_on_read=False):
-    """Bot whose stored-buckets read returns *row*.
+def _make_bot(bot_name='TestBot', *, row=None, peak_row=None, tz='', raise_on_read=False):
+    """Bot whose stored-buckets read returns *row* and whose peak-bucket read returns *peak_row*.
 
-    ``row`` is the fetchone() shape ``_day_stats`` asks for:
+    ``row`` is the fetchone() shape the aggregate read asks for:
     ``(count, day_rx_sum_ms, day_peak_ms, hour_rx_sum_ms)``.
+    ``peak_row`` is the worst bucket's ``(bucket_ts,)`` from the second read.
     """
     bot = types.SimpleNamespace()
     bot.logger = Mock()
@@ -58,6 +62,7 @@ def _make_bot(bot_name='TestBot', *, row=None, raise_on_read=False):
     config = configparser.ConfigParser()
     config.add_section('Bot')
     config.set('Bot', 'bot_name', bot_name)
+    config.set('Bot', 'timezone', tz)
     config.add_section('Channels')
     config.set('Channels', 'monitor_channels', 'general')
     config.set('Channels', 'respond_to_dms', 'true')
@@ -78,18 +83,40 @@ def _make_bot(bot_name='TestBot', *, row=None, raise_on_read=False):
         )
     )
 
-    cur = Mock()
-    if raise_on_read:
-        cur.execute = Mock(side_effect=OSError('no such table: occupancy_samples'))
-    else:
-        cur.execute = Mock(return_value=cur)
-        cur.fetchone = Mock(return_value=row)
-    conn = Mock()
-    conn.execute = cur.execute
+    aggregate = Mock()
+    aggregate.execute = Mock(return_value=aggregate)
+    aggregate.fetchone = Mock(return_value=row)
+    bucket = Mock()
+    bucket.execute = Mock(return_value=bucket)
+    bucket.fetchone = Mock(return_value=peak_row)
+
+    def _reads(*_args, **_kwargs):
+        # The two reads the command makes: the day aggregate first, then the peak
+        # bucket's clock. A Mock returning one shape for both would hide a wrong or
+        # missing second read. A callable, not a two-item list: a list runs dry once
+        # and a later read would then invent a Mock-shaped fact. Each read ends in
+        # .fetchone(), so hand back the cursor itself. Count first: this callable
+        # runs as the side_effect, so the call being served is already number 1.
+        target = aggregate if _reads.calls < 1 else bucket
+        _reads.calls += 1
+        return target
+
+    _reads.calls = 0
+    reader = Mock(side_effect=_reads)
+
     bot.db_manager = MagicMock()
-    bot.db_manager.connection = MagicMock()
-    bot.db_manager.connection.return_value.__enter__ = Mock(return_value=conn)
-    bot.db_manager.connection.return_value.__exit__ = Mock(return_value=False)
+    # `with db_manager.connection() as conn` runs __enter__ on connection() itself
+    # (and hands back that same object every time), so the execute the command sees
+    # lives on connection() — not on connection.return_value.
+    conn_cm = bot.db_manager.connection()
+    conn_cm.execute = reader
+    # The `with` runs __enter__ on connection() and uses its return as conn: pin it
+    # to connection() itself, so the execute above is the one the command sees.
+    conn_cm.__enter__ = Mock(return_value=conn_cm)
+    conn_cm.__exit__ = Mock(return_value=False)
+    bot.reads = reader  # tests read its call_args_list
+    if raise_on_read:
+        conn_cm.execute = Mock(side_effect=OSError('no such table: occupancy_samples'))
     return bot
 
 
@@ -111,8 +138,12 @@ class TestDayStats:
         # 60 s buckets: a 45 000 ms peak bucket is 75 % of one bucket's capacity;
         # 3 600 000 ms over the last hour is 100 % of that hour; 108 000 000 ms over
         # the 80 000 s elapsed of this UTC day is 135 % — deliberately above 100 to
-        # pin that the day average is not clamped.
-        self.bot = _make_bot(row=(42, 108_000_000.0, 45_000.0, 3_600_000.0))
+        # pin that the day average is not clamped. The peak bucket sat one hour into
+        # the UTC day.
+        self.peak_ts = _DAY_START + 3600
+        self.bot = _make_bot(
+            row=(42, 108_000_000.0, 45_000.0, 3_600_000.0), peak_row=(self.peak_ts,)
+        )
         self.cmd = AirtimeCommand(self.bot)
 
     def test_peak_is_the_worst_bucket_at_its_own_capacity(self):
@@ -137,10 +168,23 @@ class TestDayStats:
     def test_read_windows_are_the_utc_day_and_the_trailing_hour(self):
         """The day is the UTC day the buckets are aligned on; the hour window is exactly 1 h."""
         self.cmd._day_stats(_occupancy(sample_seconds=60))
-        params = self.bot.db_manager.connection.return_value.__enter__.return_value.execute.call_args
-        sql, args = params.args
+        sql, args = self.bot.reads.call_args_list[0].args
         assert args == (int(_NOW - 3600), 60, _DAY_START)
         assert 'bucket_ts >= ?' in sql
+
+    def test_peak_time_is_the_worst_buckets_own_clock_on_the_same_day(self):
+        """A peak the reader cannot go and look at is half a fact; the hour is read
+        from the same day window, so it can never point outside the day the peak answers for."""
+        stats = self.cmd._day_stats(_occupancy(sample_seconds=60))
+        assert stats['peak_ts'] == self.peak_ts
+        sql, args = self.bot.reads.call_args_list[1].args
+        assert args == (60, _DAY_START)
+        assert 'ORDER BY rx_ms DESC LIMIT 1' in sql
+
+    def test_a_day_without_a_peak_timestamp_keeps_the_hour_unknown(self):
+        """An unknown hour is absent from the stats, not a midnight invented by the reader."""
+        bot = _make_bot(row=(42, 108_000_000.0, 45_000.0, 3_600_000.0), peak_row=None)
+        assert AirtimeCommand(bot)._day_stats(_occupancy())['peak_ts'] is None
 
     def test_peak_prices_the_recorders_bucket_size_not_a_guessed_one(self):
         """A recorder on 30 s buckets has half the capacity per bucket; the peak has to follow."""
@@ -162,7 +206,12 @@ class TestDayStats:
 
 class TestReply:
     def setup_method(self):
-        self.bot = _make_bot(row=(42, 108_000_000.0, 45_000.0, 3_600_000.0))
+        self.peak_ts = _DAY_START + 3600  # 01:00 UTC, which is 02:00 in Europe/Paris
+        self.bot = _make_bot(
+            row=(42, 108_000_000.0, 45_000.0, 3_600_000.0),
+            peak_row=(self.peak_ts,),
+            tz='Europe/Paris',
+        )
         self.cmd = AirtimeCommand(self.bot)
 
     def test_reply_says_the_figure_is_an_estimate(self):
@@ -170,12 +219,13 @@ class TestReply:
         reply = self.cmd.format_reply(self.cmd._day_stats(_occupancy()), BODY)
         assert 'Estimated' in reply
 
-    def test_reply_carries_exactly_the_three_figures(self):
+    def test_reply_carries_exactly_the_three_figures_and_the_peak_hour(self):
         stats = self.cmd._day_stats(_occupancy())
         reply = self.cmd.format_reply(stats, BODY)
         assert f"peak: {_render_g(stats['peak_percent'])}%" in reply
         assert f"1 h average: {_render_g(stats['hour_percent'])}%" in reply
         assert f"day average: {_render_g(stats['day_percent'])}%" in reply
+        assert "at 02:00" in reply  # the operator's configured timezone, not a bare UTC hour
         for word in ('talker', 'sender', 'SF', 'hops', 'stations'):
             assert word not in reply
 
@@ -197,15 +247,20 @@ class TestRendering:
 
     def test_no_invented_second_decimal(self):
         """The reply budget is bytes of a channel body; one decimal is what it can defend."""
-        stats = {'peak_percent': 75.0, 'hour_percent': 33.333, 'day_percent': 0.0}
-        reply = AirtimeCommand(_make_bot()).format_reply(stats, BODY)
+        stats = {'peak_percent': 75.0, 'hour_percent': 33.333, 'day_percent': 0.0, 'peak_ts': _DAY_START + 3600}
+        reply = AirtimeCommand(_make_bot(tz='UTC')).format_reply(stats, BODY)
         assert '33.3%' in reply
         assert '.' not in reply.split('day average:')[1].split('%')[0]
+        assert 'at 01:00' in reply  # the hour is not rounded or re-priced by the percentage path
 
 
 class TestExecute:
     def setup_method(self):
-        self.bot = _make_bot(row=(42, 108_000_000.0, 45_000.0, 3_600_000.0))
+        self.bot = _make_bot(
+            row=(42, 108_000_000.0, 45_000.0, 3_600_000.0),
+            peak_row=(_DAY_START + 3600,),
+            tz='UTC',
+        )
         self.cmd = AirtimeCommand(self.bot)
         self.sent = []
         self.bot.command_manager.send_response = AsyncMock(
@@ -238,8 +293,14 @@ class TestExecute:
         assert '0' not in self.sent[0]
 
     def test_no_bucket_today_answers_the_nothing_recorded_line(self):
-        enter = self.bot.db_manager.connection.return_value.__enter__.return_value
-        enter.execute.return_value.fetchone.return_value = (0, None, None, None)
+        def ex(_sql, _params):
+            # The day aggregate reports zero buckets; the peak-bucket read then
+            # finds nothing to point at.
+            r = Mock()
+            r.fetchone.return_value = (0, None, None, None)
+            return r
+
+        self.bot.db_manager.connection().execute = ex
         self.bot.occupancy = _occupancy()
         assert self._run() is True
         assert 'No airtime samples recorded today' in self.sent[0]
@@ -248,6 +309,7 @@ class TestExecute:
         self.bot.occupancy = _occupancy()
         assert self._run() is True
         assert 'day peak' in self.sent[0] and '1 h average' in self.sent[0] and 'day average' in self.sent[0]
+        assert 'at 01:00' in self.sent[0]
 
     def test_a_body_too_cramped_is_split_not_cut(self):
         """Regional scope and a long sender name shrink the body; the answer still arrives whole."""

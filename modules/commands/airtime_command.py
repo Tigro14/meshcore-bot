@@ -6,9 +6,11 @@ average share over the last hour and over the day.
 """
 
 import time
+from datetime import datetime
 from typing import Any, Optional
 
 from ..models import MeshMessage
+from ..utils import get_config_timezone
 from .base_command import BaseCommand
 
 # One hour, in the milliseconds the buckets' rx_ms column is priced in.
@@ -25,13 +27,16 @@ def _render_g(value: Any) -> str:
 
 
 class AirtimeCommand(BaseCommand):
-    """Reports the modelled channel occupancy on demand: peak today, averages now.
+    """Reports the modelled channel occupancy on demand: peak today and when it
+    sat, averages now.
 
     Read-only, so it is safe for scheduled ``{cmd:...}`` rendering.
 
     The three figures answer "how busy is the channel" and nothing else — the
     network view, the per-station ledgers and the modulation behind the estimate
-    live on the /airtime page, where there is room for them.
+    live on the /airtime page, where there is room for them. The peak carries
+    the hour it was seen, in the operator's configured timezone: a worst minute
+    the reader cannot go and look at is half a fact.
 
     All three are the rx share: what this radio hears. The bot cannot merge in
     what it does not hear — hidden nodes and other radios' readings are not this
@@ -82,13 +87,16 @@ class AirtimeCommand(BaseCommand):
         """
         return self.translate('commands.airtime.description')
 
-    def _day_stats(self, occupancy: Any) -> Optional[dict[str, float]]:
+    def _day_stats(self, occupancy: Any) -> Optional[dict[str, Any]]:
         """Peak and averages over the stored buckets of the current UTC day.
 
-        One read, three figures. The peak is the worst bucket of the day at the
-        bucket's own capacity; the averages divide the summed rx_ms by the
-        capacity elapsed — the whole day so far, and the whole last hour — so
-        quiet minutes count as quiet rather than dropping out of the denominator.
+        Two reads off one connection: the day's three figures, then the worst
+        bucket's clock. The peak is the worst bucket of the day at the bucket's own
+        capacity; the averages divide the
+        summed rx_ms by the capacity elapsed — the whole day so far, and the whole
+        last hour — so quiet minutes count as quiet rather than dropping out of the
+        denominator. The peak's timestamp is that same worst bucket's ``bucket_ts``:
+        a peak without its hour is a fact the reader cannot go and look at.
 
         Returns None when the day holds no bucket. An absent day is an absent fact:
         it leaves the numbers out, it does not report a calm the recorder never
@@ -105,16 +113,24 @@ class AirtimeCommand(BaseCommand):
                 "FROM occupancy_samples WHERE sample_seconds = ? AND bucket_ts >= ?",
                 (int(now - _HOUR_MS / 1000), int(occupancy.sample_seconds), day_start),
             ).fetchone()
-        if row is None or not row[0]:
-            return None
+            if row is None or not row[0]:
+                return None
+            # A second read for the worst bucket's own clock: ORDER BY rx_ms
+            # desc puts the NULLs last and lands on the same row MAX(rx_ms) priced.
+            peak_row = conn.execute(
+                "SELECT bucket_ts FROM occupancy_samples "
+                "WHERE sample_seconds = ? AND bucket_ts >= ? ORDER BY rx_ms DESC LIMIT 1",
+                (int(occupancy.sample_seconds), day_start),
+            ).fetchone()
         _, day_sum, peak_ms, hour_sum = row
         return {
             'peak_percent': float(peak_ms or 0) / (occupancy.sample_seconds * 1000) * 100,
             'hour_percent': float(hour_sum or 0) / _HOUR_MS * 100,
             'day_percent': float(day_sum or 0) / ((now - day_start) * 1000) * 100,
+            'peak_ts': float(peak_row[0]) if peak_row and peak_row[0] is not None else None,
         }
 
-    def format_reply(self, stats: Optional[dict[str, float]], limit: int) -> str:
+    def format_reply(self, stats: Optional[dict[str, Any]], limit: int) -> str:
         """Render the reply as one channel body.
 
         Args:
@@ -132,7 +148,26 @@ class AirtimeCommand(BaseCommand):
             peak=_render_g(round(stats['peak_percent'], 1)),
             hour=_render_g(round(stats['hour_percent'], 1)),
             day=_render_g(round(stats['day_percent'], 1)),
+            peak_at=self._peak_time(stats.get('peak_ts')),
         )
+
+    def _peak_time(self, peak_ts: Optional[float]) -> str:
+        """When the day's worst bucket sat, in the operator's configured timezone.
+
+        ``[Bot] timezone``, the same resolution every other timed reply uses. The
+        buckets are UTC-aligned but the reader asking is not: a bare hour with no
+        stated zone is the one ambiguity this reply cannot clear with more bytes
+        later. An unknown peak time renders empty — the sentence stands without it
+        rather than inventing an hour.
+        """
+        if peak_ts is None:
+            return ''
+        tz, _ = get_config_timezone(self.bot.config, self.logger)
+        try:
+            local = datetime.fromtimestamp(float(peak_ts), tz)
+        except (OverflowError, OSError, ValueError):
+            return ''
+        return local.strftime('%H:%M')
 
     async def execute(self, message: MeshMessage) -> bool:
         """Execute the airtime command.
