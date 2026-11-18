@@ -374,6 +374,65 @@ def _apply_capacity_percent(
         row['capacity_percent'] = round(airtime_ms / ceiling * 100.0, 1) if ceiling else None
 
 
+def _ledger_period_totals(
+    conn: sqlite3.Connection,
+    cutoff_day: Optional[int],
+    capacity_ms: Optional[float],
+) -> dict[str, Optional[dict[str, Any]]]:
+    """Sum each ledger over the selected period, for the tables' recap header.
+
+    The sum covers the whole ledger, not the page's top slice: a "top 10"
+    table whose header summed only its own rows would understate the
+    channel's load whenever more stations exist than are shown, and the
+    station count printed next to the sum is what lets the reader see that
+    the table below is a slice.  One sum per ledger, never a sum across
+    ledgers — the three count the same copies once per different fact.
+
+    ``airtime_ms`` and the percent are ``None`` (not 0) when the ledger
+    holds no row for the period: absence is absence, not a measured zero.
+    The advert slice is ``None`` when the period mixes rows written before
+    the advert split — a share over only the rows that know the split is an
+    invented period figure.
+    """
+    out: dict[str, Optional[dict[str, Any]]] = {}
+    for name, days_table, cumulative_table in (
+        ("senders", "occupancy_sender_days", "occupancy_senders"),
+        ("emitters", "occupancy_emitter_days", "occupancy_emitters"),
+        ("relays", "occupancy_relay_days", "occupancy_relays"),
+    ):
+        table = days_table if cutoff_day is not None else cumulative_table
+        sql = (
+            f"SELECT SUM(airtime_ms), SUM(packets), SUM(advert_ms), MAX(last_seen),"
+            f" COUNT(*), COUNT(advert_ms) FROM {table}"
+        )
+        params: tuple = ()
+        if cutoff_day is not None:
+            sql += " WHERE day_ts >= ?"
+            params = (cutoff_day,)
+        try:
+            row = conn.execute(sql, params).fetchone()
+        except sqlite3.OperationalError:
+            out[name] = None
+            continue
+        total_ms = float(row[0]) if row[0] is not None else None
+        advert_known, advert_total = int(row[5] or 0), row[2]
+        advert_percent = (
+            round(float(advert_total) / float(total_ms) * 100.0, 1)
+            if total_ms and advert_total is not None and advert_known == int(row[4] or 0)
+            else None
+        )
+        ceiling = float(capacity_ms) if capacity_ms and capacity_ms > 0 else None
+        out[name] = {
+            "airtime_ms": total_ms,
+            "capacity_percent": round(total_ms / ceiling * 100.0, 1) if total_ms and ceiling else None,
+            "packets": int(row[1]) if row[1] is not None else 0,
+            "stations": int(row[4] or 0),
+            "advert_percent": advert_percent,
+            "last_seen": float(row[3]) if row[3] is not None else None,
+        }
+    return out
+
+
 def _label_node_rows(
     conn: sqlite3.Connection,
     rows: list[dict[str, Any]],
@@ -2970,6 +3029,11 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     _apply_capacity_percent(senders, capacity_ms)
                     _apply_capacity_percent(emitters, capacity_ms)
                     _apply_capacity_percent(relays, capacity_ms)
+                    # Each table's recap header sums its own whole ledger over
+                    # the period - not the page's slice - so the channel's load
+                    # per fact is stated even when stations exist beyond the
+                    # top rows, and the station count shows where the slice ends.
+                    payload['period_totals'] = _ledger_period_totals(conn, cutoff_day, capacity_ms)
                     # Resolve a full public key to a contact name where the tracking has
                     # one; a short key or the reserved unattributed bucket stays as it is,
                     # because a prefix that could belong to several keys is not an identity

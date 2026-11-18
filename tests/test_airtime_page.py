@@ -210,6 +210,17 @@ class TestAirtimePage:
         assert "data.period_capacity_ms" in body
         assert "Les tableaux ci-dessous répondent pour" in body
 
+    def test_each_airtime_table_leads_with_a_whole_ledger_recap(self, viewer):
+        """Every by-airtime table opens with its whole-ledger sum and that sum's
+        share of channel capacity — a truncated table must not understate the
+        channel's load, and an empty ledger shows no total rather than a zero."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert "oc-totals-row" in body
+        assert body.count("this.totalsRow(totals, rows.length)") == 3
+        assert "data.period_totals" in body
+        assert "Tout le registre" in body
+        assert "totals.airtime_ms == null" in body
+
     def test_chart_draws_an_absent_bucket_as_a_gap(self, viewer):
         """A window with no written bucket must not render as 0.0."""
         body = viewer.app.test_client().get("/airtime").data.decode()

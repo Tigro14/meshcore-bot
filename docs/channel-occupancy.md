@@ -462,6 +462,15 @@ themselves stay unsummed. The percent is taken after the prefix fold, so one ant
 carries one figure for all its copies, and it is `null` — not `0` — when the period's
 elapsed time is unknown (no recorded moment anywhere in the cumulative view).
 
+Each table's header also sums its whole ledger for the period, exposed as
+`"period_totals"`: `airtime_ms`, `packets`, `stations`, `advert_percent` and
+`last_seen` over every row of that ledger (day rows inside the window, or the whole
+cumulative table), plus the sum's own `capacity_percent` against the same ceiling.
+The sum is never just the page's slice — the entry count next to it says where the
+slice ends — and it is `null` (not 0) when the ledger holds no row for the period.
+`advert_percent` is `null` when the period mixes rows from before the advert split:
+a share over only the rows that know the split is an invented period figure.
+
 `GET /api/telemetry/occupancy/history?days=7` — buckets as sums and counts, plus the
 nearest-rank percentiles. Only buckets that were written appear in `buckets`. Each
 bucket also carries `rx_hashed_ms` and `rx_copy_ms` — `NULL` for buckets written before
