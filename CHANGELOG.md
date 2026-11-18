@@ -399,6 +399,20 @@ semantic versioning.
 
 ### Changed
 
+- The mesh command `airtime` answers three figures and nothing else: the day's peak, the
+  last hour's average and the day's average, all of them the rx share this radio hears.
+  The window line, the network view (talkers, unnamed copies, emitter addresses, repeat
+  factor, hop depth, stations/24 h) and this radio's weekly share line are gone from the
+  reply — that detail lives on the `/airtime` page, where there is room for it. The peak
+  is the worst UTC-day bucket priced at that bucket's own capacity; the averages divide by
+  the capacity **elapsed** rather than by the buckets that exist, because the writer
+  leaves an empty bucket absent and a denominator of existing buckets would let silence
+  flatter itself by counting only busy minutes; above 100 % is reported unclamped, since
+  parallel transmissions each cost their airtime; and a day with no sample recorded says
+  so rather than answering 0 %. A failed read answers the error line, not the
+  nothing-recorded line — on a quiet channel the two read the same and mean opposite
+  things. `modules/commands/airtime_command.py`, `docs/command-reference.md`,
+  `docs/channel-occupancy.md`.
 - The `pong` keyword is no longer answered. `load_keywords` now drops the keys named in
   `SUPPRESSED_KEYWORDS` (`modules/command_manager.py`) while reading the config, so a
   `[Keywords] pong = …` line left in an already-deployed `config.ini` cannot re-arm it — no

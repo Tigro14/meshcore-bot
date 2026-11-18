@@ -910,37 +910,35 @@ list of strings. The request times out after 10 seconds, and responses are cache
 
 ### `airtime`
 
-Estimated channel airtime for the rolling window, the local network view, and this
-radio's own airtime share over the past week. `occupancy` reaches the same command.
+Modelled channel occupancy for today (UTC): the day's peak and the average share over
+the last hour and over the day. `occupancy` reaches the same command.
 
 **Usage:**
-- `airtime` - One window, the network view, and this radio's airtime share
+- `airtime` - Day peak, last-hour average, day average
 
 **Examples:**
 ```
 airtime
 ```
 
-**Response:** The modulation the estimate is built from, the rx and tx percentages of one
-window with the packet count, a network line — talkers heard, the copies heard without an
-identity on the wire, the emitter addresses the flood path proved carried those copies,
-the repetition factor the flood router leaves behind (hashed packets heard over unique
-packet hashes), the average hop depth of heard traffic, and stations heard in the last
-24 h — and one sender line: this radio's own transmitted airtime over the last 7 rolling
-days, suffixed `/7d`. That is the only *airtime share* the reply can name: a packet this
-node hears carries its route, not its sender — the sender's identity is inside the
-encrypted payload, and the decryption that recovers it names the writer without pricing
-the copy — so a talkers list of shares beyond this radio would be a guess. When the stored
-buckets cover less than the week, the suffix says how much they actually cover instead of
-claiming seven days.
+**Response:** three figures and nothing else — the day's peak, the last hour's average
+and the day's average, all of them the rx share this radio hears. The peak is the worst
+bucket of the UTC day priced at that bucket's own capacity; the averages divide by the
+capacity **elapsed** (the day so far, the last hour), not by the buckets that happen to
+exist, because the writer leaves an empty bucket absent and a denominator of existing
+buckets would let silence flatter itself by counting only busy minutes. A share above
+100 % is possible and is not clamped: parallel transmissions each cost their airtime.
+A day with no sample recorded answers that there is nothing recorded, never 0 %. The
+network view, the per-sender ledgers and the modulation behind the estimate live on the
+web page `/airtime`, where there is room for them; the command is the short answer.
 
 The figures are an **estimate from the modulation** (SF/BW/CR/preamble), not a measurement:
 the bot is a client of a radio over serial, BLE or TCP and cannot see whether the channel
-was busy, only how long a packet of a given size occupies it. rx and tx are reported apart
-and never added, because one node's hearing is not the whole channel's airtime. The network
-line stays a **view** too: hashes and hops cover only what this node heard, so the repeat
-factor is a floor on the flooding, not a census of it, and an unknown is left out rather
-than rendered as x1 or 0 hops. The same caution, and the retention rules, are in
+was busy, only how long a packet of a given size occupies it. The share is the airtime of
+what this node **hears** — hidden nodes and other radios' readings are not this process's
+facts — so it is this antenna's view of the channel. rx and tx are kept apart in the
+stored buckets and the web page; the command quotes the rx share, because the question it
+answers is "how busy is the channel". The same caution, and the retention rules, are in
 [channel-occupancy.md](channel-occupancy.md), which is also where the web page `/airtime`
 reads these numbers from.
 
@@ -948,11 +946,9 @@ reads these numbers from.
 from `[Channel_Occupancy]`, which is off by default, so with recording off the command says
 there is nothing to read instead of answering 0%.
 
-The reply is kept inside one message body. When the body runs out of room the stations
-clause goes first; when the talker list does not fit, it is dropped and the reply says so:
-a name cut mid-way would read as a different node, and a list that quietly disappears
-reads as an empty channel. The network line is never dropped quietly — a reply that cannot
-fit whole travels in pieces, split at line boundaries.
+The reply is kept inside one message body; when the body runs out of room it travels in
+pieces through the splitter every long reply uses, so a cramped body still gets all three
+figures rather than half of one.
 
 ---
 

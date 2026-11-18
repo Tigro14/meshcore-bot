@@ -373,21 +373,25 @@ invented zero.
 
 The Web Viewer page `/airtime` draws all of this — the windows, the history chart,
 the percentiles, the sender share, the emitter share and the entry-relay share — from
-the two routes below, which are what it reads. The mesh command `airtime` answers with one window, the network view and this
-radio's own transmitted airtime over the last 7 rolling days, from the same numbers;
-the page is the whole picture, the command is the short version. The command names only
-this radio because it is the only sender the bot has complete knowledge of: heard
-adverts carry their advertiser's key and reach the senders table, but message traffic
-names no sender on the wire, so the per-sender view of the channel belongs to the page,
-not to the reply. The command reply is telegraphic and built to fit one channel body,
+the two routes below, which are what it reads. The mesh command `airtime` answers with
+three figures and nothing else: the day's peak (the worst bucket of the UTC day at that
+bucket's own capacity), the average share over the last hour, and the average over the
+UTC day so far — all of them the rx share this radio hears. The averages divide by the
+capacity **elapsed**, not by the buckets that happen to exist: the writer leaves an
+empty bucket absent, so a denominator of existing buckets would let silence flatter
+itself by counting only busy minutes. A share above 100 % is possible and is not
+clamped — parallel transmissions each cost their airtime. A day with no sample recorded
+answers "nothing recorded", never 0 %. The page is the whole picture, the command is
+the three numbers a reader actually asks for; the network view, the per-sender ledgers
+and the modulation behind the estimate stay on the page, where there is room for them.
+The command replies in telegraphic style, built to fit one channel body,
 counted in **bytes** because an accented reply overflows the wire before it overflows a
 character count. The budget is what the sender's own reply path reports: 155 minus the
 radio's name and `": "`, and a further 10 when the reply leaves on a regional flood
 scope — a regional radio answers from a smaller body than the same radio answering
-globally. When the body runs out of room the stations clause goes first,
-then the reply is split at line boundaries — the network line is part of the answer, so
-it is never dropped quietly, and a sender line that is dropped is announced as dropped
-rather than cut mid-way.
+globally. When the body runs out of room the reply travels in pieces through the
+splitter every long reply uses, so a cramped body still gets all three figures rather
+than half of one.
 
 `GET /api/telemetry/occupancy` — the live windows, the network view and the sender share:
 
