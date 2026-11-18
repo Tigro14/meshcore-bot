@@ -201,3 +201,8 @@ AGENTS.md
 # Generated knowledge graph (rebuilt locally by `graphify update .`) and agent harness state
 graphify-out/
 .opencode/
+.subagents/memory/
+
+# Single-instance lock beside the bot database
+*.db.lock
+*.db.heartbeat

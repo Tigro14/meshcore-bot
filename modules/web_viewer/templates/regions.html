@@ -248,7 +248,7 @@
                     votre nœud, et c'est réglé &mdash; vos messages ne submergeront plus tout le
                     mesh et le bot cessera de vous envoyer l'avertissement. Si vous pensez que le
                     message est une erreur, la même page qu'un administrateur utilise pour
-                    configurer cela se trouve sous <a href="/region-warnings">Paramètres région</a>
+                    configurer cela se trouve sous <a href="{{ url_for('region_warnings_page') }}">Paramètres région</a>
                     dans la zone d'administration. Vous trouverez plus d'infos sur <a href="https://wiki.mesh-idf.fr/fr/meshcore/regions_et_canaux">le WIKI</a>
                 </p>
             </div>
@@ -336,7 +336,7 @@
                     Open the MeshCore app, add a <strong>region code</strong> to your node, and you
                     are done &mdash; your messages will stop flooding the whole mesh and the bot will
                     stop sending you the warning. If you believe the message is a mistake, the same
-                    page an admin uses to configure this is under <a href="/region-warnings">Region
+                    page an admin uses to configure this is under <a href="{{ url_for('region_warnings_page') }}">Region
                     Settings</a> in the admin area.
                 </p>
             </div>
