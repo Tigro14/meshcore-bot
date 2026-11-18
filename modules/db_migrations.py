@@ -1327,6 +1327,33 @@ def _m0040_occupancy_copy_cost(cursor: sqlite3.Cursor) -> None:
     _add_column(cursor, "occupancy_samples", "rx_copy_ms", "REAL")
 
 
+def _m0041_airtime_attribution(cursor: sqlite3.Cursor) -> None:
+    """The passive analysis read model's own tables (Baliz fork, migration 37).
+
+    One row per distinct packet with its reconstructed author, kept apart
+    from the occupancy ledgers: the analysis counts distinct packets and
+    implied relay retransmissions, the ledgers price every heard copy.
+    """
+    from modules.airtime_analysis import create_tables
+    create_tables(cursor)
+
+
+def _m0042_airtime_scope_context(cursor: sqlite3.Cursor) -> None:
+    """Scope and channel context the forwarding model trains on (Baliz fork, migration 38)."""
+    from modules.airtime_forwarding import create_context_tables
+    create_context_tables(cursor)
+
+
+def _m0043_airtime_capture_intervals(cursor: sqlite3.Cursor) -> None:
+    """Capture-continuity intervals, so silence is a recorded fact (Baliz fork, migration 39).
+
+    Without them, an outage and a quiet channel look identical: both are
+    simply the absence of rows.
+    """
+    from modules.airtime_capture import create_tables
+    create_tables(cursor)
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -1374,6 +1401,9 @@ MIGRATIONS: list[MigrationEntry] = [
     (38, "occupancy sender/emitter day tables", _m0038_occupancy_day_tables),
     (39, "occupancy relays: where relayed copies entered the mesh", _m0039_occupancy_relays),
     (40, "occupancy_samples: hashed airtime and copy cost", _m0040_occupancy_copy_cost),
+    (41, "airtime_observations and author links", _m0041_airtime_attribution),
+    (42, "airtime scope context for the forwarding model", _m0042_airtime_scope_context),
+    (43, "airtime_capture_intervals: recorded capture continuity", _m0043_airtime_capture_intervals),
 ]
 
 
