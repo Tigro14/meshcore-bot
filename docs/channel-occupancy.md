@@ -448,9 +448,12 @@ Each row of the three lists also carries `capacity_percent`: that row's share of
 the channel could physically carry over the selected period, rounded to one decimal.
 The spectrum is one shared channel and one radio receives one packet at a time, so the
 ceiling is one channel-second per elapsed second — the payload exposes it as
-`"period_capacity_ms"`: in the period view it is the day-aligned window's elapsed time;
-in the cumulative view it runs from the oldest recorded moment in the ledgers (each
-station's `first_seen`, the oldest day row, the oldest sample bucket). A row at 100%
+`"period_capacity_ms"`, next to `"period_start_ts"`, the first moment of the range
+answered: in the period view it is the day-aligned window's start (the selector says
+"24 h" while the window covers whole UTC days — the page prints the span it actually
+answers for so the percent can be checked), and in the cumulative view the oldest
+recorded moment in the ledgers (each station's `first_seen`, the oldest day row, the
+oldest sample bucket). A row at 100%
 would be one station filling the channel alone; a table summing above 100% is
 oversubscription — transmissions running in parallel whose copies this antenna still
 paid for. The three tables price the same medium from three ends, so the same ceiling
