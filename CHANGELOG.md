@@ -360,7 +360,10 @@ semantic versioning.
   oversubscription: transmissions running in parallel. `GET /api/telemetry/occupancy`
   carries it per row (`capacity_percent`) and the ceiling as a scalar
   (`period_capacity_ms`: the day-aligned window's elapsed time in the period view, the
-  time since the oldest recorded moment in the cumulative view); the same ceiling
+  time since the oldest recorded moment in the cumulative view), together with the
+  period's first moment (`period_start_ts`) — which the page prints under the selector,
+  because "Last 24 h" is cut on whole UTC days and actually spans e.g. 33 h: the
+  percent is only checkable when the page says what period it answers for; the same ceiling
   applies to all three tables, so their percentages are comparable while the ledgers
   themselves stay unsummed. The percent is taken after the prefix fold, so a merged
   antenna carries one figure for all its copies, and it is null — a dash on the page,

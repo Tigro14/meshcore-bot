@@ -306,23 +306,24 @@ def _fold_prefix_rows(
     rows.sort(key=lambda r: float(r.get('airtime_ms') or 0.0), reverse=True)
 
 
-def _period_capacity_ms(conn: sqlite3.Connection, cutoff_day: Optional[int]) -> Optional[float]:
-    """What the channel could physically carry over the selected period, in ms.
+def _period_window(conn: sqlite3.Connection, cutoff_day: Optional[int]) -> tuple[Optional[float], Optional[float]]:
+    """The range the tables answer for, as (first moment, capacity in ms).
 
     The spectrum here is one shared channel and one radio receives one packet
     at a time, so the ceiling is one second of airtime per elapsed second —
     regardless of modulation, and independent of what any station actually
     sent.  In the period view the window is the day-aligned one the tables
-    were cut with, so its elapsed time is exact.  In the cumulative view the
-    range is "since the oldest recorded data", and that earliest moment is
-    read from the ledgers themselves (each station's ``first_seen``, the
-    oldest day row, the oldest sample bucket); with nothing recorded at all
-    the elapsed time is unknown, so the ceiling is ``None`` — not zero, per
-    the module's rule that missing facts stay missing rather than becoming
-    zeros that claim to be measured.
+    were cut with — the selector says "24 h" while the window covers whole
+    UTC days — so the page has to state the span it actually answers for,
+    not just the label the reader clicked.  In the cumulative view the range
+    is "since the oldest recorded data", and that earliest moment is read
+    from the ledgers themselves (each station's ``first_seen``, the oldest
+    day row, the oldest sample bucket); with nothing recorded at all both
+    are ``None`` — not zero, per the module's rule that missing facts stay
+    missing rather than becoming zeros that claim to be measured.
     """
     if cutoff_day is not None:
-        return (time.time() - float(cutoff_day)) * 1000.0
+        return float(cutoff_day), (time.time() - float(cutoff_day)) * 1000.0
     queries = [
         "SELECT MIN(first_seen) FROM occupancy_senders",
         "SELECT MIN(first_seen) FROM occupancy_emitters",
@@ -341,8 +342,8 @@ def _period_capacity_ms(conn: sqlite3.Connection, cutoff_day: Optional[int]) -> 
         if value is not None and (earliest is None or float(value) < earliest):
             earliest = float(value)
     if earliest is None:
-        return None
-    return (time.time() - earliest) * 1000.0
+        return None, None
+    return earliest, (time.time() - earliest) * 1000.0
 
 
 def _apply_capacity_percent(
@@ -2959,8 +2960,12 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     # spectrum is one shared channel and one radio receives one
                     # packet at a time, so the ceiling is one channel-second per
                     # elapsed second.  Computed after the fold, so a merged row
-                    # prices one antenna's whole cost once.
-                    capacity_ms = _period_capacity_ms(conn, cutoff_day)
+                    # prices one antenna's whole cost once.  The range itself
+                    # rides along: the day-aligned window is wider than the
+                    # "24 h" label the reader clicked, and a percent whose
+                    # denominator is invisible gets divided by the wrong period.
+                    period_start, capacity_ms = _period_window(conn, cutoff_day)
+                    payload['period_start_ts'] = period_start
                     payload['period_capacity_ms'] = capacity_ms
                     _apply_capacity_percent(senders, capacity_ms)
                     _apply_capacity_percent(emitters, capacity_ms)

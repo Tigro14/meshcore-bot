@@ -200,6 +200,16 @@ class TestAirtimePage:
         assert body.count("Number(row.capacity_percent).toFixed(1)") == 3
         assert "row.capacity_percent == null" in body
 
+    def test_page_states_the_span_the_period_answers_for(self, viewer):
+        """The selector says "24 h" while the window is cut on whole UTC days:
+        the page states the span actually measured, so the reader checks the
+        percent against the period that was answered, not one assumed."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert 'id="oc-period"' in body
+        assert "data.period_start_ts" in body
+        assert "data.period_capacity_ms" in body
+        assert "Les tableaux ci-dessous répondent pour" in body
+
     def test_chart_draws_an_absent_bucket_as_a_gap(self, viewer):
         """A window with no written bucket must not render as 0.0."""
         body = viewer.app.test_client().get("/airtime").data.decode()

@@ -104,6 +104,12 @@
         flood tree proves — and it is a floor, never a ceiling.
     </p>
 
+    <!-- The span the period answers for: the selector says "24 h" while the day-
+         aligned window covers whole UTC days, and a percent whose denominator is
+         invisible gets divided by the period the reader assumed, not the one that
+         was measured. -->
+    <p class="small text-muted mb-4" id="oc-period"></p>
+
     <!-- Live windows -->
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
@@ -432,6 +438,21 @@
         }
 
         renderLive(data) {
+            // The selector says "24 h" but the window is cut on whole UTC days:
+            // the page states the span it actually answers for, so a percent is
+            // read against the period that was measured and not an assumed one.
+            const period = el('oc-period');
+            if (data.period_start_ts == null || data.period_capacity_ms == null) {
+                period.textContent = '';
+            } else {
+                const start = new Date(data.period_start_ts * 1000).toLocaleString();
+                const hours = (data.period_capacity_ms / 3600000).toFixed(1);
+                period.textContent =
+                    'The tables below answer for: ' + start + ' → now (' + hours + ' h), '
+                    + 'aligned to whole UTC days. '
+                    + 'Les tableaux ci-dessous répondent pour : ' + start + ' → maintenant ('
+                    + hours + ' h), calés sur des jours UTC entiers.';
+            }
             el('oc-sf').textContent = data.sf == null ? '-' : data.sf;
             el('oc-bw').textContent = data.bw_khz == null ? '-' : data.bw_khz + ' kHz';
             el('oc-cr').textContent = data.coding_rate == null ? '-' : '4/' + data.coding_rate;

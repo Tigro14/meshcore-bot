@@ -1978,6 +1978,8 @@ class TestApi:
         # denominator.
         capacity = windowed["period_capacity_ms"]
         assert 86_400_000 <= capacity < 172_800_000
+        # The page states the span it answers for, so the percent can be checked.
+        assert windowed["period_start_ts"] == occupancy.window_cutoff_day(1)
         assert rows["w"]["capacity_percent"] == round(60.0 / capacity * 100.0, 1)
         assert rows["v"]["capacity_percent"] == round(30.0 / capacity * 100.0, 1)
         cumulative = json.loads(client.get("/api/telemetry/occupancy").get_data())
@@ -1986,6 +1988,7 @@ class TestApi:
         # days back, so its ceiling is wider than the 1-day window's.
         capacity = cumulative["period_capacity_ms"]
         assert capacity >= 3 * 86_400_000
+        assert cumulative["period_start_ts"] == float(day - 3 * 86400)
         for sender, airtime in (("w", 60.0), ("v", 30.0), ("u", 30.0)):
             assert rows[sender]["capacity_percent"] == round(airtime / capacity * 100.0, 1)
 
@@ -2005,16 +2008,18 @@ class TestApi:
         assert payload["top_relays"] == []
 
     def test_the_capacity_is_unknown_when_nothing_is_recorded(self, conn):
-        """With no recorded moment anywhere, the cumulative period's elapsed
-        time is unknown, so the ceiling is ``None`` — the page shows a dash
-        rather than a percent of an undated range."""
-        from modules.web_viewer.app import _period_capacity_ms
+        """With no recorded moment anywhere, the cumulative period's range is
+        unknown, so its start and ceiling are both ``None`` — the page shows a
+        dash rather than a percent of an undated range."""
+        from modules.web_viewer.app import _period_window
 
-        assert _period_capacity_ms(conn, None) is None
-        # A window's elapsed time is a property of the clock, not of the
-        # ledger, so it is known even over an empty database.
+        assert _period_window(conn, None) == (None, None)
+        # A window's span is a property of the clock, not of the ledger, so it
+        # is known even over an empty database.
         day = int(occupancy_module.time.time()) // 86400 * 86400
-        assert _period_capacity_ms(conn, day) > 0
+        start, capacity = _period_window(conn, day)
+        assert start == float(day)
+        assert capacity > 0
 
     def test_a_folded_row_prices_one_merged_cost(self, occupancy, conn, viewer):
         """The fold happens before the percent, so the merged antenna carries one
