@@ -1388,6 +1388,23 @@ occupancy_samples_retention_days = 30
 occupancy_senders_retention_days = 90
 occupancy_emitters_retention_days = 90
 occupancy_relays_retention_days = 90
+[Dx_Command]
+# Enable or disable the dx command
+# The dx command reports the farthest stations the repeater nearest the bot received,
+# measured from that repeater to each station's most recently advertised position.
+enabled = true
+
+# How far back to look, in days, for a bare "dx" (1-365). "dx 5 30d" overrides per call.
+days = 7
+
+# How many rows a bare "dx" asks for (1-10). "dx 3" overrides per call.
+# The reply is packed to one message body, so a cramped frame may keep fewer rows than
+# asked for: the least far rows go first, and the record (the farthest) never does.
+limit = 5
+
+# The reference point "nearest" is measured from is [Bot] bot_latitude/bot_longitude.
+# Without them the sender's own advertised position is used, and without that either the
+# command says which key is missing rather than guessing.
 [Path_Command]
 # Enable or disable the path command
 enabled = true

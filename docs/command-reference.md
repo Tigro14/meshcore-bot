@@ -955,6 +955,60 @@ figures rather than half of one.
 
 ---
 
+### `dx [count] [days]`
+
+The farthest station the repeater nearest this bot received. "Nearest" is measured from
+`[Bot] bot_latitude`/`bot_longitude` — or from the sender's own advertised position when
+the bot has none — over the gateways (`role` repeater or room server) that have a GPS
+fix.
+
+**Usage:**
+- `dx` - the top stations of the nearest repeater over 7 days
+- `dx 3` - only three rows
+- `dx 5 30d` - widen the window to 30 days
+
+**Examples:**
+```
+dx
+dx 3 30d
+```
+
+**Response:** one header naming the repeater, its distance from the reference point and
+the window, then the stations ranked farthest first, each with the straight-line distance
+from that repeater. The distance is the link that closed, station to gateway antenna, not
+the route the advert took afterwards, so a station is never credited with a distance it
+did not cover on RF.
+
+```
+DX Tigro G2PV 17 m 7 j
+1. FR91-3DD1-RPT 27 km
+2. Loz Tower 🌲 17 km
+3. Carrieres/Sein 17 km
+4. FR91 🦝 Mini 14 km
+```
+
+The evidence is the flood path each advert carried into the mesh: the first node of that
+path is the gateway that first repeated it, which is exactly "received by this
+repeater". A row is only kept when that first prefix resolves to the nearest repeater and
+to nothing else, so a shared prefix is decided the way the mesh graph decides it (starred
+first, then nearest, then most recently heard) rather than guessed. Adverts the bot heard
+itself — zero hop — are the bot's own DX, not the repeater's, and stay out of the list;
+so do message rows, whose author is not on the wire. Only adverts whose author has a
+GPS fix can be measured, and the position used is the station's most recent one.
+
+**Config:** `[Dx_Command] enabled` (default true) gates the command, `days` (default 7)
+sets the window and `limit` (default 5, capped at 10) the rows asked for by bare `dx`.
+The reference position comes from `[Bot] bot_latitude`/`bot_longitude`; without either,
+the sender's advertised position is used, and without that either the command says which
+key is missing.
+
+# The reply is packed to one message body: names are shortened before rows are dropped
+# (never below a dozen bytes, which is what makes a MeshCore name recognisable), rows go
+# least far first, and the record - the farthest station - is what survives a cramped
+# frame.
+
+---
+
 ### `stats`
 
 Show bot usage statistics for the past 24 hours.
