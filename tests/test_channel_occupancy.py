@@ -1954,6 +1954,58 @@ class TestApi:
         assert rows[0]["airtime_ms"] == 120.0
         assert rows[0]["merged_prefixes"] == [{"label": "6201", "packets": 1, "airtime_ms": 120.0}]
 
+    def test_the_airtime_rows_carry_their_share_of_the_period(self, occupancy, conn, viewer):
+        """Each row reports its share of its own ledger over the selected period.
+
+        The denominator is the ledger's whole-period total, not the page's rows:
+        a top-10 slice of a busy ledger must not add up to 100% by itself.  The
+        three ledgers are shared by their own totals, never by each other's.
+        """
+        day = int(occupancy_module.time.time()) // 86400 * 86400
+        occupancy.record(30, kind="rx", sender="w", at=day + 5)
+        occupancy.record(30, kind="rx", sender="w", at=day + 6)
+        occupancy.record(30, kind="rx", sender="v", at=day + 7)
+        occupancy.record(30, kind="rx", sender="u", at=day - 3 * 86400)
+        occupancy.flush(conn)
+        client = viewer.app.test_client()
+        windowed = json.loads(client.get("/api/telemetry/occupancy?days=1").get_data())
+        rows = {row["sender"]: row for row in windowed["top_senders"]}
+        assert "u" not in rows
+        # One decimal, and the outside-window sender does not dilute the shares:
+        # the period total is the in-window total.
+        assert rows["w"]["airtime_percent"] == 66.7
+        assert rows["v"]["airtime_percent"] == 33.3
+        cumulative = json.loads(client.get("/api/telemetry/occupancy").get_data())
+        rows = {row["sender"]: row for row in cumulative["top_senders"]}
+        assert rows["w"]["airtime_percent"] == 50.0
+        assert rows["v"]["airtime_percent"] == 25.0
+        assert rows["u"]["airtime_percent"] == 25.0
+
+    def test_the_share_is_never_taken_across_ledgers(self, occupancy, conn, viewer):
+        """Emitter-labelled traffic with no flood path (no entry relay) still
+        shares the emitter ledger to 100% while the relay ledger stays an
+        admitted zero — the three ledgers answer for different facts."""
+        base = int(occupancy_module.time.time()) // 60 * 60
+        occupancy.record(30, kind="rx", sender="w", emitter="62010a", at=base)
+        occupancy.flush(conn)
+        payload = json.loads(viewer.app.test_client().get("/api/telemetry/occupancy").get_data())
+        assert payload["top_emitters"][0]["airtime_percent"] == 100.0
+        assert payload["top_relays"] == []
+        assert payload["period_relay_airtime_ms"] == 0.0
+        assert payload["period_emitter_airtime_ms"] == payload["top_emitters"][0]["airtime_ms"]
+
+    def test_a_folded_row_shares_one_merged_percent(self, occupancy, conn, viewer):
+        """The fold happens before the share, so the merged antenna carries one
+        percent for all its copies, not two competing ones."""
+        base = int(occupancy_module.time.time()) // 60 * 60
+        occupancy.record(120, kind="rx", sender="w", emitter="6201", at=base)
+        occupancy.record(30, kind="rx", sender="w", emitter="62010a", at=base + 5)
+        occupancy.flush(conn)
+        payload = json.loads(viewer.app.test_client().get("/api/telemetry/occupancy").get_data())
+        rows = {row["emitter"]: row for row in payload["top_emitters"]}
+        assert set(rows) == {"62010a"}
+        assert rows["62010a"]["airtime_percent"] == 100.0
+
     def test_top_senders_resolve_full_keys_to_contact_names(self, occupancy, conn, viewer):
         """A full public key in the table gets its contact name; the unattributed bucket does not.
 

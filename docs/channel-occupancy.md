@@ -141,7 +141,13 @@ though it writes no payload of its own.
 | a full public key | a copy that arrived with no path, the sender's own antenna; and a transmission the bot made, charged to its own key |
 | `unattributed` | copies the wire names no one for: undecoded traffic, direct copies whose only sender bytes are truncated, and TRACE paths, whose entries are per-hop SNR hashes, not node addresses |
 
-The label stays as the wire sent it. The reader (`top_emitters`) turns a node address
+The label stays as the wire sent it — and only a **flood** path names relays at all.
+A direct packet carries no route info, and what the decoder hands over for one is its
+transport codes read as path-sized chunks: the capture path therefore derives the
+path-based emitter and entry-relay labels only for `FLOOD` and `TRANSPORT_FLOOD` route
+types (on live traffic one direct ACK's transport code `62016C` reached the ledgers
+before this gate, and its two 6-char labels under `6201` froze that node's fold). The
+airtime is charged whatever the route type. The reader (`top_emitters`) turns a node address
 into a contact name only when exactly one tracked contact begins with those bytes; an
 ambiguous prefix stays bytes, because naming a prefix that could belong to several
 stations is a coin flip presented as a fact. A transmission is its own emitter, and an
@@ -152,12 +158,21 @@ The same relay can nonetheless stand in the ledger under two labels: MeshCore wr
 node address **2 bytes wide in short packets and 3 bytes wide in extended ones**, so
 one antenna appears as `6201` on some copies and `62010a` on others. Two rows for one
 relay read as two emitters, so the reader folds the short label into the longer one —
+over the whole ledger, not just the page's rows: the wider partner is often the small
+row (on live traffic 237 relay copies sat under `6201` while its only possible wider
+address held 18, below the page the fold first saw), so the reader draws a wide pool
+before folding, and a prefix whose unique wider address is still not in the fetched
+rows is relabelled to it without summing an airtime that fetch never saw. It folds
 but only when the longer address is the only emitter address the ledger knows under
 that prefix, and the folded labels are listed in the row (`merged_prefixes`) rather
 than absorbed silently. With two longer addresses heard, the 2-byte copies cannot be
 told apart, and folding them into either would attribute copies to a station the wire
 did not name; the short row stays alone. The fold is a view rule: the ledger keeps the
-labels at the widths the wire sent them.
+labels at the widths the wire sent them. The fold sees the whole ledger, not just the
+page: the reader fetches a wide pool before folding, and when the one wider address is
+known to the ledger but absent from the fetched rows entirely, the short row is
+relabelled to it — the prefix can only mean that address — without summing in the
+partner row's airtime, which that fetch never saw.
 
 The two ledgers hold the same copies once per fact each — carrier and emitter are two
 different stations — so they must never be summed: a sum would bill the channel twice.
@@ -428,6 +443,18 @@ All three lists follow the page's history selector when the request carries `?da
 day-aligned, and the payload says which window it answers with
 `"share_window_days"`. Without `days` the cumulative ledgers answer, as they always
 did, and no `share_window_days` key is present.
+
+Each row of the three lists also carries `airtime_percent`: that row's share of the
+same ledger over the same period, rounded to one decimal. The denominator is never the
+page's slice and never another ledger — it is every day row of that ledger inside the
+window (`occupancy_sender_days`, `occupancy_emitter_days`, `occupancy_relay_days`) or,
+in the cumulative view, the whole cumulative table — and it is exposed as the scalars
+`period_sender_airtime_ms`, `period_emitter_airtime_ms` and `period_relay_airtime_ms`
+so a reader can check the shares without re-summing anything. One table's rows
+therefore add up to its period; shares are never comparable across the three. The
+share is taken after the prefix fold, so one antenna carries one share for all its
+copies, and it is `null` — not `0` — when the period holds no recorded airtime for
+that ledger.
 
 `GET /api/telemetry/occupancy/history?days=7` — buckets as sums and counts, plus the
 nearest-rank percentiles. Only buckets that were written appear in `buckets`. Each

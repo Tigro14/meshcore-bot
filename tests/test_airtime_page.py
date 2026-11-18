@@ -187,6 +187,17 @@ class TestAirtimePage:
         # The French half of the caption, for the reader who never switches language.
         assert "jamais leur auteur ni l'antenne émettrice" in relay_caption
 
+    def test_every_airtime_cell_shows_the_share_of_the_period(self, viewer):
+        """Next to the raw seconds, every row of the three airtime tables shows
+        its share of the period, at one decimal — and a dash, not a 0.0%, when
+        the share is unknown."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        for ledger in ("sender", "emitter", "entry-relay"):
+            assert f"Share of all {ledger} airtime recorded in the selected period" in body
+        # One decimal on each of the three tables, and the null case renders as a dash.
+        assert body.count("Number(row.airtime_percent).toFixed(1)") == 3
+        assert "row.airtime_percent == null" in body
+
     def test_chart_draws_an_absent_bucket_as_a_gap(self, viewer):
         """A window with no written bucket must not render as 0.0."""
         body = viewer.app.test_client().get("/airtime").data.decode()
