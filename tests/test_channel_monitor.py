@@ -26,6 +26,7 @@ from modules.web_viewer.channel_monitor import (
     parse_monitor_list,
     parse_names,
     public_qr_for,
+    qr_region_scope,
 )
 from modules.web_viewer.channel_visibility import channel_identity
 
@@ -245,6 +246,71 @@ class TestChannelQr:
     def test_an_empty_name_produces_no_qr(self):
         assert channel_qr("")["qr"] is None
         assert channel_qr(None)["qr"] is None
+
+    def test_a_region_scope_travels_in_the_qr_uri(self):
+        """MeshCore app v1.47.0+ assigns it to the channel when it scans."""
+        result = channel_qr("#fr-idf", region_scope="#idf")["qr"]
+        assert result["uri"].endswith(f"&secret={result['secret']}&region_scope=idf")
+
+    def test_a_region_needs_no_hash_to_be_carried(self):
+        result = channel_qr("#general", region_scope="west")["qr"]
+        assert "region_scope=west" in result["uri"]
+
+    def test_a_global_region_is_no_region_at_all(self):
+        """'*' / 'None' / '' mean join-unscoped: the parameter is simply absent."""
+        for scope in ("", " ", "*", "0", "None", "#"):
+            uri = channel_qr("#fr-idf", region_scope=scope)["qr"]["uri"]
+            assert "region_scope" not in uri, scope
+
+    def test_the_region_is_percent_encoded_like_the_name(self):
+        result = channel_qr("#general", region_scope="a b&x=y")["qr"]
+        assert "region_scope=a%20b%26x%3Dy" in result["uri"]
+
+
+# ---------------------------------------------------------------------------
+# Config -> QR region scope
+# ---------------------------------------------------------------------------
+
+class TestQrRegionScope:
+    def test_the_per_channel_scope_wins_over_the_others(self):
+        config = _config(Channels={
+            "flood_scope.weather": "#sea",
+            "outgoing_flood_scope_override": "#west",
+            "startup_flood_scope": "#home",
+        })
+        assert qr_region_scope(config, "#weather") == "sea"
+        assert qr_region_scope(config, "Weather") == "sea"
+
+    def test_the_override_is_next_and_startup_last(self):
+        config = _config(Channels={
+            "outgoing_flood_scope_override": "#west",
+            "startup_flood_scope": "#home",
+        })
+        assert qr_region_scope(config, "#general") == "west"
+        config = _config(Channels={"startup_flood_scope": "#home"})
+        assert qr_region_scope(config, "#general") == "home"
+
+    def test_a_per_channel_global_marker_stops_the_chain(self):
+        """flood_scope.#local = * says 'post this channel unscoped', not
+        'fall through to the override'."""
+        config = _config(Channels={
+            "flood_scope.#local": "*",
+            "outgoing_flood_scope_override": "#west",
+        })
+        assert qr_region_scope(config, "#local") is None
+        assert qr_region_scope(config, "#other") == "west"
+
+    def test_no_region_configured_means_no_parameter(self):
+        assert qr_region_scope(_config(Channels={}), "#general") is None
+        assert qr_region_scope(_config(), "#general") is None
+        assert qr_region_scope(None, "#general") is None
+
+    def test_a_name_the_radio_could_not_store_is_left_out_of_the_qr(self):
+        """Better a plain QR than one the app rejects when it scans."""
+        config = _config(Channels={"outgoing_flood_scope_override": "x" * 40})
+        assert qr_region_scope(config, "#general") is None
+        config = _config(Channels={"outgoing_flood_scope_override": "#déferlante"})
+        assert qr_region_scope(config, "#general") is None
 
 
 # ---------------------------------------------------------------------------

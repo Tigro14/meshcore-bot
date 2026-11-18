@@ -426,6 +426,10 @@ max_response_hops = 7
 # flood_scope.general = #west
 # flood_scope.weather = #sea
 # flood_scope.#local = *
+# The public /channels page encodes the resolved region (flood_scope.<channel>,
+# then the override, then startup_flood_scope) into each channel's "Add Channel"
+# QR code as the region_scope parameter (MeshCore app v1.47.0+), so a scanning
+# device posts that channel at the same region the bot does.
 
 [Region_Warnings]
 # Regional flood scope ("region code") monitoring, and an optional automatic

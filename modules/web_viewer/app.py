@@ -205,6 +205,7 @@ from modules.web_viewer.channel_monitor import (
     normalize_name,
     parse_names,
     public_qr_for,
+    qr_region_scope,
 )
 from modules.web_viewer.channels import ChannelAdminMixin
 from modules.web_viewer.cleanup import CleanupSchedulerMixin
@@ -5654,9 +5655,17 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             Public surface: a hashtag channel's QR secret is derivable from its
             name, so publishing it leaks nothing the name list does not.  A custom
             channel's key is only handed to an anonymous visitor when the operator
-            opted that channel into web publication on the Radio page.
+            opted that channel into web publication on the Radio page.  QR codes
+            also carry the bot's own configured region for the channel
+            (``region_scope``, docs/region-scopes.md): it is public by nature —
+            every scoped message on that channel broadcasts the same transport
+            code — so it leaks nothing the mesh does not already carry.
             """
             is_admin = _channels_is_admin()
+            # Re-read from disk so flood-scope edits made in config.ini show up
+            # in the QR codes without a viewer restart (same rule as the
+            # settings GET below).
+            self.config = self._load_merged_config()
             view = self._monitor_view()
 
             channels = []
@@ -5664,7 +5673,8 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 name = normalize_name(channel.get('name'))
                 if not name:
                     continue
-                qr = (admin_qr_for if is_admin else public_qr_for)(channel)
+                qr = (admin_qr_for if is_admin else public_qr_for)(
+                    channel, region_scope=qr_region_scope(self.config, name))
                 is_public_channel = is_public(name)
                 if not is_admin:
                     if is_public_channel:

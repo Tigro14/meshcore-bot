@@ -8,6 +8,15 @@ semantic versioning.
 
 ### Added
 
+- The "Add Channel" QR codes on the web viewer `/channels` page carry MeshCore's optional
+  `region_scope` parameter (MeshCore app v1.47.0+) when the bot has a region for that
+  channel, so a phone that scans lands on the same region the bot posts it at. The region
+  is read from config with the bot's own send precedence — `[Channels] flood_scope.<channel>`,
+  then `outgoing_flood_scope_override`, then `startup_flood_scope` — with a per-channel
+  global marker stopping the chain, and no parameter for an unset chain or a name the radio
+  could not store. It leaks nothing: every scoped message on the channel already broadcasts
+  the region's transport code. `modules/web_viewer/channel_monitor.py`,
+  `docs/region-scopes.md`.
 - `dx` command: the farthest stations the repeater nearest the bot received. "Nearest" is
   measured from `[Bot] bot_latitude`/`bot_longitude`, falling back to the sender's
   advertised position, across gateways with a GPS fix; each row is the straight-line
