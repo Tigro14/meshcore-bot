@@ -236,9 +236,12 @@
                 The Advert column is the share of that sender's airtime spent on adverts —
                 the presence traffic every MeshCore node broadcasts — and a dash means the
                 share is unknown because that sender predates the split.
-                The percent next to each airtime is that sender's share of all sender
-                airtime recorded in the selected period, so the rows of this table add up
-                to the whole period.
+                The percent next to each airtime is that sender's share of what
+                the channel could physically carry in the selected period: one
+                radio receives one packet at a time, so the ceiling is one
+                channel-second per elapsed second.  A sender at 100% would fill
+                the channel alone; a table summing above 100% is
+                oversubscription — transmissions running in parallel.
                 The table follows the history period selected above: each row sums that
                 station's day rows inside the window, aligned to whole UTC days, so a small
                 number here is not a quiet station — absence in this table is not silence on
@@ -248,8 +251,11 @@
                 <em>Attribution par notre propre déchiffrement, avant écriture seulement ;
                 l'attente de soixante secondes couvre le déchiffrement tardif ; l'anonymat des
                 canaux ouverts est structurel, pas une faille de mesure. Le reste demeure
-                inconnu. Couvert par la période choisie ; le pourcentage près de l'airtime
-                est la part de l'airtime senders total du tableau sur cette période.</em>
+                inconnu. Couvert par la période choisie ; le pourcentage près de
+                l'airtime est la part de ce que le canal peut physiquement porter
+                sur cette période — une radio ne reçoit qu'un paquet à la fois,
+                le plafond est donc une seconde de canal par seconde écoulée, et
+                un total au-dessus de 100 % signale des émissions simultanées.</em>
             </p>
         </div>
     </div>
@@ -290,10 +296,13 @@
                 copies are folded into that row and the cell names the labels it merged.
                 Where the ledger knows two longer addresses, the short row stays on its own:
                 the fold would pick a station the wire did not name.
-                The percent next to each airtime is that emitter's share of all emitter
-                airtime recorded in the selected period.
-                <em>Couvert par la période choisie. Le pourcentage près de l'airtime est la
-                part de l'airtime émetteur total du tableau sur cette période.</em>
+                The percent next to each airtime is that emitter's share of what
+                the channel could physically carry in the selected period — the
+                same ceiling as above: one channel-second per elapsed second.
+                <em>Couvert par la période choisie. Le pourcentage près de
+                l'airtime est la part de la capacité théorique du canal sur
+                cette période : une radio ne reçoit qu'un paquet à la fois, le
+                plafond est donc une seconde de canal par seconde écoulée.</em>
             </p>
         </div>
     </div>
@@ -334,13 +343,14 @@
                 address under a shorter one, the short copies fold into that row and the
                 cell names the labels it merged. Like the other tables, this one covers the
                 history period selected above, aligned to whole UTC days.
-                The percent next to each airtime is that relay's share of all entry-relay
-                airtime recorded in the selected period.
+                The percent next to each airtime is that relay's share of what
+                the channel could physically carry in the selected period — the
+                same ceiling as the tables above.
                 <em>Premier relais du chemin d'inondation : la porte d'entrée des copies
                 répétées, jamais leur auteur ni l'antenne émettrice. Les copies reçues en
                 direct n'entrent pas ici, et les trois tableaux ne se cumulent jamais. Le
-                pourcentage près de l'airtime est la part de l'airtime relais total du
-                tableau sur cette période.</em>
+                pourcentage près de l'airtime est la part de la capacité théorique du
+                canal sur cette période.</em>
             </p>
         </div>
     </div>
@@ -675,10 +685,10 @@
                 return '<tr>'
                     + '<td>' + identity + '</td>'
                     + '<td>' + escapeHtml(formatSeconds(row.airtime_ms / 1000)) + ' '
-                    + (row.airtime_percent == null
+                    + (row.capacity_percent == null
                         ? '<span class="text-muted">&mdash;</span>'
-                        : '<span class="text-muted" title="Share of all sender airtime recorded in the selected period">'
-                          + escapeHtml(Number(row.airtime_percent).toFixed(1)) + '%</span>') + '</td>'
+                        : '<span class="text-muted" title="Share of the channel&#39;s theoretical capacity in the selected period: one radio receives one packet at a time, so the ceiling is one channel-second per elapsed second">'
+                          + escapeHtml(Number(row.capacity_percent).toFixed(1)) + '%</span>') + '</td>'
                     + '<td>' + escapeHtml(row.packets) + '</td>'
                     + '<td>' + (row.advert_percent == null
                         ? '<span class="text-muted">&mdash;</span>'
@@ -721,10 +731,10 @@
                 return '<tr>'
                     + '<td>' + identity + '</td>'
                     + '<td>' + escapeHtml(formatSeconds(row.airtime_ms / 1000)) + ' '
-                    + (row.airtime_percent == null
+                    + (row.capacity_percent == null
                         ? '<span class="text-muted">&mdash;</span>'
-                        : '<span class="text-muted" title="Share of all emitter airtime recorded in the selected period">'
-                          + escapeHtml(Number(row.airtime_percent).toFixed(1)) + '%</span>') + '</td>'
+                        : '<span class="text-muted" title="Share of the channel&#39;s theoretical capacity in the selected period: one radio receives one packet at a time, so the ceiling is one channel-second per elapsed second">'
+                          + escapeHtml(Number(row.capacity_percent).toFixed(1)) + '%</span>') + '</td>'
                     + '<td>' + escapeHtml(row.packets) + '</td>'
                     + '<td>' + (row.advert_percent == null
                         ? '<span class="text-muted">&mdash;</span>'
@@ -760,10 +770,10 @@
                 return '<tr>'
                     + '<td>' + identity + '</td>'
                     + '<td>' + escapeHtml(formatSeconds(row.airtime_ms / 1000)) + ' '
-                    + (row.airtime_percent == null
+                    + (row.capacity_percent == null
                         ? '<span class="text-muted">&mdash;</span>'
-                        : '<span class="text-muted" title="Share of all entry-relay airtime recorded in the selected period">'
-                          + escapeHtml(Number(row.airtime_percent).toFixed(1)) + '%</span>') + '</td>'
+                        : '<span class="text-muted" title="Share of the channel&#39;s theoretical capacity in the selected period: one radio receives one packet at a time, so the ceiling is one channel-second per elapsed second">'
+                          + escapeHtml(Number(row.capacity_percent).toFixed(1)) + '%</span>') + '</td>'
                     + '<td>' + escapeHtml(row.packets) + '</td>'
                     + '<td>' + (row.advert_percent == null
                         ? '<span class="text-muted">&mdash;</span>'

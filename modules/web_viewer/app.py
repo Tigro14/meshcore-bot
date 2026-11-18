@@ -306,42 +306,71 @@ def _fold_prefix_rows(
     rows.sort(key=lambda r: float(r.get('airtime_ms') or 0.0), reverse=True)
 
 
-def _apply_airtime_percent(
-    conn: sqlite3.Connection,
-    rows: list[dict[str, Any]],
-    cumulative_table: str,
-    days_table: str,
-    cutoff_day: Optional[int],
-) -> float:
-    """Give every row its share of the same ledger over the selected period.
+def _period_capacity_ms(conn: sqlite3.Connection, cutoff_day: Optional[int]) -> Optional[float]:
+    """What the channel could physically carry over the selected period, in ms.
 
-    The denominator is that table's own period total — every day row inside
-    the window in the period view, every row of the cumulative table in the
-    cumulative view, not just the page's rows.  Sharing a ledger's rows by
-    that ledger's period total is the one denominator that lets the table's
-    rows add up to the whole period; the three ledgers measure the same radio
-    from three ends and are never summed, so a share is never taken across
-    ledgers either.
-
-    Returns the total.  ``None`` (not 0) on a row when the period holds no
-    recorded airtime at all: a share of nothing is unknown, and a 0.0% would
-    claim a station that did use the channel and simply had nothing to divide
-    by.  Rounded to one decimal because that is the precision the page shows.
+    The spectrum here is one shared channel and one radio receives one packet
+    at a time, so the ceiling is one second of airtime per elapsed second —
+    regardless of modulation, and independent of what any station actually
+    sent.  In the period view the window is the day-aligned one the tables
+    were cut with, so its elapsed time is exact.  In the cumulative view the
+    range is "since the oldest recorded data", and that earliest moment is
+    read from the ledgers themselves (each station's ``first_seen``, the
+    oldest day row, the oldest sample bucket); with nothing recorded at all
+    the elapsed time is unknown, so the ceiling is ``None`` — not zero, per
+    the module's rule that missing facts stay missing rather than becoming
+    zeros that claim to be measured.
     """
-    table = days_table if cutoff_day is not None else cumulative_table
-    sql = f"SELECT COALESCE(SUM(airtime_ms), 0.0) FROM {table}"
-    params: tuple = ()
     if cutoff_day is not None:
-        sql += " WHERE day_ts >= ?"
-        params = (cutoff_day,)
-    try:
-        total = float(conn.execute(sql, params).fetchone()[0] or 0.0)
-    except sqlite3.OperationalError:
-        total = 0.0
+        return (time.time() - float(cutoff_day)) * 1000.0
+    queries = [
+        "SELECT MIN(first_seen) FROM occupancy_senders",
+        "SELECT MIN(first_seen) FROM occupancy_emitters",
+        "SELECT MIN(first_seen) FROM occupancy_relays",
+        "SELECT MIN(day_ts) FROM occupancy_sender_days",
+        "SELECT MIN(day_ts) FROM occupancy_emitter_days",
+        "SELECT MIN(day_ts) FROM occupancy_relay_days",
+        "SELECT MIN(bucket_ts) FROM occupancy_samples",
+    ]
+    earliest: Optional[float] = None
+    for sql in queries:
+        try:
+            value = conn.execute(sql).fetchone()[0]
+        except sqlite3.OperationalError:
+            continue
+        if value is not None and (earliest is None or float(value) < earliest):
+            earliest = float(value)
+    if earliest is None:
+        return None
+    return (time.time() - earliest) * 1000.0
+
+
+def _apply_capacity_percent(
+    rows: list[dict[str, Any]],
+    capacity_ms: Optional[float],
+) -> None:
+    """Give every row its share of what the channel could physically carry.
+
+    The radio spectrum here is one shared channel, and one radio receives one
+    packet at a time: whatever the modulation, the channel cannot hold more
+    than one second of airtime per elapsed second.  That is the theoretical
+    ceiling — not a distribution denominator.  A row at 100% would be one
+    station alone filling the whole channel; a table summing over 100% is
+    evidence of oversubscription — simultaneous hidden transmissions whose
+    copies this antenna still paid the airtime for.  The reader's question is
+    distance to saturation: who takes how much of the finite resource, not
+    who dominates whoever else.
+
+    A share is taken per row against that one ceiling; the three ledgers
+    stay three separate views of the same channel and are never summed.
+    ``None`` (not 0) on a row when the period's elapsed time is unknown:
+    shares of an undated range are unknown.  Rounded to one decimal because
+    that is the precision the page shows.
+    """
+    ceiling = float(capacity_ms) if capacity_ms and capacity_ms > 0 else None
     for row in rows:
         airtime_ms = float(row.get('airtime_ms') or 0.0)
-        row['airtime_percent'] = round(airtime_ms / total * 100.0, 1) if total > 0 else None
-    return total
+        row['capacity_percent'] = round(airtime_ms / ceiling * 100.0, 1) if ceiling else None
 
 
 def _label_node_rows(
@@ -2924,17 +2953,18 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     emitters = emitters[:limit]
                     relays = relays[:limit]
 
-                    # The share shown next to each airtime figure: every row of a
-                    # ledger shared by that ledger's own total for the selected
-                    # period, so the table's rows add up to the period and no
-                    # share is ever taken across ledgers.  Computed after the
-                    # fold, so a merged row carries one share for one antenna.
-                    payload['period_sender_airtime_ms'] = _apply_airtime_percent(
-                        conn, senders, 'occupancy_senders', 'occupancy_sender_days', cutoff_day)
-                    payload['period_emitter_airtime_ms'] = _apply_airtime_percent(
-                        conn, emitters, 'occupancy_emitters', 'occupancy_emitter_days', cutoff_day)
-                    payload['period_relay_airtime_ms'] = _apply_airtime_percent(
-                        conn, relays, 'occupancy_relays', 'occupancy_relay_days', cutoff_day)
+                    # The percent shown next to each airtime figure is the row's
+                    # share of what the channel could physically carry over the
+                    # selected period, not its share of the other rows: the
+                    # spectrum is one shared channel and one radio receives one
+                    # packet at a time, so the ceiling is one channel-second per
+                    # elapsed second.  Computed after the fold, so a merged row
+                    # prices one antenna's whole cost once.
+                    capacity_ms = _period_capacity_ms(conn, cutoff_day)
+                    payload['period_capacity_ms'] = capacity_ms
+                    _apply_capacity_percent(senders, capacity_ms)
+                    _apply_capacity_percent(emitters, capacity_ms)
+                    _apply_capacity_percent(relays, capacity_ms)
                     # Resolve a full public key to a contact name where the tracking has
                     # one; a short key or the reserved unattributed bucket stays as it is,
                     # because a prefix that could belong to several keys is not an identity

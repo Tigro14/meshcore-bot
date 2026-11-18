@@ -352,16 +352,19 @@ semantic versioning.
   local model: three ledgers unsummed, NULL never rendered as zero.
   `docs/channel-occupancy.md`.
 - The three **by airtime** tables on `/airtime` now show, next to each airtime figure,
-  that row's share of the selected history period at one decimal. The denominator is the
-  same ledger's whole-period total — every day row inside the window in the period view,
-  every row of the cumulative table in the cumulative view — never the page's top slice
-  and never another ledger's total, so one table's rows add up to that period and a share
-  is always taken over the fact that table answers for. `GET /api/telemetry/occupancy`
-  carries it per row (`airtime_percent`) and exposes the denominators as scalars
-  (`period_sender_airtime_ms`, `period_emitter_airtime_ms`, `period_relay_airtime_ms`);
-  the share is computed after the prefix fold, so a merged antenna carries one share for
-  all its copies, and it is null — a dash on the page, never 0.0% — when the period holds
-  no recorded airtime for that ledger. `docs/channel-occupancy.md`.
+  that row's distance to channel saturation at one decimal: its share of what the
+  channel could physically carry over the selected period. The spectrum is one shared
+  channel and one radio receives one packet at a time, so the ceiling is one
+  channel-second per elapsed second — not a distribution of the traffic actually seen.
+  A row at 100% is one station filling the channel alone; a table summing above 100% is
+  oversubscription: transmissions running in parallel. `GET /api/telemetry/occupancy`
+  carries it per row (`capacity_percent`) and the ceiling as a scalar
+  (`period_capacity_ms`: the day-aligned window's elapsed time in the period view, the
+  time since the oldest recorded moment in the cumulative view); the same ceiling
+  applies to all three tables, so their percentages are comparable while the ledgers
+  themselves stay unsummed. The percent is taken after the prefix fold, so a merged
+  antenna carries one figure for all its copies, and it is null — a dash on the page,
+  never 0.0% — when the period's elapsed time is unknown. `docs/channel-occupancy.md`.
 
 ### Changed
 

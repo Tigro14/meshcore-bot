@@ -1954,12 +1954,14 @@ class TestApi:
         assert rows[0]["airtime_ms"] == 120.0
         assert rows[0]["merged_prefixes"] == [{"label": "6201", "packets": 1, "airtime_ms": 120.0}]
 
-    def test_the_airtime_rows_carry_their_share_of_the_period(self, occupancy, conn, viewer):
-        """Each row reports its share of its own ledger over the selected period.
+    def test_the_airtime_rows_carry_their_share_of_the_channel_capacity(self, occupancy, conn, viewer):
+        """Each row reports its distance to channel saturation, not its share of the others.
 
-        The denominator is the ledger's whole-period total, not the page's rows:
-        a top-10 slice of a busy ledger must not add up to 100% by itself.  The
-        three ledgers are shared by their own totals, never by each other's.
+        The ceiling is what the medium could physically carry over the selected
+        period — one channel-second per elapsed second — so the percentages are
+        tiny on a real ledger and are read against 100%, not against each other.
+        The expectations come from the payload's own ``period_capacity_ms``
+        because the window's elapsed time depends on when the request runs.
         """
         day = int(occupancy_module.time.time()) // 86400 * 86400
         occupancy.record(30, kind="rx", sender="w", at=day + 5)
@@ -1971,31 +1973,51 @@ class TestApi:
         windowed = json.loads(client.get("/api/telemetry/occupancy?days=1").get_data())
         rows = {row["sender"]: row for row in windowed["top_senders"]}
         assert "u" not in rows
-        # One decimal, and the outside-window sender does not dilute the shares:
-        # the period total is the in-window total.
-        assert rows["w"]["airtime_percent"] == 66.7
-        assert rows["v"]["airtime_percent"] == 33.3
+        # The day-aligned "last 1 day" window has been running for between one
+        # and two days; that elapsed time, not the ledger's traffic, is the
+        # denominator.
+        capacity = windowed["period_capacity_ms"]
+        assert 86_400_000 <= capacity < 172_800_000
+        assert rows["w"]["capacity_percent"] == round(60.0 / capacity * 100.0, 1)
+        assert rows["v"]["capacity_percent"] == round(30.0 / capacity * 100.0, 1)
         cumulative = json.loads(client.get("/api/telemetry/occupancy").get_data())
         rows = {row["sender"]: row for row in cumulative["top_senders"]}
-        assert rows["w"]["airtime_percent"] == 50.0
-        assert rows["v"]["airtime_percent"] == 25.0
-        assert rows["u"]["airtime_percent"] == 25.0
+        # The cumulative range starts at the oldest recorded station, three
+        # days back, so its ceiling is wider than the 1-day window's.
+        capacity = cumulative["period_capacity_ms"]
+        assert capacity >= 3 * 86_400_000
+        for sender, airtime in (("w", 60.0), ("v", 30.0), ("u", 30.0)):
+            assert rows[sender]["capacity_percent"] == round(airtime / capacity * 100.0, 1)
 
-    def test_the_share_is_never_taken_across_ledgers(self, occupancy, conn, viewer):
+    def test_the_capacity_is_one_ceiling_shared_by_all_three_ledgers(self, occupancy, conn, viewer):
         """Emitter-labelled traffic with no flood path (no entry relay) still
-        shares the emitter ledger to 100% while the relay ledger stays an
-        admitted zero — the three ledgers answer for different facts."""
+        prices itself against the channel's one ceiling while the relay ledger
+        stays empty — the ceiling is a property of the medium, not of any one
+        ledger, and the three ledgers answer for different facts."""
         base = int(occupancy_module.time.time()) // 60 * 60
         occupancy.record(30, kind="rx", sender="w", emitter="62010a", at=base)
         occupancy.flush(conn)
         payload = json.loads(viewer.app.test_client().get("/api/telemetry/occupancy").get_data())
-        assert payload["top_emitters"][0]["airtime_percent"] == 100.0
+        capacity = payload["period_capacity_ms"]
+        assert capacity > 0
+        emitter = payload["top_emitters"][0]
+        assert emitter["capacity_percent"] == round(emitter["airtime_ms"] / capacity * 100.0, 1)
         assert payload["top_relays"] == []
-        assert payload["period_relay_airtime_ms"] == 0.0
-        assert payload["period_emitter_airtime_ms"] == payload["top_emitters"][0]["airtime_ms"]
 
-    def test_a_folded_row_shares_one_merged_percent(self, occupancy, conn, viewer):
-        """The fold happens before the share, so the merged antenna carries one
+    def test_the_capacity_is_unknown_when_nothing_is_recorded(self, conn):
+        """With no recorded moment anywhere, the cumulative period's elapsed
+        time is unknown, so the ceiling is ``None`` — the page shows a dash
+        rather than a percent of an undated range."""
+        from modules.web_viewer.app import _period_capacity_ms
+
+        assert _period_capacity_ms(conn, None) is None
+        # A window's elapsed time is a property of the clock, not of the
+        # ledger, so it is known even over an empty database.
+        day = int(occupancy_module.time.time()) // 86400 * 86400
+        assert _period_capacity_ms(conn, day) > 0
+
+    def test_a_folded_row_prices_one_merged_cost(self, occupancy, conn, viewer):
+        """The fold happens before the percent, so the merged antenna carries one
         percent for all its copies, not two competing ones."""
         base = int(occupancy_module.time.time()) // 60 * 60
         occupancy.record(120, kind="rx", sender="w", emitter="6201", at=base)
@@ -2004,7 +2026,9 @@ class TestApi:
         payload = json.loads(viewer.app.test_client().get("/api/telemetry/occupancy").get_data())
         rows = {row["emitter"]: row for row in payload["top_emitters"]}
         assert set(rows) == {"62010a"}
-        assert rows["62010a"]["airtime_percent"] == 100.0
+        capacity = payload["period_capacity_ms"]
+        assert capacity > 0
+        assert rows["62010a"]["capacity_percent"] == round(150.0 / capacity * 100.0, 1)
 
     def test_top_senders_resolve_full_keys_to_contact_names(self, occupancy, conn, viewer):
         """A full public key in the table gets its contact name; the unattributed bucket does not.

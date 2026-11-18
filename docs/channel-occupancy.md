@@ -444,17 +444,20 @@ day-aligned, and the payload says which window it answers with
 `"share_window_days"`. Without `days` the cumulative ledgers answer, as they always
 did, and no `share_window_days` key is present.
 
-Each row of the three lists also carries `airtime_percent`: that row's share of the
-same ledger over the same period, rounded to one decimal. The denominator is never the
-page's slice and never another ledger — it is every day row of that ledger inside the
-window (`occupancy_sender_days`, `occupancy_emitter_days`, `occupancy_relay_days`) or,
-in the cumulative view, the whole cumulative table — and it is exposed as the scalars
-`period_sender_airtime_ms`, `period_emitter_airtime_ms` and `period_relay_airtime_ms`
-so a reader can check the shares without re-summing anything. One table's rows
-therefore add up to its period; shares are never comparable across the three. The
-share is taken after the prefix fold, so one antenna carries one share for all its
-copies, and it is `null` — not `0` — when the period holds no recorded airtime for
-that ledger.
+Each row of the three lists also carries `capacity_percent`: that row's share of what
+the channel could physically carry over the selected period, rounded to one decimal.
+The spectrum is one shared channel and one radio receives one packet at a time, so the
+ceiling is one channel-second per elapsed second — the payload exposes it as
+`"period_capacity_ms"`: in the period view it is the day-aligned window's elapsed time;
+in the cumulative view it runs from the oldest recorded moment in the ledgers (each
+station's `first_seen`, the oldest day row, the oldest sample bucket). A row at 100%
+would be one station filling the channel alone; a table summing above 100% is
+oversubscription — transmissions running in parallel whose copies this antenna still
+paid for. The three tables price the same medium from three ends, so the same ceiling
+applies to all three and their percentages are directly comparable — while the ledgers
+themselves stay unsummed. The percent is taken after the prefix fold, so one antenna
+carries one figure for all its copies, and it is `null` — not `0` — when the period's
+elapsed time is unknown (no recorded moment anywhere in the cumulative view).
 
 `GET /api/telemetry/occupancy/history?days=7` — buckets as sums and counts, plus the
 nearest-rank percentiles. Only buckets that were written appear in `buckets`. Each
