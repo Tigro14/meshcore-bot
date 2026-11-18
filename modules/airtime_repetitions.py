@@ -14,6 +14,7 @@ from typing import Any
 
 from modules.airtime_capture import covered_buckets, listening_intervals
 
+
 def _counts(packets: int, distinct: int, total: float, first: float, *, truncated: bool) -> dict:
     extra = max(0.0, total-first)
     return {

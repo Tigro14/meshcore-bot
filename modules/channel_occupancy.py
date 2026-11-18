@@ -1338,7 +1338,7 @@ class ChannelOccupancy:
             "total_rx_copy_ms": round(total_copy_ms, 2) if total_copy_ms is not None else None,
             "copy_percent": (
                 round(total_copy_ms / total_hashed_ms * 100.0, 2)
-                if copies_known and total_hashed_ms > 0
+                if total_copy_ms is not None and total_hashed_ms is not None and total_hashed_ms > 0
                 else None
             ),
             **{
