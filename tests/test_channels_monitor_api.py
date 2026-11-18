@@ -114,6 +114,16 @@ def _written_monitor_channels(tmp_path):
     return parser.get("Channels", "monitor_channels", fallback=None)
 
 
+def _write_channel_config(viewer, values):
+    """Edit [Channels] keys in config.ini on disk, the way hand-editing does."""
+    parser = configparser.ConfigParser()
+    parser.read(viewer.config_path, encoding="utf-8")
+    for key, value in values.items():
+        parser.set("Channels", key, value)
+    with open(viewer.config_path, "w", encoding="utf-8") as handle:
+        parser.write(handle)
+
+
 def _post_settings(viewer, channels):
     return _client(viewer).post(
         "/api/channels/settings",
@@ -190,6 +200,24 @@ class TestChannelsViewFeed:
         assert entry["qr"]["name"] == "fr-idf"
         assert entry["qr"]["secret"] == hashtag_secret("#fr-idf")
         assert entry["qr"]["uri"].startswith("meshcore://channel/add?name=fr-idf&secret=")
+
+    def test_the_bots_region_for_the_channel_travels_in_the_qr(self, gated_viewer):
+        """A join from the QR lands the app on the region the bot posts here at."""
+        _write_channel_config(gated_viewer, {
+            "flood_scope.fr-idf": "#idf",
+            "outgoing_flood_scope_override": "#west",
+        })
+        entry = _client(gated_viewer).get("/api/channels/view").get_json()["channels"][0]
+        assert entry["qr"]["uri"].endswith("&region_scope=idf")
+
+    def test_the_override_scopes_every_channel_without_its_own_entry(self, gated_viewer):
+        _write_channel_config(gated_viewer, {"outgoing_flood_scope_override": "#west"})
+        entry = _client(gated_viewer).get("/api/channels/view").get_json()["channels"][0]
+        assert entry["qr"]["uri"].endswith("&region_scope=west")
+
+    def test_no_region_configured_and_the_qr_stays_plain(self, gated_viewer):
+        entry = _client(gated_viewer).get("/api/channels/view").get_json()["channels"][0]
+        assert "region_scope" not in entry["qr"]["uri"]
 
     def test_a_hashtag_qr_is_offered_even_before_the_radio_subscribes(self, gated_viewer):
         entry = _client(gated_viewer).get("/api/channels/view").get_json()["channels"][0]

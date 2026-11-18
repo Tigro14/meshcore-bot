@@ -49,6 +49,13 @@ Messages the bot starts itself (scheduled messages, webhooks, feeds, alerts, ser
 4. `[Channels] outgoing_flood_scope_override`.
 5. Global flood.
 
+The `/channels` page encodes the same decision — `flood_scope.<channel>`, then
+`outgoing_flood_scope_override`, then `startup_flood_scope` — into each channel's
+"Add Channel" QR code as MeshCore's optional `region_scope` parameter (MeshCore
+app v1.47.0+), so a phone that scans the QR is scoped to the region the bot posts
+that channel at. A per-channel global marker, an unset chain, or a name the radio
+could not store leaves the parameter off.
+
 `outgoing_flood_scope_override` also applies to replies that have no mirrored scope, so a bot with an empty `flood_scopes` and the override set to `#home` answers everything in `#home`. A reply that did mirror a scope keeps it; the override never replaces a matched scope.
 
 ```ini

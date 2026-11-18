@@ -7,6 +7,9 @@ Two jobs share this module:
   way it edits every other setting (comment-preserving INI write, hot reload).
 - Build the ``meshcore://channel/add?name=…&secret=…`` payload the MeshCore
   mobile app reads from an "Add Channel" QR code (see docs.meshcore.io/qr_codes).
+  When the bot has a region configured for the channel, the QR also carries the
+  optional ``region_scope`` parameter (MeshCore app v1.47.0+), so joining from
+  the QR lands the client on the same region the bot sends that channel at.
 
 The secret of a hashtag channel is publicly derivable — it is the first 16
 bytes of ``SHA256("#name")``, the same rule ``ChannelManager.generate_hashtag_key``
@@ -21,6 +24,8 @@ import hashlib
 import re
 from typing import Any
 from urllib.parse import quote
+
+from modules import flood_scope
 
 # What the MeshCore app accepts as a channel name.  Dots are allowed so the
 # categorized names already used in [Channels_List] ("sports.sounders") round-trip.
@@ -124,14 +129,21 @@ def monitor_channel_limit(config: Any) -> int:
         return MAX_MONITOR_CHANNELS
 
 
-def channel_qr(name: str, key_hex: str | None = None, hashtag: bool | None = None) -> dict[str, Any]:
+def channel_qr(
+    name: str,
+    key_hex: str | None = None,
+    hashtag: bool | None = None,
+    region_scope: str | None = None,
+) -> dict[str, Any]:
     """Build one QR payload: ``{'qr': {'name', 'secret', 'uri'}}`` or ``{'qr': None}``.
 
     ``name`` is the wire name (``#fr-idf`` for a hashtag channel).  The MeshCore
     QR carries the name without its ``#`` — the app re-adds it and derives the
     same secret for a hashtag channel.  A custom channel needs its stored key.
     ``hashtag`` overrides the name-based guess when the caller knows the node's
-    channel type.
+    channel type.  ``region_scope`` (``west`` or ``#west``) appends the optional
+    ``region_scope`` parameter the app reads from v1.47.0 on; a global marker or
+    an empty value appends nothing, which is how "join unscoped" is spelled.
     """
     normalized = normalize_name(name)
     if not normalized:
@@ -150,6 +162,11 @@ def channel_qr(name: str, key_hex: str | None = None, hashtag: bool | None = Non
     # outside the unreserved set so a name can never inject a second query param.
     app_name = normalized[1:] if normalized.startswith('#') else normalized
     uri = f"meshcore://channel/add?name={quote(app_name, safe='')}&secret={secret}"
+    region = str(region_scope or '').strip()
+    if region.startswith('#'):
+        region = region[1:]
+    if region and not flood_scope.is_global_marker(region):
+        uri += f"&region_scope={quote(region, safe='')}"
     return {'qr': {'name': app_name, 'secret': secret, 'uri': uri}}
 
 
@@ -164,34 +181,64 @@ def _is_hashtag_channel(channel: dict[str, Any]) -> bool:
     return normalize_name(channel.get('name')).startswith('#') or channel.get('type') == 'hashtag'
 
 
-def public_qr_for(channel: dict[str, Any]) -> dict[str, Any] | None:
+def qr_region_scope(config: Any, channel_name: Any) -> str | None:
+    """The region the bot itself sends this channel at, for the QR's ``region_scope``.
+
+    Mirrors the bot's precedence for its own channel posts (docs/region-scopes.md):
+    ``[Channels] flood_scope.<channel>``, then ``outgoing_flood_scope_override``,
+    then ``startup_flood_scope`` — the radio's default scope that the bot's
+    unscoped sends inherit.  A per-channel global marker is an explicit
+    "post this channel unscoped", so it stops the chain rather than falling
+    through.  Returns the name without its ``#`` (the wire form of the QR
+    parameter, which the app re-adds before hashing the transport key), or
+    ``None`` when no region is configured or the stored name is one the app
+    could not put on a radio.
+    """
+    if not config:
+        return None
+    entry = flood_scope.channel_scope_entry(config, str(channel_name or ''))
+    if entry is None:
+        entry = flood_scope.outgoing_override(config) or None
+    if entry is None and config.has_section('Channels'):
+        entry = (config.get('Channels', 'startup_flood_scope', fallback='') or '').strip() or None
+    if entry is None or flood_scope.is_global_marker(entry):
+        return None
+    try:
+        canonical = flood_scope.validate_device_scope_name(entry)
+    except ValueError:
+        return None
+    return canonical[1:] if canonical.startswith('#') else canonical
+
+
+def public_qr_for(channel: dict[str, Any], region_scope: str | None = None) -> dict[str, Any] | None:
     """QR payload that may be shown to an anonymous visitor, or None to hide it.
 
     Hashtag channels: always shareable — their secret is derivable from a name
     already published on the page.  Custom channels: only when the operator
     opted the channel into web publication.  The Public channel is never
     encoded here; its key is not hashtag-derived, and it is not ours to share.
+    ``region_scope`` is carried into the URI as the optional region parameter.
     """
     name = normalize_name(channel.get('name'))
     if not name or is_public(name):
         return None
     is_hashtag = _is_hashtag_channel(channel)
     if is_hashtag:
-        return channel_qr(name, hashtag=is_hashtag).get('qr')
+        return channel_qr(name, hashtag=is_hashtag, region_scope=region_scope).get('qr')
     if channel.get('live_messages_visible'):
-        return channel_qr(name, channel.get('key_hex'), hashtag=is_hashtag).get('qr')
+        return channel_qr(name, channel.get('key_hex'), hashtag=is_hashtag, region_scope=region_scope).get('qr')
     return None
 
 
-def admin_qr_for(channel: dict[str, Any]) -> dict[str, Any] | None:
+def admin_qr_for(channel: dict[str, Any], region_scope: str | None = None) -> dict[str, Any] | None:
     """QR payload for an authenticated operator: custom keys included."""
     name = normalize_name(channel.get('name'))
     if not name or is_public(name):
         return None
     is_hashtag = _is_hashtag_channel(channel)
     if is_hashtag:
-        return channel_qr(name, hashtag=is_hashtag).get('qr')
-    return channel_qr(name, channel.get('key_hex'), hashtag=is_hashtag).get('qr')
+        return channel_qr(name, hashtag=is_hashtag, region_scope=region_scope).get('qr')
+    return channel_qr(name, channel.get('key_hex'), hashtag=is_hashtag, region_scope=region_scope).get('qr')
 
 
 class ChannelMonitorMixin:

@@ -435,6 +435,14 @@ next hourly tick.
 - The monitored channels (`[Channels] monitor_channels`) as a card grid, each with the
   MeshCore "Add Channel" QR code a visitor can scan from the MeshCore mobile app
   (`meshcore://channel/add?name=…&secret=…`), plus a button to copy the URI
+- When the bot has a region for the channel, the QR also carries MeshCore's optional
+  `region_scope` parameter (MeshCore app v1.47.0+), resolved with the bot's own send
+  precedence — `flood_scope.<channel>`, then `outgoing_flood_scope_override`, then
+  `startup_flood_scope` — so a device that scans posts on that channel at the same region
+  the bot does. A per-channel global marker (`flood_scope.<channel> = *`), no configured
+  region, or a name the radio could not store leaves the parameter off. The region is
+  public by nature: every scoped message on the channel already broadcasts its transport
+  code, so it leaks nothing the mesh does not carry
 - Public page: it is on the anonymous allowlist, so it works without a login, and the QR
   exposure is limited accordingly
   - Hashtag channels are always encoded: their secret is the first 16 bytes of
