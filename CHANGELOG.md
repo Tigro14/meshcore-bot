@@ -368,6 +368,15 @@ semantic versioning.
   themselves stay unsummed. The percent is taken after the prefix fold, so a merged
   antenna carries one figure for all its copies, and it is null — a dash on the page,
   never 0.0% — when the period's elapsed time is unknown. `docs/channel-occupancy.md`.
+- Each of those three tables now opens with a **recap header row**: the sum of its
+  whole ledger over the selected period — airtime, packets, entry count, advert slice,
+  last sighting — and that sum's share of the channel ceiling. The sum covers every
+  row of the ledger, not the page's top slice, and the entry count states where the
+  slice ends (`N entrées, M listées`); a table truncated at the limit therefore cannot
+  understate the channel's load. The three recaps stay three views of one medium and
+  are never added together; an empty ledger has no total — a dash, not a measured 0 —
+  and its advert slice is unknown when the period mixes rows from before and after
+  the advert split. `GET /api/telemetry/occupancy` carries it as `period_totals`.
 
 ### Changed
 

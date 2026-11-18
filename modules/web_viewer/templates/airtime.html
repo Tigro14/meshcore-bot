@@ -64,6 +64,14 @@
         color: var(--oc-tx);
         font-weight: 600;
     }
+
+    /* The recap row sums the whole ledger, not the rows below it: it is set
+       apart so it cannot be mistaken for another station. */
+    .oc-totals-row td {
+        font-weight: 600;
+        border-top: 2px solid var(--bs-border-color, #999);
+        background: rgba(128, 128, 128, 0.08);
+    }
 </style>
 {% endblock %}
 
@@ -409,9 +417,9 @@
                 if (!resp.ok) throw new Error('Request failed (' + resp.status + ')');
                 const data = await resp.json();
                 this.renderLive(data);
-                this.renderSenders(data.top_senders || []);
-                this.renderEmitters(data.top_emitters || []);
-                this.renderRelays(data.top_relays || []);
+                this.renderSenders(data.top_senders || [], (data.period_totals || {}).senders);
+                this.renderEmitters(data.top_emitters || [], (data.period_totals || {}).emitters);
+                this.renderRelays(data.top_relays || [], (data.period_totals || {}).relays);
             } catch (err) {
                 // A failed request is not evidence that recording is off, so the claim from
                 // the last response has to be retracted here: otherwise the page goes on
@@ -681,13 +689,40 @@
             });
         }
 
-        renderSenders(rows) {
+        totalsRow(totals, shown) {
+            // The recap sums the whole ledger for the period, not the page's
+            // slice: a table truncated at the limit would otherwise understate
+            // the channel's load, so the entry count says where the slice ends.
+            // The percent is the ledger's total distance to channel saturation;
+            // above 100% is oversubscription, parallel transmissions priced twice.
+            if (!totals || totals.airtime_ms == null) return '';
+            const label = '<strong>Total</strong>'
+                + '<div class="small text-muted">Tout le registre : ' + totals.stations + ' entrées'
+                + (totals.stations > shown ? ', ' + shown + ' listées</div>' : '</div>');
+            const pct = totals.capacity_percent == null
+                ? '<span class="text-muted">&mdash;</span>'
+                : '<span class="text-muted" title="Whole-ledger share of the channel&#39;s theoretical capacity in the selected period; above 100% means transmissions ran in parallel and every copy still cost airtime">'
+                  + escapeHtml(Number(totals.capacity_percent).toFixed(1)) + '%</span>';
+            return '<tr class="oc-totals-row">'
+                + '<td>' + label + '</td>'
+                + '<td>' + escapeHtml(formatSeconds(totals.airtime_ms / 1000)) + ' ' + pct + '</td>'
+                + '<td>' + escapeHtml(totals.packets) + '</td>'
+                + '<td>' + (totals.advert_percent == null
+                    ? '<span class="text-muted">&mdash;</span>'
+                    : escapeHtml(totals.advert_percent) + '%') + '</td>'
+                + '<td>' + (totals.last_seen == null
+                    ? '<span class="text-muted">&mdash;</span>'
+                    : escapeHtml(new Date(totals.last_seen * 1000).toLocaleString())) + '</td>'
+                + '</tr>';
+        }
+
+        renderSenders(rows, totals) {
             const host = el('oc-senders');
             if (!rows.length) {
                 host.innerHTML = '<tr><td colspan="5" class="oc-empty">No sender recorded yet.</td></tr>';
                 return;
             }
-            host.innerHTML = rows.map((row) => {
+            host.innerHTML = this.totalsRow(totals, rows.length) + rows.map((row) => {
                 let identity;
                 if (row.unattributed) {
                     // The label stays with the English page; the line under it is the
@@ -719,13 +754,13 @@
             }).join('');
         }
 
-        renderEmitters(rows) {
+        renderEmitters(rows, totals) {
             const host = el('oc-emitters');
             if (!rows.length) {
                 host.innerHTML = '<tr><td colspan="5" class="oc-empty">No emitter recorded yet.</td></tr>';
                 return;
             }
-            host.innerHTML = rows.map((row) => {
+            host.innerHTML = this.totalsRow(totals, rows.length) + rows.map((row) => {
                 let identity;
                 if (row.unattributed) {
                     // Same rule as the senders table: the meaning of this row is not
@@ -765,13 +800,13 @@
             }).join('');
         }
 
-        renderRelays(rows) {
+        renderRelays(rows, totals) {
             const host = el('oc-relays');
             if (!rows.length) {
                 host.innerHTML = '<tr><td colspan="5" class="oc-empty">No entry relay recorded yet.</td></tr>';
                 return;
             }
-            host.innerHTML = rows.map((row) => {
+            host.innerHTML = this.totalsRow(totals, rows.length) + rows.map((row) => {
                 let identity;
                 if (row.name) {
                     // Resolved from a node-address prefix only because exactly one

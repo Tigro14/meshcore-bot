@@ -2021,6 +2021,58 @@ class TestApi:
         assert start == float(day)
         assert capacity > 0
 
+    def test_each_table_header_sums_its_whole_ledger_for_the_period(self, occupancy, conn, viewer):
+        """The recap sums the ledger, not the page's slice; one sum per ledger is
+        never a sum across ledgers, and an empty ledger sums to None, not 0."""
+        day = int(occupancy_module.time.time()) // 86400 * 86400
+        # record() prices payload bytes through the LoRa estimate, so the sum is
+        # asserted in that same unit, not in invented round numbers.
+        unit = lora_airtime_ms(30, **occupancy.modulation())
+        occupancy.record(30, kind="rx", sender="w", at=day + 5)
+        occupancy.record(30, kind="rx", sender="w", at=day + 6)
+        occupancy.record(30, kind="rx", sender="v", at=day + 7)
+        occupancy.record(30, kind="rx", sender="u", at=day - 3 * 86400)
+        occupancy.flush(conn)
+        client = viewer.app.test_client()
+        windowed = json.loads(client.get("/api/telemetry/occupancy?days=1").get_data())
+        totals = windowed["period_totals"]
+        # The window total is every in-window row, outside-window senders excluded,
+        # and it prices the same channel ceiling as the rows do.
+        assert totals["senders"]["airtime_ms"] == pytest.approx(3 * unit)
+        assert totals["senders"]["packets"] == 3
+        assert totals["senders"]["stations"] == 2
+        assert totals["senders"]["capacity_percent"] == round(
+            3 * unit / windowed["period_capacity_ms"] * 100.0, 1)
+        # A ledger with no row for the period has no total: None, not a measured 0.
+        assert totals["relays"]["airtime_ms"] is None
+        assert totals["relays"]["capacity_percent"] is None
+        assert totals["relays"]["stations"] == 0
+        cumulative = json.loads(client.get("/api/telemetry/occupancy").get_data())
+        totals = cumulative["period_totals"]
+        assert totals["senders"]["airtime_ms"] == pytest.approx(4 * unit)
+        assert totals["senders"]["stations"] == 3
+        assert totals["senders"]["capacity_percent"] == round(
+            4 * unit / cumulative["period_capacity_ms"] * 100.0, 1)
+
+    def test_the_recap_advert_slice_stays_unknown_when_the_period_mixes_eras(self, conn):
+        """Rows written before the advert split know no advert share, so a
+        period mixing both eras sums to unknown, not to a share over only the
+        rows that happen to know it."""
+        from modules.web_viewer.app import _ledger_period_totals
+
+        conn.execute(
+            "INSERT INTO occupancy_senders (sender, airtime_ms, packets, first_seen, last_seen)"
+            " VALUES ('w', 100.0, 1, 1.0, 2.0)"
+        )
+        conn.execute(
+            "INSERT INTO occupancy_senders (sender, airtime_ms, packets, first_seen, last_seen, advert_ms)"
+            " VALUES ('v', 100.0, 1, 1.0, 2.0, 25.0)"
+        )
+        totals = _ledger_period_totals(conn, None, 1000.0)["senders"]
+        assert totals["advert_percent"] is None
+        assert totals["airtime_ms"] == 200.0
+        assert totals["capacity_percent"] == 20.0
+
     def test_a_folded_row_prices_one_merged_cost(self, occupancy, conn, viewer):
         """The fold happens before the percent, so the merged antenna carries one
         percent for all its copies, not two competing ones."""
