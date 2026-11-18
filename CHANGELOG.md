@@ -562,6 +562,13 @@ semantic versioning.
 
 ### Fixed
 
+- The web viewer `/airtime` page now shows **unattributed traffic and each source's share of the
+  packets**, ported from the [Baliz fork](https://github.com/Camousse88/meshcore-bot_Baliz/)
+  (Camille Ballon's work, PR #33). The source ranking left the packets whose author the bot never
+  learned out of the top five entirely, so a channel where the origin is mostly unknown looked as
+  if its traffic came from a handful of named stations; the `unknown_author` row is now ranked with
+  the others, behind an **Afficher le trafic non identifié** switch that also controls the modal's
+  author table. Each row carries its share of the distinct packets alongside its count.
 - A viewer **restart logged every admin out**. `SECRET_KEY` was drawn from `secrets.token_hex()` on
   every start, so the session cookie the previous process signed stopped verifying: `systemctl
   restart`, a deploy or a reboot dropped the operator's login without a word, and on the contacts
