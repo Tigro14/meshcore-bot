@@ -517,6 +517,15 @@ max_warnings_per_day = 6
 #        antenna gain, spatial reuse), so an rx percentage is a local observation, not
 #        the airtime of the whole channel.
 #   tx — airtime the bot spends itself, the only part it can decide about.
+#
+# Each window also carries a local network view of what this node heard: distinct
+# talkers, a repetition factor (hashed packets heard ÷ unique packet hashes — what a
+# flood router leaves behind; a floor, since hashes cover only what was heard here)
+# and the average hop depth of heard traffic. Unknown stays unknown: a window with no
+# hashed packet reports no repetition factor rather than x1, and a packet without a
+# readable path is left out of the hop mean rather than counted as 0 hops. These
+# counts stay in the ring buffer and the live snapshot — cardinalities do not
+# re-aggregate across buckets, so they are never written to occupancy_samples.
 enabled = false
 
 # Bucket size for stored history, in seconds. A bucket is written only when it holds a
@@ -728,7 +737,10 @@ companion_min_inactive_days = 30
 # {companions} - Same as {total_companions}
 test = "ack @[{sender}]{phrase_part} | {connection_info} | Received at: {timestamp}"
 ping = "Pong!"
-pong = "Ping!"
+# "pong" is not answered, on purpose: every bot on a shared channel replies to a
+# bare "pong", and unpunctuated replies make two bots answer each other until the
+# channel is saturated. Re-adding pong = "..." here has no effect
+# (SUPPRESSED_KEYWORDS, modules/command_manager.py).
 # Override 'help' command output
 # help = "Bot Help: test (or t), ping, version, help, hello, cmd, advert, wx, aqi, sun, moon, solar, hfcond, satpass, prefix, path, sports, dice, roll, stats | More: 'help <command>'"
 
@@ -1366,12 +1378,16 @@ battery_observations_retention_days = 90
 # Both are tiny — one tally row per channel per day — so a long window is cheap.
 region_warning_retention_days = 90
 
-# Channel occupancy buckets and sender share (see [Channel_Occupancy]). One bucket row
-# per quiet-or-busy sample_seconds, so 30 days is a few thousand rows at 60-second
-# buckets. Pruning is what makes a "last 30 days" chart mean 30 days and not whatever
-# is left in the table.
+# Channel occupancy buckets, sender share, emitter share and entry-relay share (see
+# [Channel_Occupancy]).
+# One bucket row per quiet-or-busy sample_seconds, so 30 days is a few thousand rows at
+# 60-second buckets. Pruning is what makes a "last 30 days" chart mean 30 days and not
+# whatever is left in the table. The three per-station ledgers age on the same rule: a
+# reader comparing them must not be handed a young table against an old one.
 occupancy_samples_retention_days = 30
 occupancy_senders_retention_days = 90
+occupancy_emitters_retention_days = 90
+occupancy_relays_retention_days = 90
 [Path_Command]
 # Enable or disable the path command
 enabled = true

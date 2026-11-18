@@ -1155,6 +1155,205 @@ def _m0035_bbs_inbox_notification_stages(cursor: sqlite3.Cursor) -> None:
     _add_column(cursor, "bbs_inbox", "final_notice_sent_at", "TIMESTAMP")
 
 
+def _m0036_occupancy_senders_advert_ms(cursor: sqlite3.Cursor) -> None:
+    """occupancy_senders: the advert slice of each sender's airtime.
+
+    The senders table ranks by airtime, but airtime is not one kind of traffic: an
+    ADVERT is what a MeshCore node spends for being present on the mesh, while a
+    message is what it spends for talking.  Keeping the advert slice apart lets the
+    page answer "how much of this station's channel time is presence overhead".
+
+    The column is NULL, not 0, for rows written before it existed: the split was not
+    recorded then, and an unknown share shown as a zero one is a fabricated fact.
+    Once a sender is written again the slice accumulates over the row's retained
+    history, so the share then covers that whole history — adverts included.
+    """
+    _add_column(cursor, "occupancy_senders", "advert_ms", "REAL")
+
+
+def _m0037_occupancy_emitters(cursor: sqlite3.Cursor) -> None:
+    """occupancy_emitters: the per-EMITTER airtime share, next to the per-sender one.
+
+    The senders table answers "who wrote the payload"; MeshCore's flood path answers a
+    second, different question on the wire: each relay appends its node address (the
+    first bytes of its public key), so the last entry names the station whose antenna
+    put THIS copy on the air. For a half-duplex single-channel mesh, that station is
+    the one occupying the channel — a repeater beside the antenna can own the channel
+    without ever appearing in the senders' table.
+
+    The row key is therefore an emitter label, not a key: a full public key for a copy
+    heard directly, a lowercased 4- or 6-hex-digit node address for a relayed one, or
+    the reserved unattributed bucket. Prefixes are kept as prefixes: they become a
+    name only when exactly one known contact matches, at read time.
+
+    ``advert_ms`` is NOT NULL here, unlike the senders' column: the split is known
+    from the first write of this new table, so there is no legacy row to hide a zero
+    behind. The table keeps the same retention as the senders' one and the two hold
+    the same copies once per fact — they must never be summed.
+    """
+    _execute_statements(cursor,
+        """
+        CREATE TABLE IF NOT EXISTS occupancy_emitters (
+            emitter TEXT PRIMARY KEY,
+            airtime_ms REAL NOT NULL,
+            packets INTEGER NOT NULL,
+            first_seen REAL NOT NULL,
+            last_seen REAL NOT NULL,
+            advert_ms REAL NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_occupancy_emitters_last_seen
+            ON occupancy_emitters(last_seen);
+        """
+    )
+
+
+def _m0038_occupancy_day_tables(cursor: sqlite3.Cursor) -> None:
+    """Per-day sender and emitter shares, so the page can show a selected period.
+
+    ``occupancy_senders`` and ``occupancy_emitters`` are cumulative counters: they
+    answer "since first seen, within retention", and nothing can cut a cumulative
+    total back to a window.  A page with a 24h–90d history selector that showed
+    those counters under a "24h" label would invite exactly that misreading.  These
+    tables store the same facts one grain finer — one row per station per UTC day —
+    and any window is a sum over whole days, which is also how the bucketed samples
+    above them are stored.
+
+    The day rows start the day the feature starts: history already in the
+    cumulative tables cannot be distributed across days after the fact, and
+    inventing that distribution would fabricate per-day facts nobody recorded.
+    ``last_seen`` inside a day answers "last seen during that day", and the
+    cumulative ledgers keep answering the lifetime question.
+    """
+    _execute_statements(cursor,
+        """
+        CREATE TABLE IF NOT EXISTS occupancy_sender_days (
+            sender TEXT NOT NULL,
+            day_ts INTEGER NOT NULL,
+            airtime_ms REAL NOT NULL,
+            packets INTEGER NOT NULL,
+            advert_ms REAL NOT NULL DEFAULT 0,
+            last_seen REAL NOT NULL,
+            PRIMARY KEY (sender, day_ts)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_occupancy_sender_days_day
+            ON occupancy_sender_days(day_ts);
+
+        CREATE TABLE IF NOT EXISTS occupancy_emitter_days (
+            emitter TEXT NOT NULL,
+            day_ts INTEGER NOT NULL,
+            airtime_ms REAL NOT NULL,
+            packets INTEGER NOT NULL,
+            advert_ms REAL NOT NULL DEFAULT 0,
+            last_seen REAL NOT NULL,
+            PRIMARY KEY (emitter, day_ts)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_occupancy_emitter_days_day
+            ON occupancy_emitter_days(day_ts);
+        """
+    )
+
+
+def _m0039_occupancy_relays(cursor: sqlite3.Cursor) -> None:
+    """occupancy_relays / occupancy_relay_days: where relayed traffic entered the mesh.
+
+    The flood path MeshCore already carries on the wire answers a third question
+    per copy, next to the sender's ("who wrote the payload") and the emitter's
+    ("whose antenna carried this copy"): its FIRST node address names the first
+    relay that repeated the packet — the gateway through which the copy entered
+    the mesh, as far as this radio can prove. It is not the author: a multicast's
+    routing header carries the channel's transport code and relay addresses only,
+    never the writing station's address, so a table that named authors here would
+    be inventing them.
+
+    The row key is a node address: a lowercased 4- or 6-hex-digit prefix, never a
+    full key (relayed copies are all this ledger holds — a copy heard directly
+    passed through no relay). Prefixes stay prefixes and become a name only when
+    exactly one known contact matches, at read time, under the same uniqueness
+    rule as the emitter labels. Copies heard directly belong to no row here: they
+    entered nothing, and charging them a relay would invent a hop the wire did
+    not carry. The three ledgers hold the same traffic once per fact and must
+    never be summed.
+    """
+    _execute_statements(cursor,
+        """
+        CREATE TABLE IF NOT EXISTS occupancy_relays (
+            relay TEXT PRIMARY KEY,
+            airtime_ms REAL NOT NULL,
+            packets INTEGER NOT NULL,
+            first_seen REAL NOT NULL,
+            last_seen REAL NOT NULL,
+            advert_ms REAL NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_occupancy_relays_last_seen
+            ON occupancy_relays(last_seen);
+
+        CREATE TABLE IF NOT EXISTS occupancy_relay_days (
+            relay TEXT NOT NULL,
+            day_ts INTEGER NOT NULL,
+            airtime_ms REAL NOT NULL,
+            packets INTEGER NOT NULL,
+            advert_ms REAL NOT NULL DEFAULT 0,
+            last_seen REAL NOT NULL,
+            PRIMARY KEY (relay, day_ts)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_occupancy_relay_days_day
+            ON occupancy_relay_days(day_ts);
+        """
+    )
+
+
+def _m0040_occupancy_copy_cost(cursor: sqlite3.Cursor) -> None:
+    """occupancy_samples: the airtime of copies after the first one heard.
+
+    ``dup_factor`` counts copies; these two columns price them. ``rx_hashed_ms``
+    is the rx airtime covered by a packet identity and ``rx_copy_ms`` the slice
+    of it spent on copies after the first one this station heard for that
+    identity — so ``rx_copy_ms / rx_hashed_ms`` answers how much of the channel
+    the flood burned on repetitions, and only over the airtime identities can
+    prove, never over unhashable packets that cannot be matched to a copy of
+    themselves.
+
+    Both are NULL, not 0, for buckets written before the split was recorded: an
+    unknown copy share shown as 0% is a fabricated calm. The sums are safe to
+    store per bucket (unlike cardinalities) because a reader re-aggregating
+    windows over history gets a correct sum of sums.
+    """
+    _add_column(cursor, "occupancy_samples", "rx_hashed_ms", "REAL")
+    _add_column(cursor, "occupancy_samples", "rx_copy_ms", "REAL")
+
+
+def _m0041_airtime_attribution(cursor: sqlite3.Cursor) -> None:
+    """The passive analysis read model's own tables (Baliz fork, migration 37).
+
+    One row per distinct packet with its reconstructed author, kept apart
+    from the occupancy ledgers: the analysis counts distinct packets and
+    implied relay retransmissions, the ledgers price every heard copy.
+    """
+    from modules.airtime_analysis import create_tables
+    create_tables(cursor)
+
+
+def _m0042_airtime_scope_context(cursor: sqlite3.Cursor) -> None:
+    """Scope and channel context the forwarding model trains on (Baliz fork, migration 38)."""
+    from modules.airtime_forwarding import create_context_tables
+    create_context_tables(cursor)
+
+
+def _m0043_airtime_capture_intervals(cursor: sqlite3.Cursor) -> None:
+    """Capture-continuity intervals, so silence is a recorded fact (Baliz fork, migration 39).
+
+    Without them, an outage and a quiet channel look identical: both are
+    simply the absence of rows.
+    """
+    from modules.airtime_capture import create_tables
+    create_tables(cursor)
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -1197,6 +1396,14 @@ MIGRATIONS: list[MigrationEntry] = [
     (33, "per-channel web message visibility", _m0033_channel_web_visibility),
     (34, "bbs_inbox table", _m0034_bbs_inbox_table),
     (35, "bbs_inbox: reminder_sent_at, final_notice_sent_at", _m0035_bbs_inbox_notification_stages),
+    (36, "occupancy_senders: advert_ms", _m0036_occupancy_senders_advert_ms),
+    (37, "occupancy_emitters", _m0037_occupancy_emitters),
+    (38, "occupancy sender/emitter day tables", _m0038_occupancy_day_tables),
+    (39, "occupancy relays: where relayed copies entered the mesh", _m0039_occupancy_relays),
+    (40, "occupancy_samples: hashed airtime and copy cost", _m0040_occupancy_copy_cost),
+    (41, "airtime_observations and author links", _m0041_airtime_attribution),
+    (42, "airtime scope context for the forwarding model", _m0042_airtime_scope_context),
+    (43, "airtime_capture_intervals: recorded capture continuity", _m0043_airtime_capture_intervals),
 ]
 
 

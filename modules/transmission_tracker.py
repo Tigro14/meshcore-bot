@@ -179,7 +179,9 @@ class TransmissionTracker:
             try:
                 payload_bytes = len(content.encode('utf-8'))
                 if payload_bytes > 0:
-                    occupancy.record(payload_bytes, kind='tx', sender=self.bot_prefix)
+                    # The full key, not the two-byte prefix: the senders table resolves
+                    # names on the full key, and a prefix could belong to several keys.
+                    occupancy.record(payload_bytes, kind='tx', sender=own_public_key(self.bot) or self.bot_prefix)
             except Exception as e:
                 self.logger.debug("occupancy: transmission not recorded: %s", e)
 

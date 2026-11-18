@@ -160,6 +160,7 @@ Examples of sections that configure specific commands or features:
 
 - **`[Llm_Command]`** – Local LLM chat options, including optional local Wiki.js lexical RAG context injection.
 - **`[Path_Command]`** – Path decoding and repeater selection. See [Path Command](path-command-config.md) for all options.
+- **`[Keywords]`** – Keyword → response pairs, answered on monitored channels (and in DMs when `respond_to_dms` is on). **`pong` is ignored**: with two bots on one channel the pair answers itself back and forth (`Ping!` → `Pong!` → …) until the channel is saturated, so `pong = …` is dead config — the key is dropped when the config is read (`SUPPRESSED_KEYWORDS` in `modules/command_manager.py`).
 - **`[Test_Command]`** – `test` / `t` behavior. Optional **`response_format`** overrides the legacy **`[Keywords] test`** string. Templates support the same placeholders as Keywords, plus **feed-style pipe filters** on placeholders (e.g. `{path_distance|pathbytes_min:2}`, `{firstlast_distance|hops_min:1}`) implemented in `modules/response_template.py`—see comments under `[Test_Command]` in `config.ini.example`.
 - **`[Prefix_Command]`** – Prefix lookup, prefix best, range limits.
 - **`[Cmd_Command]`** – `cmd` behavior. Set `cmd_reference_url` to return `Full command reference: <url>` instead of the generated compact command list.

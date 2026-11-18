@@ -2939,3 +2939,115 @@ class TestChannelCorrelationWait:
                 None, "", {"channel_idx": 0, "text": "hi"}, scope_eligible_only=True, extended_timeout=30.0
             )
         sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Airtime author attribution (hash → author note into the occupancy ledger)
+# ---------------------------------------------------------------------------
+
+
+class TestOccupancyAuthorAttribution:
+    """A decrypted message hands its correlated RF copy's identity to the airtime ledger.
+
+    The note must fire on the message's own packet only (never a fallback, #80),
+    on a unique contact match only, and whether or not the reply path later
+    drops the message.
+    """
+
+    PREFIX = "abcdef"
+    FULL = PREFIX + "b" * 58
+
+    def _wire(self, handler):
+        handler.logger = Mock()
+        handler.bot.meshcore = Mock()
+        handler.bot.meshcore.contacts = {
+            "c1": {"public_key": self.FULL, "name": "Alice"}
+        }
+        handler.bot.channel_manager = Mock()
+        handler.bot.channel_manager.get_channel_name = Mock(return_value="general")
+        handler.bot.translator = None
+        handler.bot.mesh_graph = None
+        handler.bot.connection_time = None
+        handler.recent_rf_data = []
+        handler.enhanced_correlation = False
+        handler.bot.command_manager.flood_scope_keys = {}
+        handler.bot.command_manager.flood_scope_allow_global = False
+        occupancy = Mock()
+        occupancy.enabled = True
+        handler.bot.occupancy = occupancy
+        return occupancy
+
+    def _rf_row(self):
+        return {
+            "timestamp": time.time(),
+            "pubkey_prefix": self.PREFIX,
+            "packet_hash": "aabbccddeeff0011",
+            "payload_type_name": "GRP_TXT",
+            "raw_hex": "00" * 24,
+        }
+
+    async def _channel_message(self, handler, rf_row):
+        handler.recent_rf_data = [rf_row]
+        event = Mock()
+        event.payload = {
+            "channel_idx": 0,
+            "text": "ALICE: hello",
+            "path_len": 255,
+            "sender_timestamp": int(time.time()),
+            "pubkey_prefix": self.PREFIX,
+        }
+        with patch.object(handler, "process_message", new_callable=AsyncMock):
+            with patch.object(handler, "_debug_decode_message_path", new_callable=AsyncMock):
+                with patch.object(handler, "_debug_decode_packet_for_message", new_callable=AsyncMock):
+                    await handler.handle_channel_message(event)
+
+    async def test_channel_message_notes_the_correlated_packet(self, handler):
+        occupancy = self._wire(handler)
+        await self._channel_message(handler, self._rf_row())
+        occupancy.note_author.assert_called_once_with("aabbccddeeff0011", self.FULL)
+
+    async def test_a_fallback_rf_row_attributes_nothing(self, handler):
+        occupancy = self._wire(handler)
+        row = self._rf_row()
+        row["pubkey_prefix"] = "fedcba"  # another sender: the lookup lands on the fallback
+        await self._channel_message(handler, row)
+        occupancy.note_author.assert_not_called()
+
+    async def test_an_ambiguous_prefix_attributes_nothing(self, handler):
+        occupancy = self._wire(handler)
+        handler.bot.meshcore.contacts["c2"] = {"public_key": self.PREFIX + "c" * 58, "name": "Other Alice"}
+        await self._channel_message(handler, self._rf_row())
+        occupancy.note_author.assert_not_called()
+
+    async def test_an_unresolved_prefix_attributes_nothing(self, handler):
+        occupancy = self._wire(handler)
+        handler.bot.meshcore.contacts = {}
+        await self._channel_message(handler, self._rf_row())
+        occupancy.note_author.assert_not_called()
+
+    async def test_occupancy_off_notes_nothing(self, handler):
+        self._wire(handler)
+        handler.bot.occupancy = None
+        await self._channel_message(handler, self._rf_row())
+
+    async def test_channel_row_without_a_hash_attributes_nothing(self, handler):
+        occupancy = self._wire(handler)
+        row = self._rf_row()
+        row.pop("packet_hash")
+        await self._channel_message(handler, row)
+        occupancy.note_author.assert_not_called()
+
+    async def test_dm_notes_the_resolved_peer(self, handler):
+        occupancy = self._wire(handler)
+        handler.recent_rf_data = [self._rf_row()]
+        event = Mock()
+        event.payload = {
+            "pubkey_prefix": self.PREFIX,
+            "text": "secret hello",
+            "sender_timestamp": int(time.time()),
+        }
+        with patch.object(handler, "process_message", new_callable=AsyncMock):
+            with patch.object(handler, "_debug_decode_message_path", new_callable=AsyncMock):
+                with patch.object(handler, "_debug_decode_packet_for_message", new_callable=AsyncMock):
+                    await handler.handle_contact_message(event)
+        occupancy.note_author.assert_called_once_with("aabbccddeeff0011", self.FULL)

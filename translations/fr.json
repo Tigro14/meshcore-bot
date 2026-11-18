@@ -330,12 +330,9 @@
       "error_fetching": "Erreur lors de la récupération des données de la Coupe du Monde"
     },
     "airtime": {
-      "description": "Airtime estimé du canal sur la dernière minute et les principaux émetteurs",
-      "header": "Airtime estimé d'après SF{sf}/{bw}kHz CR4/{cr}, non mesuré",
-      "window": "{seconds}s : rx {rx}% tx {tx}% ({packets} paquet(s))",
-      "no_samples": "Rien entendu sur les {seconds} dernières s - un canal silencieux n'est pas un enregistreur arrêté",
-      "top_senders": "Émetteurs : {names}",
-      "top_senders_omitted": "(liste des émetteurs retirée : trop longue)",
+      "description": "Occupation estimée du canal aujourd'hui : pic de la journée, moyennes de la dernière heure et du jour",
+      "reply": "Occupation estimée du canal (écoutée) — pic du jour : {peak}% à {peak_at} · moyenne 1 h : {hour}% · moyenne du jour : {day}%",
+      "no_samples": "Aucun échantillon d'airtime enregistré aujourd'hui - rien à afficher",
       "disabled": "Commande airtime désactivée. Mettez enabled = true dans [Airtime_Command].",
       "unavailable": "Airtime indisponible dans ce processus du bot.",
       "recording_off": "Enregistrement airtime arrêté. Mettez enabled = true dans [Channel_Occupancy]; rien à lire avant qu'il tourne.",

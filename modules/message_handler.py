@@ -416,6 +416,13 @@ class MessageHandler(MeshGraphRecorderMixin, ContactEventsMixin, RfCorrelationMi
                     message.path = f"Direct via {rf_routing.get('route_type', 'Unknown')}"
                     self.logger.info(f"📡 CONTACT USING RF ROUTING: {message.path}")
 
+            # A DM the radio decrypted names its author as surely as an advert
+            # names its advertiser, and the resolver above accepted this peer's
+            # prefix only when exactly one known key completes it — so the
+            # correlated RF copy of this message can leave the unattributed
+            # bucket. An ambiguous or unknown prefix attributes nothing.
+            self._note_message_author(recent_rf_data, payload, sender_pubkey)
+
             await self._debug_decode_message_path(message, sender_id, recent_rf_data)
 
             # Always attempt packet decoding and log the results for debugging
@@ -830,6 +837,17 @@ class MessageHandler(MeshGraphRecorderMixin, ContactEventsMixin, RfCorrelationMi
                 packet_info=packet_info,
                 scope_rf_data=scope_rf_data,
                 scope_packet_info=scope_packet_info,
+            )
+
+            # Airtime attribution runs ahead of the flood_scopes allowlist below,
+            # like the region-code observation: the allowlist drops unscoped
+            # messages from replies, not from the channel, and their airtime is
+            # already in the ledger unattributed. The note only relabels what is
+            # still pending there.
+            self._note_message_author(
+                recent_rf_data,
+                payload,
+                self._full_sender_pubkey(payload, sender_id),
             )
 
             # Allowlist enforcement: when flood_scopes is configured, only reply to
