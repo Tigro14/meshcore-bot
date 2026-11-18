@@ -1912,6 +1912,48 @@ class TestApi:
         assert rows["62010a"]["packets"] == 2
         assert rows["62010a"]["merged_prefixes"][0]["label"] == "6201"
 
+    def test_a_fold_target_outside_the_fetched_page_still_folds_the_short_row(self, occupancy, conn, viewer):
+        """One big short row with its tiny longer partner below the page limit.
+
+        Live shape: 1,945 copies under `6201`, 589 under `62010a`, and on the
+        relay ledger the partner row held 18 copies — below the top-10 page the
+        endpoint first drew, so the fold had nothing to fold INTO and the table
+        showed a bare prefix where a named antenna belonged.  The endpoint now
+        draws a wide pool before folding; the unit path below covers the case
+        where even the pool misses the partner.
+        """
+        base = int(occupancy_module.time.time()) // 60 * 60
+        occupancy.record(400, kind="rx", sender="w", emitter="6201", at=base)
+        occupancy.record(8, kind="rx", sender="w", emitter="62010a", at=base + 5)
+        for i in range(12):
+            occupancy.record(150, kind="rx", sender="w", emitter=f"{i:04x}", at=base + 10)
+        occupancy.flush(conn)
+        payload = json.loads(viewer.app.test_client().get("/api/telemetry/occupancy").get_data())
+        rows = {row["emitter"]: row for row in payload["top_emitters"]}
+        assert "6201" not in rows
+        folded = rows["62010a"]
+        assert folded["packets"] == 2
+        assert folded["merged_prefixes"][0]["label"] == "6201"
+
+    def test_the_fold_relabels_without_summing_an_unseen_partner(self, conn):
+        """Unit path: when the fetched rows do not hold the partner at all, the
+        short row is relabelled to it — the prefix can only mean that address —
+        but its airtime is not conjured in, because this fetch never saw it.
+        """
+        from modules.web_viewer.app import _fold_prefix_rows
+
+        conn.execute(
+            "INSERT INTO occupancy_emitters (emitter, airtime_ms, packets, first_seen, last_seen)"
+            " VALUES ('62010a', 900.0, 9, 1.0, 2.0)"
+        )
+        rows = [{"emitter": "6201", "airtime_ms": 120.0, "packets": 1}]
+        _fold_prefix_rows(conn, rows, "emitter", "occupancy_emitters")
+        assert len(rows) == 1
+        assert rows[0]["emitter"] == "62010a"
+        assert rows[0]["packets"] == 1
+        assert rows[0]["airtime_ms"] == 120.0
+        assert rows[0]["merged_prefixes"] == [{"label": "6201", "packets": 1, "airtime_ms": 120.0}]
+
     def test_top_senders_resolve_full_keys_to_contact_names(self, occupancy, conn, viewer):
         """A full public key in the table gets its contact name; the unattributed bucket does not.
 
