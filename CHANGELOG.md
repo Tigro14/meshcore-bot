@@ -8,6 +8,17 @@ semantic versioning.
 
 ### Added
 
+- `dx` command: the farthest stations the repeater nearest the bot received. "Nearest" is
+  measured from `[Bot] bot_latitude`/`bot_longitude`, falling back to the sender's
+  advertised position, across gateways with a GPS fix; each row is the straight-line
+  distance from that repeater to the station's most recent advert position, so the figure
+  is the link that closed rather than the route that followed it. The evidence is the
+  first node of the flood path each advert carried (`observed_paths.from_prefix`), kept
+  only when that prefix resolves to the nearest repeater under the mesh graph's own
+  collision rule; zero-hop adverts (the bot heard it, not the repeater) and message rows
+  (author not on the wire) are excluded. `[Dx_Command] enabled|days|limit` (default true,
+  7, 5), arguments `dx [count] [days]`, and the reply is packed to one message body,
+  shortening names before dropping the least far rows. `docs/command-reference.md`.
 - Web viewer `/airtime` adopts the design and the passive airtime model behind it from the
   [Baliz fork](https://github.com/Camousse88/meshcore-bot_Baliz/) (Camille Ballon's work): a
   French page built around one curve (channel-occupation bars plus packets/min), duty-cycle
