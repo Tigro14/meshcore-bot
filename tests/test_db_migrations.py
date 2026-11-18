@@ -647,6 +647,26 @@ class TestBbsInboxNotificationStages:
             "SELECT COUNT(*) FROM schema_version WHERE version = 35"
         ).fetchone()[0]
         assert applied == 1
+
+
+def test_passive_airtime_upgrade_preserves_upstream_copy_history(conn, runner, monkeypatch):
+    with monkeypatch.context() as base:
+        base.setattr("modules.db_migrations.MIGRATIONS", [entry for entry in MIGRATIONS if entry[0] <= 40])
+        runner.run()
+    conn.execute(
+        "INSERT INTO occupancy_samples (bucket_ts, sample_seconds, rx_ms, tx_ms, packets, rx_hashed_ms, rx_copy_ms) "
+        "VALUES (1000, 60, 125, 0, 2, 125, 50)"
+    )
+    conn.commit()
+
+    runner.run()
+
+    assert conn.execute("SELECT rx_hashed_ms, rx_copy_ms FROM occupancy_samples").fetchone() == (125, 50)
+    cursor = conn.cursor()
+    for table in ("airtime_observations", "airtime_packet_context", "airtime_capture_intervals"):
+        assert _table_exists(cursor, table)
+
+
 class TestMigrationAtomicity:
     """A failing migration must roll back every migration in the same run."""
 

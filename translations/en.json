@@ -375,6 +375,7 @@
       "network_emitters": "{n} emitter addresses",
       "network_emitters_one": "{n} emitter address",
       "network_repeats": "repeats x{dup}",
+      "network_copies": "copies {op}{pct}% of identified airtime",
       "network_hops": "avg {hops} hops",
       "network_stations": "{stations} stations/{hours}h",
       "radio_share": "this radio: {entry}",

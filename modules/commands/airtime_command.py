@@ -279,6 +279,17 @@ class AirtimeCommand(BaseCommand):
         dup = window.get('dup_factor')
         if dup:
             parts.append(self.translate('commands.airtime.network_repeats', dup=_render_g(dup)))
+        copy_percent = window.get('copy_percent')
+        if copy_percent:
+            # The repeats factor counts copies; this says what they cost the
+            # channel, over the airtime identities can prove. A bounded figure
+            # (the recorder buffer no longer covers the whole window) is marked
+            # with ≥ rather than dropped: the lower bound is still the answer.
+            parts.append(self.translate(
+                'commands.airtime.network_copies',
+                op='≥' if window.get('truncated') else '',
+                pct=_render_g(copy_percent),
+            ))
         avg_hops = window.get('avg_hops')
         if avg_hops is not None:
             parts.append(self.translate('commands.airtime.network_hops', hops=_render_g(avg_hops)))

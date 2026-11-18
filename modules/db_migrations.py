@@ -1307,23 +1307,43 @@ def _m0039_occupancy_relays(cursor: sqlite3.Cursor) -> None:
     )
 
 
+def _m0040_occupancy_copy_cost(cursor: sqlite3.Cursor) -> None:
+    """occupancy_samples: the airtime of copies after the first one heard.
+
+    ``dup_factor`` counts copies; these two columns price them. ``rx_hashed_ms``
+    is the rx airtime covered by a packet identity and ``rx_copy_ms`` the slice
+    of it spent on copies after the first one this station heard for that
+    identity — so ``rx_copy_ms / rx_hashed_ms`` answers how much of the channel
+    the flood burned on repetitions, and only over the airtime identities can
+    prove, never over unhashable packets that cannot be matched to a copy of
+    themselves.
+
+    Both are NULL, not 0, for buckets written before the split was recorded: an
+    unknown copy share shown as 0% is a fabricated calm. The sums are safe to
+    store per bucket (unlike cardinalities) because a reader re-aggregating
+    windows over history gets a correct sum of sums.
+    """
+    _add_column(cursor, "occupancy_samples", "rx_hashed_ms", "REAL")
+    _add_column(cursor, "occupancy_samples", "rx_copy_ms", "REAL")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
 
 MigrationEntry = tuple[int, str, Callable[[sqlite3.Cursor], None]]
 
-def _m0040_passive_airtime_attribution(cursor: sqlite3.Cursor) -> None:
+def _m0041_passive_airtime_attribution(cursor: sqlite3.Cursor) -> None:
     from modules.airtime_analysis import create_tables
     create_tables(cursor)
 
 
-def _m0041_passive_airtime_scope(cursor: sqlite3.Cursor) -> None:
+def _m0042_passive_airtime_scope(cursor: sqlite3.Cursor) -> None:
     from modules.airtime_forwarding import create_context_tables
     create_context_tables(cursor)
 
 
-def _m0042_passive_airtime_capture(cursor: sqlite3.Cursor) -> None:
+def _m0043_passive_airtime_capture(cursor: sqlite3.Cursor) -> None:
     from modules.airtime_capture import create_tables
     create_tables(cursor)
 
@@ -1368,9 +1388,10 @@ MIGRATIONS: list[MigrationEntry] = [
     (37, "occupancy_emitters", _m0037_occupancy_emitters),
     (38, "occupancy sender/emitter day tables", _m0038_occupancy_day_tables),
     (39, "occupancy relays: where relayed copies entered the mesh", _m0039_occupancy_relays),
-    (40, "metadata-only passive airtime attribution", _m0040_passive_airtime_attribution),
-    (41, "opaque scope context for passive forwarding scenarios", _m0041_passive_airtime_scope),
-    (42, "local passive airtime capture intervals", _m0042_passive_airtime_capture),
+    (40, "occupancy_samples: hashed airtime and copy cost", _m0040_occupancy_copy_cost),
+    (41, "metadata-only passive airtime attribution", _m0041_passive_airtime_attribution),
+    (42, "opaque scope context for passive forwarding scenarios", _m0042_passive_airtime_scope),
+    (43, "local passive airtime capture intervals", _m0043_passive_airtime_capture),
 ]
 
 

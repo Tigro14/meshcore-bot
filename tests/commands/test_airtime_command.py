@@ -277,6 +277,40 @@ class TestNetworkLine:
         assert 'avg 0 hops' in reply
         assert 'repeats x1' in reply
 
+    def test_the_reply_prices_the_repeats_it_counts(self):
+        """'repeats x2' counts copies; the copies clause says what they cost.
+
+        The share is over identity-covered airtime only: an unhashable packet
+        cannot be matched to a copy of itself, so it sits outside the measure
+        rather than diluting it.
+        """
+        network = _network(talkers=2, dup=2.0)
+        network['copy_percent'] = 40.0
+        reply = self._reply(_occupancy(network=network), limit=400)
+        assert 'repeats x2' in reply
+        assert 'copies 40% of identified airtime' in reply
+
+    def test_a_bounded_window_marks_the_copy_share_as_a_floor(self):
+        """When the recorder buffer no longer covers the window, the share seen is a floor.
+
+        Dropping the clause would hide the one honest reading available; a bare
+        number would over-claim a census the buffer cannot prove.
+        """
+        network = _network()
+        network['copy_percent'] = 35.0
+        network['truncated'] = True
+        reply = self._reply(_occupancy(network=network), limit=400)
+        assert 'copies ≥35% of identified airtime' in reply
+
+    def test_no_copy_share_without_hashed_airtime(self):
+        """An unknown copy share is left out, not rendered as a flood-free 0%."""
+        network = _network(dup=None, hops=None)
+        network['hash_known'] = 0
+        network['unique_packets'] = 0
+        network['hops_known'] = 0
+        reply = self._reply(_occupancy(network=network))
+        assert 'copies' not in reply
+
     def test_the_window_says_where_the_unnamed_copies_went(self):
         """2 packets and 1 talker reconcile only when the reader sees the rest.
 

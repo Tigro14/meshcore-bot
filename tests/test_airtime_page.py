@@ -187,11 +187,74 @@ class TestAirtimePage:
         # The French half of the caption, for the reader who never switches language.
         assert "jamais leur auteur ni l'antenne émettrice" in relay_caption
 
+    def test_every_airtime_cell_shows_the_share_of_the_channel_capacity(self, viewer):
+        """Next to the raw seconds, every row of the three airtime tables shows
+        its distance to channel saturation, at one decimal — and a dash, not a
+        0.0%, when the ceiling is unknown."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert body.count(
+            "Share of the channel&#39;s theoretical capacity in the selected period"
+        ) == 3
+        assert "one channel-second per elapsed second" in body
+        # One decimal on each of the three tables, and the null case renders as a dash.
+        assert body.count("Number(row.capacity_percent).toFixed(1)") == 3
+        assert "row.capacity_percent == null" in body
+
+    def test_page_states_the_span_the_period_answers_for(self, viewer):
+        """The selector says "24 h" while the window is cut on whole UTC days:
+        the page states the span actually measured, so the reader checks the
+        percent against the period that was answered, not one assumed."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert 'id="oc-period"' in body
+        assert "data.period_start_ts" in body
+        assert "data.period_capacity_ms" in body
+        assert "Les tableaux ci-dessous répondent pour" in body
+
+    def test_each_airtime_table_leads_with_a_whole_ledger_recap(self, viewer):
+        """Every by-airtime table opens with its whole-ledger sum and that sum's
+        share of channel capacity — a truncated table must not understate the
+        channel's load, and an empty ledger shows no total rather than a zero."""
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert "oc-totals-row" in body
+        assert body.count("this.totalsRow(totals, rows.length)") == 3
+        assert "data.period_totals" in body
+        assert "Tout le registre" in body
+        assert "totals.airtime_ms == null" in body
+
     def test_chart_draws_an_absent_bucket_as_a_gap(self, viewer):
         """A window with no written bucket must not render as 0.0."""
         body = viewer.app.test_client().get("/airtime").data.decode()
         assert "spanGaps: false" in body
         assert "null" in body
+
+    def test_page_prices_the_flood_copies_and_bounds_the_claim(self, viewer):
+        """Counting repeats is half the answer; the page also has to price them.
+
+        The copy share is measured over identity-covered airtime only, and the
+        recorder's ring buffer bounds it: both limits belong on the page, and a
+        period predating the split reads as unknown, never as a calm channel.
+        """
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert 'id="oc-copy"' in body
+        assert "identity-covered rx airtime" in body
+        assert "flood-free channel" in body
+        assert "identity-covered airtime spent on copies" in body
+        assert "_copy_percent" in body
+        assert "(bounded)" in body
+        assert "bounds, not a census" in body
+
+    def test_the_history_trend_compares_equal_periods_only(self, viewer):
+        """A change against an unrecorded past is an invented change.
+
+        The line under the chart states a difference only when the equal period
+        before holds recorded buckets; otherwise it says so instead of letting a
+        fresh start read as a sudden flood.
+        """
+        body = viewer.app.test_client().get("/airtime").data.decode()
+        assert 'id="ocTrend"' in body
+        assert "Compared with the equal period before" in body
+        assert "no change can be stated against an unrecorded past" in body
+        assert "previous" in body
 
     def test_page_script_carries_a_csp_nonce(self, viewer):
         resp = viewer.app.test_client().get("/airtime")

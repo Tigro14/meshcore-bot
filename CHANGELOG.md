@@ -11,7 +11,7 @@ semantic versioning.
 - Optional network-estimate view on `/airtime?view=network`: passive flood-path
   reconstruction of repeater duty cycle, bounded forwarding scenarios, received-copy
   analysis, adaptive occupation/packet-rate chart and Contacts duty badges. Adds a
-  versioned metadata-only analysis API and append-only migrations 40–42; preserves
+  versioned metadata-only analysis API and append-only migrations 41–43; preserves
   existing Airtime accounting, ledgers and radio command. See `docs/channel-occupancy.md`.
 
 - Web viewer gains a **Channels** page at `/channels`, on the anonymous allowlist: the channels
@@ -332,6 +332,57 @@ semantic versioning.
   writer, gateway, antenna — and must never be summed; the relay table is deliberately smaller
   than the other two because direct copies are absent by construction. It ages on the same
   rule (`occupancy_relays_retention_days`, 90). `docs/channel-occupancy.md`.
+- The network view now **prices the flood instead of only counting it**. The repetition
+  factor answers how many copies were heard; the **copy cost** answers what they cost:
+  the airtime of every heard copy *after the first one this station heard* for that
+  packet identity, each copy at its own modulation. The baseline is this station's
+  hearing with a horizon — an identity stays "already heard" for `copy_horizon_seconds`
+  (`Channel_Occupancy`, 3600), so a beacon heard once a minute never pays a copy while a
+  packet hammered ten times in a minute pays nine, and the difference from the network's
+  first emission is a bounded, per-identity offset rather than an invented zero. The
+  classification happens at record time while the writer's bounded identity memory is
+  warm, and rides to the buckets as two sums (`occupancy_samples.rx_hashed_ms`,
+  `rx_copy_ms`, migration 40) — unlike the cardinalities, sums re-aggregate, so history
+  can state the share for a whole period. It is measured over identity-covered airtime
+  only: an unhashable packet cannot be matched to a copy of itself, so `copy_percent`
+  divides by `rx_hashed_ms` and is unknown, not 0%, when no hashed packet was heard; a
+  period spanning pre-migration buckets (NULL, never zero) also reports unknown rather
+  than a ratio over part of itself. Each window says what the ring buffer can prove:
+  `truncated` when it no longer covers the whole window — repeats and copy share are
+  then bounds, marked `≥` in the mesh reply and `(bounded)` on the page — and a previous
+  equal-length window plus a trend, `insufficient_history` when the buffer cannot cover
+  two windows: an empty previous window is absent evidence, not a quiet baseline, and
+  the line under the history chart states a change only when both periods hold recorded
+  buckets. `GET /api/telemetry/occupancy/history` carries the previous period as its own
+  `previous` payload object. Adapted from Camousse88's Baliz fork PR #32, keeping the
+  local model: three ledgers unsummed, NULL never rendered as zero.
+  `docs/channel-occupancy.md`.
+- The three **by airtime** tables on `/airtime` now show, next to each airtime figure,
+  that row's distance to channel saturation at one decimal: its share of what the
+  channel could physically carry over the selected period. The spectrum is one shared
+  channel and one radio receives one packet at a time, so the ceiling is one
+  channel-second per elapsed second — not a distribution of the traffic actually seen.
+  A row at 100% is one station filling the channel alone; a table summing above 100% is
+  oversubscription: transmissions running in parallel. `GET /api/telemetry/occupancy`
+  carries it per row (`capacity_percent`) and the ceiling as a scalar
+  (`period_capacity_ms`: the day-aligned window's elapsed time in the period view, the
+  time since the oldest recorded moment in the cumulative view), together with the
+  period's first moment (`period_start_ts`) — which the page prints under the selector,
+  because "Last 24 h" is cut on whole UTC days and actually spans e.g. 33 h: the
+  percent is only checkable when the page says what period it answers for; the same ceiling
+  applies to all three tables, so their percentages are comparable while the ledgers
+  themselves stay unsummed. The percent is taken after the prefix fold, so a merged
+  antenna carries one figure for all its copies, and it is null — a dash on the page,
+  never 0.0% — when the period's elapsed time is unknown. `docs/channel-occupancy.md`.
+- Each of those three tables now opens with a **recap header row**: the sum of its
+  whole ledger over the selected period — airtime, packets, entry count, advert slice,
+  last sighting — and that sum's share of the channel ceiling. The sum covers every
+  row of the ledger, not the page's top slice, and the entry count states where the
+  slice ends (`N entrées, M listées`); a table truncated at the limit therefore cannot
+  understate the channel's load. The three recaps stay three views of one medium and
+  are never added together; an empty ledger has no total — a dash, not a measured 0 —
+  and its advert slice is unknown when the period mixes rows from before and after
+  the advert split. `GET /api/telemetry/occupancy` carries it as `period_totals`.
 
 ### Changed
 

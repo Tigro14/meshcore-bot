@@ -249,7 +249,10 @@ def _fold_prefix_rows(
     The uniqueness check reads the cumulative table, in cumulative and windowed
     reads alike: the ledger's knowledge of an address is not bounded by the window,
     and folding on less knowledge would report a different antenna depending on
-    the period the reader selected.
+    the period the reader selected.  When the one wider address is not among the
+    fetched rows, the short row is relabelled to it instead of absorbing it: the
+    prefix can only mean that address either way, and the rows' airtime is not
+    summed because this fetch never saw the partner row.
     """
     by_label = {(r[label_field] or '').lower(): r for r in rows}
     for row in list(rows):
@@ -266,8 +269,25 @@ def _fold_prefix_rows(
             wider = []
         if len(wider) != 1:
             continue
-        target = by_label.get(str(wider[0][label_field]).lower())
-        if target is None or target is row:
+        target_label = str(wider[0][label_field]).lower()
+        target = by_label.get(target_label)
+        if target is row:
+            continue
+        if target is None:
+            # The one wider address this prefix can mean is not among these rows:
+            # it sits below the fetch limit, or the selected window held no copy
+            # of it.  The prefix still can only mean that address, so it is
+            # relabelled to the wider one — without inventing the wider row's
+            # airtime, which this fetch does not carry — and the fold is still
+            # reported, because a relabelled row hides the precision it was
+            # recorded at otherwise.
+            row[label_field] = target_label
+            row.setdefault('merged_prefixes', []).append({
+                'label': label,
+                'packets': int(row['packets']),
+                'airtime_ms': float(row['airtime_ms']),
+            })
+            by_label[target_label] = row
             continue
         target['airtime_ms'] = float(target.get('airtime_ms') or 0.0) + float(row.get('airtime_ms') or 0.0)
         target['packets'] = int(target.get('packets') or 0) + int(row.get('packets') or 0)
@@ -284,6 +304,133 @@ def _fold_prefix_rows(
         })
         rows.remove(row)
     rows.sort(key=lambda r: float(r.get('airtime_ms') or 0.0), reverse=True)
+
+
+def _period_window(conn: sqlite3.Connection, cutoff_day: Optional[int]) -> tuple[Optional[float], Optional[float]]:
+    """The range the tables answer for, as (first moment, capacity in ms).
+
+    The spectrum here is one shared channel and one radio receives one packet
+    at a time, so the ceiling is one second of airtime per elapsed second —
+    regardless of modulation, and independent of what any station actually
+    sent.  In the period view the window is the day-aligned one the tables
+    were cut with — the selector says "24 h" while the window covers whole
+    UTC days — so the page has to state the span it actually answers for,
+    not just the label the reader clicked.  In the cumulative view the range
+    is "since the oldest recorded data", and that earliest moment is read
+    from the ledgers themselves (each station's ``first_seen``, the oldest
+    day row, the oldest sample bucket); with nothing recorded at all both
+    are ``None`` — not zero, per the module's rule that missing facts stay
+    missing rather than becoming zeros that claim to be measured.
+    """
+    if cutoff_day is not None:
+        return float(cutoff_day), (time.time() - float(cutoff_day)) * 1000.0
+    queries = [
+        "SELECT MIN(first_seen) FROM occupancy_senders",
+        "SELECT MIN(first_seen) FROM occupancy_emitters",
+        "SELECT MIN(first_seen) FROM occupancy_relays",
+        "SELECT MIN(day_ts) FROM occupancy_sender_days",
+        "SELECT MIN(day_ts) FROM occupancy_emitter_days",
+        "SELECT MIN(day_ts) FROM occupancy_relay_days",
+        "SELECT MIN(bucket_ts) FROM occupancy_samples",
+    ]
+    earliest: Optional[float] = None
+    for sql in queries:
+        try:
+            value = conn.execute(sql).fetchone()[0]
+        except sqlite3.OperationalError:
+            continue
+        if value is not None and (earliest is None or float(value) < earliest):
+            earliest = float(value)
+    if earliest is None:
+        return None, None
+    return earliest, (time.time() - earliest) * 1000.0
+
+
+def _apply_capacity_percent(
+    rows: list[dict[str, Any]],
+    capacity_ms: Optional[float],
+) -> None:
+    """Give every row its share of what the channel could physically carry.
+
+    The radio spectrum here is one shared channel, and one radio receives one
+    packet at a time: whatever the modulation, the channel cannot hold more
+    than one second of airtime per elapsed second.  That is the theoretical
+    ceiling — not a distribution denominator.  A row at 100% would be one
+    station alone filling the whole channel; a table summing over 100% is
+    evidence of oversubscription — simultaneous hidden transmissions whose
+    copies this antenna still paid the airtime for.  The reader's question is
+    distance to saturation: who takes how much of the finite resource, not
+    who dominates whoever else.
+
+    A share is taken per row against that one ceiling; the three ledgers
+    stay three separate views of the same channel and are never summed.
+    ``None`` (not 0) on a row when the period's elapsed time is unknown:
+    shares of an undated range are unknown.  Rounded to one decimal because
+    that is the precision the page shows.
+    """
+    ceiling = float(capacity_ms) if capacity_ms and capacity_ms > 0 else None
+    for row in rows:
+        airtime_ms = float(row.get('airtime_ms') or 0.0)
+        row['capacity_percent'] = round(airtime_ms / ceiling * 100.0, 1) if ceiling else None
+
+
+def _ledger_period_totals(
+    conn: sqlite3.Connection,
+    cutoff_day: Optional[int],
+    capacity_ms: Optional[float],
+) -> dict[str, Optional[dict[str, Any]]]:
+    """Sum each ledger over the selected period, for the tables' recap header.
+
+    The sum covers the whole ledger, not the page's top slice: a "top 10"
+    table whose header summed only its own rows would understate the
+    channel's load whenever more stations exist than are shown, and the
+    station count printed next to the sum is what lets the reader see that
+    the table below is a slice.  One sum per ledger, never a sum across
+    ledgers — the three count the same copies once per different fact.
+
+    ``airtime_ms`` and the percent are ``None`` (not 0) when the ledger
+    holds no row for the period: absence is absence, not a measured zero.
+    The advert slice is ``None`` when the period mixes rows written before
+    the advert split — a share over only the rows that know the split is an
+    invented period figure.
+    """
+    out: dict[str, Optional[dict[str, Any]]] = {}
+    for name, days_table, cumulative_table in (
+        ("senders", "occupancy_sender_days", "occupancy_senders"),
+        ("emitters", "occupancy_emitter_days", "occupancy_emitters"),
+        ("relays", "occupancy_relay_days", "occupancy_relays"),
+    ):
+        table = days_table if cutoff_day is not None else cumulative_table
+        sql = (
+            f"SELECT SUM(airtime_ms), SUM(packets), SUM(advert_ms), MAX(last_seen),"
+            f" COUNT(*), COUNT(advert_ms) FROM {table}"
+        )
+        params: tuple = ()
+        if cutoff_day is not None:
+            sql += " WHERE day_ts >= ?"
+            params = (cutoff_day,)
+        try:
+            row = conn.execute(sql, params).fetchone()
+        except sqlite3.OperationalError:
+            out[name] = None
+            continue
+        total_ms = float(row[0]) if row[0] is not None else None
+        advert_known, advert_total = int(row[5] or 0), row[2]
+        advert_percent = (
+            round(float(advert_total) / float(total_ms) * 100.0, 1)
+            if total_ms and advert_total is not None and advert_known == int(row[4] or 0)
+            else None
+        )
+        ceiling = float(capacity_ms) if capacity_ms and capacity_ms > 0 else None
+        out[name] = {
+            "airtime_ms": total_ms,
+            "capacity_percent": round(total_ms / ceiling * 100.0, 1) if total_ms and ceiling else None,
+            "packets": int(row[1]) if row[1] is not None else 0,
+            "stations": int(row[4] or 0),
+            "advert_percent": advert_percent,
+            "last_seen": float(row[3]) if row[3] is not None else None,
+        }
+    return out
 
 
 def _label_node_rows(
@@ -2846,17 +2993,50 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                             share_days = None
                     if share_days is None:
                         senders = self.occupancy.top_senders(conn, limit)
-                        emitters = self.occupancy.top_emitters(conn, limit)
-                        relays = self.occupancy.top_relays(conn, limit)
+                        cutoff_day = None
+                        # The fold joins a 2-byte label to the one 3-byte address
+                        # it can mean, and that partner row is often small: on
+                        # live traffic 1,945 copies sat under `6201` and the only
+                        # address it can mean had 18.  Fetch a generous pool, fold,
+                        # then keep the page's limit — folding on the visible page
+                        # alone would leave the big row unlabelled.
+                        pool = max(limit * 8, 200)
+                        emitters = self.occupancy.top_emitters(conn, pool)
+                        relays = self.occupancy.top_relays(conn, pool)
                     else:
                         cutoff_day = self.occupancy.window_cutoff_day(share_days)
+                        pool = max(limit * 8, 200)
                         senders = self.occupancy.top_senders_window(conn, cutoff_day, limit)
-                        emitters = self.occupancy.top_emitters_window(conn, cutoff_day, limit)
-                        relays = self.occupancy.top_relays_window(conn, cutoff_day, limit)
+                        emitters = self.occupancy.top_emitters_window(conn, cutoff_day, pool)
+                        relays = self.occupancy.top_relays_window(conn, cutoff_day, pool)
                         payload['share_window_days'] = share_days
 
                     _fold_prefix_rows(conn, emitters, 'emitter', 'occupancy_emitters')
                     _fold_prefix_rows(conn, relays, 'relay', 'occupancy_relays')
+                    emitters = emitters[:limit]
+                    relays = relays[:limit]
+
+                    # The percent shown next to each airtime figure is the row's
+                    # share of what the channel could physically carry over the
+                    # selected period, not its share of the other rows: the
+                    # spectrum is one shared channel and one radio receives one
+                    # packet at a time, so the ceiling is one channel-second per
+                    # elapsed second.  Computed after the fold, so a merged row
+                    # prices one antenna's whole cost once.  The range itself
+                    # rides along: the day-aligned window is wider than the
+                    # "24 h" label the reader clicked, and a percent whose
+                    # denominator is invisible gets divided by the wrong period.
+                    period_start, capacity_ms = _period_window(conn, cutoff_day)
+                    payload['period_start_ts'] = period_start
+                    payload['period_capacity_ms'] = capacity_ms
+                    _apply_capacity_percent(senders, capacity_ms)
+                    _apply_capacity_percent(emitters, capacity_ms)
+                    _apply_capacity_percent(relays, capacity_ms)
+                    # Each table's recap header sums its own whole ledger over
+                    # the period - not the page's slice - so the channel's load
+                    # per fact is stated even when stations exist beyond the
+                    # top rows, and the station count shows where the slice ends.
+                    payload['period_totals'] = _ledger_period_totals(conn, cutoff_day, capacity_ms)
                     # Resolve a full public key to a contact name where the tracking has
                     # one; a short key or the reserved unattributed bucket stays as it is,
                     # because a prefix that could belong to several keys is not an identity
@@ -2954,8 +3134,15 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             days = max(1, min(days, 90))
 
             end_ts = time.time()
+            start_ts = end_ts - days * 86400
             with self._with_db_connection() as conn:
-                payload = self.occupancy.history(conn, end_ts - days * 86400, end_ts)
+                payload = self.occupancy.history(conn, start_ts, end_ts)
+                # The equal-length period before this one, kept as its own object
+                # so the reader can tell "nothing happened before" (the range was
+                # recorded and held nothing) from "nothing was recorded before"
+                # (the range predates retention) — the two are different facts and
+                # only the first one makes a trend comparable.
+                payload['previous'] = self.occupancy.history(conn, start_ts - days * 86400, start_ts)
 
             if request.args.get('format') == 'text':
                 summary = {
@@ -2968,6 +3155,9 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     'packets': payload['packets'],
                     'p50_rx_ms': payload['p50_rx_ms'],
                     'p95_rx_ms': payload['p95_rx_ms'],
+                    'copy_percent': payload['copy_percent'],
+                    'previous_total_rx_ms': payload['previous']['total_rx_ms'],
+                    'previous_buckets': len(payload['previous']['buckets']),
                 }
                 response = self.app.response_class(render_key_value(summary), mimetype='text/plain')
             else:

@@ -590,6 +590,20 @@ class BotIntegration:
         path = packet_data.get('path')
         if not isinstance(path, list) or not path:
             path = None
+        # A path only names relays when the packet floods.  A direct packet carries
+        # no route info at all — what the decoder hands over for one is its 2-3 byte
+        # transport codes read as path chunks, and on live traffic one ACK with
+        # path ["62016C"] wrote a phantom emitter and entry relay whose two 6-char
+        # addresses under "6201" froze the prefix fold for the real node.  So the
+        # path feeds the labels only for flood route types; the airtime is charged
+        # either way, and an unknown route type keeps its path because only a
+        # decoder that parsed a real route offers one (emitter_label already
+        # refuses TRACE hashes).
+        route_type = str(
+            packet_data.get('route_type_name') or routing_info.get('route_type_name') or ''
+        ).strip().upper()
+        if path is not None and route_type and route_type not in ('FLOOD', 'TRANSPORT_FLOOD'):
+            path = None
         width: Optional[int] = None
         try:
             if hops and routing_info.get('path_byte_length'):
