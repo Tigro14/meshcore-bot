@@ -351,6 +351,17 @@ semantic versioning.
   `previous` payload object. Adapted from Camousse88's Baliz fork PR #32, keeping the
   local model: three ledgers unsummed, NULL never rendered as zero.
   `docs/channel-occupancy.md`.
+- The three **by airtime** tables on `/airtime` now show, next to each airtime figure,
+  that row's share of the selected history period at one decimal. The denominator is the
+  same ledger's whole-period total — every day row inside the window in the period view,
+  every row of the cumulative table in the cumulative view — never the page's top slice
+  and never another ledger's total, so one table's rows add up to that period and a share
+  is always taken over the fact that table answers for. `GET /api/telemetry/occupancy`
+  carries it per row (`airtime_percent`) and exposes the denominators as scalars
+  (`period_sender_airtime_ms`, `period_emitter_airtime_ms`, `period_relay_airtime_ms`);
+  the share is computed after the prefix fold, so a merged antenna carries one share for
+  all its copies, and it is null — a dash on the page, never 0.0% — when the period holds
+  no recorded airtime for that ledger. `docs/channel-occupancy.md`.
 
 ### Changed
 

@@ -306,6 +306,44 @@ def _fold_prefix_rows(
     rows.sort(key=lambda r: float(r.get('airtime_ms') or 0.0), reverse=True)
 
 
+def _apply_airtime_percent(
+    conn: sqlite3.Connection,
+    rows: list[dict[str, Any]],
+    cumulative_table: str,
+    days_table: str,
+    cutoff_day: Optional[int],
+) -> float:
+    """Give every row its share of the same ledger over the selected period.
+
+    The denominator is that table's own period total — every day row inside
+    the window in the period view, every row of the cumulative table in the
+    cumulative view, not just the page's rows.  Sharing a ledger's rows by
+    that ledger's period total is the one denominator that lets the table's
+    rows add up to the whole period; the three ledgers measure the same radio
+    from three ends and are never summed, so a share is never taken across
+    ledgers either.
+
+    Returns the total.  ``None`` (not 0) on a row when the period holds no
+    recorded airtime at all: a share of nothing is unknown, and a 0.0% would
+    claim a station that did use the channel and simply had nothing to divide
+    by.  Rounded to one decimal because that is the precision the page shows.
+    """
+    table = days_table if cutoff_day is not None else cumulative_table
+    sql = f"SELECT COALESCE(SUM(airtime_ms), 0.0) FROM {table}"
+    params: tuple = ()
+    if cutoff_day is not None:
+        sql += " WHERE day_ts >= ?"
+        params = (cutoff_day,)
+    try:
+        total = float(conn.execute(sql, params).fetchone()[0] or 0.0)
+    except sqlite3.OperationalError:
+        total = 0.0
+    for row in rows:
+        airtime_ms = float(row.get('airtime_ms') or 0.0)
+        row['airtime_percent'] = round(airtime_ms / total * 100.0, 1) if total > 0 else None
+    return total
+
+
 def _label_node_rows(
     conn: sqlite3.Connection,
     rows: list[dict[str, Any]],
@@ -2863,6 +2901,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                             share_days = None
                     if share_days is None:
                         senders = self.occupancy.top_senders(conn, limit)
+                        cutoff_day = None
                         # The fold joins a 2-byte label to the one 3-byte address
                         # it can mean, and that partner row is often small: on
                         # live traffic 1,945 copies sat under `6201` and the only
@@ -2884,6 +2923,18 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     _fold_prefix_rows(conn, relays, 'relay', 'occupancy_relays')
                     emitters = emitters[:limit]
                     relays = relays[:limit]
+
+                    # The share shown next to each airtime figure: every row of a
+                    # ledger shared by that ledger's own total for the selected
+                    # period, so the table's rows add up to the period and no
+                    # share is ever taken across ledgers.  Computed after the
+                    # fold, so a merged row carries one share for one antenna.
+                    payload['period_sender_airtime_ms'] = _apply_airtime_percent(
+                        conn, senders, 'occupancy_senders', 'occupancy_sender_days', cutoff_day)
+                    payload['period_emitter_airtime_ms'] = _apply_airtime_percent(
+                        conn, emitters, 'occupancy_emitters', 'occupancy_emitter_days', cutoff_day)
+                    payload['period_relay_airtime_ms'] = _apply_airtime_percent(
+                        conn, relays, 'occupancy_relays', 'occupancy_relay_days', cutoff_day)
                     # Resolve a full public key to a contact name where the tracking has
                     # one; a short key or the reserved unattributed bucket stays as it is,
                     # because a prefix that could belong to several keys is not an identity
