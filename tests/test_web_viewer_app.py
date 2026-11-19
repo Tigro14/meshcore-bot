@@ -1099,6 +1099,13 @@ def test_mesh_refresh_coordinator_handles_bursts_visibility_and_failures():
     let meshLiveRefreshRunning = false;
     let meshLiveRefreshRetryCount = 0;
     let meshLiveRefreshActiveReloadsNodes = false;
+    // refreshData's airtime-cache preamble touches these; the coordinator
+    // harness keeps the heat layer off so it stays a no-op here.
+    let airtimeOn = false;
+    let airtimeWeights = null;
+    let airtimeWeightsWindow = null;
+    async function ensureAirtimeWeights() {{}}
+    function renderAirtimeHeatmap() {{}}
     const MESH_LIVE_REFRESH_MS = 10;
     const MESH_LIVE_REFRESH_RETRY_MS = 10;
     const MESH_LIVE_REFRESH_MAX_RETRIES = 2;

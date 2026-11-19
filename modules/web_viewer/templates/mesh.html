@@ -89,6 +89,18 @@
         border-color: #21918c;
         color: #fff;
     }
+    #btn-airtime.active {
+        background: #b40426; /* magma red: matches the congestion ramp it enables */
+        border-color: #b40426;
+        color: #fff;
+    }
+    .mesh-airtime-window {
+        width: auto;
+        max-width: 76px;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-color);
+    }
     @media (max-width: 991.98px) {
         .mesh-btn-text {
             display: none; /* icon-only view switch on small screens */
@@ -200,6 +212,14 @@
             <button class="btn btn-sm" type="button" id="btn-heat" title="Hot connections: color edges by traffic (viridis)" aria-label="Hot connections">
                 <i class="fas fa-fire" aria-hidden="true"></i>
             </button>
+            <button class="btn btn-sm" type="button" id="btn-airtime" title="Airtime heatmap: RF congestion per repeater (passive listen)" aria-label="Airtime heatmap" aria-pressed="false">
+                <i class="fas fa-thermometer-half" aria-hidden="true"></i>
+            </button>
+            <select class="form-select form-select-sm mesh-airtime-window d-none" id="airtime-window" title="Heatmap time window" aria-label="Heatmap time window">
+                <option value="1h">1h</option>
+                <option value="24h" selected>24h</option>
+                <option value="7d">7d</option>
+            </select>
             <button class="btn btn-sm" type="button" id="btn-mesh-theme" title="Toggle map dark mode (independent of site theme)" aria-label="Map dark mode">
                 <i class="fas fa-moon" aria-hidden="true" id="mesh-theme-icon"></i>
             </button>
@@ -793,6 +813,7 @@
 
 <!-- Leaflet JS -->
 <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/leaflet-heat/leaflet-heat.js') }}"></script>
 <!-- MapLibre GL + Leaflet bridge, for the vector dark basemap. Must load after Leaflet:
      the bridge binds against both globals. -->
 <script src="{{ url_for('static', filename='vendor/maplibre-gl/maplibre-gl.js') }}"></script>
@@ -1132,6 +1153,14 @@
     // log-domain normalization range, recomputed from filteredEdges in applyFilters
     let heatObsRange = { min: 1, max: 1 };
 
+    // --- Airtime heatmap: leaflet.heat congestion layer from the passive
+    // read model (/api/mesh/airtime). Weights join to map nodes by public_key.
+    let airtimeOn = false;
+    let airtimeWindow = '24h';
+    let airtimeWeights = null; // Map public_key -> {airtime_ms, estimated_percent, packets}, null = not fetched
+    let airtimeWeightsWindow = null; // window the cached weights belong to
+    let airtimeLayer = null; // L.HeatLayer, only on the map when airtimeOn
+
     // Viridis control points (matplotlib), piecewise-linearly interpolated
     const VIRIDIS_STOPS = [
         [0x44, 0x01, 0x54], [0x47, 0x2d, 0x7b], [0x3b, 0x52, 0x8b],
@@ -1413,6 +1442,89 @@
         syncHeatButton();
         applyFilters();
         saveFilters();
+    }
+
+    // --- Airtime heatmap: per-repeater RF congestion from the passive model ---
+
+    async function ensureAirtimeWeights() {
+        if (airtimeWeights && airtimeWeightsWindow === airtimeWindow) return;
+        const response = await fetch('/api/mesh/airtime?window=' + encodeURIComponent(airtimeWindow));
+        if (!response.ok) throw new Error('airtime fetch failed: HTTP ' + response.status);
+        const data = await response.json();
+        airtimeWeights = new Map((data.points || []).map(p => [p.public_key, p]));
+        airtimeWeightsWindow = data.window || airtimeWindow;
+    }
+
+    function renderAirtimeHeatmap() {
+        if (!map) return;
+        if (airtimeLayer) {
+            map.removeLayer(airtimeLayer);
+            airtimeLayer = null;
+        }
+        if (!airtimeOn || !airtimeWeights) return;
+        // Weights only where the map already has a geolocated repeater, and the
+        // layer follows the current node filters like everything else on this page.
+        const raw = [];
+        filteredNodes.forEach(node => {
+            const w = airtimeWeights.get(node.public_key);
+            if (w && w.airtime_ms > 0) raw.push([node.latitude, node.longitude, w.airtime_ms]);
+        });
+        if (!raw.length) return;
+        // log1p normalization keeps a saturated repeater from washing out its
+        // quieter neighbours; leaflet.heat expects per-point 0..1 weights.
+        let logMax = 0;
+        raw.forEach(p => { logMax = Math.max(logMax, Math.log1p(p[2])); });
+        const points = raw.map(p => [p[0], p[1], logMax ? Math.log1p(p[2]) / logMax : 0]);
+        // maxZoom ~8: leaflet.heat fades alpha below maxZoom, and the mesh map
+        // typically sits at zoom 5-9 on a regional frame; without this the
+        // layer is invisible at the default fitBounds zoom.
+        airtimeLayer = L.heatLayer(points, { radius: 26, blur: 18, maxZoom: 8, minOpacity: 0.08 });
+        airtimeLayer.addTo(map);
+    }
+
+    function syncAirtimeControls() {
+        const btn = document.getElementById('btn-airtime');
+        if (btn) {
+            btn.classList.toggle('active', airtimeOn);
+            btn.setAttribute('aria-pressed', String(airtimeOn));
+        }
+        const select = document.getElementById('airtime-window');
+        if (select) {
+            select.classList.toggle('d-none', !airtimeOn);
+            select.value = airtimeWindow;
+        }
+    }
+
+    async function toggleAirtimeMode() {
+        airtimeOn = !airtimeOn;
+        syncAirtimeControls();
+        saveFilters();
+        if (!airtimeOn) {
+            if (airtimeLayer) {
+                map.removeLayer(airtimeLayer);
+                airtimeLayer = null;
+            }
+            return;
+        }
+        try {
+            await ensureAirtimeWeights();
+            renderAirtimeHeatmap();
+        } catch (error) {
+            console.error('Error loading airtime weights:', error);
+            airtimeOn = false;
+            syncAirtimeControls();
+        }
+    }
+
+    async function onAirtimeWindowChange() {
+        airtimeWindow = document.getElementById('airtime-window').value;
+        saveFilters();
+        try {
+            await ensureAirtimeWeights();
+            renderAirtimeHeatmap();
+        } catch (error) {
+            console.error('Error loading airtime weights:', error);
+        }
     }
 
     // Detect if input is a hex path (2+ hex values)
@@ -1771,6 +1883,8 @@
         document.getElementById('btn-view-map').addEventListener('click', () => switchView('map'));
         document.getElementById('btn-view-graph').addEventListener('click', () => switchView('graph'));
         document.getElementById('btn-heat').addEventListener('click', toggleHeatMode);
+        document.getElementById('btn-airtime').addEventListener('click', toggleAirtimeMode);
+        document.getElementById('airtime-window').addEventListener('change', onAirtimeWindowChange);
         document.getElementById('btn-mesh-theme').addEventListener('click', toggleMeshTheme);
         document.getElementById('btn-mesh-refresh').addEventListener('click', refreshData);
         document.getElementById('btn-mesh-export').addEventListener('click', exportView);
@@ -1825,6 +1939,17 @@
         // initial map framing can use the bot location from stats
         await Promise.all([loadStats(), loadData({ skipRender: true })]);
         applyFilters();
+        // Restore the airtime layer if it was on when the page was last open
+        syncAirtimeControls();
+        if (airtimeOn) {
+            ensureAirtimeWeights()
+                .then(renderAirtimeHeatmap)
+                .catch(error => {
+                    console.error('Error loading airtime weights:', error);
+                    airtimeOn = false;
+                    syncAirtimeControls();
+                });
+        }
         // Open graph tab if URL has #graph (e.g. /mesh#graph)
         if (window.location.hash === '#graph') {
             switchView('graph');
@@ -2124,7 +2249,9 @@
                 nodeLabels: document.getElementById('filter-node-labels').checked,
                 evidence: document.getElementById('filter-evidence').value,
                 country: document.getElementById('filter-country').value,
-                colorMode: edgeColorMode
+                colorMode: edgeColorMode,
+                airtimeOn: airtimeOn,
+                airtimeWindow: airtimeWindow
                 // Note: searchTerm is NOT saved - it should not persist across reloads
             };
             localStorage.setItem('meshGraphFilters', JSON.stringify(filters));
@@ -2167,6 +2294,12 @@
                 }
                 if (filters.colorMode === 'age' || filters.colorMode === 'heat') {
                     edgeColorMode = filters.colorMode;
+                }
+                if (filters.airtimeOn === true) {
+                    airtimeOn = true;
+                }
+                if (['1h', '24h', '7d'].includes(filters.airtimeWindow)) {
+                    airtimeWindow = filters.airtimeWindow;
                 }
                 // Note: searchTerm is NOT loaded - it should reset on page reload
             }
@@ -2366,6 +2499,21 @@
             pane.querySelectorAll('svg').forEach(svg => svg.setAttribute('aria-hidden', 'true'));
             pane.querySelectorAll('.leaflet-interactive').forEach(el => el.setAttribute('tabindex', '-1'));
         });
+    }
+
+    // Airtime detail line for node popups: only while the heat layer is on and
+    // the passive model has evidence for this repeater in the selected window.
+    function airtimePopupRow(node) {
+        if (!airtimeOn || !airtimeWeights) return '';
+        const w = airtimeWeights.get(node.public_key);
+        if (!w) return '';
+        const minutes = (w.airtime_ms / 60000).toLocaleString(undefined, { maximumFractionDigits: 1 });
+        const duty = (w.estimated_percent === null || w.estimated_percent === undefined)
+            ? 'n/a' : w.estimated_percent.toFixed(2) + '%';
+        return `<tr>
+            <td class="mesh-popup-label"><strong>Airtime (${airtimeWindow}):</strong></td>
+            <td>${minutes} min on air, est. ${duty} duty</td>
+        </tr>`;
     }
 
     function renderMap() {
@@ -2754,6 +2902,7 @@
                             <td class="mesh-popup-label"><strong>Path Observations:</strong></td>
                             <td style="padding: 2px 0;">${(nodeHeatTotals.get(getNodeId(node)) || 0).toLocaleString()}</td>
                         </tr>
+                        ${airtimePopupRow(node)}
                     </table>
                     ${nodeClockHTML(node)}
                 </div>
@@ -2841,6 +2990,11 @@
                 });
             });
         }
+
+        // The marker/polyline sweep above also drops the heat canvas (its
+        // options.radius matches the circle-marker heuristic), so rebuild it
+        // from the current filtered set on every render.
+        renderAirtimeHeatmap();
     }
     
     // Render graph view
@@ -3765,6 +3919,16 @@
     }
     
     async function refreshData() {
+        // Airtime weights are window-scoped aggregates: drop the cache so the
+        // next render refetches the passive read model. Fire-and-forget keeps
+        // the heat layer in step without blocking the edge/node reload.
+        airtimeWeights = null;
+        airtimeWeightsWindow = null;
+        if (airtimeOn) {
+            ensureAirtimeWeights()
+                .then(renderAirtimeHeatmap)
+                .catch(error => console.error('Error reloading airtime weights:', error));
+        }
         const absorbedPending = meshLiveRefreshPending
             || meshLiveRefreshTimer !== null;
         const absorbedNeedsNodes = meshLiveRefreshNeedsNodes;

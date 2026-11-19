@@ -57,6 +57,12 @@ const LIBRARIES = {
     'vendor/maplibre-gl/maplibre-gl.css': 'dist/maplibre-gl.css',
     'vendor/maplibre-gl/LICENSE.txt': 'LICENSE.txt',
   },
+  // L.heatLayer plugin for the /mesh congestion heatmap; bundles simpleheat.
+  // Its own directory: each destination directory is emptied per package entry.
+  'leaflet.heat': {
+    'vendor/leaflet-heat/leaflet-heat.js': 'dist/leaflet-heat.js',
+    'vendor/leaflet-heat/LICENSE': 'LICENSE',
+  },
   '@maplibre/maplibre-gl-leaflet': {
     'vendor/maplibre-gl-leaflet/leaflet-maplibre-gl.js': 'leaflet-maplibre-gl.js',
     'vendor/maplibre-gl-leaflet/LICENSE': 'LICENSE',
@@ -93,8 +99,14 @@ function packageDir(name) {
   return path.join(HERE, 'node_modules', name);
 }
 
+// leaflet.heat 0.2.0 predates npm's license field; its LICENSE file is the same
+// two-clause BSD text leaflet itself carries.
+const LICENSE_OVERRIDES = { 'leaflet.heat': 'BSD-2-Clause' };
+
 function readManifest(name) {
-  return JSON.parse(fs.readFileSync(path.join(packageDir(name), 'package.json'), 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(path.join(packageDir(name), 'package.json'), 'utf8'));
+  if (manifest.license === undefined && name in LICENSE_OVERRIDES) manifest.license = LICENSE_OVERRIDES[name];
+  return manifest;
 }
 
 function topDir(dest) {
