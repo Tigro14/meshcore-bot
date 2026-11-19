@@ -26,6 +26,7 @@ class SocketClientsMixin:
     _clients_lock: Any
     _config_base: Any
     _can_publish_channel_data: Any
+    _auth_enforced: Any
     config: Any
     connected_clients: Any
     db_path: Any
@@ -51,6 +52,17 @@ class SocketClientsMixin:
                 client_id = request.sid  # type: ignore[attr-defined]  # Flask-SocketIO sets sid on the request
                 if not client_id:
                     self.logger.warning("Connect event received but client_id is None")
+                    return False
+
+                # Upstream hardening (#367): with ha_ingress on, every direct
+                # non-ingress request must authenticate even when no password
+                # is set — there is no login to succeed at, so it is refused.
+                # Ingress itself is already authenticated by Home Assistant.
+                if (self.ha_ingress and not self.is_ha_ingress_request()
+                        and not session.get('authenticated_admin')):
+                    self.logger.warning(f"Rejected unauthenticated SocketIO connection from {client_id}")
+                    with suppress(Exception):
+                        disconnect()
                     return False
 
                 # Issue #240 reopen: the Real-time traffic tape is anonymous-readable.

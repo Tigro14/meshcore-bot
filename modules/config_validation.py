@@ -77,6 +77,7 @@ CANONICAL_NON_COMMAND_SECTIONS = frozenset({
     "Battery_Monitor",
     "Region_Warnings",
     "Channel_Occupancy",
+    "Repeater_Watch",
 })
 
 # Sections required for the bot to start (accessed without has_section guards)

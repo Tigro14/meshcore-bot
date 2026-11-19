@@ -53,9 +53,11 @@ nav:
   - Installation:
     - Overview: installation.md
     - Docker: docker.md
+    - Home Assistant: home-assistant.md
     - Service: service-installation.md
   - Configuration:
     - Overview: configuration.md
+    - Scheduled messages: scheduled-messages.md
     - Data retention: data-retention.md
     - Local plugins and services: local-plugins.md
     - Check-in API: checkin-api.md
@@ -66,6 +68,7 @@ nav:
     - Region warnings: region-warnings.md
     - Channel occupancy: channel-occupancy.md
     - Storage monitoring and power cycle: io-health-monitoring.md
+    - Repeater watch: repeater-watch.md
   - Web Viewer: web-viewer.md
   - Channel message visibility: channel-message-visibility.md
   - Command Reference:

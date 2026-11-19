@@ -35,7 +35,7 @@
             Les canaux sur lesquels ce bot répond. Enregistré dans
             <code>config.ini</code> &rarr; <code>[Channels] monitor_channels</code>,
             rechargé à chaud par le bot après chaque sauvegarde.
-            <a href="/channels">Voir la page publique des canaux</a>.
+            <a href="{{ url_for('channels_page') }}">Voir la page publique des canaux</a>.
         </p>
     </div>
 </div>
@@ -49,7 +49,7 @@
                     Un canal <strong>hashtag</strong> commence par <code>#</code> : sa clef est dérivée
                     de son nom et le canal est ajouté sur la radio à la sauvegarde s&#39;il y manque.
                     Un canal <strong>personnalisé</strong> (sans <code>#</code>) doit d&#39;abord être
-                    créé sur la page <a href="/radio">Radio</a>, où vous choisissez sa clef.
+                    créé sur la page <a href="{{ url_for('radio') }}">Radio</a>, où vous choisissez sa clef.
                 </p>
 
                 <div id="cs-alert" class="alert d-none" role="alert"></div>
@@ -81,7 +81,7 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-sim-card"></i> Créneaux de canaux sur la radio</span>
-                <a class="btn btn-sm btn-outline-secondary" href="/radio">
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('radio') }}">
                     <i class="fas fa-broadcast-tower me-1"></i>Gérer sur la page Radio
                 </a>
             </div>
@@ -290,7 +290,7 @@
                     if (this.radioByName(removed)) {
                         showAlert('<i class="fas fa-triangle-exclamation me-1" aria-hidden="true"></i>'
                             + escapeHtml(removed) + ' reste occupé sur la radio : retirez le créneau sur '
-                            + '<a href="/radio">la page Radio</a> si vous ne voulez plus l&#39;entendre.',
+                            + '<a href="{{ url_for("radio") }}">la page Radio</a> si vous ne voulez plus l&#39;entendre.',
                             'warning');
                     }
                 });
@@ -402,7 +402,7 @@
             (result.radio_only || []).forEach((name) => {
                 lines.push('<li><i class="fas fa-hashtag me-1 text-muted" aria-hidden="true"></i>'
                     + escapeHtml(name) + ' : plus surveillé mais toujours sur la radio '
-                    + '(<a href="/radio">page Radio</a>)</li>');
+                    + '(<a href="{{ url_for("radio") }}">page Radio</a>)</li>');
             });
 
             if (lines.length) showAlert('<ul class="mb-0">' + lines.join('') + '</ul>', 'secondary');
