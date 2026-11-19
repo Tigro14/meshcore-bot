@@ -1401,6 +1401,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             '/api/contacts',
             '/api/contact-detail',
             '/api/mesh/nodes',
+            '/api/mesh/airtime',
             '/api/mesh/edges',
             '/api/mesh/stats',
             # /regions explainer. Public aggregates only: no settings, no per-sender data.
@@ -3528,6 +3529,33 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             except Exception as e:
                 self.logger.error(f"Error getting mesh nodes: {e}")
                 return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/mesh/airtime')
+        @self._api_errors('Error reading mesh airtime weights')
+        def api_mesh_airtime():
+            """Per-repeater RF airtime weights for the /mesh congestion heatmap.
+
+            Same read model as /api/telemetry/occupancy/analysis, narrowed to
+            per-node fields. Positions stay client-side: the map already holds
+            every geolocated repeater from /api/mesh/nodes, so the heatmap
+            joins points by public key. Repeaters without observed airtime in
+            the window are absent — absence means "no evidence", not zero duty.
+            """
+            from modules.airtime_analysis import WINDOWS
+            window = request.args.get('window', '24h')
+            if window not in WINDOWS:
+                return jsonify({'error': 'window must be 1h, 24h or 7d'}), 400
+            with self._with_db_connection() as conn:
+                report = self.airtime_reader.read(conn, window)
+            points = [{
+                'public_key': repeater['public_key'],
+                'airtime_ms': repeater['airtime_ms'],
+                'estimated_percent': repeater['estimated_percent'],
+                'packets': repeater['packets'],
+            } for repeater in report['repeaters'] if repeater['public_key']]
+            response = jsonify({'window': window, 'generated_at': report['generated_at'], 'points': points})
+            response.headers['Cache-Control'] = 'private, max-age=15'
+            return response
 
         @self.app.route('/api/mesh/edges')
         def api_mesh_edges():

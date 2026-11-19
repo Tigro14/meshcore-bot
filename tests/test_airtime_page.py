@@ -10,6 +10,10 @@ read models are never summed, and the numbers keep one rounding across the page.
 from __future__ import annotations
 
 import configparser
+import json
+import sqlite3
+import time
+from contextlib import closing
 from unittest.mock import patch
 
 import pytest
@@ -157,3 +161,59 @@ class TestPassiveAirtimeAPI:
 
     def test_window_validation(self, viewer):
         assert viewer.app.test_client().get('/api/telemetry/occupancy/analysis?window=all').status_code == 400
+
+
+class TestMeshAirtimeHeatmapAPI:
+    """GET /api/mesh/airtime: per-repeater weights behind the /mesh heat layer.
+
+    The map joins weights to positions by public key, so the endpoint carries
+    key + aggregate airtime only — never positions, names or payload data.
+    """
+
+    MOD = {'sf': 9, 'bw_khz': 125.0, 'cr_den': 5, 'preamble': 8}
+
+    def _seed(self, viewer):
+        from modules.airtime_analysis import ingest_stream
+
+        relay_a, relay_b = 'aabb' + '11' * 30, 'bbcc' + '22' * 30
+        payload = '0123456789abcdef' * 5
+        path_hex = relay_a[:4] + relay_b[:4]
+        frame = {'path_hex': path_hex, 'route_type_name': 'FLOOD', 'payload_type_name': 'GRP_TXT',
+                 'payload_hex': payload, 'bytes_per_hop': 2,
+                 'raw_packet_hex': '0000' + path_hex + payload, 'packet_hash': '0123456789abcdef'}
+        with closing(sqlite3.connect(viewer.db_path)) as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO complete_contact_tracking"
+                " (public_key, name, role, latitude, longitude, is_currently_tracked)"
+                " VALUES (?, ?, 'repeater', ?, ?, 1)",
+                [(relay_a, 'Heatmap Relay A', 48.4, -4.5), (relay_b, 'Heatmap Relay B', 48.6, -4.7)])
+            conn.execute("INSERT INTO packet_stream (timestamp, data, type) VALUES (?, ?, 'packet')",
+                         (time.time() - 60, json.dumps(frame)))
+            ingest_stream(conn, self.MOD)
+            conn.commit()
+        return relay_a, relay_b
+
+    def test_weights_are_keyed_aggregates_without_positions(self, viewer):
+        relay_a, relay_b = self._seed(viewer)
+        try:
+            viewer.airtime_reader._cache.clear()
+            response = viewer.app.test_client().get('/api/mesh/airtime?window=24h')
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data['window'] == '24h'
+            by_key = {point['public_key']: point for point in data['points']}
+            assert by_key[relay_a]['airtime_ms'] > 0
+            assert by_key[relay_b]['airtime_ms'] > 0
+            # Points carry only the join key and aggregates: the map already
+            # holds positions from /api/mesh/nodes and repeating them here, or
+            # leaking names, would widen this surface for nothing.
+            assert set(by_key[relay_a]) == {'public_key', 'airtime_ms', 'estimated_percent', 'packets'}
+        finally:
+            with closing(sqlite3.connect(viewer.db_path)) as conn:
+                conn.execute("DELETE FROM complete_contact_tracking WHERE public_key IN (?, ?)",
+                             (relay_a, relay_b))
+                conn.commit()
+            viewer.airtime_reader._cache.clear()
+
+    def test_invalid_window_is_rejected_like_the_analysis_endpoint(self, viewer):
+        assert viewer.app.test_client().get('/api/mesh/airtime?window=all').status_code == 400
