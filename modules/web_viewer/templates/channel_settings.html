@@ -84,8 +84,8 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-sim-card"></i> Créneaux de canaux sur la radio</span>
-                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('radio') }}">
-                    <i class="fas fa-broadcast-tower me-1"></i>Gérer sur la page Radio
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('radio', _anchor='channelsTable') }}">
+                    <i class="fas fa-broadcast-tower me-1"></i>Créneaux et publication sur Radio
                 </a>
             </div>
             <div class="card-body">
@@ -353,7 +353,7 @@
                     + (c.live_messages_visible ? ' <span class="badge bg-info">publié</span>' : '')
                     + '  </td>'
                     + '  <td class="cs-region"><input type="text" class="form-control form-control-sm cs-region-input" '
-                    + 'list="cs-regions" autocomplete="off" spellcheck="false" maxlength="30" '
+                    + 'list="cs-regions" autocapitalize="none" autocorrect="off" autocomplete="off" spellcheck="false" maxlength="30" '
                     + 'placeholder="Par défaut (' + escapeHtml(defaultRegion) + ')" '
                     + 'aria-label="Région de ' + escapeHtml(c.name) + '" aria-describedby="cs-region-help" '
                     + 'value="' + escapeHtml(this.regionChanges.get(c.name) ?? c.region_override ?? '') + '"></td>'
