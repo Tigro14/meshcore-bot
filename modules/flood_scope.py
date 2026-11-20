@@ -21,6 +21,9 @@ from typing import Any
 # rebroadcasts. Empty is how config.ini spells "unset".
 GLOBAL_MARKERS = ("", "*", "0", "None")
 
+# Lets a local config overlay restore the default over a base file's override.
+CHANNEL_SCOPE_INHERIT = "@default"
+
 # A scope name is hashed whole, so there is no protocol limit; this is a sanity
 # bound on what the UI will write into a comma-separated INI value.
 MAX_SCOPE_NAME_LENGTH = 64
@@ -163,6 +166,17 @@ def normalize_channel_for_scope(channel: str) -> str:
     return channel.strip().removeprefix("#").lower()
 
 
+def channel_scope_option(config: Any, channel: str | None) -> str | None:
+    """Find the actual INI key so a write can retain its existing spelling."""
+    if not channel or not config.has_section("Channels"):
+        return None
+    channel_key = normalize_channel_for_scope(channel)
+    for key in config.options("Channels"):
+        if key.startswith("flood_scope.") and normalize_channel_for_scope(key[len("flood_scope."):]) == channel_key:
+            return key
+    return None
+
+
 def channel_scope_entry(config: Any, channel: str | None) -> str | None:
     """Stripped value of ``[Channels] flood_scope.<channel>``, or None with no entry.
 
@@ -170,13 +184,11 @@ def channel_scope_entry(config: Any, channel: str | None) -> str | None:
     global marker; that is returned as-is (an explicit "send this channel
     globally").
     """
-    if not channel or not config.has_section("Channels"):
+    key = channel_scope_option(config, channel)
+    if key is None:
         return None
-    channel_key = normalize_channel_for_scope(channel)
-    for key, value in config.items("Channels"):
-        if key.startswith("flood_scope.") and normalize_channel_for_scope(key[len("flood_scope."):]) == channel_key:
-            return (value or "").strip()
-    return None
+    entry = (config.get("Channels", key) or "").strip()
+    return None if entry == CHANNEL_SCOPE_INHERIT else entry
 
 
 def outgoing_override(config: Any) -> str:

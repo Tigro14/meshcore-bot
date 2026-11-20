@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Canaux surveillés - MeshCore Bot{% endblock %}
+{% block title %}Réglages des canaux - MeshCore Bot{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -24,13 +24,16 @@
     .cs-flag {
         font-size: .875rem;
     }
+    .cs-region {
+        min-width: 12rem;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="row">
     <div class="col-12">
-        <h1 class="mb-1"><i class="fas fa-hashtag"></i> Canaux surveillés</h1>
+        <h1 class="mb-1"><i class="fas fa-hashtag"></i> Réglages des canaux</h1>
         <p class="text-muted mb-4">
             Les canaux sur lesquels ce bot répond. Enregistré dans
             <code>config.ini</code> &rarr; <code>[Channels] monitor_channels</code>,
@@ -81,8 +84,8 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="fas fa-sim-card"></i> Créneaux de canaux sur la radio</span>
-                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('radio') }}">
-                    <i class="fas fa-broadcast-tower me-1"></i>Gérer sur la page Radio
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('radio', _anchor='channelsTable') }}">
+                    <i class="fas fa-broadcast-tower me-1"></i>Créneaux et publication sur Radio
                 </a>
             </div>
             <div class="card-body">
@@ -92,6 +95,11 @@
                     hashtag manquants sur les créneaux libres ; le retrait d&#39;un créneau se fait
                     sur la page Radio.
                 </p>
+                <p id="cs-region-help" class="text-muted small mb-3">
+                    La région choisie est intégrée au QR code du canal. Laissez le champ vide pour
+                    utiliser la région par défaut, ou saisissez <code>*</code> pour envoyer sans région.
+                </p>
+                <datalist id="cs-regions"></datalist>
                 <div class="table-responsive">
                     <table class="table table-striped table-hover mb-0">
                         <thead>
@@ -100,10 +108,17 @@
                                 <th scope="col">Canal</th>
                                 <th scope="col">Type</th>
                                 <th scope="col">Statut</th>
+                                <th scope="col">Région</th>
                             </tr>
                         </thead>
                         <tbody id="cs-radio-body"></tbody>
                     </table>
+                </div>
+                <div class="d-flex justify-content-between align-items-center gap-3 mt-3">
+                    <span id="cs-region-status" class="small text-muted" role="status"></span>
+                    <button type="button" class="btn btn-primary flex-shrink-0" id="cs-region-save" disabled>
+                        Enregistrer les régions
+                    </button>
                 </div>
             </div>
         </div>
@@ -162,10 +177,13 @@
             this.saved = [];
             this.dirty = false;
             this.reloadFailure = '';
+            this.regionChanges = new Map();
+            this.saving = false;
             this.load();
 
             el('cs-save').addEventListener('click', () => this.save());
             el('cs-add').addEventListener('click', () => this.addFromInput());
+            el('cs-region-save').addEventListener('click', () => this.saveRegions());
             el('cs-new').addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') { e.preventDefault(); this.addFromInput(); }
             });
@@ -192,7 +210,7 @@
 
         markDirty() {
             this.dirty = true;
-            el('cs-save').disabled = false;
+            el('cs-save').disabled = this.saving;
             setStatus('Modifications non enregistrées.', 'text-muted');
         }
 
@@ -310,9 +328,15 @@
                 .filter((c) => c.channel_idx !== null && c.channel_idx !== undefined)
                 .sort((a, b) => a.channel_idx - b.channel_idx);
             if (!onRadio.length) {
-                body.innerHTML = '<tr><td colspan="4" class="cs-empty">Aucun canal configuré sur le nœud.</td></tr>';
+                body.innerHTML = '<tr><td colspan="5" class="cs-empty">Aucun canal configuré sur le nœud.</td></tr>';
                 return;
             }
+            const regions = this.data.regions || [];
+            el('cs-regions').replaceChildren(
+                ...regions.map((region) => new Option(region, region)),
+                new Option('Sans région', '*'),
+            );
+            const defaultRegion = this.data.default_region || 'sans région';
             body.innerHTML = onRadio.map((c) => {
                 const radioKey = lookupKey(c.name);
                 const monitored = this.saved.concat(this.channels)
@@ -328,15 +352,88 @@
                         : '<span class="badge bg-secondary">non surveillé</span>')
                     + (c.live_messages_visible ? ' <span class="badge bg-info">publié</span>' : '')
                     + '  </td>'
+                    + '  <td class="cs-region"><input type="text" class="form-control form-control-sm cs-region-input" '
+                    + 'list="cs-regions" autocapitalize="none" autocorrect="off" autocomplete="off" spellcheck="false" maxlength="30" '
+                    + 'placeholder="Par défaut (' + escapeHtml(defaultRegion) + ')" '
+                    + 'aria-label="Région de ' + escapeHtml(c.name) + '" aria-describedby="cs-region-help" '
+                    + 'value="' + escapeHtml(this.regionChanges.get(c.name) ?? c.region_override ?? '') + '"></td>'
                     + '</tr>';
             }).join('');
+            body.querySelectorAll('.cs-region-input').forEach((input, index) => {
+                const channel = onRadio[index];
+                input.addEventListener('input', () => {
+                    const value = input.value.trim();
+                    if (value === (channel.region_override ?? '')) {
+                        this.regionChanges.delete(channel.name);
+                    } else {
+                        this.regionChanges.set(channel.name, value);
+                    }
+                    el('cs-region-save').disabled = this.saving || !this.regionChanges.size;
+                    this.setRegionStatus(this.regionChanges.size ? 'Modifications non enregistrées.' : '');
+                });
+            });
+        }
+
+        setRegionStatus(message, style = 'text-muted') {
+            const node = el('cs-region-status');
+            node.className = 'small ' + style;
+            node.textContent = message;
+        }
+
+        async saveRegions() {
+            if (this.saving || !this.regionChanges.size) return;
+            this.saving = true;
+            const button = el('cs-region-save');
+            button.disabled = true;
+            const inputs = el('cs-radio-body').querySelectorAll('.cs-region-input');
+            inputs.forEach((input) => { input.disabled = true; });
+            el('cs-save').disabled = true;
+            this.setRegionStatus('Enregistrement…');
+            try {
+                const resp = await fetch('/api/channels/settings/scopes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify({scopes: Object.fromEntries(this.regionChanges)}),
+                });
+                const result = await resp.json();
+                if (!resp.ok || !result.success) {
+                    throw new Error(result.error || 'Impossible d’enregistrer les régions.');
+                }
+
+                this.data = result.settings;
+                this.regionChanges.clear();
+                this.setRegionStatus('QR codes mis à jour. Rechargement du bot…');
+                const outcome = await this.awaitReload(result.reload_operation_id);
+                if (outcome === 'completed') {
+                    this.setRegionStatus('Régions enregistrées et QR codes mis à jour.', 'text-success');
+                } else {
+                    this.setRegionStatus(
+                        'QR codes mis à jour. Le rechargement du bot n’a pas été confirmé.',
+                        'text-warning',
+                    );
+                }
+                this.renderRadio();
+            } catch (error) {
+                this.setRegionStatus(error.message, 'text-danger');
+            } finally {
+                this.saving = false;
+                inputs.forEach((input) => { input.disabled = false; });
+                button.disabled = !this.regionChanges.size;
+                el('cs-save').disabled = !this.dirty;
+            }
         }
 
         async save() {
+            if (this.saving) return;
+            this.saving = true;
             const button = el('cs-save');
             button.disabled = true;
             hideAlert();
             this.reloadFailure = '';
+            el('cs-region-save').disabled = true;
             setStatus('Enregistrement…', 'text-muted');
             let result;
             try {
@@ -351,7 +448,9 @@
                 result = await resp.json();
                 if (!resp.ok || !result.success) throw new Error(result.error || 'Enregistrement impossible');
             } catch (error) {
+                this.saving = false;
                 button.disabled = false;
+                el('cs-region-save').disabled = !this.regionChanges.size;
                 setStatus(error.message, 'text-danger');
                 return;
             }
@@ -377,6 +476,9 @@
 
             this.render();
             await this.reloadView();
+            this.renderRadio();
+            this.saving = false;
+            el('cs-region-save').disabled = !this.regionChanges.size;
 
             const lines = [];
             provisioning.forEach((item) => {

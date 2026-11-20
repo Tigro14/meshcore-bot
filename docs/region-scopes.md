@@ -71,7 +71,7 @@ A regional send costs 10 bytes of message length, so scoped channel messages are
 
 ## The Radio page
 
-The web viewer's **Radio** page edits `flood_scopes` and `outgoing_flood_scope_override` in its **Region Scopes** card and reloads the bot, so you do not need to restart. Per-channel `flood_scope.<channel>` entries are listed there read-only; edit those in `config.ini`.
+The web viewer's **Radio** page edits `flood_scopes` and `outgoing_flood_scope_override` in its **Region Scopes** card. Use **Channel Settings** (`/channels/settings`) to edit the region for each radio channel. An empty field inherits the default (`@default` in the per-channel INI entry). Use `*` for global flood. Saving updates the QR codes on `/channels` and queues a configuration reload.
 
 The **Default Region Scope** card on the same page is a different setting: the radio's own default, stored in firmware. It plays no part in mirroring or in deciding which messages the bot answers, but a send the bot does not scope itself goes out under it, because the bot only sets a scope on the radio when it has one of its own.
 
