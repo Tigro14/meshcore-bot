@@ -686,6 +686,7 @@ sync_executable_tree() {
         --exclude='backups' \
         --exclude='local/' \
         --exclude='config.ini' \
+        --exclude='data/randomlines/miaou.txt' \
         "$source_dir/" "$dest_dir/"
 }
 
