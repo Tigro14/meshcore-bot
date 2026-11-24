@@ -544,13 +544,18 @@ The viewer also provides JSON API endpoints:
   private keys of unpublished custom channels
 - `GET /api/channels/settings` - Admin only. `[Channels] monitor_channels` as a
   list, the merged channel view (which entries the radio holds and in which slot),
-  and `limit`, the free-slot count `[Bot] max_channels` allows
+  and `limit`, the free-slot count `[Bot] max_channels` allows. Includes the
+  default region, region suggestions, and each channel's region override
 - `POST /api/channels/settings` - Admin only. Save `monitor_channels` (a list of
   names, `#` optional) and queue a hot config reload. Refuses a list longer than
   `max_channels` slots, an invalid name, and `Public` without the `[Bot]` override
   key. Returns `reload_operation_id` plus `provisioned` (with each queued
   `channel_operations` id and slot), `not_provisioned`, `custom_monitored` and
   `radio_only`, so the page can report what the bot did
+- `POST /api/channels/settings/scopes` - Admin only. Save region overrides for
+  the specified radio channels with `{"scopes":{"#weather":"sea","#chat":"*","#news":null}}`.
+  Use `*` for global flood and `null` or an empty string to inherit the default.
+  Returns the updated settings and a `reload_operation_id` for the hot reload.
 - `GET /api/dashboard/summary` - Snapshot-backed dashboard payload, including
   30-day sparkline series and change figures, plus `packet_encoding`: 30 days of
   raw per-payload-type multibyte/total counts for the stacked encoding chart.

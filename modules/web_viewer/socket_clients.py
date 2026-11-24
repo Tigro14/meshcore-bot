@@ -9,6 +9,7 @@ import json
 import os
 import sqlite3
 import time
+from collections.abc import Callable
 from contextlib import closing, suppress
 from typing import Any
 
@@ -30,6 +31,8 @@ class SocketClientsMixin:
     config: Any
     connected_clients: Any
     db_path: Any
+    ha_ingress: bool
+    is_ha_ingress_request: Callable[[], bool]
     logger: Any
     max_clients: Any
     socketio: Any

@@ -16,7 +16,7 @@ from collections import Counter, defaultdict
 from typing import Any
 
 from modules.channel_occupancy import lora_airtime_ms
-from modules.flood_scope import is_global_marker, normalize_scope_name
+from modules.flood_scope import CHANNEL_SCOPE_INHERIT, is_global_marker, normalize_scope_name
 
 TRAIN_SECONDS = 7 * 86400
 FRESH_SECONDS = 86400
@@ -34,6 +34,8 @@ def analysis_scope_keys(config: Any, existing: dict | None = None) -> dict[str, 
         return keys
     for section in config.sections():
         for option, value in config.items(section):
+            if section == 'Channels' and option.startswith('flood_scope.') and value.strip() == CHANNEL_SCOPE_INHERIT:
+                continue
             if option in ('flood_scope', 'startup_flood_scope', 'outgoing_flood_scope_override') or option.startswith('flood_scope.'):
                 names = [value]
             elif option == 'flood_scopes' and section in ('Channels', 'Bot'):

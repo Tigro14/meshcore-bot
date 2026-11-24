@@ -1353,7 +1353,12 @@ class MeshCoreBot(ServiceSupervisorMixin, RadioLinkMixin, RadioOfflineBreaker, D
                 try:
                     tz, tz_key = get_config_timezone(self.config, self.logger)
                     tz_name = tz_key or str(tz)
-                    utc_offset = tz.utcoffset(datetime.now(_dt_tz.utc))
+                    # zoneinfo accepts an aware instant; pytz rejects it and
+                    # needs the instant converted into its zone first.
+                    try:
+                        utc_offset = tz.utcoffset(datetime.now(_dt_tz.utc))
+                    except ValueError:
+                        utc_offset = datetime.now(_dt_tz.utc).astimezone(tz).utcoffset()
                     if utc_offset is not None:
                         offset_seconds = int(utc_offset.total_seconds())
                         current_time += offset_seconds

@@ -1741,6 +1741,32 @@ monitor_channels = #general
         assert "local time offset applied" in debug_messages
         assert "7200" in debug_messages
 
+    def test_applies_real_pytz_offset_when_radio_clock_uses_local_time(self, tmp_path):
+        """A configured pytz zone accepts the aware UTC instant after conversion."""
+        from meshcore.events import EventType
+
+        bot = self._make_bot_with_local_time(tmp_path, "Europe/Paris")
+        bot.meshcore = MagicMock()
+        bot.meshcore.is_connected = True
+
+        get_time_event = MagicMock()
+        get_time_event.type = EventType.CURRENT_TIME
+        get_time_event.payload = {"time": 100}
+
+        set_time_event = MagicMock()
+        set_time_event.type = EventType.OK
+        set_time_event.payload = {}
+
+        bot.meshcore.commands.get_time = MagicMock(return_value=_make_coro(get_time_event))
+        bot.meshcore.commands.set_time = MagicMock(return_value=_make_coro(set_time_event))
+
+        with patch("modules.core.time.time", return_value=1000):
+            result = asyncio.run(bot.set_radio_clock())
+
+        assert result is True
+        sent_time = bot.meshcore.commands.set_time.call_args.args[0]
+        assert sent_time - 1000 in (3600, 7200)
+
     def test_no_offset_when_radio_clock_use_local_time_disabled(self, tmp_path):
         """radio_clock_use_local_time=false (default) sends plain UTC epoch."""
         from meshcore.events import EventType
