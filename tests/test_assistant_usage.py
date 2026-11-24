@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock, Mock
 from modules.assistant.dispatcher import AssistantDispatcher
 from modules.assistant.router import Decision, Route
 from modules.assistant.usage import top_functions
-from modules.db_migrations import _m0030_assistant_function_usage
+from modules.db_migrations import _m0044_assistant_function_usage
 
 
 def test_usage_windows_and_ranking():
     conn = sqlite3.connect(':memory:')
-    _m0030_assistant_function_usage(conn.cursor())
-    _m0030_assistant_function_usage(conn.cursor())
+    _m0044_assistant_function_usage(conn.cursor())
+    _m0044_assistant_function_usage(conn.cursor())
     now = 4000000
     conn.executemany('INSERT INTO assistant_function_usage VALUES (?, ?)', [
         (now - 10, 'weather.forecast'), (now - 20, 'weather.forecast'),
@@ -35,6 +35,7 @@ def test_dispatch_counts_authorized_call_once():
     owner.bot.db_manager = db
     owner.bot.command_manager.commands = {'llm': command}
     owner.get_config_value.side_effect = lambda *a, **kw: kw.get("fallback")
+    owner.get_max_message_length.return_value = 500
     owner.enabled_routes = {'llm'}
     dispatcher = AssistantDispatcher(owner)
     decision = Decision(Route.LLM, 'bonjour', 'test')

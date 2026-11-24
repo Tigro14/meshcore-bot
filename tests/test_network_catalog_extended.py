@@ -1,12 +1,17 @@
-import json, sqlite3, logging, asyncio
+import asyncio
+import json
+import logging
+import sqlite3
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
 import pytest
-from modules.assistant.catalog import parse_plan, CATALOG
-from modules.assistant.router import AssistantRouter
-from modules.assistant.network_plan import parameters, infer_operation
+
+from modules.assistant.catalog import CATALOG, parse_plan
+from modules.assistant.network_plan import infer_operation, parameters
 from modules.assistant.network_tools import observation_answer, trace_content
 from tests.conftest import mock_message
+
 
 @pytest.mark.parametrize('q,op,args',[
  ('Quels sont les 3 répéteurs les plus proches ?', 'near', {'limit':3,'role':'repeater','target':''}),
@@ -80,6 +85,7 @@ async def test_stats_service_uses_tigro_functions_disabled(command_mock_bot):
 @pytest.mark.asyncio
 async def test_advert_global_cooldown_and_mock_radio(command_mock_bot):
  import time
+
  from modules.commands.advert_command import AdvertCommand
  cmd=AdvertCommand(command_mock_bot);cmd.is_channel_allowed=lambda m:True;cmd.requires_admin_access=lambda:False
  m=mock_message(is_dm=True)
@@ -113,9 +119,9 @@ async def test_trace_uses_mock_transport_only(command_mock_bot):
 
 @pytest.mark.asyncio
 async def test_network_adapter_forwards_near_parameters(command_mock_bot):
- from modules.commands.near_command import NearCommand
  from modules.assistant.network_tools import answer_network
- from modules.assistant.router import Decision,Route
+ from modules.assistant.router import Decision, Route
+ from modules.commands.near_command import NearCommand
  near=NearCommand(command_mock_bot)
  async def run(m):
   assert m.content=='near 3 sensor abcd'

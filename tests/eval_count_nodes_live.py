@@ -3,16 +3,18 @@ import asyncio
 import configparser
 import json
 import logging
-from pathlib import Path
 import sqlite3
 import sys
+from pathlib import Path
 from types import SimpleNamespace
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from modules.assistant.catalog import CATALOG
-from modules.assistant.semantic_router import SemanticRouter
-from modules.assistant.network_tools import count_nodes
 from modules.assistant.llm_service import LlmService
+from modules.assistant.network_tools import count_nodes
+from modules.assistant.semantic_router import SemanticRouter
 from modules.models import MeshMessage
+
 
 async def main():
     config=configparser.ConfigParser()

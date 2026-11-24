@@ -158,6 +158,7 @@ class TestAllowedTables:
             'path_stats', 'unique_advert_packets', 'schema_version',
             'channel_operations', 'channels', 'feed_message_queue',
             'bbs_messages', 'bbs_inbox', 'daily_rollup',
+            'assistant_function_usage',
             'dashboard_snapshot',
             'occupancy_samples', 'occupancy_senders', 'occupancy_emitters',
             'occupancy_sender_days', 'occupancy_emitter_days',

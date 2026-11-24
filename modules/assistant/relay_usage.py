@@ -1,8 +1,8 @@
 """Rank unambiguous relays by distinct observed packet hashes, never adverts sent."""
-from collections import defaultdict
-import re
 import json
+import re
 import time
+from collections import defaultdict
 
 
 def relay_usage(conn, hours=24, limit=3, budget=220):
@@ -40,7 +40,7 @@ def relay_usage(conn, hours=24, limit=3, budget=220):
         if not path or len(path) % size or not re.fullmatch('[0-9a-fA-F]+', path):
             skipped = True
             continue
-        for prefix in set(path[i:i+size].lower() for i in range(0, len(path), size)):
+        for prefix in {path[i:i+size].lower() for i in range(0, len(path), size)}:
             keys = prefixes.get(prefix, set())
             if len(keys) != 1:
                 skipped = True

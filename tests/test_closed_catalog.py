@@ -2,10 +2,12 @@ import json
 import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
 import pytest
-from modules.assistant.catalog import parse_plan, CATALOG
-from modules.assistant.router import AssistantRouter
+
+from modules.assistant.catalog import CATALOG, parse_plan
 from modules.assistant.dispatcher import AssistantDispatcher
+from modules.assistant.router import AssistantRouter
 from tests.conftest import mock_message
 
 ALL=set(CATALOG)
@@ -47,8 +49,9 @@ def test_path_public_and_internal_are_separate(command_mock_bot):
 async def test_count_uses_database_not_generated_sql(command_mock_bot, tmp_path):
  import sqlite3
  from contextlib import contextmanager
- from tests.test_assistant_integration import setup_bot
+
  from tests.conftest import mock_message
+ from tests.test_assistant_integration import setup_bot
  commands,sent=setup_bot(command_mock_bot)
  db=tmp_path/'mesh.db'
  with sqlite3.connect(db) as c:
@@ -68,8 +71,8 @@ async def test_count_uses_database_not_generated_sql(command_mock_bot, tmp_path)
 
 @pytest.mark.asyncio
 async def test_internal_path_captures_and_preserves_sender(command_mock_bot):
- from tests.test_assistant_integration import setup_bot
  from tests.conftest import mock_message
+ from tests.test_assistant_integration import setup_bot
  commands,sent=setup_bot(command_mock_bot)
  path=commands['path'];path.path_enabled=False
  commands['llm'].service.rephrase_tool_result=AsyncMock(return_value=None)

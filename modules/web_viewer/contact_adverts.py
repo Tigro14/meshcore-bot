@@ -27,4 +27,4 @@ def contact_advert_counts(cursor, now=None):
         )
         SELECT public_key, {columns} FROM announcements GROUP BY public_key
     """, params).fetchall()
-    return {row[0]: dict(zip(windows, row[1:])) for row in rows}
+    return {row[0]: dict(zip(windows, row[1:], strict=False)) for row in rows}

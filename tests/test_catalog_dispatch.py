@@ -2,10 +2,13 @@ import json
 import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
 import pytest
-from modules.assistant.catalog import parse_plan, CATALOG
+
+from modules.assistant.catalog import CATALOG, parse_plan
 from modules.assistant.dispatcher import AssistantDispatcher
 from tests.conftest import mock_message
+
 
 @pytest.mark.parametrize('q,route,op,args',[
  ('Baliz statistique des canaux','mesh','stats',{'topic':'channels','hashes':False}),
@@ -61,6 +64,7 @@ def test_trace_cannot_invent_radio_path():
 
 def test_semantic_transport_uses_closed_schema_and_separate_timeout():
     from unittest.mock import patch
+
     from modules.assistant.semantic_router import SemanticRouter
     def read(section,key,fallback=None,value_type=None):
         return 23 if (section,key)==('Ask_Command','semantic_timeout_seconds') else fallback
@@ -81,6 +85,7 @@ def test_semantic_transport_uses_closed_schema_and_separate_timeout():
 ])
 def test_semantic_transport_rejects_disabled_or_unknown_calls(content):
     from unittest.mock import patch
+
     from modules.assistant.semantic_router import SemanticRouter
     router=SemanticRouter(SimpleNamespace(logger=logging.getLogger(),get_config_value=lambda *a, fallback=None, **k:fallback))
     response=SimpleNamespace(raise_for_status=lambda:None,json=lambda:{'choices':[{'message':{'content':content}}]})
@@ -90,6 +95,7 @@ def test_semantic_transport_rejects_disabled_or_unknown_calls(content):
 
 def test_invalid_model_plan_gets_one_repair_within_same_budget():
     from unittest.mock import patch
+
     from modules.assistant.semantic_router import SemanticRouter
     router=SemanticRouter(SimpleNamespace(logger=logging.getLogger(),get_config_value=lambda *a, fallback=None, **k:fallback))
     def reply(content):
@@ -101,8 +107,10 @@ def test_invalid_model_plan_gets_one_repair_within_same_budget():
 
 
 def test_http_timeout_is_not_retried():
-    import requests
     from unittest.mock import patch
+
+    import requests
+
     from modules.assistant.semantic_router import SemanticRouter
     router=SemanticRouter(SimpleNamespace(logger=logging.getLogger(),get_config_value=lambda *a, fallback=None, **k:fallback))
     with patch('modules.assistant.semantic_router.post_chat',side_effect=requests.Timeout('busy')) as post:
@@ -136,6 +144,7 @@ async def test_clarification_dispatches_only_conversation_service():
 @pytest.mark.parametrize('hashes', [False, True])
 def test_named_statistics_keep_existing_adapter(function, topic, hashes):
     from unittest.mock import patch
+
     from modules.assistant.semantic_router import SemanticRouter
     router = SemanticRouter(SimpleNamespace(
         logger=logging.getLogger(), get_config_value=lambda *a, fallback=None, **k: fallback))
@@ -159,6 +168,7 @@ def test_named_statistics_keep_existing_adapter(function, topic, hashes):
 ])
 def test_named_statistics_reject_unexposed_or_invalid_calls(function, args):
     from unittest.mock import patch
+
     from modules.assistant.semantic_router import SemanticRouter
     router = SemanticRouter(SimpleNamespace(
         logger=logging.getLogger(), get_config_value=lambda *a, fallback=None, **k: fallback))
@@ -172,6 +182,7 @@ def test_named_statistics_reject_unexposed_or_invalid_calls(function, args):
 def test_semantic_deadline_inherits_llm_timeout(configured, llm_timeout, expected):
     import logging
     from types import SimpleNamespace
+
     from modules.assistant.semantic_router import SemanticRouter
     def read(section,key,fallback=None,value_type='str'):
         if (section,key) == ('Llm_Command','timeout_seconds'):
@@ -203,6 +214,7 @@ def test_weather_does_not_accept_invented_or_partial_place(place):
 ])
 def test_weather_argument_repair_cannot_switch_to_network(second,expected):
     from unittest.mock import patch
+
     from modules.assistant.semantic_router import SemanticRouter
     router=SemanticRouter(SimpleNamespace(logger=logging.getLogger(),get_config_value=lambda *a,fallback=None,**k:fallback))
     def reply(value):

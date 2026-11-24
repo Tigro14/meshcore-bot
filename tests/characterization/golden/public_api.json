@@ -62,6 +62,108 @@
   "shorten_event",
   "translate_or"
  ],
+ "modules/assistant/bbs_service.py": [
+  "BBSAssistant",
+  "BBSAssistant.body_session",
+  "BBSAssistant.context",
+  "BBSAssistant.execute",
+  "BBSAssistant.session_key",
+  "Pending",
+  "argument_schema",
+  "explicit_message_text",
+  "validate_bbs_arguments"
+ ],
+ "modules/assistant/catalog.py": [
+  "grounded_place",
+  "parse_plan",
+  "validate_arguments"
+ ],
+ "modules/assistant/conversation.py": [
+  "complete_reply"
+ ],
+ "modules/assistant/dispatcher.py": [
+  "AssistantDispatcher",
+  "AssistantDispatcher.answer",
+  "AssistantDispatcher.record_function"
+ ],
+ "modules/assistant/llm_backend.py": [
+  "LlmBackend",
+  "LlmBackend.headers",
+  "LlmBackend.model_info",
+  "LlmBackend.post_chat",
+  "LlmBackend.resolve"
+ ],
+ "modules/assistant/llm_client.py": [
+  "apply_reasoning_effort",
+  "configured_reasoning_effort",
+  "post_chat"
+ ],
+ "modules/assistant/llm_service.py": [
+  "LlmService",
+  "LlmService.answer",
+  "LlmService.rephrase_tool_result"
+ ],
+ "modules/assistant/mesh_service.py": [
+  "MeshService",
+  "MeshService.answer",
+  "MeshService.describe_tables"
+ ],
+ "modules/assistant/message_hops.py": [
+  "hops_reply",
+  "observed_hops"
+ ],
+ "modules/assistant/network_plan.py": [
+  "argument_schema",
+  "infer_operation",
+  "parameters"
+ ],
+ "modules/assistant/network_summary.py": [
+  "network_summary"
+ ],
+ "modules/assistant/network_tools.py": [
+  "answer_network",
+  "count_nodes",
+  "countries",
+  "observation_answer",
+  "trace_content"
+ ],
+ "modules/assistant/provenance.py": [
+  "Source",
+  "answer_source",
+  "argument_schema"
+ ],
+ "modules/assistant/rag_config.py": [
+  "read_rag_config"
+ ],
+ "modules/assistant/relay_connectivity.py": [
+  "connectivity"
+ ],
+ "modules/assistant/relay_usage.py": [
+  "relay_usage"
+ ],
+ "modules/assistant/response.py": [
+  "clarification_mention",
+  "send_answer",
+  "split_reply"
+ ],
+ "modules/assistant/router.py": [
+  "AssistantRouter",
+  "AssistantRouter.decide",
+  "Decision",
+  "Route",
+  "normalize"
+ ],
+ "modules/assistant/semantic_router.py": [
+  "SemanticRouter",
+  "SemanticRouter.decide"
+ ],
+ "modules/assistant/sender_policy.py": [
+  "sender_may_use_llm"
+ ],
+ "modules/assistant/usage.py": [
+  "record",
+  "top_functions"
+ ],
  "modules/bridge_outbound.py": [
   "is_valid_discord_webhook_url",
   "neutralize_discord_mention_content",
@@ -276,6 +378,7 @@
  "modules/commands/advert_command.py": [
   "AdvertCommand",
   "AdvertCommand.can_execute",
+  "AdvertCommand.can_use_service",
   "AdvertCommand.execute",
   "AdvertCommand.get_help_text"
  ],
@@ -329,8 +432,13 @@
  ],
  "modules/commands/ask_command.py": [
   "AskCommand",
+  "AskCommand.bbs_text_pending",
   "AskCommand.can_execute",
-  "AskCommand.execute"
+  "AskCommand.claim_bbs_text",
+  "AskCommand.execute",
+  "AskCommand.matches_keyword",
+  "AskCommand.mentioned_question",
+  "AskCommand.split_trigger_and_args"
  ],
  "modules/commands/aurora_command.py": [
   "AuroraCommand",
@@ -341,6 +449,7 @@
   "BaseCommand.build_enhanced_connection_info",
   "BaseCommand.can_execute",
   "BaseCommand.can_execute_now",
+  "BaseCommand.can_use_service",
   "BaseCommand.check_cooldown",
   "BaseCommand.cleanup_message_for_matching",
   "BaseCommand.detect_response_language",
@@ -502,6 +611,8 @@
  ],
  "modules/commands/hfcond_command.py": [
   "HfcondCommand",
+  "HfcondCommand.can_execute",
+  "HfcondCommand.can_use_service",
   "HfcondCommand.execute",
   "HfcondCommand.get_help_text"
  ],
@@ -522,6 +633,7 @@
  "modules/commands/llm_command.py": [
   "LlmCommand",
   "LlmCommand.can_execute",
+  "LlmCommand.can_use_service",
   "LlmCommand.execute",
   "LlmCommand.get_help_text"
  ],
@@ -530,6 +642,12 @@
   "Magic8Command.execute",
   "Magic8Command.get_help_text",
   "magic8"
+ ],
+ "modules/commands/mesh_command.py": [
+  "MeshCommand",
+  "MeshCommand.can_execute",
+  "MeshCommand.can_use_service",
+  "MeshCommand.execute"
  ],
  "modules/commands/moon_command.py": [
   "MoonCommand",
@@ -558,15 +676,21 @@
  "modules/commands/near_command.py": [
   "NearCommand",
   "NearCommand.can_execute",
+  "NearCommand.can_use_service",
   "NearCommand.execute"
  ],
  "modules/commands/neighbors_command.py": [
   "NeighborsCommand",
+  "NeighborsCommand.can_execute",
+  "NeighborsCommand.can_use_service",
   "NeighborsCommand.execute",
+  "NeighborsCommand.execute_service",
   "NeighborsCommand.get_help_text"
  ],
  "modules/commands/path_command.py": [
   "PathCommand",
+  "PathCommand.can_execute",
+  "PathCommand.can_use_service",
   "PathCommand.execute",
   "PathCommand.get_help",
   "PathCommand.get_help_text"
@@ -674,8 +798,10 @@
  ],
  "modules/commands/stats_command.py": [
   "StatsCommand",
+  "StatsCommand.can_use_service",
   "StatsCommand.cleanup_old_stats",
   "StatsCommand.execute",
+  "StatsCommand.execute_service",
   "StatsCommand.get_help_text",
   "StatsCommand.get_stats_summary",
   "StatsCommand.record_command",
@@ -693,6 +819,8 @@
  ],
  "modules/commands/test_command.py": [
   "TestCommand",
+  "TestCommand.can_execute",
+  "TestCommand.can_use_service",
   "TestCommand.clean_content",
   "TestCommand.execute",
   "TestCommand.format_response",
@@ -702,6 +830,8 @@
  ],
  "modules/commands/trace_command.py": [
   "TraceCommand",
+  "TraceCommand.can_execute",
+  "TraceCommand.can_use_service",
   "TraceCommand.execute",
   "TraceCommand.get_help_text"
  ],
@@ -734,6 +864,7 @@
   "WxCommand.abbreviate_noaa",
   "WxCommand.abbreviate_wind_direction",
   "WxCommand.can_execute",
+  "WxCommand.can_use_service",
   "WxCommand.city_to_lat_lon",
   "WxCommand.compact_time",
   "WxCommand.execute",
@@ -760,6 +891,7 @@
   "WxCommand.get_weather_for_location",
   "WxCommand.get_weather_for_zipcode",
   "WxCommand.matches_keyword",
+  "WxCommand.provider_description",
   "WxCommand.zipcode_to_lat_lon"
  ],
  "modules/config_reload.py": [
@@ -930,6 +1062,7 @@
  ],
  "modules/flood_scope.py": [
   "channel_scope_entry",
+  "channel_scope_option",
   "format_scope_list",
   "is_global_marker",
   "normalize_channel_for_scope",
@@ -1145,6 +1278,12 @@
   "name_words",
   "pack_names",
   "shorten_name"
+ ],
+ "modules/near_location.py": [
+  "Origin",
+  "coordinates",
+  "first_hop",
+  "resolve_origin"
  ],
  "modules/neighbors_discovery.py": [
   "NeighborEntry",
@@ -1743,6 +1882,39 @@
   "resolve_application_version",
   "resolve_runtime_version"
  ],
+ "modules/vigilance_alert_policy.py": [
+  "VigilanceAlertPolicy",
+  "VigilanceAlertPolicy.reason",
+  "VigilanceAlertPolicy.record_sent",
+  "VigilanceAlertPolicy.state",
+  "fingerprint"
+ ],
+ "modules/vigilance_cache.py": [
+  "AvailabilityNotices",
+  "AvailabilityNotices.due",
+  "AvailabilityNotices.record_sent",
+  "VigilanceCache",
+  "VigilanceCache.get",
+  "VigilanceCache.historical_reply",
+  "VigilanceCache.put",
+  "VigilanceCache.status",
+  "publication_time",
+  "usable"
+ ],
+ "modules/vigilance_messages.py": [
+  "compact_alerts",
+  "department_alerts"
+ ],
+ "modules/vigilance_periods.py": [
+  "attach_period",
+  "calendar_days",
+  "day_label",
+  "department_label",
+  "flatten",
+  "period_key",
+  "risk_lines",
+  "split_key"
+ ],
  "modules/weather_common.py": [
   "WeatherCommandMixin",
   "is_metro_france",
@@ -1793,6 +1965,9 @@
  "modules/web_viewer/config_panels.py": [
   "ConfigPanel"
  ],
+ "modules/web_viewer/contact_adverts.py": [
+  "contact_advert_counts"
+ ],
  "modules/web_viewer/dashboard.py": [
   "DashboardSnapshotMixin"
  ],
@@ -1823,6 +1998,9 @@
  ],
  "modules/web_viewer/database_admin.py": [
   "DatabaseAdminMixin"
+ ],
+ "modules/web_viewer/entry_points.py": [
+  "entry_points"
  ],
  "modules/web_viewer/feeds.py": [
   "FeedSubscriptionsMixin"
@@ -1868,6 +2046,9 @@
   "parent_is_gone",
   "start_parent_watcher",
   "watch_parent"
+ ],
+ "modules/web_viewer/relay_region_observations.py": [
+  "unscoped_only_relays"
  ],
  "modules/web_viewer/socket_clients.py": [
   "SocketClientsMixin"

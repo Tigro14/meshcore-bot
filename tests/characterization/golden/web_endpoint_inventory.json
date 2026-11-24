@@ -271,6 +271,28 @@
    "GET"
   ]
  },
+ "/api/channels/published": {
+  "GET locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_channels_published",
+  "methods": [
+   "GET"
+  ]
+ },
  "/api/channels/settings": {
   "POST locked anon": {
    "content_type": "application/json",
@@ -2050,6 +2072,28 @@
    "x_frame_options": "SAMEORIGIN"
   },
   "endpoint": "channel_settings_page",
+  "methods": [
+   "GET"
+  ]
+ },
+ "/channels/settings/view": {
+  "GET locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 401,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "channels_authenticated_view",
   "methods": [
    "GET"
   ]

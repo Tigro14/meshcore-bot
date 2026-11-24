@@ -36,7 +36,7 @@ def first_hop(message):
             if not isinstance(nodes, (list, tuple)) or not all(isinstance(n, str) for n in nodes):
                 return None
             size = 2 * width if type(width) is int and width in (1, 2, 3) else len(nodes[0])
-            if size not in (2, 4, 6) or not all(re.fullmatch(r'[0-9a-fA-F]{%d}' % size, n) for n in nodes):
+            if size not in (2, 4, 6) or not all(re.fullmatch(rf'[0-9a-fA-F]{{{size}}}', n) for n in nodes):
                 return None
             return nodes[0].lower()
         raw = routing.get('path_hex')
@@ -52,7 +52,7 @@ def first_hop(message):
     nodes = [n.strip() for n in raw.split(',')]
     if not nodes or len(nodes[0]) not in (2, 4, 6):
         return None
-    if not all(re.fullmatch(r'[0-9a-fA-F]{%d}' % len(nodes[0]), n) for n in nodes):
+    if not all(re.fullmatch(rf'[0-9a-fA-F]{{{len(nodes[0])}}}', n) for n in nodes):
         return None
     return nodes[0].lower()
 

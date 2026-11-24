@@ -2,10 +2,12 @@
 import json
 import sqlite3
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
+
 import pytest
+
 from modules.assistant.catalog import CATALOG, parse_plan
-from modules.assistant.network_tools import count_nodes, answer_network
+from modules.assistant.network_tools import answer_network, count_nodes
 
 
 def database():
@@ -50,8 +52,8 @@ async def test_count_result_passes_to_llm_without_radio():
     parent=SimpleNamespace(record_execution=lambda _:None)
     dispatcher=SimpleNamespace(
         _command=lambda _:parent, _allowed=lambda *a,**k:True,
-        owner=SimpleNamespace(bot=SimpleNamespace(db_manager=SimpleNamespace(connection=lambda:db)),
-                              logger=None,get_max_message_length=lambda _:220),
+        owner=SimpleNamespace(bot=SimpleNamespace(db_manager=SimpleNamespace(connection=lambda:db, execute_update=lambda *a: None)),
+                              logger=Mock(), get_max_message_length=lambda _:220),
         _render_tool=AsyncMock(return_value='Baliz a observé 3 nœuds sur 24 h.'))
     plan=parse_plan(json.dumps(dict(route='mesh',operation='count_nodes',args=dict(hours=24,country=''))),'combien de nœuds actifs ?',set(CATALOG))
     assert await answer_network(dispatcher,plan,SimpleNamespace(sender_id='sender'))=='Baliz a observé 3 nœuds sur 24 h.'

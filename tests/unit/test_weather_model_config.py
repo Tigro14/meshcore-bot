@@ -95,7 +95,7 @@ def test_gwx_retries_temporary_openmeteo_failure(mock_logger, monkeypatch):
     assert result != cmd.translate("commands.gwx.error_fetching")
 
 
-def test_gwx_does_not_retry_permanent_openmeteo_failure(mock_logger, monkeypatch):
+def test_gwx_degrades_model_on_permanent_openmeteo_failure(mock_logger, monkeypatch):
     config = configparser.ConfigParser()
     config.add_section("Weather")
     cmd = GlobalWxCommand(_build_bot(mock_logger, config))
@@ -106,7 +106,10 @@ def test_gwx_does_not_retry_permanent_openmeteo_failure(mock_logger, monkeypatch
 
     result = cmd.get_open_meteo_weather(48.39, -4.49)
 
-    assert get.call_count == 1
+    # One automatic degradation retry without the models parameter, then give up.
+    assert get.call_count == 2
+    assert 'models' in get.call_args_list[0].kwargs['params']
+    assert 'models' not in get.call_args_list[1].kwargs['params']
     assert result == cmd.translate("commands.gwx.error_fetching")
 
 

@@ -2143,6 +2143,8 @@ enabled_routes = test,path,mesh,wiki,weather,llm
 route_timeout_seconds = 120
 # Use the LLM only when the deterministic router cannot classify the question.
 semantic_routing_enabled = true
+# Cap for one semantic-routing classification call, in seconds.
+semantic_timeout_seconds = 300
 max_pages = 4
 
 [Mesh_Command]

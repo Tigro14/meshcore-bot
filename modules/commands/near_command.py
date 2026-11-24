@@ -126,7 +126,7 @@ class NearCommand(BaseCommand):
                     "FROM complete_contact_tracking WHERE latitude BETWEEN -90 AND 90 "
                     "AND longitude BETWEEN -180 AND 180 AND NOT (latitude=0 AND longitude=0)"
                 )
-                params = [lat, lat, lon]
+                params: list = [lat, lat, lon]
                 for key in {origin_key, message.sender_pubkey or ""} - {""}:
                     sql += " AND public_key != ?"
                     params.append(key)

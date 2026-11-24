@@ -61,9 +61,9 @@ def test_baliz_migrations_keep_usage_and_new_upstream_columns():
     from modules.db_migrations import MIGRATIONS
     versions = [entry[0] for entry in MIGRATIONS]
     assert len(versions) == len(set(versions))
-    assert 'assistant' in dict((v, name) for v, name, fn in MIGRATIONS)[30]
-    assert 'single-byte' in dict((v, name) for v, name, fn in MIGRATIONS)[31]
-    assert 'scope_verdict' in dict((v, name) for v, name, fn in MIGRATIONS)[32]
+    assert 'assistant' in {v: name for v, name, fn in MIGRATIONS}[44]
+    assert 'single-byte' in {v: name for v, name, fn in MIGRATIONS}[30]
+    assert 'scope_verdict' in {v: name for v, name, fn in MIGRATIONS}[31]
 
 
 def test_radio_markdown_cleanup_keeps_region_literals_and_command_placeholders():
@@ -75,13 +75,14 @@ def test_radio_markdown_cleanup_keeps_region_literals_and_command_placeholders()
 
 def test_upgrade_from_baliz_version_30_preserves_usage_data():
     import sqlite3
+
     from modules.db_migrations import MIGRATIONS, MigrationRunner
     conn = sqlite3.connect(':memory:')
     conn.executescript('''
         CREATE TABLE schema_version (version INTEGER PRIMARY KEY, description TEXT, applied_at TEXT);
         CREATE TABLE assistant_function_usage (timestamp REAL, function TEXT);
         INSERT INTO assistant_function_usage VALUES (123, 'weather.forecast');
-        CREATE TABLE daily_rollup (date TEXT);
+        CREATE TABLE daily_rollup (date TEXT, adverts_singlebyte_total INTEGER);
         CREATE TABLE message_stats (timestamp REAL);
     ''')
     conn.executemany('INSERT INTO schema_version(version,description) VALUES (?, ?)', [(i, 'existing Baliz migration') for i in range(1,31)])

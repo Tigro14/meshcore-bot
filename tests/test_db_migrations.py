@@ -12,7 +12,7 @@ from modules.db_migrations import (
     _column_exists,
     _m0017_feed_queue_item_uniqueness,
     _m0020_mesh_connections_last_seen_index,
-    _m0035_bbs_inbox_table,
+    _m0034_bbs_inbox_table,
     _table_exists,
 )
 
@@ -625,7 +625,7 @@ class TestBbsInboxNotificationStages:
     def test_upgrade_from_database_already_at_35(self, conn, logger):
         """A live database whose bbs_inbox predates migration 36 gets the
         columns added in place, without touching stored rows."""
-        _m0035_bbs_inbox_table(conn.cursor())
+        _m0034_bbs_inbox_table(conn.cursor())
         conn.execute(
             "INSERT INTO bbs_inbox (sender_key, recipient_key, message) VALUES ('k1', 'k2', 'held')"
         )

@@ -8,8 +8,10 @@ import pytest
 
 from modules.log_privacy import message_metadata, web_log_line
 from modules.models import MeshMessage
-from tests.test_web_viewer import socketio_viewer, managed_socketio_clients
-from tests.test_message_handler import bot, handler
+from tests.test_message_handler import bot as bot
+from tests.test_message_handler import handler as handler
+from tests.test_web_viewer import managed_socketio_clients as managed_socketio_clients
+from tests.test_web_viewer import socketio_viewer as socketio_viewer
 
 PREFIX = '2026-11-03 09:25:50 - MeshCoreBot - INFO - '
 

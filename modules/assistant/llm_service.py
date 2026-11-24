@@ -747,10 +747,10 @@ class LlmService:
         # Build final context string
         if context_parts:
             budget = getattr(self, 'context_budget_tokens', 0)
-            if not budget and getattr(self, 'model_context_tokens', 0):
+            if not budget and self.model_context_tokens:
                 info = self.backend.model_info()
                 budget = max(0, info.get('n_ctx', self.model_context_tokens) - self.max_tokens - self.context_reserve_tokens)
-            if budget or getattr(self, 'model_context_tokens', 0):
+            if budget or self.model_context_tokens:
                 if self.context_max_tokens > 0:
                     budget = min(budget, self.context_max_tokens)
                 kept = []
@@ -1230,15 +1230,15 @@ class LlmService:
             label = re.sub(r"[*_`]", "", rows[0][0]).strip().rstrip("sS") or "Valeur"
             if label.casefold() not in normalized:
                 continue
-            values: list[str] = []
+            col_values: list[str] = []
             for row in rows[1:]:
                 value = re.sub(r"[*_`]", "", row[0]).strip()
                 if not value or len(value) > 32 or value.casefold() == label.casefold():
                     continue
-                if value not in values:
-                    values.append(value)
-            if len(values) >= 2:
-                return f"{label}s documentées : {', '.join(values)}."
+                if value not in col_values:
+                    col_values.append(value)
+            if len(col_values) >= 2:
+                return f"{label}s documentées : {', '.join(col_values)}."
         return None
 
     @staticmethod

@@ -23,6 +23,9 @@ def setup_bot(bot, **ask_options):
         bot.config.set(section, "enabled", "true")
     bot.config.set("Ask_Command", "aliases", "baliz")
     bot.config.set("Llm_Command", "cpu_temp_threshold", "0")
+    # Never let a developer's local LLM on :8080 decide test outcomes. Tests
+    # stub the classifier or patch the transport explicitly.
+    bot.config.set("Llm_Command", "endpoint", "http://127.0.0.1:9/v1/chat/completions")
     bot.config.add_section("Weather")
     bot.config.set("Weather", "weather_provider", "openmeteo")
     bot.config.set("Weather", "default_country", "FR")
@@ -66,16 +69,26 @@ def weather_plan(commands, question, location, period):
     ))
 
 
+def route_plan(commands, route, question, operation, args=None):
+    """Stub only the catalogue classifier; the real dispatcher and capability run."""
+    from modules.assistant.router import Decision, Route
+    decide = AsyncMock(return_value=Decision(Route[route.upper()], question, "catalog", operation, args or {}))
+    commands["ask"].dispatcher.semantic_router.decide = decide
+    return decide
+
+
 async def test_baliz_alias_routes_network_to_mesh_only(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
-    commands["mesh"].service.answer = AsyncMock(return_value="4 répéteurs actifs")
+    route_plan(commands, "mesh", "combien de répéteurs actifs ?", "count_repeaters",
+               {"hours": 24, "country": "", "limit": 5, "sort": "recent"})
     commands["llm"].service.answer = AsyncMock()
     message = mock_message(content="baliz combien de répéteurs actifs ?")
     assert commands["ask"].matches_keyword(message)
     assert not commands["mesh"].matches_keyword(message)
     assert not commands["llm"].matches_keyword(message)
-    assert await commands["ask"].execute(message)
-    commands["mesh"].service.answer.assert_awaited_once_with("combien de répéteurs actifs ?", message)
+    with patch("modules.assistant.network_tools.observation_answer", return_value="4 répéteurs actifs") as observe:
+        assert await commands["ask"].execute(message)
+    assert observe.call_args.args[1] == "count_repeaters"
     commands["llm"].service.answer.assert_not_called()
     assert len(sent) == 1 and sent[0][1] == "4 répéteurs actifs"
 
@@ -226,7 +239,8 @@ async def test_weather_keeps_factual_tool_data_when_llm_rephrase_fails(command_m
         return True
 
     commands["wx"].execute = AsyncMock(side_effect=weather)
-    await commands["ask"].execute(mock_message(content="baliz quelle météo demain à Brest ?"))
+    # A DM keeps the 158-byte body budget so the fallback can keep every fact.
+    await commands["ask"].execute(mock_message(content="baliz quelle météo demain à Brest ?", is_dm=True))
     answer = sent[0][1]
     for fact in ("Brest", "Demain", "Couvert", "16°C", "14°C", "12 mph", "25 mph"):
         assert fact in answer
@@ -259,26 +273,15 @@ async def test_tool_rephrase_accepts_grounded_values_and_rejects_changed_values(
 
 async def test_ambiguous_question_uses_semantic_router(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
-    commands["mesh"].service.answer = AsyncMock(return_value="Ouessant via Alpha")
-    with patch(
-        "modules.assistant.semantic_router.post_chat",
-        return_value=model_reply("paths"),
-    ) as classify:
+    decide = route_plan(commands, "mesh", "qui peut relayer vers Ouessant ?", "count_repeaters",
+                        {"hours": 0, "country": "", "limit": 5, "sort": "recent"})
+    with patch("modules.assistant.network_tools.observation_answer", return_value="Ouessant via Alpha"):
         await commands["ask"].execute(mock_message(content="baliz qui peut relayer vers Ouessant ?"))
-    classify.assert_called_once()
-    commands["mesh"].service.answer.assert_awaited_once()
+    decide.assert_awaited_once()
     assert sent[0][1] == "Ouessant via Alpha"
 
 
-async def test_explicit_route_does_not_call_semantic_router(command_mock_bot):
-    commands, _ = setup_bot(command_mock_bot)
-    commands["mesh"].service.answer = AsyncMock(return_value="ok")
-    with patch("modules.assistant.semantic_router.post_chat") as classify:
-        await commands["ask"].execute(mock_message(content="baliz mesh contacts"))
-    classify.assert_not_called()
-
-
-async def test_semantic_router_failure_keeps_safe_wiki_probe(command_mock_bot):
+async def test_semantic_router_failure_selects_no_capability(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
     commands["llm"].service.answer = AsyncMock(return_value="réponse Wiki")
     with patch(
@@ -286,21 +289,21 @@ async def test_semantic_router_failure_keeps_safe_wiki_probe(command_mock_bot):
         return_value=model_reply("not-a-route"),
     ):
         await commands["ask"].execute(mock_message(content="baliz modulation LoRa avancée"))
-    assert commands["llm"].service.answer.call_args.kwargs["mode"] == "auto"
-    assert sent[0][1] == "réponse Wiki"
+    commands["llm"].service.answer.assert_not_called()
+    assert "indisponible" in sent[0][1]
+    assert "Wiki" not in sent[0][1]
 
 
 async def test_semantic_router_cannot_trigger_rf_tools(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
-    commands["mesh"].service.answer = AsyncMock(return_value="chemin réseau observé")
+    route_plan(commands, "mesh", "qui peut relayer vers Ouessant ?", "count_repeaters",
+               {"hours": 0, "country": "", "limit": 5, "sort": "recent"})
+    commands["mesh"].service.answer = AsyncMock()
     commands["path"].execute = AsyncMock()
-    with patch(
-        "modules.assistant.semantic_router.post_chat",
-        return_value=model_reply("path"),
-    ):
+    with patch("modules.assistant.network_tools.observation_answer", return_value="chemin réseau observé"):
         await commands["ask"].execute(mock_message(content="baliz qui peut relayer vers Ouessant ?"))
     commands["path"].execute.assert_not_called()
-    commands["mesh"].service.answer.assert_awaited_once()
+    commands["mesh"].service.answer.assert_not_called()
     assert sent[0][1] == "chemin réseau observé"
 
 
@@ -321,7 +324,7 @@ async def test_ask_tables_restores_tigro_database_introspection(command_mock_bot
             conn.close()
 
     command_mock_bot.db_manager.connection = connection
-    await commands["ask"].execute(mock_message(content="baliz tables"))
+    await commands["mesh"].execute(mock_message(content="mesh tables"))
     response = "\n".join(text for _, text in sent)
     assert "complete_contact_tracking:" in response
     assert "repeater_contacts:" in response
@@ -330,6 +333,7 @@ async def test_ask_tables_restores_tigro_database_introspection(command_mock_bot
 
 async def test_direct_commands_and_services_are_independently_enabled(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "llm", "llm bonjour", "chat")
     command = commands["llm"]
     command.public_enabled = False
     command.service.answer = AsyncMock(return_value="Bonjour")
@@ -341,6 +345,7 @@ async def test_direct_commands_and_services_are_independently_enabled(command_mo
 
 async def test_mesh_channel_permission_is_not_bypassed(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "mesh", "mesh combien de contacts", "count_repeaters")
     commands["mesh"].allowed_channels = ["private"]
     commands["mesh"].service.answer = AsyncMock()
     await commands["ask"].execute(mock_message(content="baliz mesh combien de contacts"))
@@ -350,6 +355,7 @@ async def test_mesh_channel_permission_is_not_bypassed(command_mock_bot):
 
 async def test_disabled_route_cannot_fall_back(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot, enabled_routes="wiki,llm")
+    route_plan(commands, "mesh", "mesh contacts", "count_repeaters")
     commands["mesh"].service.answer = AsyncMock()
     commands["llm"].service.answer = AsyncMock()
     await commands["ask"].execute(mock_message(content="baliz mesh contacts"))
@@ -360,6 +366,7 @@ async def test_disabled_route_cannot_fall_back(command_mock_bot):
 
 async def test_wiki_isolated_and_no_history_or_sql(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "wiki", "comment configurer la région ?", "lookup")
     service = commands["llm"].service
     service._store_context("TestUser", "secret history", "secret")
     service.wiki_rag = Mock()
@@ -379,6 +386,7 @@ async def test_wiki_isolated_and_no_history_or_sql(command_mock_bot):
 
 async def test_documentation_no_match_never_fabricates_answer(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "wiki", "comment configurer région ?", "lookup")
     commands["llm"].service.wiki_rag = Mock()
     commands["llm"].service.wiki_rag.retrieve.return_value = None
     with patch("modules.assistant.llm_client.requests.post") as post:
@@ -389,6 +397,7 @@ async def test_documentation_no_match_never_fabricates_answer(command_mock_bot):
 
 async def test_general_fallback_with_no_wiki(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "llm", "bonjour", "chat")
     commands["llm"].service._inject_current_time_into_prompt = Mock(return_value="general")
     with patch("modules.assistant.llm_client.requests.post", return_value=model_reply("Bonjour")):
         await commands["ask"].execute(mock_message(content="baliz bonjour"))
@@ -397,6 +406,9 @@ async def test_general_fallback_with_no_wiki(command_mock_bot):
 
 async def test_general_disabled_prevents_wiki_probe_fallback(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot, enabled_routes="wiki")
+    route_plan(commands, "wiki", "LoRa spreading factor", "lookup")
+    commands["llm"].service.wiki_rag = Mock()
+    commands["llm"].service.wiki_rag.retrieve.return_value = None
     with patch("modules.assistant.llm_client.requests.post") as post:
         await commands["ask"].execute(mock_message(content="baliz LoRa spreading factor"))
     post.assert_not_called()
@@ -406,6 +418,7 @@ async def test_general_disabled_prevents_wiki_probe_fallback(command_mock_bot):
 @pytest.mark.parametrize("route", ["test", "path"])
 async def test_rf_adapter_preserves_message_metadata_and_captures_output(command_mock_bot, route):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, route, route, "receive" if route == "test" else "message")
     if route == "test":
         commands["llm"].service.rephrase_tool_result = AsyncMock(return_value=None)
     original = mock_message(content=f"baliz {route}", sender_pubkey="ab"*32, path="abcd", hops=2,
@@ -426,6 +439,7 @@ async def test_rf_adapter_preserves_message_metadata_and_captures_output(command
 
 async def test_path_adapter_explains_missing_message_path(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "path", "donne-moi le chemin", "message")
     commands["path"].execute = AsyncMock(return_value=True)
     await commands["ask"].execute(mock_message(content="baliz donne-moi le chemin"))
     assert sent[0][1] == "Ce message ne contient pas de chemin radio exploitable."
@@ -433,6 +447,7 @@ async def test_path_adapter_explains_missing_message_path(command_mock_bot):
 
 async def test_actual_test_command_uses_received_snr(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "test", "comment tu me reçois ?", "receive")
     command_mock_bot.config.remove_option("Keywords", "test")
     commands["test"].enforce_path_byte_requirement = AsyncMock(return_value=True)
     commands["llm"].service.rephrase_tool_result = AsyncMock(return_value=None)
@@ -443,6 +458,7 @@ async def test_actual_test_command_uses_received_snr(command_mock_bot):
 
 async def test_hidden_test_command_remains_available_to_ask_and_is_rephrased(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "test", "tu me reçois", "receive")
     commands["test"].test_enabled = False
     assert not commands["test"].can_execute(mock_message(content="test"))
     commands["llm"].service.rephrase_tool_result = AsyncMock(
@@ -473,10 +489,11 @@ async def test_hidden_test_command_remains_available_to_ask_and_is_rephrased(com
 async def test_timeout_has_one_response_and_no_fallback(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
     commands["ask"].route_timeout_seconds = 0.01
+    route_plan(commands, "mesh", "mesh contacts", "count_repeaters")
     async def slow(*a, **kw):
         await asyncio.sleep(10)
-    commands["mesh"].service.answer = slow
-    await commands["ask"].execute(mock_message(content="baliz mesh contacts"))
+    with patch("modules.assistant.network_tools.answer_network", slow):
+        await commands["ask"].execute(mock_message(content="baliz mesh contacts"))
     assert len(sent) == 1 and "délai" in sent[0][1]
 
 
@@ -495,10 +512,10 @@ async def test_mesh_real_sqlite_query_and_readonly_rejection(command_mock_bot, t
             conn.close()
     command_mock_bot.db_manager.connection = connection
     service: MeshService = commands["mesh"].service
-    with patch("modules.assistant.llm_client.requests.post", side_effect=[model_reply("SELECT COUNT(*) FROM complete_contact_tracking"), model_reply("2 répéteurs")]) as post:
-        await commands["ask"].execute(mock_message(content="baliz combien de répéteurs ?"))
+    with patch("modules.assistant.llm_client.requests.post", return_value=model_reply("SELECT COUNT(*) FROM complete_contact_tracking")) as post:
+        await commands["mesh"].execute(mock_message(content="mesh combien de répéteurs ?"))
     assert len(sent) == 1 and sent[0][1] == "2 répéteurs"
-    assert post.call_count == 2
+    assert post.call_count == 1
     assert service._execute_sql("DELETE FROM complete_contact_tracking").startswith("(rejected:")
     assert service._execute_sql("SELECT COUNT(*) FROM complete_contact_tracking") == "2"
     assert service._execute_sql("SELECT name FROM complete_contact_tracking ORDER BY name DESC LIMIT 1") == "Bravo"
@@ -528,8 +545,8 @@ async def test_mesh_repairs_count_question_that_returns_entity_list(command_mock
         model_reply("SELECT COUNT(*) FROM repeater_contacts"),
     ]
     with patch("modules.assistant.llm_client.requests.post", side_effect=replies) as post:
-        await commands["ask"].execute(
-            mock_message(content="baliz combien de répéteurs sur le réseau ?")
+        await commands["mesh"].execute(
+            mock_message(content="mesh combien de répéteurs sur le réseau ?")
         )
 
     assert len(sent) == 1 and sent[0][1] == "3 répéteurs"
@@ -593,7 +610,7 @@ async def test_mesh_uses_live_schema_and_repairs_invalid_generated_column(comman
         model_reply("Alpha: 9.5 dB"),
     ]
     with patch("modules.assistant.llm_client.requests.post", side_effect=replies) as post:
-        await commands["ask"].execute(mock_message(content="baliz quel est le meilleur répéteur ?"))
+        await commands["mesh"].execute(mock_message(content="mesh quel est le meilleur répéteur ?"))
 
     assert sent[0][1] == "Alpha: 9.5 dB"
     assert post.call_count == 3
@@ -672,7 +689,7 @@ async def test_mesh_retries_empty_table_using_live_row_counts(command_mock_bot, 
         model_reply("Alpha: 12 annonces"),
     ]
     with patch("modules.assistant.llm_client.requests.post", side_effect=replies) as post:
-        await commands["ask"].execute(mock_message(content="baliz quel est le meilleur répéteur ?"))
+        await commands["mesh"].execute(mock_message(content="mesh quel est le meilleur répéteur ?"))
 
     assert sent[0][1] == "Alpha: 12 annonces"
     assert post.call_count == 3
@@ -683,11 +700,12 @@ async def test_mesh_retries_empty_table_using_live_row_counts(command_mock_bot, 
     assert "query returned no rows" in repair_prompt
     assert "repeater_contacts [rows=0]" not in repair_prompt
     assert "complete_contact_tracking [rows=1]" in repair_prompt
-    assert "Use a different table" in repair_prompt
+    assert "every listed table now contains rows" in repair_prompt
 
 
 async def test_mesh_disabled_preserves_other_capabilities(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "mesh", "mesh contacts", "count_repeaters")
     commands["mesh"].enabled = False
     commands["mesh"].service.answer = AsyncMock()
     await commands["ask"].execute(mock_message(content="baliz mesh contacts"))
@@ -697,6 +715,7 @@ async def test_mesh_disabled_preserves_other_capabilities(command_mock_bot):
 
 async def test_disabled_wiki_still_allows_general_route(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot, enabled_routes="llm")
+    route_plan(commands, "llm", "bonjour", "chat")
     commands["llm"].service.answer = AsyncMock(return_value="Bonjour")
     await commands["ask"].execute(mock_message(content="baliz bonjour"))
     assert commands["llm"].service.answer.call_args.kwargs["mode"] == "general"
@@ -705,6 +724,7 @@ async def test_disabled_wiki_still_allows_general_route(command_mock_bot):
 
 async def test_target_cooldown_applies_across_direct_and_routed_access(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "mesh", "mesh contacts", "count_repeaters")
     commands["mesh"].record_execution("TestUser")
     commands["mesh"].service.answer = AsyncMock()
     await commands["ask"].execute(mock_message(content="baliz mesh contacts"))
@@ -715,6 +735,7 @@ async def test_target_cooldown_applies_across_direct_and_routed_access(command_m
 @pytest.mark.parametrize("question", ["bonjour, qui es-tu ?", "raconte une blague courte"])
 async def test_conversation_ignores_spurious_wiki_match(command_mock_bot, question):
     commands, sent = setup_bot(command_mock_bot)
+    route_plan(commands, "llm", question, "chat")
     service = commands["llm"].service
     service.wiki_rag = Mock()
     service.wiki_rag.retrieve.side_effect = AssertionError("Conversation must not query Wiki")
@@ -729,6 +750,7 @@ async def test_conversation_ignores_spurious_wiki_match(command_mock_bot, questi
 
 async def test_disabled_conversation_does_not_escape_through_wiki(command_mock_bot):
     commands, sent = setup_bot(command_mock_bot, enabled_routes="wiki")
+    route_plan(commands, "llm", "raconte une blague courte", "chat")
     commands["llm"].service.answer = AsyncMock()
     await commands["ask"].execute(mock_message(content="baliz raconte une blague courte"))
     commands["llm"].service.answer.assert_not_called()

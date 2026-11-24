@@ -1354,6 +1354,16 @@ def _m0043_airtime_capture_intervals(cursor: sqlite3.Cursor) -> None:
     create_tables(cursor)
 
 
+def _m0044_assistant_function_usage(cursor: sqlite3.Cursor) -> None:
+    """Assistant function-usage accounting (Baliz fork, their migration 30).
+
+    Renumbered to 44 to sit after the occupancy/airtime migrations already
+    applied on deployed databases under Tigro numbering.
+    """
+    cursor.execute("CREATE TABLE IF NOT EXISTS assistant_function_usage (timestamp REAL NOT NULL, function TEXT NOT NULL)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_assistant_function_usage_time ON assistant_function_usage(timestamp)")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry — append new entries here, never remove or reorder.
 # ---------------------------------------------------------------------------
@@ -1404,6 +1414,7 @@ MIGRATIONS: list[MigrationEntry] = [
     (41, "airtime_observations and author links", _m0041_airtime_attribution),
     (42, "airtime scope context for the forwarding model", _m0042_airtime_scope_context),
     (43, "airtime_capture_intervals: recorded capture continuity", _m0043_airtime_capture_intervals),
+    (44, "assistant_function_usage table", _m0044_assistant_function_usage),
 ]
 
 

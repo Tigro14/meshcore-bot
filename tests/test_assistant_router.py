@@ -16,7 +16,7 @@ from modules.assistant.router import AssistantRouter, Route
     ("Comment configurer un répéteur demain ?", Route.WIKI, "documentation"),
     ("Comment fonctionne le chemin d’un message ?", Route.WIKI, "documentation"),
     ("Explique le chemin entre deux nœuds", Route.WIKI, "documentation"),
-    ("Quelle commande pour configurer la région ?", Route.WIKI, "documentation"),
+    ("Quelle commande pour configurer la région ?", Route.WIKI, "configuration_documentation"),
     ("Comment ajouter les régions à un répéteur ?", Route.WIKI, "configuration_documentation"),
     ("Donne-moi les régions pour un Companion", Route.WIKI, "configuration_documentation"),
     ("Quelle météo demain à Brest ?", Route.WEATHER, "weather_forecast"),

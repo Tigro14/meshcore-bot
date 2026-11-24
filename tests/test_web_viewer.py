@@ -570,10 +570,10 @@ class TestContactRoutes:
         from datetime import datetime, timedelta
         now = datetime.now()
         keys = ['fac1' * 16, 'fac2' * 16, 'fac3' * 16]
-        for key, name in zip(keys, ['AdvertWindow Alpha', 'AdvertWindow Beta', 'AdvertWindow Old']):
+        for key, name in zip(keys, ['AdvertWindow Alpha', 'AdvertWindow Beta', 'AdvertWindow Old'], strict=True):
             _insert_contact(viewer, key, name)
         with closing(sqlite3.connect(viewer.db_path)) as conn:
-            for key, total, age in zip(keys, [100, 20, 50], [1, 1, 72]):
+            for key, total, age in zip(keys, [100, 20, 50], [1, 1, 72], strict=True):
                 conn.execute(
                     'UPDATE complete_contact_tracking SET advert_count=?, last_heard=? WHERE public_key=?',
                     (total, (now-timedelta(hours=age)).isoformat(' '), key))

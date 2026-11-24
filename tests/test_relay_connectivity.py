@@ -1,4 +1,5 @@
 import sqlite3
+
 from modules.assistant.relay_connectivity import connectivity
 
 

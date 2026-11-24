@@ -188,7 +188,10 @@
         // The proxy keeps this probe protected but suppresses WWW-Authenticate
         // on denied responses. Cached credentials work without asking visitors
         // to log in; the published feed is always safe for anonymous access.
-        for (const path of ['/channels/settings/view', '/api/channels/published']) {
+        for (const path of [
+            appUrl("{{ url_for('channels_authenticated_view') }}"),
+            appUrl("{{ url_for('api_channels_published') }}"),
+        ]) {
             const resp = await fetch(path, {
                 credentials: 'same-origin',
                 cache: 'no-store',

@@ -1,5 +1,6 @@
 """Typed network plans. User text supplies parameters; the model cannot invent them."""
 import re
+
 from .router import normalize
 
 ACTIVE = {'neighbors', 'trace', 'advert'}

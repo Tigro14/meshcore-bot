@@ -107,6 +107,7 @@ def harness():
 
     async def _send_response(message, content, *args, **kwargs):
         cm._last_response = content
+        cm._capture_reply(message, [content])
         sent.append(content)
         return True
 
@@ -159,8 +160,8 @@ async def test_cooldown_rejection_replies_and_records_stats(harness):
     assert _stats_rows(stats) == [("probe", True), ("probe", True)]
 
 
-async def test_silent_command_after_any_reply_counts_as_responded(harness):
-    """Defect pinned on purpose: _last_response is never reset."""
+async def test_silent_command_after_any_reply_counts_as_silent(harness):
+    """Per-execution reply capture isolates replies: no leaking the prior reply."""
     cm, bot, clock, stats, sent = harness
     cm.commands["probe"] = _Probe(bot, clock=clock)
     cm.commands["quiet"] = quiet = _Probe(bot, reply=False, clock=clock)
@@ -168,7 +169,7 @@ async def test_silent_command_after_any_reply_counts_as_responded(harness):
     quiet.keywords = ["quiet"]
     await cm.execute_commands(_msg("probe"))
     await cm.execute_commands(_msg("quiet", sender="Bob"))
-    assert _stats_rows(stats) == [("probe", True), ("quiet", True)]
+    assert _stats_rows(stats) == [("probe", True), ("quiet", False)]
 
 
 async def test_silent_command_with_no_prior_reply_counts_as_silent(harness):

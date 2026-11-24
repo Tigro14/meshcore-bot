@@ -42,6 +42,7 @@ def _signal_value(
 class ChannelMessageMixin:
     """Mixed into MessageHandler."""
 
+    bot: Any
     _find_contact: Any
     _get_path_from_rf_data: Any
     _is_confirmed_global_flood: Any

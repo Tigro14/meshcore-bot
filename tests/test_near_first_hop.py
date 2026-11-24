@@ -1,8 +1,10 @@
 import sqlite3
-from types import SimpleNamespace
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
 import pytest
+
 from modules.near_location import first_hop, resolve_origin
 
 

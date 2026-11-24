@@ -5,7 +5,7 @@
 <style>#entry-map{height:62vh;min-height:340px}.entry-arrow{font-size:20px;color:#b45309;text-shadow:0 0 2px white}.entry-row{cursor:pointer}.entry-row::marker{color:#6c757d}.entry-heading{display:inline;font-weight:600;overflow-wrap:anywhere}.entry-meta{display:block;margin:0.4rem 0 0 1rem;font-size:.85rem;color:var(--bs-secondary-color,#6c757d);line-height:1.5}.entry-count{float:right;margin-left:.5rem;font-size:.8rem}.hop-caption{display:flex;justify-content:space-between;gap:1rem;margin-bottom:.3rem}</style>
 {% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between flex-wrap gap-2 mb-3"><h1 class="h3">Points d’entrée — Étranger → France</h1><a href="/mesh" class="btn btn-outline-secondary">Retour au Mesh Graph</a></div>
+<div class="d-flex justify-content-between flex-wrap gap-2 mb-3"><h1 class="h3">Points d’entrée — Étranger → France</h1><a href="{{ url_for('mesh') }}" class="btn btn-outline-secondary">Retour au Mesh Graph</a></div>
 <p class="small text-muted mb-2">Étranger en bleu → France en orange · Observations de Baliz</p>
 <div class="d-flex flex-wrap gap-3 align-items-end mb-3">
 <div><label for="entry-days" class="form-label">Période</label><select id="entry-days" class="form-select"><option value="1">24 heures</option><option value="7">7 jours</option><option value="30">30 jours</option></select></div>

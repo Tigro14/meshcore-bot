@@ -1,9 +1,11 @@
-import sqlite3
 import json
+import sqlite3
 import time
+
 import pytest
-from modules.assistant.relay_usage import relay_usage
+
 from modules.assistant.conversation import complete_reply
+from modules.assistant.relay_usage import relay_usage
 
 
 def test_distinct_packets_collisions_and_multibyte():
@@ -31,7 +33,8 @@ def test_conversation_complete_and_bounded(text,budget):
 @pytest.mark.asyncio
 async def test_conversation_compresses_before_sending():
     import logging
-    from unittest.mock import Mock,patch
+    from unittest.mock import Mock, patch
+
     from modules.assistant.llm_service import LlmService
     s=object.__new__(LlmService)
     s.wiki_rag=None;s.logger=logging.getLogger();s.endpoint='test';s.timeout_seconds=2
@@ -68,6 +71,7 @@ def test_conversation_budget_counts_utf8_bytes():
 async def test_direct_conversation_preserves_short_unpunctuated_model_answer():
     import logging
     from unittest.mock import Mock, patch
+
     from modules.assistant.llm_service import LlmService
     service = object.__new__(LlmService)
     service.wiki_rag = None
@@ -87,6 +91,7 @@ async def test_direct_conversation_preserves_short_unpunctuated_model_answer():
 def test_conversation_payload_excludes_global_channel_context():
     import logging
     from unittest.mock import Mock
+
     from modules.assistant.llm_service import LlmService
     service = object.__new__(LlmService)
     service.logger = logging.getLogger()
@@ -110,8 +115,9 @@ def test_conversation_payload_excludes_global_channel_context():
 async def test_clarification_uses_llm_without_wiki_or_global_context():
     import logging
     from unittest.mock import Mock, patch
-    from modules.assistant.llm_service import LlmService
+
     from modules.assistant.catalog import parse_plan
+    from modules.assistant.llm_service import LlmService
     plan = parse_plan('{"route":"llm","operation":"clarify","args":{}}', 'statistiques de la télémétrie ?', {'llm','mesh','wiki'})
     assert plan.operation == 'clarify'
     service = object.__new__(LlmService)
@@ -134,6 +140,7 @@ async def test_default_region_question_is_answered_from_wiki_not_replaced_by_val
     import logging
     from types import SimpleNamespace
     from unittest.mock import Mock, patch
+
     from modules.assistant.llm_service import LlmService
     service = object.__new__(LlmService)
     service.logger = logging.getLogger()

@@ -40,6 +40,7 @@
  ],
  "modules/airtime_forwarding.py": [
   "Any",
+  "CHANNEL_SCOPE_INHERIT",
   "Counter",
   "FRESH_SECONDS",
   "MAX_OPPORTUNITIES",
@@ -86,6 +87,157 @@
   "dataclass",
   "datetime",
   "re"
+ ],
+ "modules/assistant/bbs_service.py": [
+  "MAX_SESSIONS",
+  "SESSION_SECONDS",
+  "asyncio",
+  "dataclass",
+  "field",
+  "normalize",
+  "re",
+  "time"
+ ],
+ "modules/assistant/catalog.py": [
+  "ACTIVE",
+  "CATALOG",
+  "CLARIFICATION_EXAMPLES",
+  "Decision",
+  "ROUTING_DIALOG_EXAMPLES",
+  "ROUTING_EXAMPLES",
+  "Route",
+  "STATS_FUNCTIONS",
+  "infer_operation",
+  "json",
+  "normalize",
+  "re"
+ ],
+ "modules/assistant/conversation.py": [
+  "re"
+ ],
+ "modules/assistant/dispatcher.py": [
+  "Any",
+  "Decision",
+  "HELP",
+  "MeshMessage",
+  "Route",
+  "SemanticRouter",
+  "asyncio",
+  "deepcopy",
+  "re",
+  "sender_may_use_llm",
+  "split_reply",
+  "unicodedata"
+ ],
+ "modules/assistant/llm_backend.py": [
+  "requests",
+  "time",
+  "urljoin",
+  "urlparse"
+ ],
+ "modules/assistant/llm_client.py": [
+  "Any",
+  "requests"
+ ],
+ "modules/assistant/llm_service.py": [
+  "Any",
+  "LocalWikiRag",
+  "MeshMessage",
+  "WikiJsSource",
+  "apply_reasoning_effort",
+  "asyncio",
+  "configured_reasoning_effort",
+  "datetime",
+  "difflib",
+  "geocode_city_sync",
+  "get_cpu_temperature",
+  "get_cpu_usage",
+  "get_moon",
+  "get_ram_usage",
+  "get_sun",
+  "os",
+  "post_chat",
+  "re",
+  "read_rag_config",
+  "requests",
+  "sender_may_use_llm",
+  "time",
+  "urljoin",
+  "urlparse"
+ ],
+ "modules/assistant/mesh_service.py": [
+  "Any",
+  "DB_SCHEMA",
+  "MeshMessage",
+  "NETWORK_TABLES",
+  "apply_reasoning_effort",
+  "asyncio",
+  "configured_reasoning_effort",
+  "get_cpu_temperature",
+  "post_chat",
+  "re",
+  "requests",
+  "sender_may_use_llm",
+  "sqlite3",
+  "time",
+  "validate_readonly_sql"
+ ],
+ "modules/assistant/message_hops.py": [
+  "decode_path_len_byte"
+ ],
+ "modules/assistant/network_plan.py": [
+  "ACTIVE",
+  "normalize",
+  "re"
+ ],
+ "modules/assistant/network_tools.py": [
+  "datetime",
+  "deepcopy",
+  "find_onebyte_repeaters",
+  "normalize",
+  "record",
+  "timedelta",
+  "timezone"
+ ],
+ "modules/assistant/provenance.py": [
+  "SOURCES",
+  "TOPICS",
+  "dataclass"
+ ],
+ "modules/assistant/relay_connectivity.py": [
+  "Counter"
+ ],
+ "modules/assistant/relay_usage.py": [
+  "defaultdict",
+  "json",
+  "re",
+  "time"
+ ],
+ "modules/assistant/response.py": [
+  "Any",
+  "MeshMessage"
+ ],
+ "modules/assistant/router.py": [
+  "Enum",
+  "dataclass",
+  "field",
+  "re",
+  "unicodedata"
+ ],
+ "modules/assistant/semantic_router.py": [
+  "Any",
+  "asyncio",
+  "post_chat",
+  "requests",
+  "time"
+ ],
+ "modules/assistant/sender_policy.py": [
+  "DmContactResolver",
+  "json"
+ ],
+ "modules/assistant/usage.py": [
+  "LABELS",
+  "time"
  ],
  "modules/bridge_outbound.py": [
   "Any",
@@ -270,6 +422,7 @@
   "Any",
   "BaseCommand",
   "CHANNEL_REGIONAL_FLOOD_SCOPE_BODY_OVERHEAD",
+  "ContextVar",
   "DM_BODY_LIMIT",
   "DM_MIN_ACK_TIMEOUT_DEFAULT",
   "DM_MIN_ACK_TIMEOUT_MAX",
@@ -440,14 +593,12 @@
   "retry"
  ],
  "modules/commands/ask_command.py": [
-  "Any",
+  "AssistantDispatcher",
   "BaseCommand",
-  "DB_SCHEMA",
   "MeshMessage",
-  "asyncio",
   "re",
-  "requests",
-  "validate_readonly_sql"
+  "send_answer",
+  "sender_may_use_llm"
  ],
  "modules/commands/aurora_command.py": [
   "BaseCommand",
@@ -624,6 +775,7 @@
  "modules/commands/hfcond_command.py": [
   "BaseCommand",
   "MeshMessage",
+  "asyncio",
   "hf_band_conditions"
  ],
  "modules/commands/joke_command.py": [
@@ -638,27 +790,11 @@
   "split_joke_text"
  ],
  "modules/commands/llm_command.py": [
-  "Any",
   "BaseCommand",
-  "LocalWikiRag",
+  "LlmService",
   "MeshMessage",
-  "WikiJsSource",
-  "asyncio",
-  "datetime",
-  "difflib",
-  "geocode_city_sync",
-  "get_cpu_temperature",
-  "get_cpu_usage",
-  "get_moon",
-  "get_ram_usage",
-  "get_sun",
-  "os",
-  "re",
-  "requests",
-  "time",
-  "urljoin",
-  "urlparse",
-  "validate_readonly_sql"
+  "send_answer",
+  "sender_may_use_llm"
  ],
  "modules/commands/magic8_command.py": [
   "BaseCommand",
@@ -666,6 +802,13 @@
   "Optional",
   "magic8_responses",
   "random"
+ ],
+ "modules/commands/mesh_command.py": [
+  "BaseCommand",
+  "MeshMessage",
+  "MeshService",
+  "send_answer",
+  "sender_may_use_llm"
  ],
  "modules/commands/moon_command.py": [
   "BaseCommand",
@@ -921,10 +1064,25 @@
  ],
  "modules/commands/vigilance_command.py": [
   "BaseCommand",
+  "COLORS",
   "MeshMessage",
+  "VigilanceCache",
   "asyncio",
+  "calendar_days",
+  "day_label",
+  "department_label",
   "fetch_vigilance",
-  "normalize_department"
+  "fetch_vigilance_multi",
+  "fingerprint",
+  "flatten",
+  "get_config_timezone",
+  "normalize_department",
+  "parse_departments",
+  "period_key",
+  "publication_time",
+  "risk_lines",
+  "split_key",
+  "time"
  ],
  "modules/commands/webviewer_command.py": [
   "BaseCommand",
@@ -1268,6 +1426,7 @@
  ],
  "modules/flood_scope.py": [
   "Any",
+  "CHANNEL_SCOPE_INHERIT",
   "GLOBAL_MARKERS",
   "MAX_DEVICE_SCOPE_NAME_LENGTH",
   "MAX_SCOPE_NAME_LENGTH",
@@ -1614,6 +1773,11 @@
   "annotations",
   "re",
   "unicodedata"
+ ],
+ "modules/near_location.py": [
+  "dataclass",
+  "math",
+  "re"
  ],
  "modules/neighbors_discovery.py": [
   "AdvertFlags",
@@ -2214,21 +2378,40 @@
  ],
  "modules/service_plugins/vigilance_service.py": [
   "Any",
+  "AvailabilityNotices",
   "BaseServicePlugin",
   "BeautifulSoup",
   "Optional",
+  "PARIS",
   "Tag",
+  "VigilanceAlertPolicy",
+  "VigilanceCache",
   "asyncio",
+  "attach_period",
+  "calendar_days",
   "codecs",
+  "compact_alerts",
   "contextlib",
   "datetime",
+  "day_label",
+  "deepcopy",
+  "department_alerts",
+  "department_label",
+  "fingerprint",
+  "flatten",
+  "get_config_timezone",
   "http",
   "json",
+  "logging",
+  "period_key",
   "random",
   "re",
   "requests",
+  "risk_lines",
   "socket",
+  "split_key",
   "time",
+  "timezone",
   "unicodedata"
  ],
  "modules/service_plugins/weather_service.py": [
@@ -2477,6 +2660,47 @@
   "re",
   "subprocess"
  ],
+ "modules/vigilance_alert_policy.py": [
+  "Any",
+  "COLORS",
+  "hashlib",
+  "json",
+  "math"
+ ],
+ "modules/vigilance_cache.py": [
+  "Any",
+  "COLORS",
+  "MAX_UNDATED_VALIDITY_AGE",
+  "datetime",
+  "day_label",
+  "deepcopy",
+  "json",
+  "math",
+  "risk_lines",
+  "split_key",
+  "time",
+  "timezone"
+ ],
+ "modules/vigilance_messages.py": [
+  "AlertEvent",
+  "Any",
+  "PARIS",
+  "calendar_days",
+  "date",
+  "datetime",
+  "defaultdict",
+  "split_key"
+ ],
+ "modules/vigilance_periods.py": [
+  "Any",
+  "PARIS",
+  "ZoneInfo",
+  "date",
+  "datetime",
+  "math",
+  "time",
+  "timedelta"
+ ],
  "modules/weather_common.py": [
   "Any",
   "Iterable",
@@ -2563,6 +2787,7 @@
   "channel_body_limit",
   "closing",
   "compose_value",
+  "compute_path_encoding_badge",
   "config_to_redacted_sections",
   "configparser",
   "contextmanager",
@@ -2581,6 +2806,7 @@
   "format_feed_message",
   "functools",
   "g",
+  "get_config_timezone",
   "get_nested_value",
   "get_settings_store",
   "ha_ingress_enabled",
@@ -2683,6 +2909,10 @@
   "TypedDict",
   "annotations"
  ],
+ "modules/web_viewer/contact_adverts.py": [
+  "datetime",
+  "timedelta"
+ ],
  "modules/web_viewer/dashboard.py": [
   "Any",
   "DashboardStatsService",
@@ -2740,6 +2970,14 @@
   "time",
   "timezone",
   "validate_sql_identifier"
+ ],
+ "modules/web_viewer/entry_points.py": [
+  "datetime",
+  "defaultdict",
+  "json",
+  "re",
+  "time",
+  "timezone"
  ],
  "modules/web_viewer/feeds.py": [
   "Any",
@@ -2828,8 +3066,15 @@
   "threading",
   "time"
  ],
+ "modules/web_viewer/relay_region_observations.py": [
+  "defaultdict",
+  "json",
+  "re",
+  "time"
+ ],
  "modules/web_viewer/socket_clients.py": [
   "Any",
+  "Callable",
   "annotations",
   "closing",
   "configparser",
