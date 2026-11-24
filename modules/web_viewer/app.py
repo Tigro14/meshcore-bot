@@ -1564,24 +1564,27 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 'mesh',
                 'api_explorer',
             }
-            if request.endpoint in nonce_hardened_endpoints:
-                script_source = f"script-src 'self' 'nonce-{g.csp_nonce}'; "
-            else:
-                script_source = "script-src 'self' 'unsafe-inline'; "
-            response.headers['Content-Security-Policy'] = (
-                "default-src 'self'; "
-                + script_source
-                + "style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data: blob: https://*.tile.openstreetmap.org "
-                "https://tiles.openfreemap.org; "
-                "connect-src 'self' ws: wss: https://tiles.openfreemap.org; "
-                # MapLibre GL runs its renderer in a worker spawned from a blob: URL.
-                # Without these it falls back to default-src 'self' and the dark
-                # basemap fails to start.
-                "worker-src 'self' blob:; "
-                "child-src 'self' blob:; "
-                "font-src 'self'"
-            )
+            # CSP is managed by the reverse proxy (Apache) — skip when behind proxy,
+            # the browser would apply the intersection of both headers.
+            if not request.headers.get('X-Forwarded-For') and not request.headers.get('X-Real-Ip'):
+                if request.endpoint in nonce_hardened_endpoints:
+                    script_source = f"script-src 'self' 'nonce-{g.csp_nonce}'; "
+                else:
+                    script_source = "script-src 'self' 'unsafe-inline'; "
+                response.headers['Content-Security-Policy'] = (
+                    "default-src 'self'; "
+                    + script_source
+                    + "style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data: blob: https://*.tile.openstreetmap.org "
+                    "https://tiles.openfreemap.org; "
+                    "connect-src 'self' ws: wss: https://tiles.openfreemap.org; "
+                    # MapLibre GL runs its renderer in a worker spawned from a blob: URL.
+                    # Without these it falls back to default-src 'self' and the dark
+                    # basemap fails to start.
+                    "worker-src 'self' blob:; "
+                    "child-src 'self' blob:; "
+                    "font-src 'self'"
+                )
 
             # Sanitize error details from 5xx JSON responses to prevent info disclosure.
             # The full exception is already logged server-side; clients only need a
