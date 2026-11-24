@@ -34,7 +34,6 @@ DISCORD_WEBHOOK_ALLOWED_MENTIONS: dict[str, list[str]] = {"parse": []}
 # Zero-width space after @ — Discord still renders @name but won't treat it as a mention.
 _DISCORD_MENTION_ZWSP = "\u200b"
 DISCORD_CONTENT_MAX = 2000
-TELEGRAM_TEXT_MAX = 4096
 TELEGRAM_TRUNCATE_AT = 4000
 HTTP_TIMEOUT_SECONDS = 10.0
 

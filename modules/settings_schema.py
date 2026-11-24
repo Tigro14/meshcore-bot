@@ -46,8 +46,6 @@ from typing import Any, Optional
 from modules.config_schema import LEGACY_ENABLED_ALIASES as _ENABLED_LEGACY_ALIASES
 from modules.managed_keys import is_managed, load_managed_keys
 
-VALID_TYPES = {"bool", "int", "float", "str", "enum", "list", "password"}
-
 # Truthy/falsey string forms accepted for bool fields (configparser-compatible).
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}

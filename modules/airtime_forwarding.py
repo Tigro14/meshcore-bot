@@ -258,10 +258,6 @@ def build_forwarding_model(conn: sqlite3.Connection, contacts: Any, *, start: fl
         if len(classes) != 1:
             exclusions['inconsistent_packet_context'] += 1
             continue
-        for row in copies:
-            keys, error = _decode(row, contacts)
-            if not error:
-                seen_forwarders[fp].update(keys)
         packet_opportunities: dict[tuple, dict] = {}
         packet_errors = set()
         for row in copies:
@@ -269,6 +265,7 @@ def build_forwarding_model(conn: sqlite3.Connection, contacts: Any, *, start: fl
             if error:
                 packet_errors.add(error)
                 continue
+            seen_forwarders[fp].update(keys)
             profile = json.loads(row['profile'])
             base = 2+(4 if row['route'] == 'TRANSPORT_FLOOD' else 0)+row['payload_bytes']
             times = [lora_airtime_ms(base+depth*row['bph'], **profile) for depth in range(len(keys)+1)]

@@ -391,18 +391,6 @@ def _product_entry(department: str, product: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def fetch_vigilance_api(department: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
-    """
-    Fetch the current level for a department from the official vigilance product.
-
-    The product is national, so the department is read out of its block in the
-    period J timelaps. Returns the same dict as fetch_vigilance.
-    Raises requests.exceptions.RequestException on network errors and
-    ValueError when the product carries no block for that department.
-    """
-    return _product_entry(department, _fetch_product(api_key, timeout))
-
-
 def _session_token(page_response: requests.Response) -> str:
     """Turn the page's `mfsession` cookie into the Bearer token the JSON endpoint wants."""
     cookie = page_response.cookies.get('mfsession', '')

@@ -3,6 +3,48 @@
   "BotAdminServer",
   "BotAdminServer.run"
  ],
+ "modules/airtime_analysis.py": [
+  "AirtimeReader",
+  "AirtimeReader.read",
+  "Contacts",
+  "Contacts.author",
+  "Contacts.identity",
+  "Contacts.relay",
+  "Contacts.resolve",
+  "build_report",
+  "create_tables",
+  "duty_summary",
+  "ingest_stream",
+  "normalize_packet"
+ ],
+ "modules/airtime_capture.py": [
+  "ListeningRecorder",
+  "ListeningRecorder.record",
+  "covered_buckets",
+  "create_tables",
+  "listening_intervals"
+ ],
+ "modules/airtime_forwarding.py": [
+  "analysis_scope_keys",
+  "build_forwarding_model",
+  "create_context_tables",
+  "empty_forwarding_model",
+  "ingest_context",
+  "packet_scope"
+ ],
+ "modules/airtime_quality.py": [
+  "local_load",
+  "observer_metadata",
+  "recent_receptions",
+  "reception_history",
+  "rolling_peak",
+  "write_observer_metadata"
+ ],
+ "modules/airtime_repetitions.py": [
+  "closed_period_comparison",
+  "compare_receptions",
+  "received_insights"
+ ],
  "modules/alert_format.py": [
   "AlertTime",
   "abbreviate_city_name",
@@ -42,6 +84,48 @@
   "ChannelManager.get_configured_channels",
   "ChannelManager.invalidate_cache",
   "ChannelManager.remove_channel"
+ ],
+ "modules/channel_message.py": [
+  "ChannelMessageMixin"
+ ],
+ "modules/channel_occupancy.py": [
+  "ChannelOccupancy",
+  "ChannelOccupancy.ewma_airtime",
+  "ChannelOccupancy.fields",
+  "ChannelOccupancy.flush",
+  "ChannelOccupancy.history",
+  "ChannelOccupancy.modulation",
+  "ChannelOccupancy.note_author",
+  "ChannelOccupancy.read_live",
+  "ChannelOccupancy.record",
+  "ChannelOccupancy.refresh_from_device",
+  "ChannelOccupancy.set_device_modulation",
+  "ChannelOccupancy.top_emitters",
+  "ChannelOccupancy.top_emitters_window",
+  "ChannelOccupancy.top_relays",
+  "ChannelOccupancy.top_relays_window",
+  "ChannelOccupancy.top_senders",
+  "ChannelOccupancy.top_senders_window",
+  "ChannelOccupancy.window_airtime",
+  "ChannelOccupancy.window_cutoff_day",
+  "ChannelOccupancy.windows",
+  "emitter_label",
+  "entry_relay_label",
+  "lora_airtime_ms",
+  "nearest_rank_percentile",
+  "normalize_bw_khz",
+  "normalize_cr_den",
+  "normalize_hops",
+  "normalize_packet_hash",
+  "render_key_value"
+ ],
+ "modules/clients/corescope_client.py": [
+  "CoreScopeClient",
+  "CoreScopeClient.configured",
+  "CoreScopeClient.fetch",
+  "CoreScopeClient.map_url",
+  "ScopePacket",
+  "normalize_base_url"
  ],
  "modules/clients/espn_client.py": [
   "ESPNClient",
@@ -124,12 +208,26 @@
   "WXSIMParser.is_forecast_stale",
   "WXSIMParser.parse"
  ],
+ "modules/clock_observations.py": [
+  "latest_clock_attempts",
+  "latest_clock_samples",
+  "map_clock_fields",
+  "observation_window",
+  "parse_timestamp",
+  "target_clock_status",
+  "utc_iso"
+ ],
+ "modules/clock_reply.py": [
+  "ClockReplyWatch",
+  "ClockReplyWatch.wait"
+ ],
  "modules/command_manager.py": [
   "CommandManager",
   "CommandManager.channel_body_budget",
   "CommandManager.check_keywords",
   "CommandManager.command_prefix",
   "CommandManager.effective_channel_send_scope",
+  "CommandManager.execute_capture",
   "CommandManager.execute_commands",
   "CommandManager.format_keyword_response",
   "CommandManager.get_available_commands_list",
@@ -188,6 +286,12 @@
   "is_deprecated_public_airplanes_live_url",
   "normalize_api_url"
  ],
+ "modules/commands/airtime_command.py": [
+  "AirtimeCommand",
+  "AirtimeCommand.execute",
+  "AirtimeCommand.format_reply",
+  "AirtimeCommand.get_help_text"
+ ],
  "modules/commands/alert_command.py": [
   "AlertCommand",
   "AlertCommand.execute"
@@ -222,6 +326,11 @@
   "AqiCommand.get_neighborhood_queries",
   "AqiCommand.get_openmeteo_aqi",
   "AqiCommand.get_pollutant_help"
+ ],
+ "modules/commands/ask_command.py": [
+  "AskCommand",
+  "AskCommand.can_execute",
+  "AskCommand.execute"
  ],
  "modules/commands/aurora_command.py": [
   "AuroraCommand",
@@ -265,7 +374,16 @@
   "BaseCommand.split_trigger_and_args",
   "BaseCommand.translate",
   "BaseCommand.translate_get_value",
-  "BaseCommand.translated_or"
+  "BaseCommand.translated_or",
+  "help_text_for"
+ ],
+ "modules/commands/bbs_command.py": [
+  "BBSCommand",
+  "BBSCommand.can_execute",
+  "BBSCommand.check_inbox_notification",
+  "BBSCommand.execute",
+  "BBSCommand.get_help_text",
+  "BBSCommand.run_pending_notification_job"
  ],
  "modules/commands/catfact_command.py": [
   "CatfactCommand",
@@ -284,6 +402,12 @@
   "ChannelsCommand.get_help_text",
   "ChannelsCommand.matches_keyword"
  ],
+ "modules/commands/clock_command.py": [
+  "ClockCommand",
+  "ClockCommand.can_execute",
+  "ClockCommand.execute",
+  "ClockCommand.requires_admin_access"
+ ],
  "modules/commands/cmd_command.py": [
   "CmdCommand",
   "CmdCommand.execute",
@@ -291,6 +415,7 @@
  ],
  "modules/commands/contact_command.py": [
   "ContactCommand",
+  "ContactCommand.can_execute",
   "ContactCommand.execute",
   "ContactCommand.get_help_text",
   "ContactCommand.matches_keyword"
@@ -317,6 +442,11 @@
   "DiceCommand.parse_mixed_dice",
   "DiceCommand.roll_dice"
  ],
+ "modules/commands/dx_command.py": [
+  "DxCommand",
+  "DxCommand.can_execute",
+  "DxCommand.execute"
+ ],
  "modules/commands/feed_command.py": [
   "FeedCommand",
   "FeedCommand.execute",
@@ -335,7 +465,9 @@
   "GreeterCommand.matches_custom_syntax",
   "GreeterCommand.matches_keyword",
   "GreeterCommand.should_execute",
-  "GreeterCommand.start_rollout"
+  "GreeterCommand.start_rollout",
+  "parse_channel_greetings",
+  "split_greeting_parts"
  ],
  "modules/commands/hacker_command.py": [
   "HackerCommand",
@@ -387,11 +519,16 @@
   "JokeCommand.send_joke_with_length_handling",
   "JokeCommand.split_joke"
  ],
+ "modules/commands/llm_command.py": [
+  "LlmCommand",
+  "LlmCommand.can_execute",
+  "LlmCommand.execute",
+  "LlmCommand.get_help_text"
+ ],
  "modules/commands/magic8_command.py": [
   "Magic8Command",
   "Magic8Command.execute",
   "Magic8Command.get_help_text",
-  "Magic8Command.get_response_format",
   "magic8"
  ],
  "modules/commands/moon_command.py": [
@@ -399,16 +536,29 @@
   "MoonCommand.execute",
   "MoonCommand.get_help_text"
  ],
+ "modules/commands/multibyte_command.py": [
+  "MultibyteCommand",
+  "MultibyteCommand.can_execute",
+  "MultibyteCommand.execute",
+  "MultibyteCommand.get_help_text"
+ ],
  "modules/commands/multitest_command.py": [
   "MultitestCommand",
   "MultitestCommand.condense_paths",
+  "MultitestCommand.default_format",
   "MultitestCommand.execute",
   "MultitestCommand.extract_path_from_message",
   "MultitestCommand.extract_path_from_rf_data",
   "MultitestCommand.get_help_text",
   "MultitestCommand.get_rf_data_for_message",
   "MultitestCommand.on_message_received",
+  "MultitestCommand.uses_corescope",
   "MultitestSession"
+ ],
+ "modules/commands/near_command.py": [
+  "NearCommand",
+  "NearCommand.can_execute",
+  "NearCommand.execute"
  ],
  "modules/commands/neighbors_command.py": [
   "NeighborsCommand",
@@ -424,8 +574,7 @@
  "modules/commands/ping_command.py": [
   "PingCommand",
   "PingCommand.execute",
-  "PingCommand.get_help_text",
-  "PingCommand.get_response_format"
+  "PingCommand.get_help_text"
  ],
  "modules/commands/prefix_command.py": [
   "PrefixCommand",
@@ -500,6 +649,7 @@
  ],
  "modules/commands/sports_command.py": [
   "SportsCommand",
+  "SportsCommand.can_execute",
   "SportsCommand.execute",
   "SportsCommand.fetch_team_game_data",
   "SportsCommand.fetch_team_games",
@@ -560,6 +710,11 @@
   "VersionCommand.execute",
   "VersionCommand.get_help_text"
  ],
+ "modules/commands/vigilance_command.py": [
+  "VigilanceCommand",
+  "VigilanceCommand.execute",
+  "VigilanceCommand.get_help_text"
+ ],
  "modules/commands/webviewer_command.py": [
   "WebViewerCommand",
   "WebViewerCommand.execute",
@@ -607,6 +762,9 @@
   "WxCommand.matches_keyword",
   "WxCommand.zipcode_to_lat_lon"
  ],
+ "modules/config_reload.py": [
+  "ConfigReloadMixin"
+ ],
  "modules/config_schema.py": [
   "KeyMeta",
   "SectionMeta",
@@ -632,27 +790,25 @@
   "strip_optional_quotes",
   "validate_config"
  ],
+ "modules/contact_events.py": [
+  "ContactEventsMixin",
+  "ContactEventsMixin.handle_new_contact"
+ ],
+ "modules/contacts_repo.py": [
+  "unique_recent_repeater_key"
+ ],
  "modules/core.py": [
   "MeshCoreBot",
+  "MeshCoreBot.apply_startup_flood_scope",
   "MeshCoreBot.available_languages",
   "MeshCoreBot.bot_root",
-  "MeshCoreBot.connect",
   "MeshCoreBot.create_default_config",
-  "MeshCoreBot.disconnect_radio",
-  "MeshCoreBot.get_system_health",
   "MeshCoreBot.get_translator",
-  "MeshCoreBot.is_radio_offline",
-  "MeshCoreBot.is_radio_zombie",
   "MeshCoreBot.is_valid_prefix",
   "MeshCoreBot.keep_running",
   "MeshCoreBot.key_prefix",
   "MeshCoreBot.load_config",
-  "MeshCoreBot.radio_session",
-  "MeshCoreBot.reboot_radio",
-  "MeshCoreBot.reconnect_radio",
   "MeshCoreBot.reload_config",
-  "MeshCoreBot.send_startup_advert",
-  "MeshCoreBot.set_device_name",
   "MeshCoreBot.set_radio_clock",
   "MeshCoreBot.setup_logging",
   "MeshCoreBot.setup_message_handlers",
@@ -665,6 +821,7 @@
   "RestoreResult",
   "apply_pending_database_restore",
   "apply_pending_restores_from_config",
+  "configured_bot_database_path",
   "pending_restore_path",
   "stage_database_restore",
   "validate_restore_database"
@@ -703,7 +860,8 @@
   "DBManager.set_bot_start_time",
   "DBManager.set_metadata",
   "DBManager.set_system_health",
-  "DBManager.vacuum_database"
+  "DBManager.vacuum_database",
+  "validate_readonly_sql"
  ],
  "modules/db_migrations.py": [
   "MigrationRunner",
@@ -712,6 +870,20 @@
  "modules/db_retention.py": [
   "delete_timestamp_rows_in_chunks",
   "retention_delete_settings"
+ ],
+ "modules/device_setup.py": [
+  "DeviceSetupMixin",
+  "DeviceSetupMixin.send_startup_advert",
+  "DeviceSetupMixin.set_device_name"
+ ],
+ "modules/dm_contacts.py": [
+  "DmContactResolver",
+  "DmContactResolver.identify",
+  "DmContactResolver.invalidate",
+  "DmContactResolver.is_in_use",
+  "DmContactResolver.restoration",
+  "DmContactResolver.use",
+  "ResolvedContact"
  ],
  "modules/enums.py": [
   "AdvertFlags",
@@ -773,6 +945,26 @@
  "modules/graph_trace_helper.py": [
   "update_mesh_graph_from_trace_data"
  ],
+ "modules/ha_addon.py": [
+  "IniMap",
+  "as_bool",
+  "as_connection_type",
+  "as_int",
+  "as_log_level",
+  "as_str",
+  "main",
+  "run"
+ ],
+ "modules/healthcheck.py": [
+  "main"
+ ],
+ "modules/heartbeat.py": [
+  "cancel_heartbeat",
+  "heartbeat_loop",
+  "heartbeat_path",
+  "start_heartbeat",
+  "touch_heartbeat"
+ ],
  "modules/http_retry.py": [
   "make_retry_session"
  ],
@@ -786,7 +978,30 @@
  "modules/ini_writer.py": [
   "IniValueError",
   "backup_config",
-  "update_ini_values"
+  "update_ini_values",
+  "write_text_atomic"
+ ],
+ "modules/instance_lock.py": [
+  "InstanceAlreadyRunning",
+  "InstanceLock",
+  "InstanceLock.release",
+  "acquire_instance_lock",
+  "instance_lock_path"
+ ],
+ "modules/io_health.py": [
+  "IOHealthMonitor",
+  "IOHealthMonitor.counters",
+  "IOHealthMonitor.is_monitored_path",
+  "IOHealthMonitor.last_signal",
+  "IOHealthMonitor.mount_state",
+  "IOHealthMonitor.powercycle",
+  "IOHealthMonitor.probe",
+  "IOHealthMonitor.probe_status",
+  "IOHealthMonitor.report_write_failure",
+  "IOHealthMonitor.semaphore_pending",
+  "IOHealthMonitor.signal_reboot",
+  "IOHealthMonitor.stats",
+  "IOHealthMonitor.status"
  ],
  "modules/joke_text.py": [
   "fetch_fitting_joke",
@@ -809,15 +1024,20 @@
   "get_config_default_lat_lon",
   "get_neighborhood_queries",
   "join_location",
+  "latest_contact_position_rows",
   "lookup_repeater_lat_lon",
   "parse_coordinates",
   "parse_coordinates_detailed",
+  "repeater_by_name_rows",
   "resolve_location",
   "resolve_location_async",
-  "resolve_with_message_fallbacks",
   "reverse_geocode_region",
   "titlecase_location",
   "zip_to_city_string"
+ ],
+ "modules/log_privacy.py": [
+  "message_metadata",
+  "web_log_line"
  ],
  "modules/logging_setup.py": [
   "JsonFormatter",
@@ -843,6 +1063,13 @@
   "read_smtp_settings",
   "send_smtp_message"
  ],
+ "modules/managed_keys.py": [
+  "ManagedKeyError",
+  "guard_managed_writes",
+  "is_managed",
+  "load_managed_keys",
+  "normalize_managed_pair"
+ ],
  "modules/mesh_graph.py": [
   "MeshGraph",
   "MeshGraph.add_edge",
@@ -858,6 +1085,19 @@
   "MeshGraph.validate_path",
   "MeshGraph.validate_path_segment"
  ],
+ "modules/mesh_graph_recorder.py": [
+  "MeshGraphRecorderMixin"
+ ],
+ "modules/mesh_paths.py": [
+  "bytes_per_hop_from_routing_and_nodes",
+  "calculate_path_distances",
+  "extract_path_node_ids_from_message",
+  "message_hop_count",
+  "message_path_bytes_per_hop",
+  "node_ids_from_path_string",
+  "parse_path_string",
+  "public_key_has_prefix"
+ ],
  "modules/meshcore_payload_decode.py": [
   "ChannelKeyStore",
   "ChannelKeyStore.add_hashtag",
@@ -870,20 +1110,18 @@
   "decode_payload",
   "decrypt_group_text",
   "derive_hashtag_key",
-  "parse_advert"
+  "parse_advert",
+  "verify_meshcore_advert_ed25519"
  ],
  "modules/message_handler.py": [
   "MessageHandler",
   "MessageHandler.decode_meshcore_packet",
   "MessageHandler.discover_message_path",
   "MessageHandler.extract_path_from_raw_hex",
-  "MessageHandler.find_recent_rf_data",
   "MessageHandler.get_payload_type_name",
   "MessageHandler.handle_channel_message",
   "MessageHandler.handle_contact_message",
-  "MessageHandler.handle_new_contact",
   "MessageHandler.handle_raw_data",
-  "MessageHandler.handle_rf_log_data",
   "MessageHandler.parse_advert",
   "MessageHandler.process_message",
   "MessageHandler.should_process_message"
@@ -894,6 +1132,19 @@
   "MeshMessage.is_global_flood_scope",
   "channel_body_limit",
   "self_info_name"
+ ],
+ "modules/multibyte_detection.py": [
+  "bucket_hop_chunks",
+  "chunks_from_multibyte_path_hex",
+  "collect_multibyte_hop_chunks",
+  "compute_path_encoding_badge",
+  "count_tracked_repeaters",
+  "find_onebyte_repeaters"
+ ],
+ "modules/name_shortener.py": [
+  "name_words",
+  "pack_names",
+  "shorten_name"
  ],
  "modules/neighbors_discovery.py": [
   "NeighborEntry",
@@ -923,9 +1174,19 @@
   "service_special_headline_event",
   "wx_special_headline_event"
  ],
+ "modules/nws_coverage.py": [
+  "NWSNoCoverageCache",
+  "NWSNoCoverageCache.is_unavailable",
+  "NWSNoCoverageCache.mark_available",
+  "NWSNoCoverageCache.mark_unavailable"
+ ],
  "modules/packet_decode.py": [
+  "calculate_packet_hash",
   "decode_meshcore_packet",
+  "decode_path_len_byte",
+  "encode_path_len_byte",
   "format_path_string",
+  "parse_trace_payload_route_hashes",
   "path_bytes_to_nodes",
   "payload_type_name",
   "process_packet_path",
@@ -938,6 +1199,7 @@
   "PathInferenceConfig.from_config",
   "apply_tie_breakers",
   "calculate_recency_weighted_scores",
+  "candidate_repeaters",
   "decode_path_nodes",
   "get_node_location",
   "select_by_dual_proximity",
@@ -947,6 +1209,11 @@
   "select_geographic",
   "select_node_repeater",
   "select_repeater_by_graph"
+ ],
+ "modules/path_names.py": [
+  "confident_hop_names",
+  "format_path_names",
+  "template_uses_path_names"
  ],
  "modules/plugin_loader.py": [
   "PluginLoader",
@@ -968,6 +1235,19 @@
  "modules/profanity_filter.py": [
   "censor",
   "contains_profanity"
+ ],
+ "modules/radio_link.py": [
+  "RadioLinkMixin",
+  "RadioLinkMixin.connect",
+  "RadioLinkMixin.disconnect_radio",
+  "RadioLinkMixin.is_radio_zombie",
+  "RadioLinkMixin.radio_session",
+  "RadioLinkMixin.reboot_radio",
+  "RadioLinkMixin.reconnect_radio"
+ ],
+ "modules/radio_offline.py": [
+  "RadioOfflineBreaker",
+  "RadioOfflineBreaker.is_radio_offline"
  ],
  "modules/rate_limiter.py": [
   "BotTxRateLimiter",
@@ -1065,9 +1345,54 @@
   "collect_protected_pubkeys_for_device_mode",
   "validate_repeater_tables"
  ],
+ "modules/repeater_watch.py": [
+  "RepeaterActivity",
+  "RepeaterActivity.label",
+  "RepeaterActivity.last_activity",
+  "RepeaterWatchMonitor",
+  "RepeaterWatchMonitor.check",
+  "RepeaterWatchMonitor.settings",
+  "RepeaterWatchMonitor.stop",
+  "RepeaterWatchMonitor.tick",
+  "RepeaterWatchSettings",
+  "RepeaterWatchSettings.check_interval_seconds",
+  "RepeaterWatchSettings.has_targets",
+  "RepeaterWatchSettings.offline_after_seconds",
+  "Transition",
+  "WatchState",
+  "WatchState.from_json",
+  "WatchState.to_json",
+  "candidate_repeaters",
+  "display_prefix",
+  "evaluate",
+  "format_duration",
+  "gather_activity",
+  "latest_heard_anything",
+  "load_settings",
+  "load_state",
+  "normalize_channel",
+  "normalize_key",
+  "notice_lines",
+  "pack_lines",
+  "recent_events",
+  "render_template",
+  "resolve_watch_list",
+  "save_state",
+  "settings_to_config_values",
+  "status_view",
+  "template_errors"
+ ],
  "modules/response_template.py": [
   "format_piped_template",
   "format_piped_template_async"
+ ],
+ "modules/rf_correlation.py": [
+  "RfCorrelationMixin",
+  "RfCorrelationMixin.find_recent_rf_data"
+ ],
+ "modules/rf_log.py": [
+  "RfLogMixin",
+  "RfLogMixin.handle_rf_log_data"
  ],
  "modules/rf_match.py": [
   "rf_data_is_correlated"
@@ -1081,15 +1406,21 @@
  ],
  "modules/scheduled_message_cron.py": [
   "ScheduleParseResult",
+  "bounds_error",
   "is_valid_legacy_hhmm",
   "parse_schedule_key",
-  "parse_scheduled_message_value"
+  "parse_scheduled_message_value",
+  "split_schedule_options",
+  "week_error"
  ],
  "modules/scheduler.py": [
   "MessageScheduler",
   "MessageScheduler.check_interval_advertising",
   "MessageScheduler.get_current_time",
   "MessageScheduler.join",
+  "MessageScheduler.run_battery_monitor_job_sync",
+  "MessageScheduler.run_bbs_notification_job_sync",
+  "MessageScheduler.run_clock_sync_admin_job_sync",
   "MessageScheduler.run_db_backup",
   "MessageScheduler.run_scheduler",
   "MessageScheduler.send_interval_advert",
@@ -1156,10 +1487,22 @@
   "BaseServicePlugin.is_healthy",
   "BaseServicePlugin.is_running",
   "BaseServicePlugin.on_transport_reconnected",
+  "BaseServicePlugin.run_periodic",
   "BaseServicePlugin.send_external_notifications",
   "BaseServicePlugin.start",
   "BaseServicePlugin.stop",
   "ExternalNotifySettings"
+ ],
+ "modules/service_plugins/blitzortung_service.py": [
+  "BlitzortungService",
+  "BlitzortungService.start",
+  "BlitzortungService.stop"
+ ],
+ "modules/service_plugins/channel_bridge_utils.py": [
+  "ChannelBridgeBase",
+  "ChannelBridgeBase.on_transport_reconnected",
+  "ChannelBridgeBase.start",
+  "ChannelBridgeBase.stop"
  ],
  "modules/service_plugins/darc_mowas_service.py": [
   "DARC_MoWaS_Service",
@@ -1178,9 +1521,6 @@
  ],
  "modules/service_plugins/discord_bridge_service.py": [
   "DiscordBridgeService",
-  "DiscordBridgeService.on_transport_reconnected",
-  "DiscordBridgeService.start",
-  "DiscordBridgeService.stop",
   "QueuedMessage"
  ],
  "modules/service_plugins/earthquake_service.py": [
@@ -1257,10 +1597,17 @@
  ],
  "modules/service_plugins/telegram_bridge_service.py": [
   "QueuedMessage",
-  "TelegramBridgeService",
-  "TelegramBridgeService.on_transport_reconnected",
-  "TelegramBridgeService.start",
-  "TelegramBridgeService.stop"
+  "TelegramBridgeService"
+ ],
+ "modules/service_plugins/vigilance_service.py": [
+  "VigilanceService",
+  "VigilanceService.start",
+  "VigilanceService.stop",
+  "fetch_vigilance",
+  "fetch_vigilance_multi",
+  "fetch_vigilance_site_api",
+  "normalize_department",
+  "parse_departments"
  ],
  "modules/service_plugins/weather_service.py": [
   "ForecastFetchResult",
@@ -1278,9 +1625,14 @@
   "WorldCupLiveService.start",
   "WorldCupLiveService.stop"
  ],
+ "modules/service_supervisor.py": [
+  "ServiceSupervisorMixin",
+  "ServiceSupervisorMixin.get_system_health"
+ ],
  "modules/settings_schema.py": [
   "build_plugin_settings_view",
   "command_section_name",
+  "field_id",
   "read_enabled",
   "read_section_items",
   "service_section_name",
@@ -1320,6 +1672,10 @@
   "solar_conditions",
   "solar_conditions_condensed"
  ],
+ "modules/template_reference.py": [
+  "render_preview",
+  "template_spec"
+ ],
  "modules/trace_runner.py": [
   "RunTraceResult",
   "run_trace"
@@ -1327,12 +1683,15 @@
  "modules/transmission_tracker.py": [
   "TransmissionRecord",
   "TransmissionTracker",
+  "TransmissionTracker.bot_prefix",
   "TransmissionTracker.cleanup_old_records",
+  "TransmissionTracker.close",
   "TransmissionTracker.extract_repeater_prefixes_from_path",
   "TransmissionTracker.get_repeat_info",
   "TransmissionTracker.match_packet_hash",
   "TransmissionTracker.record_repeat",
-  "TransmissionTracker.record_transmission"
+  "TransmissionTracker.record_transmission",
+  "own_public_key"
  ],
  "modules/url_shortener.py": [
   "shorten_url",
@@ -1340,17 +1699,11 @@
  ],
  "modules/utils.py": [
   "abbreviate_location",
-  "bytes_per_hop_from_routing_and_nodes",
   "calculate_distance",
-  "calculate_packet_hash",
-  "calculate_path_distances",
   "check_internet_connectivity",
   "check_internet_connectivity_async",
   "decode_escape_sequences",
-  "decode_path_len_byte",
-  "encode_path_len_byte",
   "espn_dates_for_local_day",
-  "extract_path_node_ids_from_message",
   "filter_events_local_day",
   "format_elapsed_display",
   "format_keyword_response_with_placeholders",
@@ -1361,29 +1714,29 @@
   "geocode_zipcode",
   "geocode_zipcode_sync",
   "get_config_timezone",
+  "get_cpu_temperature",
+  "get_cpu_usage",
   "get_major_city_queries",
   "get_nominatim_geocoder",
   "get_packet_hash_placeholder",
+  "get_ram_usage",
   "is_country_name",
   "is_us_state",
   "is_valid_timezone",
-  "message_hop_count",
-  "message_path_bytes_per_hop",
-  "node_ids_from_path_string",
   "normalize_country_name",
   "normalize_us_state",
   "parse_location_string",
-  "parse_path_string",
-  "parse_trace_payload_route_hashes",
-  "public_key_has_prefix",
   "rate_limited_nominatim_geocode",
   "rate_limited_nominatim_geocode_sync",
   "rate_limited_nominatim_reverse",
   "rate_limited_nominatim_reverse_sync",
   "resolve_path",
   "truncate_string",
-  "truncate_to_bytes",
-  "verify_meshcore_advert_ed25519"
+  "truncate_to_bytes"
+ ],
+ "modules/utils_weather.py": [
+  "get_weather_code_emoji",
+  "get_weather_openmeteo"
  ],
  "modules/version_info.py": [
   "get_application_root",
@@ -1392,16 +1745,56 @@
  ],
  "modules/weather_common.py": [
   "WeatherCommandMixin",
-  "load_open_meteo_model"
+  "is_metro_france",
+  "load_open_meteo_model",
+  "load_open_meteo_units",
+  "open_meteo_cache_is_usable",
+  "open_meteo_cache_key",
+  "read_open_meteo_cache",
+  "select_open_meteo_model",
+  "store_open_meteo_payload"
  ],
  "modules/web_viewer/app.py": [
   "BotDataViewer",
+  "BotDataViewer.is_ha_ingress_request",
   "BotDataViewer.run",
-  "NeighborEvidenceKeys",
   "main"
+ ],
+ "modules/web_viewer/channel_monitor.py": [
+  "ChannelMonitorMixin",
+  "admin_qr_for",
+  "channel_qr",
+  "hashtag_secret",
+  "is_public",
+  "is_valid_name",
+  "lookup_key",
+  "monitor_channel_limit",
+  "normalize_name",
+  "parse_monitor_list",
+  "parse_names",
+  "public_qr_for",
+  "qr_region_scope"
+ ],
+ "modules/web_viewer/channel_visibility.py": [
+  "can_publish",
+  "channel_identity",
+  "encrypted_packet_view",
+  "message_identity",
+  "normalized_name",
+  "permitted_ids",
+  "set_visibility"
+ ],
+ "modules/web_viewer/channels.py": [
+  "ChannelAdminMixin"
+ ],
+ "modules/web_viewer/cleanup.py": [
+  "CleanupSchedulerMixin"
  ],
  "modules/web_viewer/config_panels.py": [
   "ConfigPanel"
+ ],
+ "modules/web_viewer/dashboard.py": [
+  "DashboardSnapshotMixin"
  ],
  "modules/web_viewer/dashboard_stats.py": [
   "DashboardStatsService",
@@ -1428,6 +1821,20 @@
   "normalize_role",
   "packet_share_metric"
  ],
+ "modules/web_viewer/database_admin.py": [
+  "DatabaseAdminMixin"
+ ],
+ "modules/web_viewer/feeds.py": [
+  "FeedSubscriptionsMixin"
+ ],
+ "modules/web_viewer/ha_ingress.py": [
+  "HaIngressMiddleware",
+  "ha_ingress_enabled",
+  "ingress_prefix",
+  "is_browser_origin",
+  "normalize_ingress_path",
+  "socketio_cors_allowed"
+ ],
  "modules/web_viewer/integration.py": [
   "BotIntegration",
   "BotIntegration.capture_channel_message",
@@ -1446,5 +1853,47 @@
   "WebViewerIntegration.start_viewer",
   "WebViewerIntegration.stop_viewer",
   "normalized_web_viewer_password"
+ ],
+ "modules/web_viewer/live_stream.py": [
+  "LiveStreamMixin"
+ ],
+ "modules/web_viewer/mesh_evidence.py": [
+  "MeshEvidenceMixin",
+  "NeighborEvidenceKeys"
+ ],
+ "modules/web_viewer/multibyte_rollout.py": [
+  "MultibyteRolloutMixin"
+ ],
+ "modules/web_viewer/parent_watch.py": [
+  "parent_is_gone",
+  "start_parent_watcher",
+  "watch_parent"
+ ],
+ "modules/web_viewer/socket_clients.py": [
+  "SocketClientsMixin"
+ ],
+ "modules/web_viewer/tracking.py": [
+  "ContactTrackingMixin"
+ ],
+ "modules/wiki_rag.py": [
+  "LocalWikiRag",
+  "LocalWikiRag.build_context",
+  "LocalWikiRag.ensure_fresh",
+  "LocalWikiRag.retrieve",
+  "WikiJsSource",
+  "WikiJsSource.api_mode",
+  "WikiJsSource.ensure_fresh",
+  "WikiJsSource.fetch_page_source",
+  "WikiJsSource.is_fresh",
+  "WikiJsSource.list_pages",
+  "WikiJsSource.refresh",
+  "WikiRagError",
+  "WikiRagMatch",
+  "WikiRagResult",
+  "WikiRagSection",
+  "WikiRefreshResult",
+  "allowed_path",
+  "extract_guest_source",
+  "split_source_sections"
  ]
 }

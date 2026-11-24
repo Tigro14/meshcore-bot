@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Optional, Union
 
 import requests
@@ -912,27 +912,3 @@ async def resolve_location_async(
     """Async twin of ``resolve_location`` (same behavior via thread offload)."""
     opts = options or OPTIONS_PREFIX
     return await asyncio.to_thread(resolve_location, bot, raw, options=opts)
-
-
-def resolve_with_message_fallbacks(
-    bot: Any,
-    raw: Optional[str],
-    message: Any,
-    *,
-    config_section: Optional[str] = None,
-    options: Optional[ResolveOptions] = None,
-) -> ResolvedLocation:
-    opts = options or OPTIONS_AQI
-    if raw is None or not str(raw).strip():
-        for coords in (
-            get_companion_lat_lon(bot, message),
-            get_config_default_lat_lon(bot, config_section) if config_section else None,
-            get_bot_lat_lon(bot),
-        ):
-            if coords:
-                return resolve_location(bot, None, options=replace(opts, fallback_coords=coords))
-        return ResolvedLocation(
-            lat=None, lon=None, location_type=None, query="",
-            display_name=None, address_info=None, error="no_location",
-        )
-    return resolve_location(bot, raw, options=opts)

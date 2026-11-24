@@ -320,11 +320,10 @@ class BBSCommand(BaseCommand):
         recipient_name, recipient_key = recipient
 
         # Self-send guard: public keys are authoritative; tolerate the
-        # prefix-vs-full-key mismatch when a pubkey could not be resolved.
+        # prefix-vs-full-key mismatch when a pubkey could not be resolved
+        # (one key being a prefix of the other covers the equal case).
         if recipient_key and sender_key and (
-            recipient_key == sender_key
-            or recipient_key.startswith(sender_key)
-            or sender_key.startswith(recipient_key)
+            recipient_key.startswith(sender_key) or sender_key.startswith(recipient_key)
         ):
             await self.send_response(message, "You cannot send a message to yourself.")
             return True
@@ -376,12 +375,8 @@ class BBSCommand(BaseCommand):
             await self.send_response(message, "No pending BBS messages.")
             return True
 
-        # Build per-message strings
-        lines: list[str] = []
-        for row in new_rows:
-            lines.append(self._format_inbox_line(row[1], row[3], row[2]))
-        for row in legacy_rows:
-            lines.append(self._format_inbox_line(row[1], row[3], row[2]))
+        # Build per-message strings (new table first, then legacy)
+        lines = [self._format_inbox_line(row[1], row[3], row[2]) for row in (*new_rows, *legacy_rows)]
 
         # Send chunked if responses won't fit in one message
         all_sent = True

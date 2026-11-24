@@ -203,27 +203,13 @@ def duty_summary(events: list[tuple[float, float, bool]], start: float, end: flo
                 'packets': 0, 'reference_percent': REFERENCE_PERCENT, 'compliance': 'unknown',
                 'status': 'no_attributed_observation'}
     total = sum(event[1] for event in selected)
-    ordered = sorted((at, ms) for at, ms, _ in events if start-3600 < at <= end)
-    # A peak can already exist at the start, before the next selected event.
-    peak = sum(ms for at, ms in ordered if at <= start)
-    peak_at = start
-    rolling = 0.0
-    left = 0
-    for right, (at, ms) in enumerate(ordered):
-        rolling += ms
-        while left <= right and ordered[left][0] <= at-3600:
-            rolling -= ordered[left][1]
-            left += 1
-        if at >= start and rolling > peak:
-            peak = rolling
-            peak_at = at
-    last = sum(ms for at, ms in ordered if end-3600 < at)
+    hour = rolling_peak(events, start, end, 3600)
     last_events = [(at, ms, direct) for at, ms, direct in events if end-3600 < at <= end]
-    peak_percent = peak/3600000*100
+    last = sum(ms for _, ms, _ in last_events)
     burst = rolling_peak(events, start, end, 300)
     return {'estimated_percent': round(total/max(1,end-start)/1000*100, 6),
             'last_hour_percent': round(last/3600000*100, 6) if last_events else None,
-            'peak_hour_percent': round(peak_percent, 6), 'peak_hour_ending_at': peak_at,
+            'peak_hour_percent': hour['percent'], 'peak_hour_ending_at': hour['ending_at'],
             'peak_five_minute_percent': burst['percent'], 'peak_five_minute_ending_at': burst['ending_at'],
             'direct_packets': sum(1 for _, _, direct in selected if direct),
             'inferred_packets': sum(1 for _, _, direct in selected if not direct),
@@ -235,7 +221,7 @@ def duty_summary(events: list[tuple[float, float, bool]], start: float, end: flo
             'direct_airtime_ms': round(sum(ms for _, ms, direct in selected if direct), 3),
             'inferred_airtime_ms': round(sum(ms for _, ms, direct in selected if not direct), 3),
             'packets': len(selected), 'reference_percent': REFERENCE_PERCENT, 'compliance': 'unknown',
-            'status': 'reference_reached_in_estimate' if peak_percent >= REFERENCE_PERCENT else 'partial_estimate',
+            'status': 'reference_reached_in_estimate' if hour['percent'] >= REFERENCE_PERCENT else 'partial_estimate',
             'first_observed_at': min(at for at, _, _ in selected),
             'last_observed_at': max(at for at, _, _ in selected)}
 

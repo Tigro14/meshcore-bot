@@ -151,10 +151,10 @@ def local_load(events: dict[str, list[tuple[float, float, bool]]], contacts: Any
     local_events: list[tuple[float, float, bool]] = []
     directly_attributed = 0.0
     for key, node_events in events.items():
-        direct = [(at, ms, flag) for at, ms, flag in node_events if start <= at <= end and flag]
+        selected = [(at, ms, flag) for at, ms, flag in node_events if start <= at <= end]
+        direct = [event for event in selected if event[2]]
         if not direct or key == observer.get('public_key') or not contacts.relay(key):
             continue
-        selected = [(at, ms, flag) for at, ms, flag in node_events if start <= at <= end]
         direct_ms = sum(ms for _, ms, _ in direct)
         inferred_ms = sum(ms for _, ms, flag in selected if not flag)
         directly_attributed += direct_ms
