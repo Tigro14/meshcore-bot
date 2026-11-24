@@ -126,7 +126,13 @@ def _monitor(config, tmp_path, mounts_path=None, db_manager=None):
 
 def _mounts(tmp_path, entries):
     mounts = tmp_path / "mounts"
-    mounts.write_text("\n".join(entries) + "\n", encoding="utf-8")
+    # Match the canonical paths the monitor reads, including macOS /var symlinks.
+    canonical = []
+    for entry in entries:
+        parts = entry.split()
+        parts[1] = str(Path(parts[1]).resolve())
+        canonical.append(' '.join(parts))
+    mounts.write_text("\n".join(canonical) + "\n", encoding="utf-8")
     return mounts
 
 

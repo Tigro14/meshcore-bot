@@ -29,9 +29,10 @@ class NearCommand(BaseCommand):
         self.near_enabled = self.get_config_value("Near_Command", "enabled", fallback=True, value_type="bool")
 
     def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
-        if not self.near_enabled:
-            return False
-        return super().can_execute(message)
+        return self.near_enabled and self.can_use_service(message, skip_channel_check)
+
+    def can_use_service(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        return super().can_use_service(message, skip_channel_check=skip_channel_check)
 
     def _parse_args(self, message: MeshMessage) -> tuple[int, str | None, str | None]:
         """Parse optional count, role, and target node prefix from the message."""
@@ -100,89 +101,54 @@ class NearCommand(BaseCommand):
         return None
 
     async def execute(self, message: MeshMessage) -> bool:
+        from ..near_location import resolve_origin
         count, role, target_prefix = self._parse_args(message)
-
-        pos = None
-        if target_prefix:
-            pos = self._get_node_position_by_prefix(target_prefix)
-            if not pos:
-                return await self.send_response(message, f"Node {target_prefix} sans GPS trouvé.")
-        else:
-            pos = self._get_sender_position(message)
-            if not pos:
-                return await self.send_response(message, "Position GPS introuvable pour calculer les distances.")
-
-        lat, lon = pos
-        limit = count
-
-        sender_name = (message.sender_id or "").strip()
-        sender_key = (getattr(message, 'sender_pubkey', None) or "").strip()
+        label = ""
+        origin_key = ""
         try:
             with self.bot.db_manager.connection() as conn:
-                cursor = conn.cursor()
-                sql = (
-                    "SELECT name, "
-                    "6371*2*ASIN(SQRT("
-                    f"POWER(SIN(RADIANS(latitude-{lat:.5f})/2),2)+"
-                    f"COS(RADIANS({lat:.5f}))*COS(RADIANS(latitude))*"
-                    f"POWER(SIN(RADIANS(longitude-{lon:.5f})/2),2)"
-                    ")) AS dist "
-                    "FROM complete_contact_tracking "
-                    "WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0"
-                )
-                if sender_name:
-                    sql += f" AND name != '{sender_name}'"
-                if sender_key and len(sender_key) == 64:
-                    sql += f" AND public_key != '{sender_key}'"
-                if role:
-                    sql += f" AND role = '{role}'"
-                sql += f" ORDER BY dist ASC LIMIT {max(limit, 20)}"
-                cursor.execute(sql)
-                rows = cursor.fetchall()
-        except Exception as e:
-            self.logger.warning(f"Near command query error: {e}")
-            return await self.send_response(message, f"Erreur query: {e}")
-
-        if not rows:
-            label = f" {role}" if role else " répéteur"
-            return await self.send_response(message, f"Aucun{label} avec GPS trouvé.")
-
-        max_length = self.get_max_message_length(message)
-        min_name_len = 12
-
-        # Priority: maximize station count. Truncate names to fit.
-        # Each line: name + ": X.X km" (8) worst case. Total: n*(name_len+8) + (n-1) <= max_length
-        # Max possible count with min_name_len: (max_length+1) // (min_name_len + 9)
-        max_possible = (max_length + 1) // (min_name_len + 9)
-        target_count = min(len(rows), max(limit, max_possible)) if limit > 1 else max_possible
-        target_count = min(target_count, len(rows), max_possible)
-
-        # Find name_len that fits target_count lines
-        # n*(name_len+8) + (n-1) <= max_length → name_len <= (max_length+1)/n - 9
-        name_len = (max_length + 1) // target_count - 9
-        name_len = max(min_name_len, min(name_len, 30))
-
-        lines = []
-        for name, dist in rows[:target_count]:
-            display_name = name[:name_len] if len(name) > name_len else name
-            if dist < 1.0:
-                lines.append(f"{display_name}: {dist * 1000:.0f} m")
-            else:
-                lines.append(f"{display_name}: {dist:.1f} km")
-
-        response = "\n".join(lines)
-        if len(response) > max_length:
-            # Shrink name_len and retry
-            name_len = min_name_len
-            lines = []
-            for name, dist in rows[:target_count]:
-                display_name = name[:name_len] if len(name) > name_len else name
-                if dist < 1.0:
-                    lines.append(f"{display_name}: {dist * 1000:.0f} m")
+                if target_prefix:
+                    pos = self._get_node_position_by_prefix(target_prefix)
+                    if not pos:
+                        return await self.send_response(message, f"Node {target_prefix} sans GPS trouvé.")
                 else:
-                    lines.append(f"{display_name}: {dist:.1f} km")
-            response = "\n".join(lines)
-            if len(response) > max_length:
-                response = response[:max_length]
-
-        return await self.send_response(message, response)
+                    origin, error = resolve_origin(conn, message)
+                    if origin is None:
+                        return await self.send_response(message, error)
+                    pos = (origin.latitude, origin.longitude)
+                    label, origin_key = origin.label, origin.public_key
+                lat, lon = pos
+                sql = (
+                    "SELECT name, 6371*2*ASIN(MIN(1,SQRT("
+                    "POWER(SIN(RADIANS(latitude-?)/2),2)+"
+                    "COS(RADIANS(?))*COS(RADIANS(latitude))*"
+                    "POWER(SIN(RADIANS(longitude-?)/2),2)))) AS dist "
+                    "FROM complete_contact_tracking WHERE latitude BETWEEN -90 AND 90 "
+                    "AND longitude BETWEEN -180 AND 180 AND NOT (latitude=0 AND longitude=0)"
+                )
+                params = [lat, lat, lon]
+                for key in {origin_key, message.sender_pubkey or ""} - {""}:
+                    sql += " AND public_key != ?"
+                    params.append(key)
+                if role:
+                    sql += " AND role = ?"
+                    params.append(role)
+                sql += " ORDER BY dist ASC LIMIT ?"
+                params.append(count)
+                rows = conn.execute(sql, params).fetchall()
+        except Exception:
+            self.logger.exception("Near origin/distance lookup failed")
+            return await self.send_response(message, "Les données de localisation sont temporairement indisponibles.")
+        if not rows:
+            return await self.send_response(message, (label + " " if label else "") + "Aucun autre nœud géolocalisé correspondant.")
+        budget = self.get_max_message_length(message)
+        lines = [label] if label else []
+        for name, distance in rows:
+            name = str(name or "Sans nom").replace("\n", " ")
+            name = name.encode("utf-8")[:28].decode("utf-8", errors="ignore")
+            value = f"{distance * 1000:.0f} m" if distance < 1 else f"{distance:.1f} km"
+            line = f"{name}: {value}"
+            if len("\n".join(lines + [line]).encode("utf-8")) > budget:
+                break
+            lines.append(line)
+        return await self.send_response(message, "\n".join(lines))

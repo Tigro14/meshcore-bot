@@ -412,7 +412,8 @@ class RfLogMixin:
             log_message = f"🛣️  ROUTING INFO: {routing_info['route_type']} | Path: {formatted_path} ({routing_info['path_length']} hops, {path_bytes_str} bytes) | Payload: {routing_info['payload_length']} bytes | Type: {routing_info['payload_type']}"
             self.logger.info(log_message)
         else:
-            log_message = f"📡 DIRECT MESSAGE: {routing_info['route_type']} | Type: {routing_info['payload_type']}"
+            message_kind = "CHANNEL" if routing_info["payload_type"] in {"GRP_TXT", "GRP_DATA"} else "DIRECT"
+            log_message = f"📡 {message_kind} MESSAGE: {routing_info['route_type']} | Type: {routing_info['payload_type']}"
             self.logger.info(log_message)
 
 

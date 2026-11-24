@@ -57,12 +57,11 @@ class AdvertCommand(BaseCommand):
         Returns:
             bool: True if the command can be executed, False otherwise.
         """
-        # Check if advert command is enabled
-        if not self.advert_enabled:
-            return False
+        return self.advert_enabled and self.can_use_service(message, skip_channel_check)
 
-        # Use the base class cooldown check
-        if not super().can_execute(message):
+    def can_use_service(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        # Retain both sender and global radio cooldowns for internal calls.
+        if not super().can_use_service(message, skip_channel_check=skip_channel_check):
             return False
 
         # Additional check for bot's last advert time (legacy support)

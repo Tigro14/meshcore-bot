@@ -215,9 +215,10 @@ from modules.feed_parse import (  # noqa: F401
     feed_max_response_bytes,
     rss_entry_published,
 )
+from modules.multibyte_detection import compute_path_encoding_badge
 from modules.repeater_manager import RepeaterManager, validate_repeater_tables
 from modules.security_utils import SafeUrlPolicy, create_safe_requests_session, safe_requests_request  # noqa: F401
-from modules.utils import resolve_path
+from modules.utils import get_config_timezone, resolve_path
 from modules.web_viewer.channel_monitor import (
     ChannelMonitorMixin,
     admin_qr_for,
@@ -522,6 +523,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
         'packet_stream',
         'message_stats',
         'command_stats',
+        'assistant_function_usage',
         'greeted_users',
         'repeater_contacts',
         'complete_contact_tracking',
@@ -1386,6 +1388,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             # /channels page feed. Names plus hashtag-derived secrets; a custom
             # channel's key only appears for channels the operator published.
             '/api/channels/view',
+            '/api/channels/published',
             '/api/banner-status',
             '/api/stats',
             '/api/dashboard/summary',
@@ -1398,8 +1401,11 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             '/api/telemetry/occupancy',
             '/api/telemetry/occupancy/analysis',
             '/api/telemetry/occupancy/history',
+            '/api/telemetry/occupancy/analysis',
             '/api/contacts',
             '/api/contact-detail',
+            '/mesh-entry-points',
+            '/api/mesh/entry-points',
             '/api/mesh/nodes',
             '/api/mesh/airtime',
             '/api/mesh/edges',
@@ -1425,6 +1431,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
 
         # Read-only POST helpers used by public Contacts / Mesh info panels.
         _PUBLIC_API_POST_PATHS = frozenset([
+            '/api/mesh/entry-points',
             '/api/decode-path',
             '/api/mesh/resolve-path',
         ])
@@ -1496,7 +1503,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 return
             if request.method in ('POST', 'OPTIONS') and path in _PUBLIC_API_POST_PATHS:
                 return
-            if path.startswith(('/api/', '/radio/api/')):
+            if path.startswith(('/api/', '/radio/api/')) or path == '/channels/settings/view':
                 return make_response(jsonify({'error': 'Admin authentication required'}), 401)
             return redirect(url_for('login', next=path))
 
@@ -3442,26 +3449,70 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 self.logger.error(f"Error optimizing database: {e}")
                 return jsonify({'success': False, 'error': str(e)}), 500
 
+        @self.app.route('/mesh-entry-points')
+        def mesh_entry_points_page():
+            return render_template('mesh_entry_points.html')
+
+
+        @self.app.route('/api/mesh/entry-points', methods=['GET', 'POST'])
+        def api_mesh_entry_points():
+            from modules.web_viewer.entry_points import entry_points
+            days = request.args.get('days', default=1, type=int)
+            if days not in (0, 1, 2, 3, 7, 30, 90):
+                return jsonify({'error': 'Période invalide'}), 400
+            country = request.args.get('country', '').strip()
+            if len(country) > 100:
+                return jsonify({'error': 'Pays invalide'}), 400
+            unscoped = request.args.get('unscoped', '0')
+            if unscoped not in ('0', '1'):
+                return jsonify({'error': 'Filtre de région invalide'}), 400
+            packet_type = request.args.get('packet_type', 'all')
+            if packet_type not in ('all', 'messages', 'adverts'):
+                return jsonify({'error': 'Type de paquet invalide'}), 400
+            payload = request.get_json(silent=True) if request.method == 'POST' else {}
+            if not isinstance(payload, dict):
+                return jsonify({'error': 'Filtres invalides'}), 400
+            keys = payload.get('target_keys')
+            if keys is not None and (not isinstance(keys, list) or len(keys) > 10000 or any(not isinstance(k, str) or len(k) > 128 for k in keys)):
+                return jsonify({'error': 'Relais invalides'}), 400
+            min_packets = request.args.get('min_packets', default=1, type=int)
+            evidence = request.args.get('evidence', 'all')
+            if min_packets is None or not 1 <= min_packets <= 100000 or evidence not in ('all', 'multibyte'):
+                return jsonify({'error': 'Filtre de liaison invalide'}), 400
+            with self._with_db_connection() as conn:
+                return jsonify(entry_points(conn, days, country, unscoped_only=unscoped == '1', packet_type=packet_type,
+                                           target_keys={k.lower() for k in keys} if keys is not None else None,
+                                           min_packets=min_packets, evidence=evidence))
+
+
         @self.app.route('/api/mesh/nodes')
         def api_mesh_nodes():
-            """Get all repeater nodes with locations and metadata. Prefix length from query param or [Bot] prefix_bytes.
+            """Get repeater nodes with locations and metadata.
 
-            ``days`` limits nodes to the selected Node Timeframe; keeping the filter here
-            also lets the country selector be built from countries heard in that period.
+            ``days`` limits nodes to the selected Node Timeframe.  Keeping the
+            filtering in this endpoint also means the country selector can be
+            built solely from countries heard during that same period.
             """
+            conn = None
             try:
                 prefix_hex_chars = request.args.get('prefix_hex_chars', type=int)
-                days = request.args.get('days', type=int)
-                if days is not None and days <= 0:
-                    days = None
                 if prefix_hex_chars not in (2, 4, 6):
                     prefix_hex_chars = self.config.getint('Bot', 'prefix_bytes', fallback=1) * 2
                 if prefix_hex_chars <= 0:
                     prefix_hex_chars = 2
-                with self._db_connection() as conn:
-                    cursor = conn.cursor()
+                days = request.args.get('days', type=int)
+                if days is not None and days <= 0:
+                    days = None
+                conn = self._get_db_connection()
+                cursor = conn.cursor()
 
-                    query = f'''
+                time_clause = ''
+                query_params = []
+                if days is not None:
+                    time_clause = "AND last_heard >= datetime('now', 'localtime', ?)"
+                    query_params.append(f'-{days} days')
+
+                query = f'''
                     SELECT
                         public_key,
                         SUBSTR(public_key, 1, {prefix_hex_chars}) as prefix,
@@ -3475,63 +3526,68 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                         is_starred,
                         last_heard,
                         last_advert_timestamp,
-                        raw_advert_data
+                        raw_advert_data, out_bytes_per_hop, out_path_len, advert_count
                     FROM complete_contact_tracking
                     WHERE role IN ('repeater', 'roomserver')
                     AND latitude IS NOT NULL
                     AND longitude IS NOT NULL
                     AND latitude != 0
                     AND longitude != 0
+                    {time_clause}
+                    ORDER BY name
                 '''
-                    params = []
-                    if days is not None:
-                        query += '''
-                    AND COALESCE(NULLIF(last_heard, ''), last_advert_timestamp)
-                        >= datetime("now", "-" || ? || " days")
-                    '''
-                        params.append(days)
-                    query += ' ORDER BY name'
 
-                    cursor.execute(query, params)
-                    rows = cursor.fetchall()
+                cursor.execute(query, query_params)
+                rows = cursor.fetchall()
 
-                    clock_samples = self._get_latest_clock_drift_samples(cursor)
-                    nodes = []
-                    for row in rows:
-                        # adv_name (Meshcore short name) is stored inside raw_advert_data JSON.
-                        # The web viewer runs as a separate process, so read it from the DB.
-                        adv_name = None
-                        raw = row['raw_advert_data']
-                        if raw:
-                            try:
-                                parsed = json.loads(raw)
-                                if isinstance(parsed, dict):
-                                    candidate = (parsed.get('adv_name') or '').strip()
-                                    if candidate:
-                                        adv_name = candidate
-                            except (ValueError, TypeError):
-                                adv_name = None
-                        nodes.append({
-                            **map_clock_fields(clock_samples.get(row['name']), self.config),
-                            'public_key': row['public_key'],
-                            'prefix': row['prefix'].lower(),
-                            'name': row['name'] or f"Node {row['prefix']}",
-                            'adv_name': adv_name,
-                            'latitude': float(row['latitude']),
-                            'longitude': float(row['longitude']),
-                            'city': row['city'],
-                            'state': row['state'],
-                            'country': row['country'],
-                            'role': row['role'],
-                            'is_starred': bool(row['is_starred']),
-                            'last_heard': row['last_heard'],
-                            'last_advert_timestamp': row['last_advert_timestamp']
-                        })
+                chunks = self._get_cached_contact_multibyte_hop_chunks(cursor)
+                advert_paths = {}
+                for observed in cursor.execute("SELECT DISTINCT public_key, bytes_per_hop FROM observed_paths WHERE packet_type='advert'"):
+                    advert_paths.setdefault(observed[0], []).append({'bytes_per_hop': observed[1]})
+                from modules.web_viewer.relay_region_observations import unscoped_only_relays
+                unscoped_relays = unscoped_only_relays(conn, days=days)
+                clock_samples = self._get_latest_clock_drift_samples(cursor)
+                nodes = []
+                for row in rows:
+                    # adv_name (Meshcore short name) is stored inside raw_advert_data JSON.
+                    # The web viewer runs as a separate process, so read it from the DB.
+                    adv_name = None
+                    raw = row['raw_advert_data']
+                    if raw:
+                        try:
+                            parsed = json.loads(raw)
+                            if isinstance(parsed, dict):
+                                candidate = (parsed.get('adv_name') or '').strip()
+                                if candidate:
+                                    adv_name = candidate
+                        except (ValueError, TypeError):
+                            adv_name = None
+                    nodes.append({
+                        **map_clock_fields(clock_samples.get(row['name']), self.config),
+                        'unscoped_only_observed': row['public_key'].lower() in unscoped_relays,
+                        'path_encoding_badge': compute_path_encoding_badge(row, advert_paths.get(row['public_key'], []), chunks),
+                        'public_key': row['public_key'],
+                        'prefix': row['prefix'].lower(),
+                        'name': row['name'] or f"Node {row['prefix']}",
+                        'adv_name': adv_name,
+                        'latitude': float(row['latitude']),
+                        'longitude': float(row['longitude']),
+                        'city': row['city'],
+                        'state': row['state'],
+                        'country': row['country'],
+                        'role': row['role'],
+                        'is_starred': bool(row['is_starred']),
+                        'last_heard': row['last_heard'],
+                        'last_advert_timestamp': row['last_advert_timestamp']
+                    })
 
-                    return jsonify({'nodes': nodes})
+                return jsonify({'nodes': nodes})
             except Exception as e:
                 self.logger.error(f"Error getting mesh nodes: {e}")
                 return jsonify({'error': str(e)}), 500
+            finally:
+                if conn:
+                    conn.close()
 
         @self.app.route('/api/mesh/airtime')
         @self._api_errors('Error reading mesh airtime weights')
@@ -5400,7 +5456,6 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
 
         # Feed management API endpoints
         def _schedule_tz():
-            from modules.utils import get_config_timezone
             tz, _name = get_config_timezone(self.config, self.logger)
             return tz
 
@@ -6023,14 +6078,12 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             """Whether the current request is an authenticated operator (or auth is off)."""
             return not self.web_viewer_password or bool(session.get('authenticated_admin'))
 
-        @self.app.route('/api/channels/view')
-        @self._api_errors('Error getting channels view')
-        def api_channels_view():
+        def _channels_view_payload(*, published_only=False):
             """Payload for the /channels page: names, join QR codes, monitoring state.
 
-            The merged list is monitored names first, then the radio's own slots, then the
-            names the bot only lists (`[Channels_List]`, ``decode_hashtag_channels``); the
-            ``monitored``/``on_radio``/``decoded`` flags tell the page which group a card is in.
+            Only channels assigned to radio slots are displayed. The internal catalog
+            and extra decode-only names stay available to their existing consumers,
+            but do not become join cards on this page.
 
             Public surface: a hashtag channel's QR secret is derivable from its
             name, so publishing it leaks nothing the name list does not.  A custom
@@ -6041,7 +6094,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             every scoped message on that channel broadcasts the same transport
             code — so it leaks nothing the mesh does not already carry.
             """
-            is_admin = _channels_is_admin()
+            is_admin = False if published_only else _channels_is_admin()
             # Re-read from disk so flood-scope edits made in config.ini show up
             # in the QR codes without a viewer restart (same rule as the
             # settings GET below).
@@ -6050,6 +6103,10 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
 
             channels = []
             for channel in view['channels']:
+                if not channel.get('on_radio'):
+                    continue
+                if published_only and not channel.get('live_messages_visible'):
+                    continue
                 name = normalize_name(channel.get('name'))
                 if not name:
                     continue
@@ -6081,11 +6138,36 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     ),
                 })
 
-            return jsonify({
+            response = jsonify({
                 'channels': channels,
-                'monitor_channels': view['monitor_channels'],
+                'monitor_channels': (
+                    [channel['name'] for channel in channels if channel['monitored']]
+                    if published_only else view['monitor_channels']
+                ),
                 'is_admin': is_admin,
             })
+            response.headers['Cache-Control'] = 'private, no-store'
+            return response
+
+        @self.app.route('/api/channels/view')
+        @self._api_errors('Error getting channels view')
+        def api_channels_view():
+            return _channels_view_payload()
+
+        @self.app.route('/channels/settings/view')
+        @self._api_errors('Error getting authenticated channels view')
+        def channels_authenticated_view():
+            # With external authentication, protect this path like /channels/settings.
+            # The proxy must suppress its Basic Auth challenge on this exact path
+            # so a background request cannot open a browser password dialog.
+            return _channels_view_payload()
+
+        @self.app.route('/api/channels/published')
+        @self._api_errors('Error getting published channels')
+        def api_channels_published():
+            # This route is safe to exempt from proxy authentication. Never infer
+            # administrator access here from disabled app auth or client headers.
+            return _channels_view_payload(published_only=True)
 
         def _channels_settings_view():
             view = self._monitor_view()
@@ -7066,7 +7148,7 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             llm_context_total_tokens = 0
             try:
                 minimal_bot = _MinimalBot(self.config, self.logger, getattr(self, 'db_manager', None))
-                llm_cmd = LlmCommand(minimal_bot)
+                llm_cmd = LlmCommand(minimal_bot).service
                 llm_context = llm_cmd._inject_current_time_into_prompt(llm_cmd.system_prompt)
                 llm_context_breakdown = llm_cmd._cached_context_breakdown
                 if llm_context_breakdown:
@@ -7671,13 +7753,13 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
             if since == 'all':
                 since_clause = ''
             elif since == '24h':
-                since_clause = " WHERE c.last_heard >= strftime('%s', 'now', '-24 hours')"
+                since_clause = " WHERE CASE WHEN typeof(c.last_heard) IN ('integer', 'real') THEN datetime(c.last_heard, 'unixepoch', 'localtime') ELSE datetime(c.last_heard) END >= datetime('now', 'localtime', '-24 hours')"
             elif since == '7d':
-                since_clause = " WHERE c.last_heard >= strftime('%s', 'now', '-7 days')"
+                since_clause = " WHERE CASE WHEN typeof(c.last_heard) IN ('integer', 'real') THEN datetime(c.last_heard, 'unixepoch', 'localtime') ELSE datetime(c.last_heard) END >= datetime('now', 'localtime', '-7 days')"
             elif since == '30d':
-                since_clause = " WHERE c.last_heard >= strftime('%s', 'now', '-30 days')"
+                since_clause = " WHERE CASE WHEN typeof(c.last_heard) IN ('integer', 'real') THEN datetime(c.last_heard, 'unixepoch', 'localtime') ELSE datetime(c.last_heard) END >= datetime('now', 'localtime', '-30 days')"
             else:
-                since_clause = " WHERE c.last_heard >= strftime('%s', 'now', '-90 days')"
+                since_clause = " WHERE CASE WHEN typeof(c.last_heard) IN ('integer', 'real') THEN datetime(c.last_heard, 'unixepoch', 'localtime') ELSE datetime(c.last_heard) END >= datetime('now', 'localtime', '-90 days')"
 
             params = []
             search_clause = ''

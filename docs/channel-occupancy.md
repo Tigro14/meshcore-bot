@@ -1,5 +1,52 @@
 # Channel occupancy
 
+## Baliz: received copies and RF roles
+
+The passive `/api/telemetry/occupancy/analysis?window=1h|24h|7d` model retains schema
+version 1 and advances its method version to 6. It adds `receptions`, computed from
+existing metadata; there is no migration, new radio transmission, or retention change.
+The separation of writer, first flood relay and heard emitter follows the questions
+raised by [Tigro's Airtime work](https://github.com/Tigro14/meshcore-bot/pull/97), while
+keeping Baliz's full-frame costing, 1/2/3-byte paths and existing reconstruction model.
+
+- `repetition_factor` is received copies divided by distinct payload fingerprints.
+- `additional_received_airtime_percent` is the airtime of receptions after the first
+  local reception of each fingerprint, divided by total received airtime. The first
+  reception is selected **inside the requested period**; it need not be the original
+  transmitter. Each copy uses its own complete frame length and recorded modulation.
+  Useful flood forwarding is included; this is neither a waste percentage nor a
+  global network repetition rate. Unknown short hashes do not collapse identities.
+- The same weighted share is provided in `receptions.series` and the existing chart
+  bins. A bin can contain only additional copies of a packet first received in an
+  earlier bin of the selected period. Missing reception history remains unknown.
+- Truncated queries expose `status: truncated` and null ratio/weighted-share fields.
+  A period with no receptions has no repetition factor or airtime share, not a measured
+  zero. These metrics apply to retained normalized RF frames, not undecodable RF energy.
+- `receptions.roles.emitters` attributes each eligible received flood copy to its last
+  relay; `entry_relays` attributes it to its first relay. Both contain `rx_airtime_ms`,
+  `received_packets` and message/advert/other counts. No-path flood copies with a known
+  author can name their direct emitter and have no entry relay. Direct-route paths and
+  TRACE never establish either relay role. Unresolved prefixes stay separate labels;
+  widths 1, 2 and 3 resolve only to a unique known repeater/room server. Unknown emitters
+  are explicit, and emitter rows plus that bucket reconcile with local RX airtime.
+- Authors retain distinct-packet counts and reconstructed source-plus-relay radio cost.
+  They are ranked by that cost, with unknown costs last and a reconstruction-coverage
+  field. **Author cost and received-copy role totals must never be summed.**
+- `receptions.comparison` compares the preceding equal-length period. Changes in received
+  airtime, distinct packets and additional-copy airtime share are supplied only if both
+  windows have confirmed continuous listening and untruncated, nonempty observations.
+  The pair ends at the latest fresh confirmed listening timestamp (at most 75 seconds
+  behind the request), exposed as `end_time`; this excludes the writer's unconfirmed
+  tail without bridging any internal outage. The page's selected-period totals still
+  end at the request time, and the comparison carries its own `current`/`previous` metrics.
+  Otherwise previous observations can be shown, but change fields are null. No automatic
+  congestion classification or alert is inferred.
+
+The page keeps four header cards and one combined chart. The chart summary reports
+distinct packets, receptions and additional-copy airtime; hover details show the same
+breakdown per bin. The existing Sources detail table switches between the three roles.
+Per-repeater reconstructed and scenario duty cycles remain separate from these RX metrics.
+
 This feature counts **airtime**: how much of the channel a packet takes, and how much
 the bot itself takes. It is off by default.
 

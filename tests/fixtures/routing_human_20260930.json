@@ -1,0 +1,85 @@
+[
+  {
+    "question": "Tu as entendu combien de nœuds ces dernières 48 heures ?",
+    "route": "mesh",
+    "operation": "count_nodes",
+    "args": {
+      "hours": 48,
+      "country": ""
+    }
+  },
+  {
+    "question": "Combien de répéteurs as-tu vus en France sur les dernières 24 heures ?",
+    "route": "mesh",
+    "operation": "count_repeaters",
+    "args": {
+      "hours": 24,
+      "country": "France",
+      "limit": 5,
+      "sort": "recent"
+    }
+  },
+  {
+    "question": "Il reste quels relais qui utilisent un seul octet pour le routage ?",
+    "route": "mesh",
+    "operation": "onebyte",
+    "args": {
+      "hours": 0,
+      "country": "",
+      "limit": 5,
+      "sort": "recent"
+    }
+  },
+  {
+    "question": "Tu peux me donner les trois relais les plus proches de moi ?",
+    "route": "mesh",
+    "operation": "near",
+    "args": {
+      "limit": 3,
+      "role": "repeater",
+      "target": ""
+    }
+  },
+  {
+    "question": "Sur quels canaux les gens discutent le plus ?",
+    "route": "mesh",
+    "operation": "stats",
+    "args": {
+      "topic": "channels",
+      "hashes": false
+    }
+  },
+  {
+    "question": "Je vais à Quimper demain, tu peux me dire le temps prévu ?",
+    "route": "weather",
+    "operation": "forecast",
+    "args": {
+      "location": "Quimper",
+      "period": "tomorrow"
+    }
+  },
+  {
+    "question": "Je configure mon répéteur, comment je lui ajoute une région ?",
+    "route": "wiki",
+    "operation": "lookup",
+    "args": {}
+  },
+  {
+    "question": "Merci Baliz, c’est exactement ce que je voulais !",
+    "route": "llm",
+    "operation": "chat",
+    "args": {}
+  },
+  {
+    "question": "Par quels relais est passé le message que je viens de t’envoyer ?",
+    "route": "path",
+    "operation": "message",
+    "args": {}
+  },
+  {
+    "question": "Tu m’entends bien ? Donne-moi le niveau de réception de ce message.",
+    "route": "test",
+    "operation": "receive",
+    "args": {}
+  }
+]

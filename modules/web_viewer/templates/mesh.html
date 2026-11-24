@@ -155,9 +155,30 @@
         min-height: 0;
         flex: 1;
     }
+    #mesh-graph-container:not(.mesh-dark) .leaflet-tile-pane,
+    .mesh-dark .onebyte-focus .leaflet-tile-pane {opacity:0.65}
+    /* Filter actual images, not Leaflet's zero-sized positioning pane. */
+    #mesh-graph-container:not(.mesh-dark) .leaflet-tile,
+    .mesh-dark .onebyte-focus .maplibregl-canvas {filter:grayscale(0.85) saturate(0.3)}
+    .leaflet-tooltip.onebyte-label {background:#fff;color:#6b21a8;border:1px solid #d8b4fe;border-radius:5px;padding:4px 7px;font-size:12px;font-weight:700;box-shadow:0 2px 5px #0003}
+    #filterPanel .card-body {padding:10px 12px}
+    #filterPanel .form-label {font-size:.8rem;margin-bottom:3px}
+    #filterPanel .form-select,#filterPanel .form-control {font-size:.85rem;padding-top:4px;padding-bottom:4px}
+    #filterPanel .row {row-gap:8px}
+    #entry-filters {border-top:1px solid #ddd;padding-top:8px}
+    .visualization-row.warning-layout {display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:12px;margin:0}
+    .warning-layout > .col-12 {padding:0;min-width:0}
+    #warning-sidebar, #entry-sidebar {overflow-y:auto;min-height:0;padding:12px;border:1px solid #ddd;border-radius:5px;background:var(--bs-body-bg,#fff)}
+    .entry-arrow{font-size:20px;color:#b45309;text-shadow:0 0 2px white}.entry-row{cursor:pointer}.entry-heading{font-weight:600;overflow-wrap:anywhere}.entry-meta{display:block;font-size:.8rem;margin-top:5px}.entry-count{float:right}.hop-caption{display:flex;justify-content:space-between;gap:8px}
+    .warning-list-item {display:block;width:100%;text-align:left;border:1px solid #ddd;border-left:5px solid var(--warning-color);border-radius:5px;background:transparent;color:inherit;padding:9px;margin-bottom:8px}
+    .warning-list-item small {display:block;color:var(--bs-secondary-color,#666)}
+    @media(max-width:767px){.visualization-row.warning-layout {grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(300px,1fr) 240px}}
+    .leaflet-tooltip.region-warning-label {color:#991b1b;border-color:#fca5a5}
+    .leaflet-tooltip.combined-warning-label {color:#000;border-color:#737373}
+    .leaflet-tooltip.onebyte-warning {background:transparent;border:0;box-shadow:none;padding:0;font-size:17px;line-height:1.2;text-shadow:0 0 3px white}
+    .leaflet-tooltip.onebyte-warning::before {display:none}
     .mesh-clock-symbol {display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:3px;vertical-align:middle;border-radius:50%;background:#fff;color:#374151;line-height:1;text-shadow:none;box-shadow:0 0 2px #0005}
-    .leaflet-tooltip.mesh-clock-indicator {background:transparent;border:0;box-shadow:none;padding:0}
-    .leaflet-tooltip.mesh-clock-indicator::before {display:none}
+    .mesh-dark .mesh-clock-symbol {background:#fff;color:#374151}
 </style>
 
 <div id="mesh-graph-container" class="d-flex flex-column">
@@ -206,8 +227,10 @@
             </button>
         </div>
         <div class="btn-group mesh-tool-group" role="group" aria-label="Tools">
-            <button class="btn btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#filterPanel" title="Filters" aria-label="Filters">
-                <i class="fas fa-filter" aria-hidden="true"></i>
+            <button type="button" id="btn-entry-mode" class="btn btn-sm btn-outline-warning" aria-pressed="false" title="Passages observés depuis l’étranger vers la France">Points d’entrée</button>
+            <button type="button" id="btn-one-byte" class="btn btn-sm btn-outline-danger" aria-pressed="false" title="Repérer les relais à 1 octet ou observés uniquement sans région">Configurations à vérifier</button>
+            <button class="btn btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#filterPanel" title="Filtres">
+                <i class="fas fa-filter"></i> Filtres
             </button>
             <button class="btn btn-sm" type="button" id="btn-heat" title="Hot connections: color edges by traffic (viridis)" aria-label="Hot connections">
                 <i class="fas fa-fire" aria-hidden="true"></i>
@@ -311,6 +334,15 @@
                         <input type="text" class="form-control" id="filter-search" placeholder="Name, prefix, or path...">
                     </div>
                 </div>
+
+                <div id="entry-filters" class="mt-2" hidden>
+                    <div class="d-flex flex-wrap gap-3 align-items-end">
+                        <div><label for="entry-country" class="form-label">Pays du relais précédent</label><select id="entry-country" class="form-select"><option value="">Tous les pays étrangers</option></select></div>
+                        <div><label for="entry-type" class="form-label">Type de trafic</label><select id="entry-type" class="form-select"><option value="all">Tout</option><option value="messages">Messages</option><option value="adverts">Annonces</option></select></div>
+                        <div class="form-check mb-2"><input id="entry-unscoped" class="form-check-input" type="checkbox" checked><label for="entry-unscoped" class="form-check-label">Sans région uniquement</label></div>
+                    </div>
+                    <p class="small text-muted mt-2 mb-0">Edge Timeframe : période des passages. Les filtres de nœuds ciblent les relais français. Min Observations : paquets distincts par liaison. Les voisins directs ne s’appliquent pas à ce mode.</p>
+                </div>
             </div>
         </div>
     </div>
@@ -387,6 +419,13 @@
     </div>
 </div>
 
+<aside id="warning-sidebar" hidden aria-label="Relais à vérifier"></aside>
+
+<aside id="entry-sidebar" hidden aria-label="Points d’entrée">
+<div id="entry-status" role="status" class="small mb-2"></div>
+<section class="border rounded p-2 mb-3"><h6>Sauts à l’arrivée — vue globale</h6><div id="entry-global"></div></section>
+<div id="entry-ranking"></div>
+</aside>
 <!-- Node Details Modal -->
 <div class="modal fade" id="nodeDetailsModal" tabindex="-1" aria-labelledby="nodeDetailsTitle">
     <div class="modal-dialog modal-lg">
@@ -713,9 +752,13 @@
     .mesh-basemap-fallback .leaflet-tile {
         filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
     }
-    div.vis-tooltip {
-        font-family: inherit;
-        box-shadow: 0 2px 5px var(--mesh-panel-shadow);
+    .mesh-basemap-fallback .onebyte-focus .leaflet-tile {
+        filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9) grayscale(0.85) saturate(0.3);
+    }
+    .mesh-dark .leaflet-popup-content-wrapper,
+    .mesh-dark .leaflet-popup-tip {
+        background: #2d2d2d;
+        color: #e9ecef;
     }
     div.vis-tooltip,
     .mesh-dark .leaflet-popup-content-wrapper,
@@ -821,6 +864,7 @@
 <!-- vis-network JS -->
 <script src="{{ url_for('static', filename='vendor/vis-network/vis-network.min.js') }}"></script>
 
+<script src="{{ url_for('static', filename='js/mesh_entry_view.js') }}"></script>
 <script nonce="{{ g.csp_nonce }}">
     // Global state
     let currentView = 'map';
@@ -1036,6 +1080,20 @@
         return vectorBasemapSupported;
     }
 
+    const ResilientTileLayer = L.TileLayer.extend({
+        createTile(coords, done) {
+            let retries = 0;
+            const tile = L.TileLayer.prototype.createTile.call(this, coords, (error, loaded) => {
+                if (error && retries < 2) {
+                    retries += 1;
+                    tile.retryTimer = setTimeout(() => {
+                        if (tile.isConnected) tile.src = this.getTileUrl(coords);
+                    }, retries * 1500);
+                } else done(error, loaded);
+            });
+            return tile;
+        }
+    });
     function setBaseTileLayer() {
         if (!map) return;
         const theme = getMeshTheme();
@@ -1049,7 +1107,8 @@
             // The bridge renders into tilePane, so marker/overlay z-order is unchanged.
             baseTileLayer = L.maplibreGL({ style: cfg.styleUrl });
         } else {
-            baseTileLayer = L.tileLayer(cfg.url, { attribution: cfg.attribution });
+            baseTileLayer = new ResilientTileLayer(cfg.url, { attribution: cfg.attribution, keepBuffer: 4, updateWhenIdle: true });
+            baseTileLayer.on('tileunload', event => clearTimeout(event.tile.retryTimer));
         }
         // Drives the CSS inversion that stands in for dark cartography when we had to
         // fall back to raster.  Never set when the vector style rendered.
@@ -1245,6 +1304,18 @@
         return Math.min(1, Math.max(0, (Math.log(total) - lo) / (hi - lo)));
     }
 
+    function oneByteModeEnabled() {
+        return document.getElementById('btn-one-byte').getAttribute('aria-pressed') === 'true';
+    }
+
+    function setOneByteMode(enabled) {
+        const button = document.getElementById('btn-one-byte');
+        button.setAttribute('aria-pressed', String(enabled));
+        button.classList.toggle('active', enabled);
+        button.classList.toggle('btn-danger', enabled);
+        button.classList.toggle('btn-outline-danger', !enabled);
+    }
+
     function nodeClockNumber(value) {
         return typeof value === 'number' && Number.isFinite(value) ? value : null;
     }
@@ -1255,14 +1326,14 @@
 
     function formatClockDriftDuration(value) {
         const number = nodeClockNumber(value);
-        if (number === null) return 'Not measured';
+        if (number === null) return 'Non mesuré';
         const seconds = Math.abs(Math.round(number));
         if (seconds < 60) return `${seconds} s`;
         const minutes = Math.floor(seconds / 60);
         if (minutes < 60) return `${minutes} min ${seconds % 60} s`;
         const hours = Math.floor(minutes / 60);
         if (hours < 24) return `${hours} h ${minutes % 60} min`;
-        return `${Math.floor(hours / 24)} d ${hours % 24} h`;
+        return `${Math.floor(hours / 24)} j ${hours % 24} h`;
     }
 
     function nodeClockSummary(node) {
@@ -1270,17 +1341,17 @@
         if (drift === null) return '';
         const signed = nodeClockNumber(node.clock_signed_drift_seconds);
         const duration = formatClockDriftDuration(drift);
-        if (signed === null || signed === 0) return `Measured drift: ${duration}`;
-        return `${signed < 0 ? 'Behind' : 'Ahead'} by ${duration}`;
+        if (signed === null || signed === 0) return `Décalage mesuré : ${duration}`;
+        return `${signed < 0 ? 'En retard' : 'En avance'} de ${duration}`;
     }
 
     function nodeClockObservation(node) {
         const observed = nodeClockNumber(node.clock_observed_at);
-        if (observed === null) return 'Observation time unknown';
+        if (observed === null) return 'Date de mesure inconnue';
         const date = new Date(observed * 1000);
-        if (Number.isNaN(date.getTime())) return 'Observation time unknown';
-        const source = node.clock_drift_source === 'advert' ? 'advert' : 'message';
-        return `Measured at ${date.toLocaleString()} · ${source}${node.clock_observation_stale ? ' · old observation' : ''}`;
+        if (Number.isNaN(date.getTime())) return 'Date de mesure inconnue';
+        const source = node.clock_drift_source === 'advert' ? 'annonce' : 'message';
+        return `Mesuré le ${date.toLocaleString('fr-FR')} · ${source}${node.clock_observation_stale ? ' · mesure ancienne' : ''}`;
     }
 
     function clockGlyphHTML() {
@@ -1291,31 +1362,43 @@
         const summary = nodeClockSummary(node);
         if (!summary) return '';
         const border = nodeHasClockWarning(node) ? '#eab308' : 'var(--bs-border-color,#aaa)';
-        return `<div class="mesh-clock-detail" style="margin-top:8px;padding:8px;border:1px solid ${border};border-radius:5px;"><strong><span class="mesh-clock-symbol">${clockGlyphHTML()}</span> Clock</strong><div>${escapeHtml(summary)}</div><div class="small text-muted">${escapeHtml(nodeClockObservation(node))}</div></div>`;
+        return `<div class="mesh-clock-detail" style="margin-top:8px;padding:8px;border:1px solid ${border};border-radius:5px;"><strong><span class="mesh-clock-symbol">${clockGlyphHTML()}</span> Horloge</strong><div>${escapeHtml(summary)}</div><div class="small text-muted">${escapeHtml(nodeClockObservation(node))}</div></div>`;
+    }
+
+    function nodeNeedsForeground(node) {
+        return nodeWarningReasons(node).length > 0 || nodeHasClockWarning(node);
     }
 
     function ensureNodeIndicatorPanes(mapInstance) {
-        for (const [name, zIndex] of [['meshClockMarkers', '625'], ['meshClockLabels', '670']]) {
+        // Ordinary labels stay at Leaflet's 650; popups stay above all at 700.
+        for (const [name, zIndex] of [['meshClockLabels', '670'], ['meshConfigurationLabels', '680']]) {
             const pane = mapInstance.getPane(name) || mapInstance.createPane(name);
             pane.style.zIndex = zIndex;
-            if (name === 'meshClockLabels') pane.style.pointerEvents = 'none';
+            pane.style.pointerEvents = 'none';
         }
     }
 
     function bindNodeLabel(marker, node) {
         const toggle = document.getElementById('filter-node-labels');
-        const showName = toggle && toggle.checked;
+        const warning = nodeWarningReasons(node).length > 0;
         const clockWarning = nodeHasClockWarning(node);
-        if (!showName && !clockWarning) return;
+        const indicator = warning || clockWarning;
+        const showName = (toggle && toggle.checked) || isWarningHighlighted(node);
+        if (!showName && !indicator) return;
         const label = document.createElement('span');
-        label.textContent = showName ? getNodeShortLabel(node) || node.name : '';
+        const name = isWarningHighlighted(node) ? `${node.name} - ${nodeWarningLabel(node)}` : getNodeShortLabel(node);
+        label.textContent = showName ? (name || node.name) : (warning ? '⚠️' : '');
+        const descriptions = nodeWarningReasons(node);
         if (clockWarning) {
             const clock = document.createElement('span');
             clock.className = 'mesh-clock-symbol';
             clock.innerHTML = clockGlyphHTML();
             label.appendChild(clock);
-            label.title = `${nodeClockSummary(node)}. ${nodeClockObservation(node)}`;
-            label.setAttribute('aria-label', `${node.name}: ${label.title}`);
+            descriptions.push(`${nodeClockSummary(node)}. ${nodeClockObservation(node)}`);
+        }
+        if (indicator) {
+            label.title = descriptions.join(' ');
+            label.setAttribute('aria-label', `${node.name} : ${label.title}`);
             label.setAttribute('role', 'button');
             label.tabIndex = 0;
             label.style.cursor = 'pointer';
@@ -1330,18 +1413,130 @@
                 }
             });
         }
+        const oneByte = node.path_encoding_badge === 'one_byte';
         marker.bindTooltip(label, {
             permanent: true,
-            pane: clockWarning ? 'meshClockLabels' : 'tooltipPane',
-            interactive: clockWarning,
+            pane: warning ? 'meshConfigurationLabels' : (clockWarning ? 'meshClockLabels' : 'tooltipPane'),
+            interactive: indicator,
             direction: showName ? 'top' : 'right',
             offset: showName ? [0, 0] : [6, 0],
-            className: showName ? 'mesh-node-label' : 'mesh-clock-indicator',
+            className: !showName ? 'onebyte-warning' : (isWarningHighlighted(node) ? `mesh-node-label onebyte-label ${node.unscoped_only_observed ? (oneByte ? 'combined-warning-label' : 'region-warning-label') : ''}` : 'mesh-node-label'),
             opacity: 1
         });
     }
 
+    function nodeWarningReasons(node) {
+        const reasons = [];
+        if (node.path_encoding_badge === 'one_byte') reasons.push('Identifiants à 1 octet.');
+        if (node.unscoped_only_observed === true) reasons.push('Aucun trafic avec région observé sur cette période.');
+        return reasons;
+    }
+
+    function nodeWarningHTML(node) {
+        const reasons = nodeWarningReasons(node);
+        if (!reasons.length) return '';
+        return `<div style="margin-top:8px;padding:8px;border:1px solid #eab308;border-radius:5px;"><strong>⚠️ Configuration à vérifier</strong><ul style="margin:5px 0 0;padding-left:18px;">${reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ul></div>`;
+    }
+
+    let entryMode = false;
+    let entryView = null;
+    let fitEntryView = false;
+    let savedEntryEvidence = null;
+    let savedEntryMin = 1;
+    let savedWarningEvidence = null;
+    let savedWarningMin = 1;
+    function setEntryMode(enabled) {
+        entryMode = enabled;
+        fitEntryView = enabled;
+        const button = document.getElementById('btn-entry-mode');
+        button.setAttribute('aria-pressed', String(enabled));
+        button.classList.toggle('active', enabled);
+        document.getElementById('entry-filters').hidden = !enabled;
+        const evidence = document.getElementById('filter-evidence');
+        evidence.querySelector('option[value="neighbors"]').disabled = enabled;
+        if (enabled) {
+            if(oneByteModeEnabled() && savedWarningEvidence !== null){evidence.value=savedWarningEvidence;minObsValue=savedWarningMin;}
+            setOneByteMode(false);
+            savedEntryEvidence = evidence.value;
+            savedEntryMin = minObsValue;
+            minObsValue = 1;
+            evidence.value = 'all';
+            document.getElementById('filter-min-obs').value = minObsThresholdToPosition(1);
+
+            currentView = 'map';
+            document.getElementById('map-view').style.display='block';
+            document.getElementById('graph-view').style.display='none';
+            document.getElementById('btn-view-map').classList.add('active');
+            document.getElementById('btn-view-graph').classList.remove('active');
+        } else {
+            if(entryView)entryView.clear();
+            document.getElementById('connection-legend').style.removeProperty('display');
+            if(savedEntryEvidence !== null)evidence.value=savedEntryEvidence;
+            minObsValue=savedEntryMin;
+            document.getElementById('filter-min-obs').value=minObsThresholdToPosition(minObsValue);
+        }
+        applyFilters();
+        if(!enabled)loadData({reloadNodes:false});
+    }
+    function renderWarningSidebar() {
+        const panel = document.getElementById('warning-sidebar');
+        const row = document.querySelector('.visualization-row');
+        if (panel.parentElement !== row) row.appendChild(panel);
+        const entryPanel = document.getElementById('entry-sidebar');
+        if(entryPanel.parentElement !== row)row.appendChild(entryPanel);
+        entryPanel.hidden = !entryMode;
+        const enabled = oneByteModeEnabled();
+        ['filter-min-obs','filter-evidence'].forEach(id => document.getElementById(id).closest('.col-md-2').hidden=enabled);
+        panel.hidden = !enabled;
+        row.classList.toggle('warning-layout', enabled || entryMode);
+        panel.replaceChildren();
+        if (!enabled) return;
+        const rank = n => n.unscoped_only_observed ? (n.path_encoding_badge === 'one_byte' ? 0 : 1) : 2;
+        const nodes = filteredNodes.filter(n => nodeWarningReasons(n).length).sort((a,b) =>
+            rank(a)-rank(b) || (nodeDegrees.get(getNodeId(b)) || 0)-(nodeDegrees.get(getNodeId(a)) || 0) || (a.name || '').localeCompare(b.name || '', 'fr') || getNodeId(a).localeCompare(getNodeId(b)));
+        const title = document.createElement('h6');
+        title.textContent = `Relais à vérifier (${nodes.length})`;
+        const hint = document.createElement('p');
+        hint.className = 'small text-muted';
+        hint.textContent = 'Les deux alertes, puis sans région, puis 1 octet. Dans chaque groupe : connexions décroissantes sur la carte, puis nom.';
+        panel.append(title, hint);
+        if (!nodes.length) panel.append(document.createTextNode('Aucun relais signalé avec ces filtres.'));
+        nodes.forEach(node => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'warning-list-item';
+            button.style.setProperty('--warning-color', getNodeFillColor(node));
+            const name = document.createElement('strong');
+            name.textContent = node.name;
+            const detail = document.createElement('small');
+            detail.textContent = `${nodeWarningLabel(node)} · ${nodeDegrees.get(getNodeId(node)) || 0} connexion(s)`;
+            button.append(name, detail);
+            button.addEventListener('click', () => {
+                if (currentView !== 'map') switchView('map');
+                const marker = nodeMarkers.get(getNodeId(node));
+                if (marker) {
+                    map.panTo(marker.getLatLng(), {animate: false});
+                    marker.getPopup().options.autoPan = true;
+                    marker.fire('click');
+                }
+            });
+            panel.appendChild(button);
+        });
+    }
+
+    function nodeWarningLabel(node) {
+        return [node.path_encoding_badge === 'one_byte' ? '1 octet' : '', node.unscoped_only_observed ? 'Sans région' : ''].filter(Boolean).join(' & ');
+    }
+
+    function isWarningHighlighted(node) {
+        return oneByteModeEnabled() && nodeWarningReasons(node).length > 0;
+    }
+
     function getNodeFillColor(node) {
+        if (oneByteModeEnabled()) {
+            if (node.path_encoding_badge === 'one_byte') return node.unscoped_only_observed ? '#000000' : '#9333ea';
+            return node.unscoped_only_observed ? '#dc2626' : '#9ca3af';
+        }
         if (edgeColorMode === 'heat') {
             return viridisThemed(nodeHeatT(node));
         }
@@ -1900,6 +2095,15 @@
             loadData({ reloadEdges: false })
                 .catch(error => console.error('Error reloading node window:', error));
         });
+        document.getElementById('btn-entry-mode').addEventListener('click', () => setEntryMode(!entryMode));
+        ['entry-country','entry-type','entry-unscoped'].forEach(id => document.getElementById(id).addEventListener('change', applyFilters));
+        document.getElementById('btn-one-byte').addEventListener('click', () => {if(entryMode)setEntryMode(false);
+            const enabled=!oneByteModeEnabled();
+            const evidence=document.getElementById('filter-evidence');
+            if(enabled){savedWarningEvidence=evidence.value;savedWarningMin=minObsValue;evidence.value='all';minObsValue=1;}
+            else{if(savedWarningEvidence !== null)evidence.value=savedWarningEvidence;minObsValue=savedWarningMin;}
+            document.getElementById('filter-min-obs').value=minObsThresholdToPosition(minObsValue);
+            setOneByteMode(enabled);applyFilters();loadData({reloadNodes:false});saveFilters();});
         document.getElementById('filter-starred').addEventListener('change', () => {
             applyFilters();
             saveFilters();
@@ -2245,6 +2449,7 @@
                 minObs: minObsValue, // threshold, not slider position
                 edgeDays: document.getElementById('filter-edge-days').value,
                 nodeDays: document.getElementById('filter-node-days').value,
+                oneByteOnly: oneByteModeEnabled(),
                 starredOnly: document.getElementById('filter-starred').checked,
                 nodeLabels: document.getElementById('filter-node-labels').checked,
                 evidence: document.getElementById('filter-evidence').value,
@@ -2280,6 +2485,7 @@
                 if (filters.nodeDays !== undefined) {
                     document.getElementById('filter-node-days').value = filters.nodeDays;
                 }
+                setOneByteMode(filters.oneByteOnly === true);
                 if (filters.starredOnly !== undefined) {
                     document.getElementById('filter-starred').checked = filters.starredOnly;
                 }
@@ -2347,6 +2553,7 @@
     
     // Apply filters
     function applyFilters() {
+        document.getElementById('map-view').classList.toggle('onebyte-focus', oneByteModeEnabled());
         // Preserve highlighted node before filtering/re-rendering
         const preservedHighlightedNode = highlightedNodeObject;
         // Preserve path highlight if active (will be re-applied in renderMap if still valid)
@@ -2432,6 +2639,8 @@
         heatObsRange = heatMax ? { min: heatMin, max: heatMax } : { min: 1, max: 1 };
         updateHeatLegend();
 
+        renderWarningSidebar();
+
         // Re-render current view
         if (currentView === 'map') {
             renderMap();
@@ -2457,6 +2666,7 @@
 
     // Switch between views
     function switchView(view) {
+        if(view === 'graph' && entryMode)setEntryMode(false);
         currentView = view;
         // Update URL hash so /mesh#graph links open directly to graph tab
         if (view === 'graph') {
@@ -2668,6 +2878,17 @@
             });
         }
         
+        if (entryMode) {
+            nodeMarkers.clear();nodeMarkersByPrefix.clear();edgeLines.clear();edgeToNodes.clear();
+            highlightedNodeObject = null;highlightedPath = null;
+            document.getElementById('connection-legend').style.display = 'none';
+            if (!entryView) entryView = window.createMeshEntryView(map);
+            entryView.load({targetKeys:filteredNodes.map(n=>n.public_key),minPackets:minObsValue || 1,
+                evidence:document.getElementById('filter-evidence').value === 'multibyte' ? 'multibyte' : 'all',
+                labels:document.getElementById('filter-node-labels').checked,fit:fitEntryView});
+            fitEntryView=false;
+            return;
+        }
         // Clear node and edge maps
         nodeMarkers.clear();
         nodeMarkersByPrefix.clear();
@@ -2819,6 +3040,12 @@
             edgeToNodes.set(edgeKey, { fromNode: fromNode, toNode: toNode, edge: edge });
         });
         
+        // Dedicated pane keeps one-byte repeaters above all regular markers,
+        // independently of insertion order, zoom updates and edge highlights.
+        if (!map.getPane('oneBytePane')) {
+            map.createPane('oneBytePane');
+            map.getPane('oneBytePane').style.zIndex = '625';
+        }
         ensureNodeIndicatorPanes(map);
         // Add markers for nodes AFTER edges (so they appear on top and are easier to click)
         filteredNodes.forEach(node => {
@@ -2835,7 +3062,9 @@
                 weight: borderWeight,
                 opacity: 1,
                 fillOpacity: 0.8,
-                pane: nodeHasClockWarning(node) ? 'meshClockMarkers' : 'markerPane'
+                // Keep flagged repeaters clickable when another node shares
+                // their location, including outside the 1-byte focus mode.
+                pane: nodeNeedsForeground(node) ? 'oneBytePane' : 'markerPane'
             });
             
             // Create information-rich tooltip with all node details
@@ -2904,6 +3133,7 @@
                         </tr>
                         ${airtimePopupRow(node)}
                     </table>
+                    ${nodeWarningHTML(node)}
                     ${nodeClockHTML(node)}
                 </div>
             `;
@@ -2926,6 +3156,8 @@
                     clearPathHighlight();
                 }
                 highlightNodeConnectionsForNode(node);
+                // Node labels and warning icons are permanent; keep them
+                // visible when opening or dismissing the node popup.
                 // Open popup on click
                 marker.openPopup();
             });
@@ -3019,7 +3251,7 @@
                 }
                 nodeMapById.set(nodeId, {
                     id: nodeId,
-                    label: shortLabel + (nodeHasClockWarning(node) ? ' ◷' : ''),
+                    label: (isWarningHighlighted(node) ? `${shortLabel} - ${nodeWarningLabel(node)}` : shortLabel) + (nodeHasClockWarning(node) ? ' ◷' : ''),
                     title: `${escapeHtml(node.name)} (${escapeHtml(node.prefix)})` + nodeClockHTML(node), // Full name in tooltip (rendered as HTML by vis-network)
                     prefix: node.prefix, // Store prefix for reference
                     color: {
@@ -3444,7 +3676,9 @@
             const marker = nodeMarkers.get(nodeId);
             if (!marker) return;
             
-            if (nodeId === clickedNodeId) {
+            if (isWarningHighlighted(node) && nodeId !== clickedNodeId) {
+                marker.setStyle({radius: getMapNodeSize(node), fillColor: getNodeFillColor(node), fillOpacity: 1});
+            } else if (nodeId === clickedNodeId) {
                 // Highlight the clicked node - make it larger
                 const highlightSize = getMapNodeSize(node) + 3;
                 const highlightBorderWeight = getBorderWeight(highlightSize, node.is_starred);
@@ -3742,7 +3976,9 @@
         // resolve endpoints the same way edges are drawn. Base 5, cap 13: large
         // enough to click, small enough that dense clusters stay readable.
         const degree = nodeDegrees.get(getNodeId(node)) || 0;
-        return Math.max(5, Math.min(13, 5 + degree * 0.4));
+        const baseSize = Math.max(5, Math.min(13, 5 + degree * 0.4));
+        if (oneByteModeEnabled()) return isWarningHighlighted(node) ? 16 : 4;
+        return baseSize;
     }
 
     // Map dots and lines shrink as you zoom out so dense areas stay readable;
@@ -3761,6 +3997,7 @@
 
     // Shared edge width: log-scaled, capped so heavy edges don't blanket dense areas
     function getEdgeWeight(edge) {
+        if (oneByteModeEnabled()) return 1;
         const weight = Math.max(1, Math.min(5, Math.log10(Math.max(1, edge.observation_count || 1)) * 1.5));
         // Confirmed zero-hop links are the strongest evidence class, but they
         // accumulate observations slowly (one per cycle, cycles are >=12h apart).
@@ -3824,6 +4061,7 @@
     }
     
     function getEdgeColor(edge) {
+        if (oneByteModeEnabled()) return '#94a3b8';
         if (edgeColorMode === 'heat') return heatColor(edge);
 
         // Recency fades one hue (see the age legend); the status lamps stay out of it
@@ -3840,6 +4078,7 @@
     }
 
     function getEdgeOpacity(edge) {
+        if (oneByteModeEnabled()) return 0.18;
         // Heat mode: hot edges pop, cold edges recede (recency shown by color mode 'age')
         if (edgeColorMode === 'heat') return 0.45 + 0.5 * heatT(edge);
 

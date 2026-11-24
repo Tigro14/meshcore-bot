@@ -30,6 +30,7 @@ class ContactTrackingMixin:
     _get_latest_clock_drift_samples: Any
     config: Any
     logger: Any
+    airtime_reader: Any
 
     def _get_tracking_data(
         self,
@@ -62,6 +63,10 @@ class ContactTrackingMixin:
             with self._db_connection() as conn:
                 cursor = conn.cursor()
 
+                from modules.web_viewer.contact_adverts import contact_advert_counts
+                advert_windows = contact_advert_counts(cursor)
+                conn.create_function('contact_adverts_for_window', 1,
+                                     lambda key: advert_windows.get(key, {}).get(since, 0))
                 # Get bot location from config
                 bot_lat = self.config.getfloat('Bot', 'bot_latitude', fallback=None)
                 bot_lon = self.config.getfloat('Bot', 'bot_longitude', fallback=None)
@@ -137,7 +142,7 @@ class ContactTrackingMixin:
                     'path_bytes': path_bytes_expression,
                     'first_heard': "COALESCE(c.first_heard, '')",
                     'last_seen': "COALESCE(c.last_heard, '')",
-                    'advert_count': 'COALESCE(c.advert_count, 0)',
+                    'advert_count': ('COALESCE(c.advert_count, 0)' if since == 'all' else 'contact_adverts_for_window(c.public_key)'),
                 }
                 sort = sort if sort in (*sort_expressions.keys(), 'distance') else 'last_seen'
                 direction = 'asc' if direction == 'asc' else 'desc'
@@ -245,13 +250,52 @@ class ContactTrackingMixin:
                 )
 
                 for entry in tracking:
-                    entry.update(target_clock_status(clock_samples.get(entry['username']),
-                        clock_attempts.get(entry['user_id']), self.config))
+                    clock_status = target_clock_status(clock_samples.get(entry['username']),
+                        clock_attempts.get(entry['user_id']), self.config)
+                    entry.update(clock_status)
+                    windows = advert_windows.get(entry['user_id'], {})
+                    entry['advert_counts'] = {**{window: windows.get(window, 0)
+                                                for window in ('24h', '7d', '30d', '90d')},
+                                             'all': entry['advert_count'] or 0}
+                    if since != 'all':
+                        entry['advert_count'] = windows.get(since, 0)
+
+                # Always a rolling hour, independently of the contact discovery filter.
+                # A small value is partial evidence, never a compliance verdict.
+                reader = getattr(self, 'airtime_reader', None)
+                if reader is not None:
+                    airtime = reader.read(conn, '1h')
+                    by_key = {node['public_key']: node for node in airtime['repeaters']}
+                    for entry in tracking:
+                        if str(entry.get('role') or '').lower() in ('repeater', 'roomserver', 'room server'):
+                            estimate = by_key.get(entry['user_id'].lower())
+                            entry['airtime_duty'] = {
+                                'schema_version': airtime['schema_version'], 'window_seconds': 3600,
+                                'start_time': airtime['start_time'], 'end_time': airtime['end_time'],
+                                'estimated_percent': estimate['last_hour_percent'] if estimate else None,
+                                'reference_percent': 10.0, 'compliance': 'unknown',
+                                'status': estimate['status'] if estimate else 'no_attributed_observation',
+                                'method': 'passive_flood_path_reconstruction',
+                                'direct_percent': estimate['last_hour_direct_percent'] if estimate else None,
+                                'inferred_percent': estimate['last_hour_inferred_percent'] if estimate else None,
+                                'attributed_packets': estimate['last_hour_packets'] if estimate else 0,
+                                'retained_full_hour': estimate['last_hour_history_complete'] if estimate else False,
+                                'capture_uptime_known': False,
+                                'modulation_profiles': airtime['method']['modulation_profiles'],
+                            }
 
                 # Get server statistics for daily tracking using direct database queries
                 server_stats: dict[str, Any] = {}
                 self._tracking_server_stats(cursor, server_stats)
                 server_stats['clock_drift_threshold_seconds'] = clock_drift_threshold
+                # Aggregate the entire filtered cohort, including contacts on other pages.
+                cohort = cursor.execute('SELECT c.public_key, c.advert_count FROM complete_contact_tracking c '
+                                        + where_clause, tuple(where_params)).fetchall()
+                for key, window in (('advertisements_24h', '24h'), ('advertisements_7d', '7d'),
+                                    ('total_advertisements', 'all')):
+                    server_stats[key] = sum((row['advert_count'] or 0) if window == 'all' else
+                                            advert_windows.get(row['public_key'], {}).get(window, 0)
+                                            for row in cohort)
 
                 result: dict[str, Any] = {
                     'tracking_data': tracking,
@@ -297,7 +341,7 @@ class ContactTrackingMixin:
             # Rows written before the ISO-text switch can still hold a numeric epoch, so
             # accept both shapes on their own scale instead of dropping legacy rows.
             where_parts.append(
-                f"(c.last_heard >= datetime('now', 'localtime', {offset}) OR "
+                f"((typeof(c.last_heard) NOT IN ('real', 'integer') AND c.last_heard >= datetime('now', 'localtime', {offset})) OR "
                 f"(typeof(c.last_heard) IN ('real', 'integer') AND "
                 f"CAST(c.last_heard AS REAL) >= CAST(strftime('%s', 'now', {offset}) AS REAL)))"
             )

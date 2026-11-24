@@ -2708,6 +2708,12 @@ class TestClockDriftFreshness:
                 return row
         return None
 
+    def test_db_timestamp_uses_configured_timezone(self, viewer_with_db):
+        viewer_with_db.config.set("Bot", "timezone", "Europe/Paris")
+        parsed = viewer_with_db._parse_db_timestamp("2026-09-23 17:25:28")
+        expected = datetime(2026, 9, 23, 15, 25, 28, tzinfo=timezone.utc).timestamp()
+        assert parsed == expected
+
     def test_fresh_advert_overrides_stale_out_of_sync_message(self, viewer_with_db):
         """TigroBot case: stale 4h-drift message + fresh in-sync advert."""
         now_epoch = int(time.time())
@@ -3025,6 +3031,31 @@ class TestClockSyncTargetsAdminBatteryEnrichment:
             assert 'battery_voltage' not in target
 
 
+def test_dashboard_assistant_function_counts(viewer_with_db):
+    viewer = viewer_with_db
+    with sqlite3.connect(viewer.db_path) as conn:
+        conn.execute('INSERT INTO assistant_function_usage VALUES (?, ?)',
+                     (time.time(), 'mesh.stats.channels'))
+        conn.execute('INSERT INTO assistant_function_usage VALUES (?, ?)',
+                     (time.time() - 90000, 'weather.forecast'))
+    data = viewer.app.test_client().get('/api/stats?top_commands_window=24h').get_json()
+    assert data['top_functions'] == [
+        {'command': 'Statistiques : canaux', 'function': 'mesh.stats.channels', 'count': 1}
+    ]
+
+
+def test_mesh_entry_points_api_and_page(viewer_with_db):
+    client = viewer_with_db.app.test_client()
+    response = client.get('/api/mesh/entry-points?days=1')
+    assert response.status_code == 200
+    assert response.get_json()['ranking'] == []
+    assert client.get('/api/mesh/entry-points?days=999').status_code == 400
+    assert client.get('/api/mesh/entry-points?unscoped=1').get_json()['unscoped_only'] is True
+    assert client.get('/api/mesh/entry-points?unscoped=bad').status_code == 400
+    assert client.get('/mesh-entry-points').status_code == 200
+    assert b'/mesh-entry-points' in client.get('/mesh').data
+
+
 class TestWebViewerTestDmRoute:
     def test_test_dm_route_returns_captured_replies(self, mock_viewer):
         manager = Mock()
@@ -3193,6 +3224,8 @@ class TestApiBbs:
             ('Dave', '', 1),
             ('Erin', '', 1),
         ]
+        for private_body in ('body one', 'body two', 'body three', 'old legacy body', 'legacy body'):
+            assert private_body not in response.get_data(as_text=True)
 
         # 30 min + 2h < 1d; 5d in [3,7); 10d >= 7d. The 1–3d bucket is empty on purpose.
         assert data['age_buckets'] == {'lt_1d': 2, 'd1_3': 0, 'd3_7': 1, 'gte_7d': 1}

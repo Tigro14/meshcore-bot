@@ -687,6 +687,13 @@ class BaseCommand(ABC):
         if not self.honors_skip_channel_check:
             skip_channel_check = False
 
+        return self._can_access(message, skip_channel_check)
+
+    def can_use_service(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        """Authorize an internal catalogue capability independently of direct command visibility."""
+        return self._can_access(message, skip_channel_check)
+
+    def _can_access(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
         # Check channel access (standardized channel override)
         if not skip_channel_check and not self.is_channel_allowed(message):
             return False

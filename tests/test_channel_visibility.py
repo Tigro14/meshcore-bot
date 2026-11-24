@@ -35,19 +35,20 @@ def message(identity, channel="#test", **extra):
     return dict(channel_visibility_id=identity, channel=channel, content="private content", is_dm=False, **extra)
 
 
-def test_unconfigured_channels_are_hidden_and_no_private_key_in_decoder_api(viewer_with_db):
+@pytest.mark.parametrize("path", ["/api/channels", "/api/channels/live"])
+def test_unconfigured_channels_are_hidden_and_no_private_key_in_decoder_api(viewer_with_db, path):
     viewer = viewer_with_db
     add_channel(viewer)
     client = viewer.app.test_client()
     channels = client.get("/radio/api/channels").get_json()["channels"]
     assert channels[0]["live_messages_visible"] is False
-    assert client.get("/api/channels/live").get_json() == {"channels": []}
+    assert client.get(path).get_json() == {"channels": []}
     result = client.put(
         "/radio/api/channels/live-visibility",
         json=dict(channel_idx=1, channel_name="#test", live_messages_visible=True),
     )
     assert result.status_code == 200
-    visible = client.get("/api/channels/live").get_json()["channels"]
+    visible = client.get(path).get_json()["channels"]
     assert visible == [{"name": "#test", "type": "custom"}]
     assert "ab" * 16 not in json.dumps(visible)
 

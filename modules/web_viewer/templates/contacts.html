@@ -485,7 +485,7 @@
             </div>
         </div>
     </div>
-    
+
     <!-- Advertisements -->
     <div class="col-md-3">
         <div class="card h-100">
@@ -510,7 +510,7 @@
             </div>
         </div>
     </div>
-    
+
     <!-- New Devices -->
     <div class="col-md-3">
         <div class="card h-100">
@@ -538,7 +538,7 @@
             </div>
         </div>
     </div>
-        
+
     <!-- Activity Trends -->
     <div class="col-md-3">
         <div class="card h-100">
@@ -551,7 +551,7 @@
         </div>
     </div>
         </div>
-        
+
 <!-- Tracking Table -->
 <div class="row">
     <div class="col-12">
@@ -768,10 +768,10 @@
                                 <button type="button" class="sort-btn">First Heard&nbsp;<i class="fas fa-sort sort-icon" aria-hidden="true"></i></button>
                             </th>
                             <th class="sortable sort-active" data-sort="last_seen" aria-sort="descending">
-                                <button type="button" class="sort-btn">Last Heard&nbsp;<i class="fas fa-sort-down sort-icon" aria-hidden="true"></i></button>
+                                <button type="button" class="sort-btn">Dernière annonce&nbsp;<i class="fas fa-sort-down sort-icon" aria-hidden="true"></i></button>
                             </th>
-                            <th class="sortable" data-sort="advert_count">
-                                <button type="button" class="sort-btn">Adverts&nbsp;<i class="fas fa-sort sort-icon" aria-hidden="true"></i></button>
+                            <th class="sortable" data-sort="advert_count" title="Annonces distinctes reçues sur la période sélectionnée ; All time affiche le total cumulé.">
+                                <button type="button" class="sort-btn"><span id="contacts-adverts-heading">Adverts</span>&nbsp;<i class="fas fa-sort sort-icon" aria-hidden="true"></i></button>
                             </th>
                             <th>Actions</th>
                         </tr>
@@ -872,7 +872,7 @@ class ModernContactsManager {
         this.activityChart = null; // Chart.js instance for activity trends
         this.initializeContacts();
     }
-    
+
     async initializeContacts() {
         const savedTimespan = localStorage.getItem('contactsTimespan');
         const valid = ['24h', '7d', '30d', '90d', 'all'];
@@ -890,7 +890,7 @@ class ModernContactsManager {
         }
         await this.loadContactsData();
     }
-    
+
     async loadContactsData({ resetPage = false, clearSelection = false } = {}) {
         if (resetPage) this.currentPage = 1;
         if (clearSelection) this.selectedContactIds.clear();
@@ -919,12 +919,12 @@ class ModernContactsManager {
             });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
-            
+
             if (data.error) {
                 this.showError('Failed to load contacts data: ' + data.error);
                 return;
             }
-            
+
             this.contactsData = {
                 tracking_data: data.tracking_data || [],
                 server_stats: data.server_stats || {}
@@ -942,9 +942,17 @@ class ModernContactsManager {
             this.filteredStats = data.filtered_stats || {};
             this.updateSortIcons();
             this.renderContactsData();
+            const advertHeader = document.querySelector('th[data-sort="advert_count"]');
+            const advertHeading = document.getElementById('contacts-adverts-heading');
+            if (advertHeading) advertHeading.textContent = 'Adverts · ' + (since === 'all' ? 'All' : since);
+            if (advertHeader) {
+                advertHeader.title = 'Annonces distinctes reçues — ' +
+                    ({'24h': '24 heures', '7d': '7 jours', '30d': '30 jours',
+                      '90d': '90 jours', all: 'total cumulé'}[since] || since);
+            }
             this.updatePagination();
             this.updateStatistics();
-            
+
         } catch (error) {
             if (error.name === 'AbortError') return;
             console.error('Error loading contacts data:', error);
@@ -971,7 +979,7 @@ class ModernContactsManager {
             this.updatePagination();
         }
     }
-    
+
     setupEventHandlers() {
         document.querySelectorAll('.contacts-export-action').forEach(link => {
             link.addEventListener('click', (event) => {
@@ -984,7 +992,7 @@ class ModernContactsManager {
         document.getElementById('refresh-contacts').addEventListener('click', () => {
             this.loadContactsData();
         });
-        
+
         document.getElementById('search-contacts').addEventListener('input', (e) => {
             this.searchTerm = e.target.value.toLowerCase().trim();
             window.clearTimeout(this.searchTimer);
@@ -992,7 +1000,7 @@ class ModernContactsManager {
                 this.loadContactsData({ resetPage: true, clearSelection: true });
             }, 300);
         });
-        
+
         document.getElementById('contacts-timespan').addEventListener('change', () => {
             const since = document.getElementById('contacts-timespan').value;
             localStorage.setItem('contactsTimespan', since);
@@ -1025,11 +1033,11 @@ class ModernContactsManager {
                 sel.dispatchEvent(new Event('change', { bubbles: true }));
             });
         }
-        
+
         document.getElementById('bulk-delete-contacts').addEventListener('click', () => {
             this.showBulkDeleteConfirmation();
         });
-        
+
         const listPanel = document.getElementById('contacts-list-panel');
         if (listPanel) {
             listPanel.addEventListener('change', (e) => {
@@ -1078,7 +1086,7 @@ class ModernContactsManager {
                 }
             });
         }
-        
+
         // Add click handlers for sortable columns
         document.querySelectorAll('.sortable .sort-btn').forEach(button => {
             button.addEventListener('click', () => {
@@ -1100,7 +1108,7 @@ class ModernContactsManager {
             this.loadContactsData();
         });
     }
-    
+
     setSort(column) {
         if (this.sortColumn === column) {
             // Toggle direction if same column
@@ -1111,19 +1119,19 @@ class ModernContactsManager {
             this.sortDirection = 'asc';
         }
     }
-    
+
     updateSortIcons() {
         // Only touch dedicated sort chevrons — never the hops path-encoding (i) tip.
         document.querySelectorAll('.sortable .sort-icon').forEach(icon => {
             icon.className = 'fas fa-sort sort-icon';
         });
-        
+
         // Remove active class from all headers
         document.querySelectorAll('.sortable').forEach(header => {
             header.classList.remove('sort-active');
             header.removeAttribute('aria-sort');
         });
-        
+
         // Add active class and correct icon to current sort column
         const activeHeader = document.querySelector(`[data-sort="${this.sortColumn}"]`);
         if (activeHeader) {
@@ -1178,7 +1186,7 @@ class ModernContactsManager {
             });
         });
     }
-    
+
     // Distance and SNR on a phone card, labeled, leaving out what isn't known.
     formatCardReadings(contact) {
         const parts = [];
@@ -1228,6 +1236,7 @@ class ModernContactsManager {
                                 <div class="d-flex align-items-center min-w-0">${this.formatHops(contact)}</div>
                                 <div class="d-flex align-items-center gap-1"><span class="text-muted small">Bytes/hop:</span>${this.formatPathBytes(contact)}</div>
                                 ${this.formatPathEncodingBadge(contact)}
+                                ${this.formatDutyCycle(contact)}
                                 </div>
                                 <div class="small"><span class="contacts-num">${(Number(contact.advert_count) || 0).toLocaleString()}</span> <span class="text-muted">adverts</span></div>
                             </div>
@@ -1292,7 +1301,7 @@ class ModernContactsManager {
                 <td class="contacts-location-cell">${this.formatLocation(contact)}</td>
                 <td>${this.formatDistance(contact)}</td>
                 <td>${this.formatSignal(contact)}</td>
-                <td><div class="d-flex flex-column align-items-start gap-1">${this.formatHops(contact)}${this.formatPathEncodingBadge(contact)}${this.formatBattery(contact)}</div></td>
+                <td><div class="d-flex flex-column align-items-start gap-1">${this.formatHops(contact)}${this.formatPathEncodingBadge(contact)}${this.formatBattery(contact)}${this.formatDutyCycle(contact)}</div></td>
                 <td>${this.formatPathBytes(contact)}</td>
                 <td>${this.formatTimestamp(contact.first_heard)}</td>
                 <td>${this.formatTimeAgo(contact.last_seen)}</td>
@@ -1352,7 +1361,7 @@ class ModernContactsManager {
         if (previous) previous.disabled = !this.pagination.has_previous;
         if (next) next.disabled = !this.pagination.has_next;
     }
-    
+
     updateBulkDeleteButton() {
         const btn = document.getElementById('bulk-delete-contacts');
         const countEl = document.getElementById('bulk-delete-count');
@@ -1367,7 +1376,7 @@ class ModernContactsManager {
             }
         }
     }
-    
+
     updateSelectAllCheckbox() {
         const selectAll = document.getElementById('contacts-select-all');
         const selectAllMobile = document.getElementById('contacts-select-all-mobile');
@@ -1382,29 +1391,29 @@ class ModernContactsManager {
         sync(selectAll);
         sync(selectAllMobile);
     }
-    
+
     updateStatistics() {
         const now = new Date();
         const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        
+
         // Calculate time-based metrics
         const contacts24h = this.filteredStats.contacts_24h ?? this.filteredData.filter(contact => {
             const lastSeen = new Date(contact.last_seen);
             return lastSeen >= oneDayAgo;
         }).length;
-        
+
         const contacts7d = this.filteredStats.contacts_7d ?? this.filteredData.filter(contact => {
             const lastSeen = new Date(contact.last_seen);
             return lastSeen >= oneWeekAgo;
         }).length;
-        
+
         const contactsAll = this.filteredStats.contacts_total ?? this.filteredData.length;
-        
+
         // Calculate advertisement metrics using daily tracking data
         // Note: These should now be provided by the server from the daily_advertisements table
         // Fallback to client-side calculation if server data not available
-        
+
         // Try to get server-provided daily stats first
         const serverStats = this.contactsData.server_stats || {};
         const adverts24h = (serverStats.advertisements_24h !== undefined) ? serverStats.advertisements_24h : this.filteredData.filter(contact => {
@@ -1414,78 +1423,78 @@ class ModernContactsManager {
             const contactDate = new Date(lastSeen.getFullYear(), lastSeen.getMonth(), lastSeen.getDate());
             return contactDate.getTime() === today.getTime();
         }).reduce((sum, contact) => sum + (contact.advert_count || 0), 0);
-        
+
         const adverts7d = (serverStats.advertisements_7d !== undefined) ? serverStats.advertisements_7d : this.filteredData.filter(contact => {
             const lastSeen = new Date(contact.last_seen);
             return lastSeen >= oneWeekAgo && lastSeen < oneDayAgo;
         }).reduce((sum, contact) => sum + (contact.advert_count || 0), 0);
-        
+
         const advertsAll = (serverStats.total_advertisements !== undefined) ? serverStats.total_advertisements : this.filteredData.reduce((sum, contact) => sum + (contact.advert_count || 0), 0);
-        
+
         // Calculate new device metrics (devices first seen in the last 7 days)
         // Try different possible device type values
         const newCompanions = this.filteredStats.new_companions ?? this.filteredData.filter(contact => {
             const firstHeard = new Date(contact.first_heard);
             const deviceType = (contact.device_type || '').toLowerCase();
             return firstHeard >= oneWeekAgo && (
-                deviceType === 'companion' || 
+                deviceType === 'companion' ||
                 deviceType === 'companions' ||
                 deviceType.includes('companion')
             );
         }).length;
-        
+
         const newRepeaters = this.filteredStats.new_repeaters ?? this.filteredData.filter(contact => {
             const firstHeard = new Date(contact.first_heard);
             const deviceType = (contact.device_type || '').toLowerCase();
             return firstHeard >= oneWeekAgo && (
-                deviceType === 'repeater' || 
+                deviceType === 'repeater' ||
                 deviceType === 'repeaters' ||
                 deviceType.includes('repeater')
             );
         }).length;
-        
+
         const newRoomServers = this.filteredStats.new_room_servers ?? this.filteredData.filter(contact => {
             const firstHeard = new Date(contact.first_heard);
             const deviceType = (contact.device_type || '').toLowerCase();
             return firstHeard >= oneWeekAgo && (
-                deviceType === 'room_server' || 
+                deviceType === 'room_server' ||
                 deviceType === 'roomserver' ||
                 deviceType === 'room_servers' ||
                 deviceType.includes('room') ||
                 deviceType.includes('server')
             );
         }).length;
-        
+
         // Update contact metrics (grouped digits keep big counts on one line)
         const fmt = (n) => (Number(n) || 0).toLocaleString();
         document.getElementById('contacts-24h').textContent = fmt(contacts24h);
         document.getElementById('contacts-7d').textContent = fmt(contacts7d);
         document.getElementById('contacts-all').textContent = fmt(contactsAll);
-        
+
         // Update advertisement metrics
         document.getElementById('adverts-24h').textContent = fmt(adverts24h);
         document.getElementById('adverts-7d').textContent = fmt(adverts7d);
         document.getElementById('adverts-all').textContent = fmt(advertsAll);
-        
+
         // Update new device metrics
         document.getElementById('new-companions').textContent = fmt(newCompanions);
         document.getElementById('new-repeaters').textContent = fmt(newRepeaters);
         document.getElementById('new-room-servers').textContent = fmt(newRoomServers);
-        
+
         // Update activity trends chart
         this.updateActivityTrendsChart();
     }
-    
+
     updateActivityTrendsChart() {
         const serverStats = this.contactsData.server_stats || {};
         const dailyDataByRole = serverStats.daily_nodes_30d_by_role || [];
         const nodesTodayByRole = serverStats.nodes_24h_by_role || {};
-        
+
         // Destroy existing chart if it exists
         if (this.activityChart) {
             this.activityChart.destroy();
         }
-        
+
         // Prepare data for the last 30 days by role
         // Create a map of date -> role counts for quick lookup
         const dataMapByRole = {};
@@ -1498,7 +1507,7 @@ class ModernContactsManager {
                 other: item.other || 0
             };
         });
-        
+
         // Generate labels and data arrays for each role
         const labels = [];
         const companionData = [];
@@ -1506,17 +1515,17 @@ class ModernContactsManager {
         const roomserverData = [];
         const sensorData = [];
         const otherData = [];
-        
+
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD format for today
-        
+
         for (let i = 29; i >= 0; i--) {
             const date = new Date(today);
             date.setDate(date.getDate() - i);
             const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD format
-            
+
             labels.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-            
+
             // Use today's data from server stats if this is today, otherwise use dataMapByRole
             if (dateStr === todayStr) {
                 companionData.push(nodesTodayByRole.companion || 0);
@@ -1533,11 +1542,11 @@ class ModernContactsManager {
                 otherData.push(dayData.other || 0);
             }
         }
-        
+
         // Get canvas context
         const ctx = document.getElementById('activityTrendsChart');
         if (!ctx) return;
-        
+
         // Role colors come from the --role-* tokens, so the chart and the
         // device-type chips agree in both themes.
         const roleStyles = getComputedStyle(document.documentElement);
@@ -1667,10 +1676,10 @@ class ModernContactsManager {
             }
         });
     }
-    
+
     formatLastSeen(lastSeen) {
         if (!lastSeen) return 'Never';
-        
+
         const date = new Date(lastSeen);
         const now = new Date();
         const diffMs = now - date;
@@ -1679,7 +1688,7 @@ class ModernContactsManager {
         const diffDays = Math.floor(diffHours / 24);
         const diffWeeks = Math.floor(diffDays / 7);
         const diffMonths = Math.floor(diffDays / 30);
-        
+
         if (diffMonths > 0) {
             return `${diffMonths}mo ago`;
         } else if (diffWeeks > 0) {
@@ -1694,10 +1703,10 @@ class ModernContactsManager {
             return 'Just now';
         }
     }
-    
+
     formatLastMessage(lastMessage) {
         if (!lastMessage) return 'Never';
-        
+
         const date = new Date(lastMessage);
         const now = new Date();
         const diffMs = now - date;
@@ -1706,7 +1715,7 @@ class ModernContactsManager {
         const diffDays = Math.floor(diffHours / 24);
         const diffWeeks = Math.floor(diffDays / 7);
         const diffMonths = Math.floor(diffDays / 30);
-        
+
         if (diffMonths > 0) {
             return `${diffMonths}mo ago`;
         } else if (diffWeeks > 0) {
@@ -1721,15 +1730,15 @@ class ModernContactsManager {
             return 'Just now';
         }
     }
-    
+
     getStatusBadge(lastSeen) {
         if (!lastSeen) return '<span class="badge bg-secondary">Unknown</span>';
-        
+
         const date = new Date(lastSeen);
         const now = new Date();
         const diffMs = now - date;
         const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-        
+
         if (diffHours < 1) {
             return '<span class="badge bg-success">Online</span>';
         } else if (diffHours < 24) {
@@ -1738,7 +1747,7 @@ class ModernContactsManager {
             return '<span class="badge bg-secondary">Offline</span>';
         }
     }
-    
+
     formatLocation(contact) {
         if (contact.city && contact.state) {
             return `${this.escapeHtml(contact.city)}, ${this.escapeHtml(contact.state)}`;
@@ -1750,7 +1759,7 @@ class ModernContactsManager {
             return '<span class="text-muted">Unknown</span>';
         }
     }
-    
+
     formatDistance(contact) {
         if (contact.distance !== undefined && contact.distance !== null) {
             if (contact.distance < 1) {
@@ -1762,11 +1771,11 @@ class ModernContactsManager {
             return '<span class="text-muted">—</span>';
         }
     }
-    
+
     formatDeviceType(contact) {
         const deviceType = contact.device_type || 'Unknown';
         const role = contact.role || '';
-        
+
         // Role colors are data colors shared with the activity chart, as tints
         // with readable text; the lamp colors stay reserved for state.
         const displayText = deviceType;
@@ -1774,7 +1783,7 @@ class ModernContactsManager {
 
         return `<span class="role-chip role-${roleKey}">${this.escapeHtml(displayText)}</span>`;
     }
-    
+
     formatSignal(contact) {
         if (contact.snr !== null && contact.snr !== undefined) {
             const snr = parseFloat(contact.snr);
@@ -1783,7 +1792,7 @@ class ModernContactsManager {
             return '<span class="text-muted">—</span>';
         }
     }
-    
+
     formatHops(contact) {
         const hopCount = Number(contact.hop_count) || 0;
         const outPath = contact.out_path || '';
@@ -1791,11 +1800,11 @@ class ModernContactsManager {
         // Full paths are loaded on demand in the modal; the list only needs the count.
         const pathsCount = Number(contact.paths_count) || 0;
         const hasMultiplePaths = pathsCount > 1;
-        
+
         // Escape the path for use in HTML attributes
         const escapedPath = this.escapeAttribute(outPath);
         const escapedUserId = this.escapeAttribute(contact.user_id);
-        
+
         // If we have path data, add tooltip and click functionality
         if (outPath && outPathLen > 0) {
             // Create a unique ID for this tooltip
@@ -1848,7 +1857,7 @@ class ModernContactsManager {
             ? `<span class="contacts-num">${bytes}</span>`
             : '<span class="text-muted">—</span>';
     }
-    
+
     setupPathTooltips() {
         // Create a global custom tooltip element if it doesn't exist
         let customTooltip = document.getElementById('custom-path-tooltip');
@@ -1859,22 +1868,22 @@ class ModernContactsManager {
             customTooltip.style.cssText = 'position: absolute; z-index: 1070; display: none; padding: 0.5rem; background-color: rgba(0, 0, 0, 0.9); color: white; border-radius: 0.25rem; font-size: 0.875rem; max-width: 300px; pointer-events: none;';
             document.body.appendChild(customTooltip);
         }
-        
+
         // Setup event listeners for path tooltips after rendering
         document.querySelectorAll('.path-badge').forEach(badge => {
             const pathHex = badge.dataset.pathHex;
             if (!pathHex) return;
-            
+
             // Check if tooltip is already set up
             if (badge.dataset.tooltipSetup === 'true') return;
-            
+
             badge.dataset.tooltipSetup = 'true';
             badge.addEventListener('click', () => this.showPathsModal(badge.dataset.userId));
-            
+
             // Load path data on first hover (for tooltip)
             let pathLoaded = false;
             let pathContent = 'Loading path...';
-            
+
             const showTooltip = (event) => {
                 const rect = badge.getBoundingClientRect();
                 customTooltip.textContent = pathContent;
@@ -1882,7 +1891,7 @@ class ModernContactsManager {
                 customTooltip.style.display = 'block';
                 customTooltip.style.left = (rect.left + rect.width / 2 - customTooltip.offsetWidth / 2) + 'px';
                 customTooltip.style.top = (rect.top - customTooltip.offsetHeight - 8) + 'px';
-                
+
                 // Adjust if tooltip goes off screen
                 const tooltipRect = customTooltip.getBoundingClientRect();
                 if (tooltipRect.left < 10) {
@@ -1895,27 +1904,27 @@ class ModernContactsManager {
                     customTooltip.style.top = (rect.bottom + 8) + 'px';
                 }
             };
-            
+
             const hideTooltip = () => {
                 customTooltip.style.display = 'none';
             };
-            
+
             // Only show tooltip on hover, click opens modal
             badge.addEventListener('mouseenter', async (event) => {
                 // Don't show tooltip if user is clicking (will open modal)
                 if (event.target === badge && event.type === 'mouseenter') {
                     showTooltip(event);
-                    
+
                     // If path is already loaded, we're done
                     if (pathLoaded) {
                         return;
                     }
-                    
+
                     // If we're already loading, don't start another request
                     if (badge.dataset.loading === 'true') {
                         return;
                     }
-                    
+
                     try {
                         badge.dataset.loading = 'true';
                         const body = { path_hex: pathHex };
@@ -1932,17 +1941,17 @@ class ModernContactsManager {
                             },
                             body: JSON.stringify(body)
                         });
-                        
+
                         const data = await response.json();
-                        
+
                         if (!response.ok || !data.success) {
                             throw new Error(data.error || 'Failed to decode path');
                         }
-                        
+
                         if (!data.path || !Array.isArray(data.path)) {
                             throw new Error('Invalid path data format');
                         }
-                        
+
                         // Format the path response
                         const pathLines = data.path.map(node => {
                             if (node.found) {
@@ -1954,21 +1963,21 @@ class ModernContactsManager {
                                 return `${node.node_id}: Unknown`;
                             }
                         });
-                        
+
                         pathContent = pathLines.length > 0 ? pathLines.join('\n') : 'No path data';
                         pathLoaded = true;
                         badge.dataset.loading = 'false';
-                        
+
                         // Update tooltip content if still hovering
                         if (badge.matches(':hover')) {
                             showTooltip(event);
                         }
-                        
+
                     } catch (error) {
                         console.error('Error loading path tooltip:', error);
                         pathContent = 'Error loading path: ' + error.message;
                         badge.dataset.loading = 'false';
-                        
+
                         // Update tooltip content if still hovering
                         if (badge.matches(':hover')) {
                             showTooltip(event);
@@ -1976,7 +1985,7 @@ class ModernContactsManager {
                     }
                 }
             });
-            
+
             badge.addEventListener('mouseleave', hideTooltip);
             badge.addEventListener('mousemove', (event) => {
                 if (badge.matches(':hover')) {
@@ -1985,7 +1994,7 @@ class ModernContactsManager {
             });
         });
     }
-    
+
     formatPathHex(pathHex, bytesPerHop) {
         // Break hex string into chunks for readability. bytesPerHop 1,2,3 → 2,4,6 hex chars per node.
         if (!pathHex) return '';
@@ -1996,11 +2005,11 @@ class ModernContactsManager {
         }
         return chunks.join(' ') || pathHex;
     }
-    
+
     sortPaths(paths, sortOrder) {
         // Create a copy to avoid mutating the original array
         const sortedPaths = [...paths];
-        
+
         switch (sortOrder) {
             case 'length':
                 // Sort by path_length ascending (shortest first)
@@ -2034,16 +2043,16 @@ class ModernContactsManager {
                     return aLength - bLength;
                 });
         }
-        
+
         return sortedPaths;
     }
-    
+
     renderPathsInModal(paths, primaryPath) {
         this.renderedModalPaths = paths;
         if (paths.length === 0) {
             return '<p class="text-muted">No path data available for this contact.</p>';
         }
-        
+
         let pathsHtml = '<div class="list-group paths-list-group">';
         for (let i = 0; i < paths.length; i++) {
             const path = paths[i];
@@ -2056,7 +2065,7 @@ class ModernContactsManager {
             const byteCount = Number(path.path_length) || 0;
             const seenCount = Number(path.observation_count) || 0;
             const bytesPerHopAttr = bph != null ? ` data-path-bph="${bph}"` : '';
-            
+
             pathsHtml += `
                 <div class="list-group-item path-list-item ${isPrimary ? 'is-primary' : ''}" id="path-item-${i}"${bytesPerHopAttr}>
                     <div class="d-flex justify-content-between align-items-start">
@@ -2079,16 +2088,16 @@ class ModernContactsManager {
         pathsHtml += '</div>';
         return pathsHtml;
     }
-    
+
     async showPathsModal(userId) {
         // Find the contact data
-        const contact = this.filteredData.find(c => c.user_id === userId) || 
+        const contact = this.filteredData.find(c => c.user_id === userId) ||
                       this.contactsData.tracking_data.find(c => c.user_id === userId);
         if (!contact) {
             this.showError('Contact data not found');
             return;
         }
-        
+
         // Store contact and paths for re-rendering
         this.currentModalContact = contact;
         const primaryPath = contact.out_path || '';
@@ -2108,16 +2117,16 @@ class ModernContactsManager {
             console.error('Error loading contact paths:', err);
         }
         this.currentModalPaths = detailPaths;
-        
+
         // Load sort preference from localStorage (default to 'length')
         const sortOrder = localStorage.getItem('contactsPathSortOrder') || 'length';
-        
+
         // Sort paths according to preference
         const sortedPaths = this.sortPaths(this.currentModalPaths, sortOrder);
-        
+
         // Build modal content
         const pathsHtml = this.renderPathsInModal(sortedPaths, primaryPath);
-        
+
         // Create modal HTML with dark mode support
         const modalHtml = `
             <div class="modal fade" id="pathsModal" tabindex="-1" aria-labelledby="pathsModalTitle">
@@ -2152,13 +2161,13 @@ class ModernContactsManager {
                 </div>
             </div>
         `;
-        
+
         // Remove existing modal if any
         const existingModal = document.getElementById('pathsModal');
         if (existingModal) {
             existingModal.remove();
         }
-        
+
         // Add modal to page
         document.body.insertAdjacentHTML('beforeend', modalHtml);
 
@@ -2174,7 +2183,7 @@ class ModernContactsManager {
                 : null;
             this.decodePathInModal(String(path.path_hex ?? ''), index, bph);
         });
-        
+
         // Setup sort dropdown event handler
         const sortSelect = document.getElementById('pathSortOrder');
         if (sortSelect) {
@@ -2182,10 +2191,10 @@ class ModernContactsManager {
                 const newSortOrder = e.target.value;
                 // Save preference to localStorage
                 localStorage.setItem('contactsPathSortOrder', newSortOrder);
-                
+
                 // Re-sort paths
                 const reSortedPaths = this.sortPaths(this.currentModalPaths, newSortOrder);
-                
+
                 // Re-render paths
                 const pathsContainer = document.getElementById('paths-list-container');
                 if (pathsContainer) {
@@ -2193,11 +2202,11 @@ class ModernContactsManager {
                 }
             });
         }
-        
+
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById('pathsModal'));
         modal.show();
-        
+
         // Clean up modal when hidden
         document.getElementById('pathsModal').addEventListener('hidden.bs.modal', () => {
             document.getElementById('pathsModal').remove();
@@ -2206,7 +2215,7 @@ class ModernContactsManager {
             this.currentModalPaths = null;
         });
     }
-    
+
     async decodePathInModal(pathHex, pathIndex, pathBytesPerHop) {
         const decodedDiv = document.getElementById(`decoded-path-${pathIndex}`);
         const pathItem = document.getElementById(`path-item-${pathIndex}`);
@@ -2238,17 +2247,17 @@ class ModernContactsManager {
                 },
                 body: JSON.stringify(body)
             });
-            
+
             const data = await response.json();
-            
+
             if (!response.ok || !data.success) {
                 throw new Error(data.error || 'Failed to decode path');
             }
-            
+
             if (!data.path || !Array.isArray(data.path)) {
                 throw new Error('Invalid path data format');
             }
-            
+
             const alert = document.createElement('div');
             alert.className = 'alert alert-info decoded-path-alert mb-0';
             const heading = document.createElement('strong');
@@ -2271,7 +2280,7 @@ class ModernContactsManager {
             });
             alert.append(heading, content);
             decodedDiv.replaceChildren(alert);
-            
+
         } catch (error) {
             console.error('Error decoding path:', error);
             const alert = document.createElement('div');
@@ -2283,17 +2292,17 @@ class ModernContactsManager {
             button.innerHTML = originalHtml;
         }
     }
-    
+
     formatTimestamp(timestamp) {
         if (!timestamp) return '<span class="text-muted">Never</span>';
-        
+
         const date = new Date(timestamp);
         return `${date.toLocaleDateString()} <span class="contacts-num">${date.toLocaleTimeString()}</span>`;
     }
-    
+
     formatTimeAgo(timestamp) {
         if (!timestamp) return '<span class="text-muted">Never</span>';
-        
+
         const date = new Date(timestamp);
         const now = new Date();
         const diffMs = now - date;
@@ -2302,7 +2311,7 @@ class ModernContactsManager {
         const diffDays = Math.floor(diffHours / 24);
         const diffWeeks = Math.floor(diffDays / 7);
         const diffMonths = Math.floor(diffDays / 30);
-        
+
         if (diffMonths > 0) {
             return `${diffMonths}mo ago`;
         } else if (diffWeeks > 0) {
@@ -2317,7 +2326,7 @@ class ModernContactsManager {
             return 'just now';
         }
     }
-    
+
     async viewAdvertData(userId) {
         // Find the contact data (for the title); the advert payload is loaded on demand below.
         const contact = this.filteredData.find(c => c.user_id === userId);
@@ -2375,16 +2384,16 @@ class ModernContactsManager {
                 </div>
             </div>
         `;
-        
+
         // Remove existing modal if any
         const existingModal = document.getElementById('advertModal');
         if (existingModal) {
             existingModal.remove();
         }
-        
+
         // Add modal to page
         document.body.insertAdjacentHTML('beforeend', modalHtml);
-        
+
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById('advertModal'));
         modal.show();
@@ -2409,7 +2418,7 @@ class ModernContactsManager {
             }
         }
     }
-    
+
     async geocodeContact(userId, buttonElement = null) {
         // Find the contact data
         const contact = this.filteredData.find(c => c.user_id === userId);
@@ -2417,27 +2426,27 @@ class ModernContactsManager {
             this.showError('Contact data not found');
             return;
         }
-        
+
         // Check if contact has valid coordinates
         if (!contact.latitude || !contact.longitude || contact.latitude === 0 || contact.longitude === 0) {
             this.showError('Contact does not have valid coordinates');
             return;
         }
-        
+
         // Get the button element - use passed element or find it
         const button = buttonElement || document.querySelector(`button[onclick*="${userId.substring(0, 16)}"]`);
         if (!button) {
             this.showError('Button not found');
             return;
         }
-        
+
         // Disable button and show loading state
         const originalHTML = button.innerHTML;
         button.disabled = true;
         button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
         button.classList.remove('btn-outline-primary');
         button.classList.add('btn-secondary');
-        
+
         try {
             // Call the geocoding API
             const response = await fetch('/api/geocode-contact', {
@@ -2450,18 +2459,18 @@ class ModernContactsManager {
                     public_key: userId
                 })
             });
-            
+
             const data = await response.json();
-            
+
             if (!response.ok || !data.success) {
                 throw new Error(data.error || 'Geocoding failed');
             }
-            
+
             // Check if we got any location data
             if (!data.location || (!data.location.city && !data.location.state && !data.location.country)) {
                 throw new Error('Geocoding returned no location data');
             }
-            
+
             // Update the contact data in our local array
             const contactIndex = this.filteredData.findIndex(c => c.user_id === userId);
             if (contactIndex !== -1) {
@@ -2469,7 +2478,7 @@ class ModernContactsManager {
                 this.filteredData[contactIndex].state = data.location.state || this.filteredData[contactIndex].state;
                 this.filteredData[contactIndex].country = data.location.country || this.filteredData[contactIndex].country;
             }
-            
+
             // Also update in the main contacts data
             const mainContactIndex = this.contactsData.tracking_data.findIndex(c => c.user_id === userId);
             if (mainContactIndex !== -1) {
@@ -2477,13 +2486,13 @@ class ModernContactsManager {
                 this.contactsData.tracking_data[mainContactIndex].state = data.location.state || this.contactsData.tracking_data[mainContactIndex].state;
                 this.contactsData.tracking_data[mainContactIndex].country = data.location.country || this.contactsData.tracking_data[mainContactIndex].country;
             }
-            
+
             // Re-render the table to show updated location
             this.renderContactsData();
-            
+
             // Show success message
             this.showSuccess(data.message || 'Location geocoded successfully');
-            
+
         } catch (error) {
             console.error('Error geocoding contact:', error);
             this.showError('Failed to geocode contact: ' + error.message);
@@ -2495,7 +2504,7 @@ class ModernContactsManager {
             button.classList.add('btn-outline-primary');
         }
     }
-    
+
     async toggleStar(userId, buttonElement = null) {
         // Find the contact data
         const contact = this.filteredData.find(c => c.user_id === userId);
@@ -2503,19 +2512,19 @@ class ModernContactsManager {
             this.showError('Contact data not found');
             return;
         }
-        
+
         // Get the button element - use passed element or find it
         const button = buttonElement || document.querySelector(`button[onclick*="toggleStar('${userId.substring(0, 16)}"]`);
         if (!button) {
             this.showError('Button not found');
             return;
         }
-        
+
         // Disable button and show loading state
         const originalHTML = button.innerHTML;
         button.disabled = true;
         button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-        
+
         try {
             // Call the toggle star API
             const response = await fetch('/api/toggle-star-contact', {
@@ -2528,32 +2537,32 @@ class ModernContactsManager {
                     public_key: userId
                 })
             });
-            
+
             const data = await response.json();
-            
+
             if (!response.ok || !data.success) {
                 throw new Error(data.error || 'Failed to toggle star status');
             }
-            
+
             // Update the contact data in our local array
             const contactIndex = this.filteredData.findIndex(c => c.user_id === userId);
             if (contactIndex !== -1) {
                 this.filteredData[contactIndex].is_starred = data.is_starred;
             }
-            
+
             // Also update in the main contacts data
             const mainContactIndex = this.contactsData.tracking_data.findIndex(c => c.user_id === userId);
             if (mainContactIndex !== -1) {
                 this.contactsData.tracking_data[mainContactIndex].is_starred = data.is_starred;
             }
-            
+
             // Re-render the table to show updated star status
             this.renderContactsData();
-            
+
             // Show success message
             const action = data.is_starred ? 'starred' : 'unstarred';
             this.showSuccess(`Contact ${action} successfully. Path command will ${data.is_starred ? 'strongly prefer' : 'no longer prefer'} this repeater.`);
-            
+
         } catch (error) {
             console.error('Error toggling star status:', error);
             this.showError('Failed to toggle star status: ' + error.message);
@@ -2563,7 +2572,7 @@ class ModernContactsManager {
             button.innerHTML = originalHTML;
         }
     }
-    
+
     showDeleteConfirmation(userId) {
         // Find the contact data
         const contact = this.filteredData.find(c => c.user_id === userId);
@@ -2619,42 +2628,42 @@ class ModernContactsManager {
                 </div>
             </div>
         `;
-        
+
         // Remove existing modal if any
         const existingModal = document.getElementById('deleteContactModal');
         if (existingModal) {
             existingModal.remove();
         }
-        
+
         // Add modal to page
         document.body.insertAdjacentHTML('beforeend', modalHtml);
-        
+
         // Get the modal element
         const modalElement = document.getElementById('deleteContactModal');
         const modal = new bootstrap.Modal(modalElement);
-        
+
         // Set up delete button handler
         const confirmBtn = document.getElementById('confirmDeleteBtn');
         confirmBtn.addEventListener('click', () => {
             this.deleteContact(userId, username, modalElement);
         });
-        
+
         // Show modal
         modal.show();
-        
+
         // Clean up modal when hidden
         modalElement.addEventListener('hidden.bs.modal', () => {
             modalElement.remove();
         });
     }
-    
+
     async deleteContact(userId, username, modalElement) {
         // Disable the delete button and show loading state
         const confirmBtn = document.getElementById('confirmDeleteBtn');
         const originalHTML = confirmBtn.innerHTML;
         confirmBtn.disabled = true;
         confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
-        
+
         try {
             // Call the delete API
             const response = await fetch('/api/delete-contact', {
@@ -2667,35 +2676,35 @@ class ModernContactsManager {
                     public_key: userId
                 })
             });
-            
+
             const data = await response.json();
-            
+
             if (!response.ok || !data.success) {
                 throw new Error(data.error || 'Failed to delete contact');
             }
-            
+
             // Close the modal
             const modal = bootstrap.Modal.getInstance(modalElement);
             if (modal) {
                 modal.hide();
             }
-            
+
             this.selectedContactIds.delete(userId);
             await this.loadContactsData();
-            
+
             // Show success message
             this.showSuccess(`Contact "${this.escapeHtml(username || 'Unknown')}" has been deleted successfully.`);
-            
+
         } catch (error) {
             console.error('Error deleting contact:', error);
             this.showError('Failed to delete contact: ' + error.message);
-            
+
             // Restore button state
             confirmBtn.disabled = false;
             confirmBtn.innerHTML = originalHTML;
         }
     }
-    
+
     showBulkDeleteConfirmation() {
         const count = this.selectedContactIds.size;
         if (count === 0) return;
@@ -2705,7 +2714,7 @@ class ModernContactsManager {
         const listPreview = contactList.length <= 5
             ? contactList.join(', ')
             : contactList.slice(0, 5).join(', ') + ' and ' + (contactList.length - 5) + ' more';
-        
+
         const modalHtml = `
             <div class="modal fade" id="bulkDeleteContactModal" tabindex="-1" aria-labelledby="bulkDeleteContactModalTitle">
                 <div class="modal-dialog">
@@ -2747,32 +2756,32 @@ class ModernContactsManager {
                 </div>
             </div>
         `;
-        
+
         const existingModal = document.getElementById('bulkDeleteContactModal');
         if (existingModal) existingModal.remove();
         document.body.insertAdjacentHTML('beforeend', modalHtml);
-        
+
         const modalElement = document.getElementById('bulkDeleteContactModal');
         const modal = new bootstrap.Modal(modalElement);
-        
+
         document.getElementById('confirmBulkDeleteBtn').addEventListener('click', () => {
             this.deleteSelectedContacts(modalElement);
         });
-        
+
         modal.show();
         modalElement.addEventListener('hidden.bs.modal', () => modalElement.remove());
     }
-    
+
     async deleteSelectedContacts(modalElement) {
         const confirmBtn = document.getElementById('confirmBulkDeleteBtn');
         const originalHTML = confirmBtn.innerHTML;
         confirmBtn.disabled = true;
         confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
-        
+
         const toDelete = [...this.selectedContactIds];
         let successCount = 0;
         let failCount = 0;
-        
+
         try {
             for (const userId of toDelete) {
                 try {
@@ -2791,13 +2800,13 @@ class ModernContactsManager {
                     failCount++;
                 }
             }
-            
+
             const modal = bootstrap.Modal.getInstance(modalElement);
             if (modal) modal.hide();
-            
+
             toDelete.forEach(userId => this.selectedContactIds.delete(userId));
             await this.loadContactsData();
-            
+
             if (failCount === 0) {
                 this.showSuccess(`${successCount} contact${successCount !== 1 ? 's' : ''} deleted successfully.`);
             } else {
@@ -2810,7 +2819,7 @@ class ModernContactsManager {
             confirmBtn.innerHTML = originalHTML;
         }
     }
-    
+
     escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
@@ -2825,7 +2834,7 @@ class ModernContactsManager {
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
     }
-    
+
     // Toasts float in base.html's stack instead of pushing the page down.
     showError(message) {
         const text = document.createElement('span');
@@ -2912,10 +2921,10 @@ class ModernContactsManager {
         });
     }
     clockObservationText(contact) {
-        if (!contact.clock_observed_at) return 'Observation time unknown';
+        if (!contact.clock_observed_at) return 'Date de mesure inconnue';
         const date = new Date(Number(contact.clock_observed_at) * 1000);
-        const source = contact.clock_drift_source === 'advert' ? 'advert' : 'message';
-        return `Measured at ${date.toLocaleString()} · ${source}`;
+        const source = contact.clock_drift_source === 'advert' ? 'annonce' : 'message';
+        return `Mesuré le ${date.toLocaleString('fr-FR')} · ${source}`;
     }
 
     formatClockDriftBadge(contact) {
@@ -2961,6 +2970,21 @@ class ModernContactsManager {
         return globalThis.MeshClockBadges.full(seconds);
     }
 
+    formatDutyCycle(contact) {
+        const duty = contact.airtime_duty;
+        if (!duty) return '';
+        const value = duty.estimated_percent;
+        const known = value !== null && value !== undefined && Number.isFinite(Number(value));
+        const label = known ? `DC ≈ ${Number(value).toLocaleString('fr-FR', {maximumFractionDigits: 3})} % · 1 h` : 'DC N/D · 1 h';
+        const color = known && Number(value) >= 10 ? 'bg-danger' : 'bg-secondary';
+        const pct = number => Number(number).toLocaleString('fr-FR', {maximumFractionDigits: 3}) + ' %';
+        const detail = duty.direct_percent !== undefined && duty.direct_percent !== null
+            ? ` Entendu : ${pct(duty.direct_percent)} ; déduit : ${pct(duty.inferred_percent)} ; ${duty.attributed_packets} émissions attribuées.` : '';
+        const history = duty.retained_full_hour === false && known ? ' Historique disponible inférieur à une heure.' : '';
+        const title = known ? 'Émission estimée sur la dernière heure à partir des chemins reçus. Référence : 10 % par émetteur. Trafic partiel ; ne prouve pas la conformité.' + detail + history : 'Aucune émission attribuable sur la dernière heure. Cela ne signifie pas que ce relais est silencieux.';
+        return `<span class="badge ${color}" title="${this.escapeAttribute(title)}">${label}</span>`;
+    }
+
     formatBattery(contact) {
         const v = contact.battery_voltage;
         if (v === null || v === undefined) return '';
@@ -2994,6 +3018,15 @@ class ModernContactsManager {
             badge.dataset.setup = 'true';
             badge.addEventListener('click', () => this.showBatteryHistory(badge.dataset.userId));
         });
+    }
+
+    formatBatteryTimestamp(timestamp) {
+        if (typeof timestamp !== 'string' || !timestamp.trim()) return '-';
+        // Battery observation dates without an explicit offset are stored in UTC.
+        let text = timestamp.trim().replace(' ', 'T');
+        if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(text)) text += 'Z';
+        const date = new Date(text);
+        return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString('fr-FR');
     }
 
     async showBatteryHistory(userId) {
@@ -3044,7 +3077,7 @@ class ModernContactsManager {
             new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: points.map(p => this.formatTimestamp(p.observed_at)),
+                    labels: points.map(p => this.formatBatteryTimestamp(p.observed_at)),
                     datasets: [{
                         label: 'Tension (V)',
                         data: points.map(p => p.voltage),

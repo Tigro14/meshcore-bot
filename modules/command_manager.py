@@ -11,6 +11,7 @@ import math
 import random
 import re
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -87,6 +88,17 @@ from .utils import check_internet_connectivity_async, decode_escape_sequences, f
 # code: configs already deployed on other operators' nodes still carry the line,
 # and shipping it in the templates would put it back for everyone.
 SUPPRESSED_KEYWORDS = frozenset({"pong"})
+
+
+@dataclass
+class _CommandReply:
+    manager: Any
+    message: MeshMessage
+    command_id: str
+    parts: list[str]
+
+
+_command_reply: ContextVar[_CommandReply | None] = ContextVar('command_reply', default=None)
 
 
 def _call_with_optional_user_id(method: Any, user_id: str | None) -> Any:
@@ -896,6 +908,28 @@ class CommandManager:
         if normalized is None:
             return matches
         content = normalized
+        # Native bot mentions address the assistant once, even when the body
+        # also happens to start with another command (e.g. "ping").
+        assistant = self.commands.get('ask')
+        if assistant is not None and getattr(assistant, 'ask_enabled', False) is True:
+            mentioned_question = getattr(assistant, 'mentioned_question', None)
+            if callable(mentioned_question):
+                question = mentioned_question(message, content)
+                if isinstance(question, str):
+                    content = 'ask ' + question
+        # A requested BBS body is data even if it starts with "test", "help"
+        # or another command. Keep normal priorities outside this exact session.
+        pending_body = getattr(assistant, 'claim_bbs_text', None)
+        if getattr(message, 'bbs_body_session', None) is not None or (callable(pending_body) and pending_body(message, content) is True):
+            message.content = content
+            message.content_lower = content.lower()
+            message.prefix_normalized = True
+            should_queue, remaining = self._should_queue_command(assistant, message)
+            if allow_queue and should_queue and self._queue_command(assistant, message, remaining):
+                return []
+            if not assistant.can_execute(message) or not self._is_channel_trigger_allowed('ask', message):
+                return []
+            return [('ask', None)]
         content_lower = content.lower()
 
         # Persist the normalized (prefix-stripped) content to the shared message once,
@@ -961,9 +995,11 @@ class CommandManager:
                         matches.append(('help', help_text))
                         return matches
 
+        recognized_command = False
         # Check all loaded plugins for matches
         for command_name, command in self.commands.items():
             if command.should_execute(message):
+                recognized_command = True
                 # Check if we should queue instead of skip (for global cooldowns near expiring)
                 should_queue, remaining = self._should_queue_command(command, message)
                 if allow_queue and should_queue and self._queue_command(command, message, remaining):
@@ -1041,6 +1077,15 @@ class CommandManager:
                         self.logger.warning(f"Error formatting response for '{keyword}': {e}")
                         matches.append((keyword, response_format))
 
+        # Private conversation only: unmatched text is a question for Baliz.
+        # Existing commands retain their permissions/cooldowns and take priority.
+        if (not matches and not recognized_command and message.is_dm and content.strip()
+                and assistant is not None and getattr(assistant, 'ask_enabled', False) is True):
+            trigger, _ = assistant.split_trigger_and_args(content)
+            if trigger is None:
+                message.content = 'ask ' + content
+                message.content_lower = message.content.lower()
+                return self.check_keywords(message, allow_queue=allow_queue)
         return matches
 
     def _normalize_trigger_text(self, raw: str) -> str:
@@ -1878,6 +1923,8 @@ class CommandManager:
                 message.capture_sink.append(content)
                 return True
 
+            command_id = self._capture_reply(message, [content], command_id)
+
             # Store the response content for web viewer capture
             if hasattr(self, '_last_response'):
                 self._last_response = content
@@ -1906,6 +1953,16 @@ class CommandManager:
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")
             return False
+
+    def _capture_reply(self, message: MeshMessage, parts: list[str], command_id: str | None = None) -> str | None:
+        """Bind prepared replies to this invocation before waiting for radio delivery."""
+        capture = _command_reply.get()
+        if capture is not None and capture.manager is self and capture.message is message:
+            if not capture.parts and command_id:
+                capture.command_id = command_id
+            capture.parts.extend(parts)
+            return command_id or capture.command_id
+        return command_id
 
     @staticmethod
     def split_text_into_chunks(text: str, max_len: int) -> list[str]:
@@ -2094,6 +2151,8 @@ class CommandManager:
             message.capture_sink.extend(chunk for chunk in chunks if chunk)
             return True
 
+        command_id = self._capture_reply(message, chunks)
+
         rate_limit_key = self.get_rate_limit_key(message)
         if message.is_dm:
             sleep_time = self._chunk_spacing_seconds()
@@ -2105,6 +2164,7 @@ class CommandManager:
                 success = await self.send_dm(
                     message.sender_pubkey or message.sender_id or "",
                     chunk,
+                    command_id=command_id,
                     skip_user_rate_limit=skip,
                     rate_limit_key=rate_limit_key,
                     delivery_report=message.dm_delivery,
@@ -2121,6 +2181,7 @@ class CommandManager:
         return await self.send_channel_messages_chunked(
             message.channel or "",
             chunks,
+            command_id=command_id,
             skip_user_rate_limit=skip_user_rate_limit_first,
             rate_limit_key=rate_limit_key,
             scope=getattr(message, 'reply_scope', None),
@@ -2343,8 +2404,12 @@ class CommandManager:
             message.content_lower = content
             message.prefix_normalized = True
 
-        # Check each command to see if it should execute
-        for command_name, command in self.commands.items():
+        assistant = self.commands.get('ask')
+        pending_body = getattr(assistant, 'claim_bbs_text', None)
+        bbs_body = getattr(message, 'bbs_body_session', None) is not None or (callable(pending_body) and pending_body(message) is True)
+        commands = [('ask', assistant)] if bbs_body else self.commands.items()
+        # A requested BBS body has one owner; still apply normal access checks.
+        for command_name, command in commands:
             # Skip commands not allowed in this channel (silent - no stats, no error)
             # This mirrors the check_keywords() path which calls can_execute() before matching.
             # Messages may reach execute_commands() via a per-command channel override (e.g.
@@ -2352,7 +2417,7 @@ class CommandManager:
             if not command.is_channel_allowed(message):
                 continue
 
-            if command.should_execute(message):
+            if bbs_body or command.should_execute(message):
                 # Only execute commands that don't have a response format (they handle their own responses)
                 response_format = command.get_response_format()
                 if response_format is not None:
@@ -2427,6 +2492,8 @@ class CommandManager:
                         self.record_command_stat(message, command_name, True)
                         return
 
+                capture = _CommandReply(self, message, f'{command_name}_{message.sender_id}_{time.time_ns()}', [])
+                capture_token = _command_reply.set(capture)
                 try:
                     # Record execution time for cooldown tracking
                     if hasattr(command, '_record_execution') and callable(command._record_execution):
@@ -2441,11 +2508,11 @@ class CommandManager:
                     # Determine if a response was sent by checking response tracking
                     response_sent = False
                     response = None
-                    if hasattr(command, 'last_response') and command.last_response:
-                        response = command.last_response
+                    if capture.parts:
+                        response = '\n'.join(capture.parts)
                         response_sent = True
-                    elif hasattr(self, '_last_response') and self._last_response:
-                        response = self._last_response
+                    elif isinstance(getattr(command, 'last_response', None), str) and command.last_response:
+                        response = command.last_response
                         response_sent = True
 
                     # Record command execution in stats database
@@ -2458,22 +2525,27 @@ class CommandManager:
                             if response is None:
                                 response = "Command executed"
 
-                            # Generate command_id for repeat tracking
-                            command_id = f"{command_name}_{message.sender_id}_{int(time.time())}"
+                            # Reuse the identity assigned before execution and radio waits.
+                            command_id = capture.command_id
 
-                            # Try to find matching transmission by content and timestamp
-                            if (hasattr(self.bot, 'transmission_tracker') and
+                            # Compatibility for plugins that only expose last_response;
+                            # normal replies already carry their exact identity on send.
+                            if (not capture.parts and hasattr(self.bot, 'transmission_tracker') and
                                 self.bot.transmission_tracker and
                                 response):
                                 # Search for recent transmission with matching content
                                 current_time = time.time()
+                                targets = ({message.sender_id, message.sender_pubkey} if message.is_dm
+                                           else {message.channel})
+                                message_type = 'dm' if message.is_dm else 'channel'
                                 matched = False
                                 for timestamp_key in range(int(current_time - 10), int(current_time + 1)):
                                     if timestamp_key in self.bot.transmission_tracker.pending_transmissions:
                                         for record in self.bot.transmission_tracker.pending_transmissions[timestamp_key]:
                                             # Match by exact content and recent timestamp to avoid false positives
                                             # Using substring matching (e.g., "ok" in "outlook") would cause incorrect correlations
-                                            if record.content == response and \
+                                            if record.content == response and record.target in targets and \
+                                               record.message_type == message_type and \
                                                abs(record.timestamp - current_time) < 10:
                                                 record.command_id = command_id
                                                 self.logger.debug(f"Linked command {command_id} to transmission: {record.message_type} to {record.target}")
@@ -2486,7 +2558,8 @@ class CommandManager:
                                 if not matched:
                                     for _packet_hash, record in self.bot.transmission_tracker.confirmed_transmissions.items():
                                         # Match by exact content and recent timestamp to avoid false positives
-                                        if record.content == response and \
+                                        if record.content == response and record.target in targets and \
+                                           record.message_type == message_type and \
                                            abs(record.timestamp - current_time) < 10:
                                             record.command_id = command_id
                                             self.logger.debug(f"Linked command {command_id} to confirmed transmission: {record.message_type} to {record.target}")
@@ -2512,12 +2585,14 @@ class CommandManager:
                     # Capture failed command for web viewer
                     if viewer := self._viewer_bridge():
                         try:
-                            command_id = f"{command_name}_{message.sender_id}_{int(time.time())}"
+                            command_id = capture.command_id
                             viewer.capture_command(
                                 message, command_name, f"Error: {e}", False, command_id
                             )
                         except Exception as capture_error:
                             self.logger.debug(f"Failed to capture failed command data: {capture_error}")
+                finally:
+                    _command_reply.reset(capture_token)
                 return
 
     def _check_internet_cached(self) -> bool:

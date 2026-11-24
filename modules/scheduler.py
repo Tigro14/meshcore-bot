@@ -351,7 +351,7 @@ class MessageScheduler:
         """Register the periodic sweep behind the BBS private notifications.
 
         Stage 1 (arrival) fires inside ``bbs s`` itself and needs no job; the
-        24h reminder and 73h final-notice stages (migration 35 stage columns,
+        24h reminder and 73h final-notice stages (migration 36 stage columns,
         see ``BBSCommand.run_pending_notification_job``) need one sweep per
         interval.  IntervalTrigger rather than cron on purpose: the sweep is
         only a staleness check, wall-clock alignment would buy nothing and a

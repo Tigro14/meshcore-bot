@@ -91,6 +91,12 @@ class TraceCommand(BaseCommand):
         output_fmt = (self.bot.config.get("Trace_Command", "output_format", fallback="inline") or "inline").strip().lower()
         self.output_format = output_fmt if output_fmt in ("inline", "vertical") else "inline"
 
+    def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        return self.trace_enabled and self.can_use_service(message, skip_channel_check)
+
+    def can_use_service(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        return super().can_use_service(message, skip_channel_check=skip_channel_check)
+
     def get_help_text(self, message: MeshMessage | None = None) -> str:
         return (
             "trace [path] — run trace along path (return may not be heard). No path = round-trip like tracer. "

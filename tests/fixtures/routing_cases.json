@@ -1,0 +1,53 @@
+[
+  {
+    "question": "statistique des canaux",
+    "route": "mesh",
+    "operation": "stats",
+    "args": {
+      "topic": "channels",
+      "hashes": false
+    }
+  },
+  {
+    "question": "tu en as mis du temps pour répondre",
+    "route": "llm",
+    "operation": "chat",
+    "args": {}
+  },
+  {
+    "question": "quels sont les relais les plus sollicités ?",
+    "route": "mesh",
+    "operation": "relay_connectivity",
+    "args": {
+      "hours": 24,
+      "limit": 3
+    }
+  },
+  {
+    "question": "quelle est la route ?",
+    "route": "path",
+    "operation": "message",
+    "args": {}
+  },
+  {
+    "question": "tu me reçois ?",
+    "route": "test",
+    "operation": "receive",
+    "args": {}
+  },
+  {
+    "question": "météo demain à Brest",
+    "route": "weather",
+    "operation": "forecast",
+    "args": {
+      "location": "Brest",
+      "period": "tomorrow"
+    }
+  },
+  {
+    "question": "comment ajouter les régions à un répéteur ?",
+    "route": "wiki",
+    "operation": "lookup",
+    "args": {}
+  }
+]

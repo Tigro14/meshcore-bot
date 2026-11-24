@@ -126,6 +126,9 @@ class CleanupSchedulerMixin:
                 # tables of different ages.
                 ('occupancy_relays', 'last_seen', self._config_int('Data_Retention', 'occupancy_relays_retention_days', 90)),
                 ('occupancy_relay_days', 'day_ts', self._config_int('Data_Retention', 'occupancy_relays_retention_days', 90)),
+                ('airtime_observations', 'observed_at', self._config_int('Data_Retention', 'occupancy_samples_retention_days', 30)),
+                ('airtime_author_links', 'observed_at', self._config_int('Data_Retention', 'occupancy_samples_retention_days', 30)),
+                ('airtime_packet_context', 'observed_at', self._config_int('Data_Retention', 'occupancy_samples_retention_days', 30)),
             ):
                 if table not in existing:
                     continue

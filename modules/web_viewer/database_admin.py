@@ -441,6 +441,10 @@ class DatabaseAdminMixin:
             ]
 
     def _stats_commands(self, cursor, tables, stats, top_commands_window):
+        stats['top_functions'] = []
+        if 'assistant_function_usage' in tables:
+            from modules.assistant.usage import top_functions
+            stats['top_functions'] = top_functions(cursor, top_commands_window)
         """Command statistics, reply rates and top commands."""
         if 'command_stats' in tables:
             cursor.execute("SELECT COUNT(*) FROM command_stats")

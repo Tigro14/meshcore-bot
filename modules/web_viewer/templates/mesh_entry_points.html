@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Points d’entrée · Baliz{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+<style>#entry-map{height:62vh;min-height:340px}.entry-arrow{font-size:20px;color:#b45309;text-shadow:0 0 2px white}.entry-row{cursor:pointer}.entry-row::marker{color:#6c757d}.entry-heading{display:inline;font-weight:600;overflow-wrap:anywhere}.entry-meta{display:block;margin:0.4rem 0 0 1rem;font-size:.85rem;color:var(--bs-secondary-color,#6c757d);line-height:1.5}.entry-count{float:right;margin-left:.5rem;font-size:.8rem}.hop-caption{display:flex;justify-content:space-between;gap:1rem;margin-bottom:.3rem}</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap gap-2 mb-3"><h1 class="h3">Points d’entrée — Étranger → France</h1><a href="/mesh" class="btn btn-outline-secondary">Retour au Mesh Graph</a></div>
+<p class="small text-muted mb-2">Étranger en bleu → France en orange · Observations de Baliz</p>
+<div class="d-flex flex-wrap gap-3 align-items-end mb-3">
+<div><label for="entry-days" class="form-label">Période</label><select id="entry-days" class="form-select"><option value="1">24 heures</option><option value="7">7 jours</option><option value="30">30 jours</option></select></div>
+<div><label for="entry-country" class="form-label">Pays du relais précédent</label><select id="entry-country" class="form-select"><option value="">Tous les pays étrangers</option></select></div>
+<div><label for="entry-type" class="form-label">Type de trafic</label><select id="entry-type" class="form-select"><option value="all">Tout</option><option value="messages">Messages</option><option value="adverts">Annonces</option></select></div>
+<div class="form-check mb-2"><input id="entry-unscoped" class="form-check-input" type="checkbox" checked><label for="entry-unscoped" class="form-check-label">Sans région uniquement</label></div>
+<button id="entry-refresh" class="btn btn-primary">Actualiser</button></div>
+<div class="small mb-2"><strong>Trait continu :</strong> liaison identifiée · <strong>Pointillés :</strong> liaison probable</div>
+<div id="entry-status" role="status" class="small mb-1"></div>
+<details class="small text-muted mb-2"><summary>Détails des observations</summary>
+<p class="my-1">Sauts avant l’arrivée en France, chemin le plus court par paquet et par relais. Une source sans position connue est comptée mais non tracée.</p>
+<div id="entry-diagnostics"></div></details>
+<div class="row g-3"><div class="col-lg-8"><div id="entry-map" class="rounded border"></div><section class="border rounded p-3 mt-3"><h2 class="h5">Sauts à l’arrivée — vue globale</h2><div id="entry-global" role="status"></div></section></div>
+<div class="col-lg-4"><h2 class="h5">Relais français d’entrée</h2><p class="small">Clique sur un relais pour voir ses sauts à l’arrivée et le situer. Ce classement dépend de ce que reçoit Baliz, pas de tout le trafic du réseau.</p><div id="entry-ranking"></div></div></div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script>
+(() => {
+    const map = L.map('entry-map').setView([48.5, -3], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OpenStreetMap contributors'}).addTo(map);
+    const layer = L.layerGroup().addTo(map);
+    const status = document.getElementById('entry-status');
+    const country = document.getElementById('entry-country');
+    const days = document.getElementById('entry-days');
+    const unscoped = document.getElementById('entry-unscoped');
+    const globalPanel = document.getElementById('entry-global');
+    const packetType = document.getElementById('entry-type');
+    const relayPanels = new Map();
+    let generation = 0;
+    function renderHops(details, n, onlyUnscoped) {
+        const subtitle=document.createElement('p');subtitle.className='small fw-semibold mb-3';
+        subtitle.textContent='Sauts déjà parcourus à l’arrivée · '+packetType.options[packetType.selectedIndex].text+(onlyUnscoped?' · sans région':' · avec ou sans région');details.appendChild(subtitle);
+        n.arrival_hops.forEach(bin=>{
+            const row=document.createElement('div');row.className='mb-3';
+            const caption=document.createElement('div');caption.className='small hop-caption';
+            const hops=document.createElement('span');hops.textContent=`${bin.hops} saut${bin.hops>1?'s':''}`;
+            const count=document.createElement('span');count.textContent=`${bin.count} paquet${bin.count>1?'s':''} · ${Math.round(100*bin.count/n.count)} %`;
+            caption.append(hops,count);
+            const track=document.createElement('div');track.className='progress';track.style.height='12px';
+            const bar=document.createElement('div');bar.className='progress-bar bg-warning';bar.style.width=(100*bin.count/n.count)+'%';
+            track.appendChild(bar);row.append(caption,track);details.appendChild(row);
+        });
+        const note=document.createElement('p');note.className='small text-muted mb-0';
+        note.textContent='Chemin le plus court observé pour chaque paquet.';details.appendChild(note);
+    }
+    const located = n => Number.isFinite(n.latitude) && Number.isFinite(n.longitude) && Math.abs(n.latitude)<=90 && Math.abs(n.longitude)<=180 && !(n.latitude===0 && n.longitude===0);
+    const point = n => [n.latitude,n.longitude];
+    const label = text => {const el=document.createElement('span');el.textContent=text;return el;};
+    async function load() {
+        const current = ++generation;
+        status.textContent='Chargement des observations…';
+        document.getElementById('entry-diagnostics').textContent='';
+        layer.clearLayers();
+        relayPanels.clear();
+        globalPanel.textContent='Chargement…';
+        document.getElementById('entry-ranking').replaceChildren();
+        try {
+            const resp=await fetch('/api/mesh/entry-points?'+new URLSearchParams({days:days.value,country:country.value,unscoped:unscoped.checked?'1':'0',packet_type:packetType.value}));
+            if(!resp.ok) throw new Error('Chargement impossible');
+            const data=await resp.json();
+            if(current!==generation) return;
+            globalPanel.replaceChildren();
+            if(data.global_summary.count){
+                const total=document.createElement('p');total.className='fw-semibold';
+                total.textContent=`${data.global_summary.count} paquets distincts · tous les relais d’entrée retenus`;
+                globalPanel.appendChild(total);renderHops(globalPanel,data.global_summary,data.unscoped_only);
+                globalPanel.lastChild.textContent='Chaque paquet compte une seule fois, au plus petit nombre de sauts observé parmi les relais et les pays sélectionnés.';
+            } else globalPanel.textContent='Aucun passage identifiable avec ces filtres.';
+            const selected=country.value;
+            country.replaceChildren(new Option('Tous les pays étrangers',''));
+            data.countries.forEach(c=>country.add(new Option(c,c)));
+            country.value=data.countries.includes(selected)?selected:'';
+            const nodes=new Map();const bounds=[];
+            data.edges.forEach(e=>{
+                nodes.set(e.source.public_key,e.source);nodes.set(e.target.public_key,e.target);
+                if(!located(e.source)||!located(e.target))return;
+                const a=point(e.source),b=point(e.target);
+                const shortOnly=e.reliable_count===0;
+                const evidence=e.inferred_count>0?` · ${e.inferred_count} paquet(s) : arrivée probable` : shortOnly?(e.count===1?' · 1 octet, un seul paquet : attribution fragile':' · 1 octet uniquement : attribution à confirmer'):` · ${e.multi_byte_count} paquet(s) à identifiants de 2 ou 3 octets`;
+                L.polyline([a,b],{color:'#d97706',weight:Math.min(7,1+Math.log2(e.count+1)),opacity:shortOnly?0.45:0.75,dashArray:shortOnly?'6 6':null}).bindPopup(label(`${e.source.name} → ${e.target.name} : ${e.count} paquets distincts${evidence}`)).addTo(layer);
+                const pa=map.project(a,8),pb=map.project(b,8);
+                const angle=Math.atan2(pb.y-pa.y,pb.x-pa.x)*180/Math.PI;
+                L.marker([(a[0]+b[0])/2,(a[1]+b[1])/2],{interactive:false,icon:L.divIcon({className:'entry-arrow',html:`<span style="display:block;transform:rotate(${angle}deg)">➤</span>`,iconSize:[20,20],iconAnchor:[10,10]})}).addTo(layer);
+            });
+            const targets=new Map(data.ranking.map(n=>[n.public_key,n]));
+            nodes.forEach(n=>{
+                if(!located(n))return;
+                const t=targets.get(n.public_key);bounds.push(point(n));
+                L.circleMarker(point(n),{radius:t?Math.min(17,6+Math.log2(t.count+1)):5,color:'#fff',weight:1,fillColor:t?'#f59e0b':'#1687ec',fillOpacity:0.9}).bindPopup(label(`${n.name} (${n.country})${t?' — '+t.count+' paquets distincts':''}`)).on('click',()=>{if(t){const panel=relayPanels.get(t.public_key);if(panel)panel.open=true;}}).addTo(layer);
+            });
+            if(bounds.length)map.fitBounds(bounds,{padding:[25,25],maxZoom:10});
+            const ranking=document.getElementById('entry-ranking');
+            data.ranking.forEach((n,i)=>{
+                const panel=document.createElement('details');panel.className='border rounded mb-2';
+                const button=document.createElement('summary');button.className='p-2 entry-row';
+                const heading=document.createElement('span');heading.className='entry-heading';heading.textContent=`${i+1}. ${n.name}`;
+                const total=document.createElement('span');total.className='badge bg-secondary entry-count';total.textContent=`${n.count} paquet${n.count>1?'s':''}`;
+                const meta=document.createElement('span');meta.className='entry-meta';
+                const origins=document.createElement('span');origins.textContent='Depuis : '+n.origins.map(c=>c==='United Kingdom'?'Royaume-Uni':c).join(', ');
+                const last=document.createElement('span');last.className='d-block';last.textContent='Dernier passage : '+new Date(n.last_seen).toLocaleString('fr-FR')+(located(n)?'':' · position inconnue');
+                meta.append(origins,last);button.append(heading,total,meta);
+                const content=document.createElement('div');content.className='border-top p-3';
+                renderHops(content,n,data.unscoped_only);
+                panel.append(button,content);ranking.appendChild(panel);relayPanels.set(n.public_key,panel);
+                panel.addEventListener('toggle',()=>{if(panel.open&&located(n))map.setView(point(n),11);});
+            });
+            if(!data.ranking.length) ranking.appendChild(label('Aucun passage identifiable sur cette période.'));
+            status.textContent=`${data.ranking.length} relais d’entrée · ${data.edges.length} liaisons · ${data.scanned} paquets examinés`;
+            document.getElementById('entry-diagnostics').textContent=`Écartés : ${data.excluded_packets} paquets invalides, ${data.excluded_segments} segments non identifiables, ${data.foreign_suffix_segments} passages suivis d’un relais étranger. Historique depuis le ${data.retained_since?new Date(data.retained_since).toLocaleDateString('fr-FR'):'—'}.`;
+
+        } catch(e) {if(current===generation){status.textContent='Impossible de charger les points d’entrée. Réessaie plus tard.';globalPanel.textContent='Données indisponibles.';}}
+    }
+    days.onchange=()=>{country.value='';load();};country.onchange=load;packetType.onchange=()=>{country.value='';load();};unscoped.onchange=()=>{country.value='';load();};
+    document.getElementById('entry-refresh').onclick=load;load();
+})();
+</script>
+{% endblock %}

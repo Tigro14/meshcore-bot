@@ -3051,3 +3051,38 @@ class TestOccupancyAuthorAttribution:
                 with patch.object(handler, "_debug_decode_packet_for_message", new_callable=AsyncMock):
                     await handler.handle_contact_message(event)
         occupancy.note_author.assert_called_once_with("aabbccddeeff0011", self.FULL)
+
+
+@pytest.mark.asyncio
+async def test_requested_bbs_body_skips_advert_and_randomline_shortcuts(handler, bot):
+    bot.command_manager.commands = {'ask': Mock(claim_bbs_text=Mock(return_value=True))}
+    bot.command_manager.handle_advert_command = AsyncMock()
+    bot.command_manager.check_keywords.return_value = [('ask',None)]
+    bot.command_manager.match_randomline = Mock(side_effect=AssertionError('Payload must not reach randomline'))
+    bot.command_manager.execute_commands = AsyncMock()
+    handler.should_process_message = Mock(return_value=True)
+    await handler.process_message(make_message('advert',is_dm=True))
+    bot.command_manager.handle_advert_command.assert_not_awaited()
+    bot.command_manager.match_randomline.assert_not_called()
+    bot.command_manager.execute_commands.assert_awaited_once()
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('raw,expected',[(255,None),(0,0),(0x43,3)])
+async def test_dm_preserves_received_path_byte_for_passive_hop_count(handler,raw,expected):
+    from modules.assistant.message_hops import observed_hops
+    handler.bot.meshcore=Mock()
+    handler.bot.meshcore.contacts={}
+    handler.bot.translator=None
+    handler.bot.connection_time=None
+    event=Mock(payload={'pubkey_prefix':'ab12','text':'Combien de sauts jusqu’à toi ?',
+                        'path_len':raw,'sender_timestamp':int(time.time())},metadata={})
+    handler.find_recent_rf_data=Mock(return_value=None)
+    handler.process_message=AsyncMock()
+    handler._debug_decode_message_path=AsyncMock()
+    handler._debug_decode_packet_for_message=AsyncMock()
+    await handler.handle_contact_message(event)
+    captured=handler.process_message.call_args.args[0]
+    assert captured.received_path_len==raw
+    assert observed_hops(captured)==expected

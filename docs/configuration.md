@@ -182,73 +182,17 @@ Common per-command options (when supported by that command):
   - Comma list: only those channels
 - **`aliases`** – Extra trigger words for that command, comma-separated **stems only** (e.g. `aliases = weather, w`). Do not put the bot's **`command_prefix`** or punctuation in this value (no `!` or `.`)
 
-### Local Wiki.js RAG for `llm`
+### Local Wiki.js RAG
 
-The `llm` command can inject local Wiki.js context without embeddings, vector DB, or external retrieval services.
+Documentary retrieval is configured in `[Rag_Service]`, independently of the
+conversation settings in `[Llm_Command]`. Enable `Rag_Service.enabled` and
+configure the source URL, locale, allowed paths and local index. For the assistant,
+include `wiki` in `[Ask_Command] enabled_routes` and enable the LLM for synthesis.
 
-1. Generate a local JSONL index with one of the crawler scripts:
-
-```bash
-# mesh-idf wiki
-python3 scripts/crawl_meshcore_wiki.py \
-  --base-url https://wiki.mesh-idf.fr \
-  --locale fr \
-  --prefix meshcore/ \
-  --output data/wiki_rag/meshcore_wiki_pages.jsonl
-
-# meshcore.bzh wiki
-python3 scripts/crawl_meshcore_bzh_wiki.py \
-  --base-url https://wiki.meshcore.bzh \
-  --locale fr \
-  --prefix configuration/ \
-  --prefix démarrer/ \
-  --prefix ressources/ \
-  --prefix materiel/ \
-  --output data/wiki_rag/meshcore_bzh_wiki_pages.jsonl
-
-# Blog category (non-Wiki.js)
-python3 scripts/crawl_meshcore_blog.py \
-  --category-url https://serveurperso.in/archives/category/meshcore \
-  --output data/wiki_rag/serveurperso_meshcore.jsonl
-```
-
-2. Point `Llm_Command` at the generated index:
-
-```ini
-[Llm_Command]
-wiki_rag_enabled = true
-wiki_rag_index_path = data/wiki_rag/meshcore_wiki_pages.jsonl
-wiki_rag_max_chunks = 3
-wiki_rag_chunk_chars = 450
-wiki_rag_min_term_len = 3
-```
-
-3. Restart the bot (or reload command settings where applicable).
-
-If you use multiple sources, merge them into one index file first:
-
-```bash
-cat data/wiki_rag/meshcore_wiki_pages.jsonl \
-    data/wiki_rag/meshcore_bzh_wiki_pages.jsonl \
-    data/wiki_rag/serveurperso_meshcore.jsonl \
-  > data/wiki_rag/wiki_pages.jsonl
-```
-
-#### Troubleshooting empty output files
-
-- If you see `listed > 0` but `selected = 0`, your `--prefix` values do not match actual page paths on that wiki.
-- Print page paths quickly:
-
-```bash
-python3 - <<'PY'
-from scripts.wikijs_rag_collect import graphql_list_pages
-pages = graphql_list_pages("https://wiki.meshcore.bzh", "", "fr", 20.0, True)
-for p in pages:
-    print(p.get("path"))
-PY
-```
-
-- The collector already falls back from GraphQL (locale / no-locale) to `sitemap.xml` discovery when needed.
+See [the RAG configuration and migration guide](wiki-rag.md) for the universal
+collector, authentication and refresh lifecycle. Old `wiki_*` options in
+`[Llm_Command]` remain readable as migration fallbacks; new profiles should use
+`[Rag_Service]` and rename `wiki_rag_enabled` to `enabled`.
 
 ### Command prefix
 

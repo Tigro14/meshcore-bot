@@ -517,7 +517,9 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
         """
         # Format location name for display, when it tells the user something
         location_display = ""
-        if default_location or self._location_label_adds_information(location, address_info):
+        if (default_location or self._location_label_adds_information(location, address_info)
+                or isinstance(getattr(message, "capture_sink", None), list)):
+            # The assistant needs the provider's actual place to ground its prose.
             location_display = self._format_location_display(address_info, geocode_result, location)
         self.logger.debug(f"Formatted location_display: '{location_display}' from location: '{location}'")
         prefix = f"{location_display}: " if location_display else ""
@@ -1613,4 +1615,3 @@ class GlobalWxCommand(WeatherCommandMixin, BaseCommand):
             return int(code)
         except (ValueError, TypeError):
             return 0
-

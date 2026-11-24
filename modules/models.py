@@ -110,6 +110,10 @@ class MeshMessage:
     original_content: str = ""
     # Per-request delivery metadata; contains no message body.
     dm_delivery: dict[str, str] = dataclass_field(default_factory=dict)
+    # Transient BBS body claim; binds queued text to the session that requested it.
+    bbs_body_session: Optional[float] = None
+    # Raw companion receive-frame path byte; 255 means no incoming hop count.
+    received_path_len: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not self.original_content:

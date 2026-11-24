@@ -7,7 +7,7 @@ rooms, no public posts and no search over stored messages.
 
 ## Overview
 
-- Mailboxes are keyed on each node's **full public key** (migration 34, `bbs_inbox`
+- Mailboxes are keyed on each node's **full public key** (migration 35, `bbs_inbox`
   table): two nodes advertising the same name get separate mailboxes, and a queued
   message stays deliverable when the recipient renames its node.
 - Only nodes the bot has heard are addressable: recipients are resolved from the
@@ -138,7 +138,7 @@ private DM, always **aggregated** into a single DM carrying the unread count:
   radio DMs; a message swallowed by the cooldown is still covered by the 24h
   reminder.
 - Stages 2 and 3 are swept by a scheduler job every `notify_check_minutes` minutes.
-  Each stage is stamped per message in the database (migration 35) **only after the
+  Each stage is stamped per message in the database (migration 36) **only after the
   DM actually went out on the radio**: a stage is never repeated for the same
   message, it survives bot restarts, and an unreachable recipient is retried on the
   next sweep.
@@ -224,8 +224,8 @@ command settings without a restart.
 
 ## Migration and the legacy table
 
-- Migration 34 created `bbs_inbox`; all new messages land there.
-- Migration 35 added `reminder_sent_at` and `final_notice_sent_at` to `bbs_inbox`:
+- Migration 35 created `bbs_inbox`; all new messages land there.
+- Migration 36 added `reminder_sent_at` and `final_notice_sent_at` to `bbs_inbox`:
   per-message stamps for the +24h reminder and +73h final-notice stages, so a
   stage is sent at most once per message and survives bot restarts.
 - The old name-keyed `bbs_messages` table is kept **read-only**: `bbs r`, `bbs list`

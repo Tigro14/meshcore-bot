@@ -501,7 +501,7 @@
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <p class="small text-muted">Choose which channels may publish decrypted messages on the web. Unchecked channels are still monitored by the bot.</p>
+                        <p class="small text-muted">La case autorise la publication des messages déchiffrés sur internet. Un canal décoché reste surveillé par Baliz.</p>
                         <table class="table table-striped table-hover" id="channelsTable">
                             <thead class="table-dark">
                                 <tr>
@@ -539,8 +539,8 @@
                 <form id="createChannelForm">
                     <div class="form-check mb-3">
                         <input type="checkbox" class="form-check-input" id="channelLiveMessagesVisible">
-                        <label class="form-check-label" for="channelLiveMessagesVisible">Publish messages on the web</label>
-                        <div class="form-text">Show decrypted messages in Live Channel Messages. Off by default.</div>
+                        <label class="form-check-label" for="channelLiveMessagesVisible">Afficher les messages sur internet</label>
+                        <div class="form-text">Publie les messages déchiffrés dans « Live Channel Messages ». Désactivé par défaut.</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label" for="channelName">Channel Name</label>
@@ -780,8 +780,8 @@ class RadioManager {
                 visibility.type = 'checkbox';
                 visibility.className = 'form-check-input';
                 visibility.checked = channel.live_messages_visible === true;
-                visibility.setAttribute('aria-label', `Publish messages from ${channelName} on the web`);
-                visibility.title = 'Show decrypted messages from this channel in Realtime';
+                visibility.setAttribute('aria-label', `Afficher les messages de ${channelName} sur internet`);
+                visibility.title = 'Afficher les messages déchiffrés de ce canal dans Real-time';
                 visibility.addEventListener('change', () => this.setChannelVisibility(channel, visibility));
                 visibilityCell.appendChild(visibility);
                 row.appendChild(visibilityCell);
@@ -813,9 +813,9 @@ class RadioManager {
                     live_messages_visible: visible})
             });
             const result = await response.json();
-            if (!response.ok || !result.success) throw new Error(result.error || 'Could not save visibility setting');
+            if (!response.ok || !result.success) throw new Error(result.error || 'Enregistrement impossible');
             channel.live_messages_visible = visible;
-            this.showSuccess(visible ? 'Channel messages are visible in Realtime.' : 'Channel messages are hidden in Realtime.');
+            this.showSuccess(visible ? 'Messages du canal visibles dans Real-time.' : 'Messages du canal masqués dans Real-time.');
         } catch (error) {
             checkbox.checked = !visible;
             this.showError(error.message);

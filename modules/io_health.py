@@ -58,7 +58,7 @@ class IOHealthMonitor:
         self.db_manager = db_manager
         self.mounts_path = mounts_path
         self.enabled = self._bool("enabled", True)
-        self.reboot_on_erofs = self._bool("reboot_on_erofs", True)
+        self.reboot_on_erofs = self._bool("reboot_on_erofs", False)
         self.failure_threshold = max(1, self._int("failure_threshold", 3))
         self.cooldown_seconds = max(0, self._int("cooldown_seconds", 900))
         self.powercycle_command = self._get("powercycle_command", "").strip()

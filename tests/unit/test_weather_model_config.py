@@ -77,6 +77,39 @@ def test_gwx_unset_weather_model_uses_best_match(mock_logger, monkeypatch):
     assert captured["params"]["models"] == "best_match"
 
 
+def test_gwx_retries_temporary_openmeteo_failure(mock_logger, monkeypatch):
+    config = configparser.ConfigParser()
+    config.add_section("Weather")
+    cmd = GlobalWxCommand(_build_bot(mock_logger, config))
+
+    unavailable = Mock(ok=False, status_code=503)
+    success = Mock(ok=True, status_code=200)
+    success.json.return_value = _openmeteo_payload()
+    get = Mock(side_effect=[unavailable, success])
+    monkeypatch.setattr("modules.commands.alternatives.wx_international.requests.get", get)
+    monkeypatch.setattr("modules.commands.alternatives.wx_international.time.sleep", Mock())
+
+    result = cmd.get_open_meteo_weather(48.39, -4.49)
+
+    assert get.call_count == 2
+    assert result != cmd.translate("commands.gwx.error_fetching")
+
+
+def test_gwx_does_not_retry_permanent_openmeteo_failure(mock_logger, monkeypatch):
+    config = configparser.ConfigParser()
+    config.add_section("Weather")
+    cmd = GlobalWxCommand(_build_bot(mock_logger, config))
+
+    bad_request = Mock(ok=False, status_code=400)
+    get = Mock(return_value=bad_request)
+    monkeypatch.setattr("modules.commands.alternatives.wx_international.requests.get", get)
+
+    result = cmd.get_open_meteo_weather(48.39, -4.49)
+
+    assert get.call_count == 1
+    assert result == cmd.translate("commands.gwx.error_fetching")
+
+
 def test_weather_service_blank_weather_model_omits_models_param(mock_logger):
     config = configparser.ConfigParser()
     config.add_section("Weather")

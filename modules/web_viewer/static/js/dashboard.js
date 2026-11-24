@@ -1217,13 +1217,11 @@
     function rankedRow(rank, name, badgeText, badgeClass) {
         const row = document.createElement('div');
         row.className = 'top-list-row';
-        const identity = document.createElement('div');
-        identity.className = 'd-flex align-items-center gap-2 top-list-row__name';
         const label = makeTextElement('span', name, 'fw-semibold top-list-row__name');
         label.title = String(name ?? '');
-        identity.append(makeTextElement('span', rank, 'top-list-row__rank'), label);
         // Counts are tinted chips in each list's own color, not lamp pills.
-        row.append(identity, makeTextElement('span', badgeText, 'tag-chip ' + badgeClass));
+        row.append(makeTextElement('span', rank, 'top-list-row__rank'), label,
+            makeTextElement('span', badgeText, 'tag-chip ' + badgeClass));
         return row;
     }
 
@@ -1232,8 +1230,8 @@
             select: 'top-commands-window',
             container: 'top-commands-list',
             limit: 15,
-            empty: 'No commands recorded.',
-            render: (item, i) => rankedRow(i + 1, item.name, formatNumber(item.count) + ' uses', 'tag-chip--violet'),
+            empty: 'Aucune fonction enregistrée.',
+            render: (item, i) => rankedRow(i + 1, item.name, formatNumber(item.count) + ' appels', 'tag-chip--violet'),
         },
         users: {
             select: 'top-users-window',
@@ -1249,6 +1247,7 @@
             empty: 'No channels recorded.',
             render: (item, i) => {
                 const row = rankedRow(i + 1, item.name, formatNumber(item.count) + ' msgs', 'tag-chip--teal');
+                row.classList.add('top-list-row--channels');
                 row.appendChild(makeTextElement('span', formatNumber(item.users) + ' users', 'tag-chip'));
                 return row;
             },
@@ -1262,7 +1261,7 @@
                 const card = document.createElement('div');
                 card.className = 'mb-2 pb-2 border-bottom';
                 const heading = document.createElement('div');
-                heading.className = 'd-flex align-items-center gap-2 mb-1';
+                heading.className = 'top-list-row mb-1';
                 const name = makeTextElement('span', item.name, 'fw-semibold top-list-row__name');
                 name.title = String(item.name ?? '');
                 const hops = Number(item.path_length) || 0;

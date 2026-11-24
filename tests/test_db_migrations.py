@@ -12,7 +12,7 @@ from modules.db_migrations import (
     _column_exists,
     _m0017_feed_queue_item_uniqueness,
     _m0020_mesh_connections_last_seen_index,
-    _m0034_bbs_inbox_table,
+    _m0035_bbs_inbox_table,
     _table_exists,
 )
 
@@ -613,7 +613,7 @@ class TestBatteryObservations:
 
 
 class TestBbsInboxNotificationStages:
-    """Migration 35: per-stage private-notification timestamps on bbs_inbox
+    """Migration 36: per-stage private-notification timestamps on bbs_inbox
     (see BBSCommand.run_pending_notification_job)."""
 
     def test_stage_columns_added(self, runner, conn):
@@ -622,15 +622,15 @@ class TestBbsInboxNotificationStages:
         for column in ("reminder_sent_at", "final_notice_sent_at"):
             assert _column_exists(cursor, "bbs_inbox", column) is True
 
-    def test_upgrade_from_database_already_at_34(self, conn, logger):
-        """A live database whose bbs_inbox predates migration 35 gets the
+    def test_upgrade_from_database_already_at_35(self, conn, logger):
+        """A live database whose bbs_inbox predates migration 36 gets the
         columns added in place, without touching stored rows."""
-        _m0034_bbs_inbox_table(conn.cursor())
+        _m0035_bbs_inbox_table(conn.cursor())
         conn.execute(
             "INSERT INTO bbs_inbox (sender_key, recipient_key, message) VALUES ('k1', 'k2', 'held')"
         )
         conn.commit()
-        # bbs_inbox already exists exactly as migration 34 left it, without
+        # bbs_inbox already exists exactly as migration 35 left it, without
         # the stage columns; the runner's ALTER path must cope and leave the
         # stored row untouched.
         MigrationRunner(conn, logger).run()
@@ -644,7 +644,7 @@ class TestBbsInboxNotificationStages:
         MigrationRunner(conn, logger).run()
         MigrationRunner(conn, logger).run()
         applied = conn.execute(
-            "SELECT COUNT(*) FROM schema_version WHERE version = 35"
+            "SELECT COUNT(*) FROM schema_version WHERE version = 36"
         ).fetchone()[0]
         assert applied == 1
 class TestMigrationAtomicity:

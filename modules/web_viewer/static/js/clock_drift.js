@@ -15,7 +15,7 @@
                  + ' title="No drift data — no recent packet with a timestamp">N/D</span>';
         }
         if (status === 'stale') {
-            return ` <span class="badge clock-drift-badge bg-secondary" title="Old observation : ${full(drift)}">${compact(drift)}</span>`;
+            return ` <span class="badge clock-drift-badge bg-secondary" title="Mesure ancienne : ${full(drift)}">${compact(drift)}</span>`;
         }
 
         const compactText = compact(drift);

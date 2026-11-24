@@ -291,11 +291,12 @@ class ChannelMessageMixin:
         # Get the full public key from contacts if available
         sender_pubkey = payload.get("pubkey_prefix", "")
         if sender_pubkey:
-            prefix = sender_pubkey
-            contact = self._find_contact(lambda c: c.get("public_key", "").startswith(prefix))
-            if contact:
-                sender_pubkey = contact.get("public_key", sender_pubkey)
-                self.logger.debug(f"Found full public key for {sender_id}: {sender_pubkey[:16]}...")
+            from .dm_contacts import DmContactResolver
+            try:
+                key, _, _ = DmContactResolver(self.bot).identify(sender_pubkey)
+            except Exception:
+                key = None
+            sender_pubkey = key or sender_pubkey
         return sender_pubkey
 
     def _note_message_author(

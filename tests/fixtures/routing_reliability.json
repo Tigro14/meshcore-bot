@@ -1,0 +1,110 @@
+[
+  {
+    "question": "statistique des canaux",
+    "route": "mesh",
+    "operation": "stats",
+    "args": {
+      "topic": "channels",
+      "hashes": false
+    }
+  },
+  {
+    "question": "tu en as mis du temps pour répondre",
+    "route": "llm",
+    "operation": "chat",
+    "args": {}
+  },
+  {
+    "question": "quels sont les relais les plus sollicités ?",
+    "route": "mesh",
+    "operation": "relay_connectivity",
+    "args": {
+      "hours": 24,
+      "limit": 3
+    }
+  },
+  {
+    "question": "quelle est la route ?",
+    "route": "path",
+    "operation": "message",
+    "args": {}
+  },
+  {
+    "question": "tu me reçois ?",
+    "route": "test",
+    "operation": "receive",
+    "args": {}
+  },
+  {
+    "question": "météo demain à Brest",
+    "route": "weather",
+    "operation": "forecast",
+    "args": {
+      "location": "Brest",
+      "period": "tomorrow"
+    }
+  },
+  {
+    "question": "comment ajouter les régions à un répéteur ?",
+    "route": "wiki",
+    "operation": "lookup",
+    "args": {}
+  },
+  {
+    "question": "Par où mon message est-il arrivé jusqu'à toi ?",
+    "route": "path",
+    "operation": "message",
+    "args": {}
+  },
+  {
+    "question": "Quels canaux sont les plus bavards ?",
+    "route": "mesh",
+    "operation": "stats",
+    "args": {
+      "topic": "channels",
+      "hashes": false
+    }
+  },
+  {
+    "question": "Ta réponse a été vraiment lente",
+    "route": "llm",
+    "operation": "chat",
+    "args": {}
+  },
+  {
+    "question": "Baliz combien de nœuds actifs?",
+    "route": "mesh",
+    "operation": "count_nodes",
+    "args": {
+      "hours": 24,
+      "country": ""
+    }
+  },
+  {
+    "question": "Combien de noeuds ont été entendus sur 48 heures ?",
+    "route": "mesh",
+    "operation": "count_nodes",
+    "args": {
+      "hours": 48,
+      "country": ""
+    }
+  },
+  {
+    "question": "Combien de nœuds connus au total ?",
+    "route": "mesh",
+    "operation": "count_nodes",
+    "args": {
+      "hours": 0,
+      "country": ""
+    }
+  },
+  {
+    "question": "Combien de nœuds actifs en France ?",
+    "route": "mesh",
+    "operation": "count_nodes",
+    "args": {
+      "hours": 24,
+      "country": "France"
+    }
+  }
+]

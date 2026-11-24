@@ -185,22 +185,22 @@ class TestSummaryAndDate:
 class TestFetchVigilance:
     def test_url_uses_department_slug(self):
         response = Mock(status_code=200)
-        response.cookies = {}
-        response.content = ORANGE_HTML.encode("utf-8")
+        response.cookies = {"mfsession": "rlz"}
+        response.json.return_value = {**SITE_API_DATA, "domain_id": "25"}
         with patch("modules.service_plugins.vigilance_service.requests.get", return_value=response) as get:
             data = fetch_vigilance("25")
-        assert "/fr/doubs" in get.call_args[0][0]
+        assert "/fr/doubs" in get.call_args_list[0].args[0]
         assert data["color"] == "Orange"
         assert data["url"].startswith("https://vigilance.meteofrance.fr/")
 
     def test_number_is_not_a_slug(self):
         """The page is named after the department, not after its number."""
         response = Mock(status_code=200)
-        response.cookies = {}
-        response.content = GREEN_HTML.encode("utf-8")
+        response.cookies = {"mfsession": "rlz"}
+        response.json.return_value = SITE_API_DATA
         with patch("modules.service_plugins.vigilance_service.requests.get", return_value=response) as get:
             fetch_vigilance("95")
-        assert get.call_args[0][0].endswith("/fr/val-d-oise")
+        assert get.call_args_list[0].args[0].endswith("/fr/val-d-oise")
 
     def test_unknown_department_raises_before_fetching(self):
         """A number with no page would only produce a 404, so it is refused."""
@@ -338,8 +338,8 @@ class TestFetchVigilanceSources:
         assert entries["95"]["color"] == "Orange"
         assert entries["13"]["color"] == "Jaune"
 
-    def test_a_list_without_a_cookie_costs_one_page_each(self):
-        """Nothing to authenticate with, so every department needs its own page."""
+    def test_a_list_without_a_cookie_tries_other_departments_without_inventing_green(self):
+        """A broken page must not prevent another department from providing a session."""
         page_95 = Mock(status_code=200)
         page_95.cookies = {}
         page_95.content = ORANGE_HTML.encode("utf-8")
@@ -349,10 +349,9 @@ class TestFetchVigilanceSources:
         with patch(
             "modules.service_plugins.vigilance_service.requests.get", side_effect=[page_95, page_25]
         ) as get:
-            entries = fetch_vigilance_multi(["95", "25"], "")
+            with pytest.raises(ValueError, match="accès au bulletin"):
+                fetch_vigilance_multi(["95", "25"], "")
         assert get.call_count == 2
-        assert entries["95"]["color"] == "Orange"
-        assert entries["25"]["color"] == "Vert"
 
     def test_empty_list_raises(self):
         with patch("modules.service_plugins.vigilance_service.requests.get") as get:
@@ -360,15 +359,15 @@ class TestFetchVigilanceSources:
                 fetch_vigilance_multi([], "")
         get.assert_not_called()
 
-    def test_no_cookie_falls_back_to_the_page(self):
+    def test_no_cookie_refuses_the_page_instead_of_inventing_a_level(self):
         response = Mock(status_code=200)
         response.cookies = {}
         response.content = ORANGE_HTML.encode("utf-8")
         with patch(
             "modules.service_plugins.vigilance_service.requests.get", return_value=response
         ) as get:
-            data = fetch_vigilance("25", "")
-        assert data["color"] == "Orange"
+            with pytest.raises(ValueError, match="accès au bulletin"):
+                fetch_vigilance("25", "")
         assert "cartevigilance" not in get.call_args[0][0]
 
     def test_overseas_department_needs_a_key(self):
@@ -464,16 +463,15 @@ class TestRequestDelay:
         order, _ = self._run(["95", "13"], "", 0.0, responses)
         assert order == ["get", "get", "get"]
 
-    def test_pages_are_spaced_too_when_the_page_sets_no_cookie(self):
+    def test_no_cookie_cannot_report_green_for_any_department(self):
         page_95 = Mock(status_code=200)
         page_95.cookies = {}
         page_95.content = ORANGE_HTML.encode("utf-8")
         page_25 = Mock(status_code=200)
         page_25.cookies = {}
         page_25.content = GREEN_HTML.encode("utf-8")
-        order, entries = self._run(["95", "25"], "", 2.0, iter([page_95, page_25]))
-        assert order == ["get", "sleep:2.0", "get"]
-        assert entries["25"]["color"] == "Vert"
+        with pytest.raises(ValueError, match="accès au bulletin"):
+            self._run(["95", "25"], "", 2.0, iter([page_95, page_25]))
 
     def test_default_is_two_seconds(self):
         assert _svc().request_delay == 2.0

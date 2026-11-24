@@ -6,6 +6,11 @@ semantic versioning.
 
 ## [Unreleased]
 
+### Baliz assistant
+- Turn `ask` into a configurable assistant router (alias `baliz`); extract network SQL into `mesh` (`query`/`sql`).
+- Share LLM services without adding routing to `llm_command.py`; isolate Wiki, network and conversation.
+- Preserve RF metadata and capability permissions; send captured answers through UTF-8-aware pagination.
+- See `docs/baliz-assistant.md` for settings migration and LXC 109 validation.
 
 ### Added
 
@@ -90,7 +95,7 @@ semantic versioning.
   age — always a single DM per recipient carrying the unread count, never one DM per
   stored message. The 24h/73h stages are swept by a scheduler job every
   `notify_check_minutes` minutes (default 30) and stamped per message in `bbs_inbox`
-  (migration 35) only after the DM actually went out on the radio: a stage is sent
+  (migration 36 in Baliz) only after the DM actually went out on the radio: a stage is sent
   at most once per message, survives bot restarts and retries unreachable recipients
   on the next sweep. New `[BBS_Command]` keys: `notify_on_arrival`,
   `notify_reminder_hours`, `notify_final_hours`, `notify_check_minutes` (a stage
@@ -106,7 +111,7 @@ semantic versioning.
   battery badges). The clock-sync write routes, per-target history, Run Now, battery history and
   the `/time/admin` editor stay admin-only. See `docs/web-viewer.md`.
 
-- Rebuilt the **BBS** store-and-forward mailbox on `bbs_inbox` (migration 34), keyed on full public
+- Rebuilt the **BBS** store-and-forward mailbox on `bbs_inbox` (migration 35 in Baliz), keyed on full public
   keys: two nodes advertising the same name no longer share a mailbox, and a queued message stays
   deliverable when the recipient renames its node. Recipients resolve in MeshCore-BBS order —
   exact name, then public-key prefix (4+ hex characters), then partial name — and ambiguous
@@ -620,6 +625,9 @@ semantic versioning.
   the others, behind an **Afficher le trafic non identifié** switch that also controls the modal's
   author table. Each row carries its share of the distinct packets alongside its count.
 
+- Baliz weather replies keep the location returned by the weather provider.
+  Remove the Brest-specific reformulation example and reject prose that changes
+  or omits the source location, using the factual forecast as fallback.
 - A viewer **restart logged every admin out**. `SECRET_KEY` was drawn from `secrets.token_hex()` on
   every start, so the session cookie the previous process signed stopped verifying: `systemctl
   restart`, a deploy or a reboot dropped the operator's login without a word, and on the contacts
@@ -1341,6 +1349,12 @@ semantic versioning.
   need it so one line does not come back in the sender's language and the next in
   the bot's default; `wx_international` was reaching for the private
   `_response_translator` ContextVar to do this.
+
+- The optional LLM RAG can now collect and refresh a path-scoped corpus from any
+  Wiki.js instance. It supports either Guest source access or a Wiki.js API key,
+  publishes indexes atomically, retrieves structure-aware sections with explicit
+  score thresholds, and isolates wiki answers from unrelated conversational and
+  local context.
 
 - Shlink is now supported as a URL shortener alongside v.gd / is.gd, selected with
   `short_url_website_service = shlink` under `[External_Data]`. It authenticates with

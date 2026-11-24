@@ -1872,6 +1872,10 @@ class DashboardStatsService:
                     (now, cutoff if cutoff is not None else 0, limit),
                 )
             ]
+        elif kind == "commands" and _table_exists(conn, "assistant_function_usage"):
+            from modules.assistant.usage import top_functions
+            items = [{"name": row["command"], "count": row["count"]}
+                     for row in top_functions(conn.cursor(), window, now=now)][:limit]
         elif kind == "commands" and _table_exists(conn, "command_stats"):
             items = [
                 {"name": row[0], "count": row[1]}

@@ -1488,7 +1488,7 @@
         keyStoreStarted = true;
         try {
             // Fetch the channels the operator has agreed to publish.
-            const response = await fetch('/api/channels/live');
+            const response = await fetch('/api/channels');
             const data = await response.json();
 
             let radioChannels = 0;
@@ -2228,27 +2228,27 @@
         const failed = cmd.success === false;
         const delivery = cmd.dm_delivery || {};
         const deliveryLabels = {
-            not_sent: 'Not sent', unconfirmed: 'Delivery unconfirmed',
-            acknowledged: 'Delivery confirmed', partial: 'Partially sent',
+            not_sent: 'Non émis', unconfirmed: 'Livraison non confirmée',
+            acknowledged: 'Livraison confirmée', partial: 'Envoi partiel',
         };
         const reasonLabels = {
-            contact_missing: 'Contact not found.', ambiguous_contact: 'Recipient matches multiple contacts.',
-            contact_data_incomplete: 'Insufficient data to restore this contact.',
-            contact_table_full: 'The radio contact table is full.',
-            contact_refresh_failed: 'Unable to verify radio contacts.',
-            contact_resolution_timeout: 'Contact verification timed out.',
-            invalid_recipient: 'Missing or invalid recipient.',
-            contact_resolution_failed: 'Unable to prepare the recipient.',
-            contact_restore_failed: 'The radio could not add this contact.',
-            contact_restore_unavailable: 'Contact restoration is unavailable.',
-            send_not_confirmed: 'Transmission could not be confirmed.',
-            contact_capacity_unknown: 'Unable to verify contact table capacity.',
-            contact_restore_disabled: 'Automatic contact management is disabled.',
-            contact_restore_unconfirmed: 'The radio did not confirm the restored contact.',
-            contact_cleanup_in_progress: 'Contact cleanup is in progress.',
-            radio_unavailable: 'Radio unavailable.', rate_limited: 'Transmission temporarily rate limited.',
-            radio_rejected: 'The radio rejected this transmission.', ack_missing: 'No ACK received.',
-            ack_received: 'ACK received.', radio_accepted: 'Transmission accepted by the radio; no verified ACK.',
+            contact_missing: 'Contact introuvable.', ambiguous_contact: 'Plusieurs contacts correspondent au destinataire.',
+            contact_data_incomplete: 'Données du contact insuffisantes pour le restaurer.',
+            contact_table_full: 'La liste de contacts de la radio est pleine.',
+            contact_refresh_failed: 'Impossible de vérifier les contacts de la radio.',
+            contact_resolution_timeout: 'La vérification du contact a pris trop de temps.',
+            invalid_recipient: 'Destinataire manquant ou invalide.',
+            contact_resolution_failed: 'Impossible de préparer le destinataire.',
+            contact_restore_failed: 'La radio n’a pas pu ajouter ce contact.',
+            contact_restore_unavailable: 'La restauration de ce contact est indisponible.',
+            send_not_confirmed: 'L’envoi n’a pas pu être confirmé.',
+            contact_capacity_unknown: 'La capacité de la liste de contacts ne peut pas être vérifiée.',
+            contact_restore_disabled: 'La gestion automatique des contacts est désactivée.',
+            contact_restore_unconfirmed: 'La radio n’a pas confirmé le contact restauré.',
+            contact_cleanup_in_progress: 'Le contact est en cours de nettoyage.',
+            radio_unavailable: 'La radio est indisponible.', rate_limited: 'Envoi limité temporairement.',
+            radio_rejected: 'La radio a refusé cet envoi.', ack_missing: 'Aucun accusé de réception reçu.',
+            ack_received: 'Accusé de réception reçu.', radio_accepted: 'Envoi accepté par la radio, sans ACK vérifié.',
         };
         const deliveryLabel = deliveryLabels[delivery.state];
         const head = makeElement('div', 'rt-reply-head');
@@ -2260,7 +2260,7 @@
         reply.appendChild(makeElement('p', 'rt-reply-text', cmd.response || 'No response'));
         const status = makeElement('div', `rt-reply-status${failed ? ' is-failed' : ''}`);
         if (deliveryLabel) {
-            const detail = reasonLabels[delivery.reason] || 'See technical logs for details.';
+            const detail = reasonLabels[delivery.reason] || 'Voir les journaux techniques pour le détail.';
             status.appendChild(document.createTextNode(detail));
         } else if (failed) {
             status.append(makeIcon('fas fa-circle-exclamation'), document.createTextNode(' Delivery failed'));

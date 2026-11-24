@@ -68,9 +68,24 @@ class NeighborsCommand(BaseCommand):
         """
         return self.translate('commands.neighbors.description')
 
+    def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        """Check if the neighbors command can be executed.
+
+        Args:
+            message: The message triggering the command.
+            skip_channel_check: Passed through to the base implementation.
+
+        Returns:
+            bool: True if the command can be executed, False otherwise.
+        """
+        return self.command_enabled and self.can_use_service(message, skip_channel_check)
+
+    def can_use_service(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        return super().can_use_service(message, skip_channel_check=skip_channel_check)
+
     def _get_capture_service(self) -> Any:
         """The packet capture service instance, or None when unavailable."""
-        service = getattr(self.bot, 'packet_capture_service', None)
+        service = getattr(self, '_manual_service', None) or getattr(self.bot, 'packet_capture_service', None)
         if service is not None:
             return service
         # The alias is set up at init; fall back to the service registry in case
@@ -127,6 +142,25 @@ class NeighborsCommand(BaseCommand):
             return
         spent = max(0.0, self.cooldown_seconds - remaining)
         self._user_cooldowns[user_id] = time.time() - spent
+
+    async def execute_service(self, message: MeshMessage) -> bool:
+        """Await the captured outcome; never lose the detached public-command reply."""
+        service = self._get_capture_service()
+        if service is None:
+            service = getattr(self.bot, '_assistant_neighbors_service', None)
+            if service is None:
+                from ..service_plugins.packet_capture_service import PacketCaptureService
+                service = PacketCaptureService(self.bot)
+                # No start(): no packet capture, MQTT, or periodic discovery.
+                self.bot._assistant_neighbors_service = service
+        self._manual_service = service
+        before = self._cycle_task
+        result = await self.execute(message)
+        if self._cycle_task is not None and self._cycle_task is not before:
+            await self._cycle_task
+            if message.capture_sink and len(message.capture_sink) > 1:
+                message.capture_sink[:] = message.capture_sink[-1:]
+        return result
 
     async def execute(self, message: MeshMessage) -> bool:
         """Execute the neighbors command.

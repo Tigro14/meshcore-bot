@@ -1,0 +1,706 @@
+# Profil Baliz issu du LXC 103 — 2026-09-13
+# Copier vers le config.ini actif ; voir docs/baliz-config.md.
+# Configuration propre à l'installation : radio, chemins et endpoint Ollama à vérifier.
+# Sans contournement de scope fr / fr-bre. Aucun secret fourni.
+
+[Connection]
+connection_type = serial
+serial_port = /dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0
+ble_device_name = 
+hostname = 
+tcp_port = 5000
+timeout = 30
+reconnect_max_retries = 0
+reconnect_delay_seconds = 10
+reconnect_max_delay_seconds = 60
+radio_debug = false
+radio_probe_interval_seconds = 300
+radio_probe_fail_threshold = 3
+radio_zombie_alert_enabled = false
+radio_zombie_alert_email = 
+radio_offline_threshold = 3
+radio_offline_alert_enabled = false
+radio_offline_alert_email = 
+command_min_interval_ms = 30
+channel_fetch_interval_ms = 300
+
+[Bot]
+bot_name = [BOT] Baliz
+auto_update_device_name = true
+rf_data_timeout = 15.0
+message_correlation_timeout = 10.0
+enable_enhanced_correlation = true
+node_id = 
+respond_to_mentions = also
+enabled = true
+passive_mode = false
+rate_limit_seconds = 1
+scheduled_message_max_stagger_seconds = 1.5
+scheduled_command_timeout_seconds = 30
+bot_tx_rate_limit_seconds = 1.0
+per_user_rate_limit_seconds = 5
+per_user_rate_limit_enabled = true
+tx_delay_ms = 250
+dm_max_retries = 3
+dm_max_flood_attempts = 2
+dm_flood_after = 2
+timezone = Europe/Paris
+bot_latitude = 48.578334
+bot_longitude = -3.826667
+max_channels = 12
+advert_interval_hours = 0
+startup_advert = false
+auto_manage_contacts = device
+db_path = /var/lib/meshcore-bot/meshcore_bot.db
+service_restart_backoff_seconds = 300
+send_timeout_seconds = 30
+prefix_bytes = 3
+# Keep the MeshCore protocol clock in UTC. The Web Viewer converts the naive
+# database reception timestamps from the configured Europe/Paris timezone.
+radio_clock_use_local_time = false
+local_dir_path = /var/lib/meshcore-bot/local
+
+[Admin]
+enabled = false
+port = 5001
+token = 
+
+[Clock_Sync_Admin]
+enabled = true
+schedule = 0 3 * * *
+targets = 
+command_payload = clock sync admin
+min_sync_drift = 60
+dashboard_hop_radius = 10
+dashboard_check_window_hours = 24
+dashboard_max_clock_drift_seconds = 300
+clock_sync_admin_reply_window_seconds = 60
+
+[Battery_Monitor]
+# Un relevé quotidien à 03:00, sur les cibles Clock Sync déjà autorisées.
+enabled = true
+schedule = 0 3 * * *
+
+[Channels]
+startup_flood_scope = fr-bre
+monitor_channels = #bretagne
+respond_to_dms = true
+max_response_hops = 10
+
+[Banned_Users]
+banned_users = 
+
+[Localization]
+language = fr
+translation_path = translations/
+auto_detect_language = false
+
+[Admin_ACL]
+admin_pubkeys = 
+admin_commands = repeater,webviewer,reload,channelpause,neighbors
+
+[Plugin_Overrides]
+
+
+[Service_Overrides]
+
+
+[Companion_Purge]
+companion_purge_enabled = false
+companion_dm_threshold_days = 30
+companion_advert_threshold_days = 30
+companion_min_inactive_days = 30
+
+[Keywords]
+test = "ack @[{sender}]{phrase_part} | {connection_info} | Received at: {timestamp}"
+ping = "Pong!"
+pong = "Ping!"
+
+[Custom_Syntax]
+
+
+[RandomLine]
+prefix.default = 
+triggers.momjoke = momjoke,momjokes,mom joke,mom jokes,mom-joke,mom-jokes
+file.momjoke = data/randomlines/momjokes.txt
+prefix.momjoke = 🥸
+triggers.funfact = funfact,funfacts,fun fact,fun facts,fun-fact,fun-facts
+file.funfact = data/randomlines/funfacts.txt
+prefix.funfact = 💡
+category.funfact = fun
+
+[Scheduled_Messages]
+
+
+[Schedule_Command]
+enabled = true
+dm_only = true
+
+[Logging]
+log_level = INFO
+log_file = /var/log/meshcore-bot/meshcore_bot.log
+colored_output = true
+meshcore_log_level = INFO
+json_logging = false
+log_max_bytes = 5242880
+log_backup_count = 3
+
+[External_Data]
+short_url_website = https://v.gd
+short_url_website_api_key = 
+weather_api_key = 
+weather_update_interval = 3600
+tide_api_key = 
+tide_update_interval = 1800
+n2yo_api_key = 
+airnow_api_key = 
+forecast_solar_api_key = 
+repeater_prefix_api_url = 
+repeater_prefix_cache_hours = 1
+
+[Prefix_Command]
+show_repeater_locations = false
+use_reverse_geocoding = true
+hide_source = false
+prefix_heard_days = 7
+prefix_free_days = 7
+max_prefix_range = 200
+prefix_best_enabled = true
+prefix_best_min_edge_observations = 2
+prefix_best_max_edge_age_days = 30
+prefix_best_location_radius_km = 50
+prefix_best_do_not_suggest = 
+
+[Weather]
+weather_provider = openmeteo
+default_city = Bretagne
+default_location_label = En Bretagne
+default_state =
+default_country = FR
+use_bot_location_when_no_location = false
+temperature_unit = celsius
+wind_speed_unit = kmh
+precipitation_unit = mm
+temperature_high_low_format = H:{high}{units} L:{low}{units}
+temperature_high_only_format = H:{high}{units}
+temperature_low_only_format = L:{low}{units}
+
+[Solar_Config]
+url_timeout = 10
+use_zulu_time = false
+
+[Aurora_Command]
+enabled = false
+
+[Rain_Command]
+enabled = false
+
+[Channels_List]
+weather = Weather updates and conditions
+emergency = Emergency communications and alerts
+sports.sounders = Seattle Sounders FC
+sports.kraken = Seattle Kraken
+sports.mariners = Seattle Mariners
+sports.seahawks = Seattle Seahawks
+sports.reign = OL Reign
+sports.storm = Seattle Storm
+sports.huskies = Washington Huskies
+local.capitolhill = Capitol Hill neighborhood
+local.ballard = Ballard neighborhood
+local.fremont = Fremont neighborhood
+local.queenanne = Queen Anne neighborhood
+tech.mesh = Mesh networking and technical discussions
+tech.hamradio = Amateur radio and ham radio topics
+tech.programming = Programming and development
+tech.iot = Internet of Things projects
+emergency.emergency = Emergency communications and alerts
+emergency.weather = Weather updates and conditions
+emergency.traffic = Traffic updates and road conditions
+emergency.hamradio = Amateur radio emergency net
+
+[Sports_Command]
+enabled = false
+teams = seahawks,mariners,sounders,kraken
+channel_override = #sounders=sounders,#seahawks=seahawks,#kraken=kraken,#mariners=mariners
+api_timeout = 10
+
+[Worldcup_Command]
+enabled = false
+api_timeout = 10
+cache_ttl_minutes = 360
+
+[Stats_Command]
+enabled = false
+data_retention_days = 7
+auto_cleanup = true
+collect_stats = true
+track_all_messages = true
+track_command_details = true
+anonymize_users = false
+
+[Data_Retention]
+retention_delete_batch_size = 1000
+retention_delete_pause_seconds = 0.1
+packet_stream_retention_days = 3
+daily_stats_retention_days = 90
+observed_paths_retention_days = 90
+purging_log_retention_days = 90
+mesh_connections_retention_days = 7
+neighbor_observations_retention_days = 365
+
+[Path_Command]
+enabled = true
+require_path_bytes_greater_or_equal_to = 0
+require_path_bytes_failure_response = 
+enable_p_shortcut = true
+reply_prefix = 
+minimum_path_bytes = 0
+path_selection_preset = balanced
+proximity_method = path
+path_proximity_fallback = true
+max_proximity_range = 200
+max_repeater_age_days = 14
+recency_weight = 0.4
+recency_decay_half_life_hours = 24
+graph_based_validation = true
+min_edge_observations = 3
+graph_edge_expiration_days = 7
+graph_write_strategy = batched
+graph_batch_interval_seconds = 30
+graph_batch_max_pending = 100
+graph_use_bidirectional = true
+graph_use_hop_position = true
+graph_multi_hop_enabled = true
+graph_multi_hop_max_hops = 2
+graph_geographic_combined = false
+graph_geographic_weight = 0.7
+graph_confidence_override_threshold = 0.7
+graph_distance_penalty_enabled = true
+graph_max_reasonable_hop_distance_km = 50
+graph_distance_penalty_strength = 0.3
+graph_zero_hop_bonus = 0.4
+graph_prefer_stored_keys = true
+graph_final_hop_proximity_enabled = true
+graph_final_hop_proximity_weight = 0.25
+graph_final_hop_max_distance = 0
+graph_final_hop_proximity_normalization_km = 200
+graph_final_hop_very_close_threshold_km = 10
+graph_final_hop_close_threshold_km = 30
+graph_final_hop_max_proximity_weight = 0.6
+graph_path_validation_max_bonus = 0.3
+graph_path_validation_obs_divisor = 50.0
+graph_startup_load_days = 0
+graph_capture_enabled = true
+star_bias_multiplier = 2.5
+high_confidence_symbol = 🎯
+medium_confidence_symbol = 📍
+low_confidence_symbol = ❓
+
+[Joke_Command]
+enabled = false
+seasonal_jokes = true
+long_jokes = false
+
+[DadJoke_Command]
+enabled = false
+long_jokes = false
+
+[Hacker_Command]
+enabled = false
+
+[Multitest_Command]
+response_format = @[{sender}] found {path_count} unique path(s):\n{paths}
+condense_paths = true
+require_path_bytes_greater_or_equal_to = 0
+require_path_bytes_failure_response = 
+
+[Greeter_Command]
+enabled = false
+greeting_message = Welcome to the mesh, @[{sender}]!
+channel_greetings = 
+per_channel_greetings = false
+include_mesh_info = true
+mesh_info_format = \n\nMesh Info: {total_contacts} contacts, {repeaters} repeaters, {recent_activity_24h} active in last 24h
+rollout_days = 7
+auto_backfill = false
+backfill_lookback_days = 30
+dead_air_delay_seconds = 0
+defer_to_human_greeting = false
+levenshtein_distance = 0
+
+[Alert_Command]
+enabled = false
+max_distance_km = 20.0
+max_incident_age_hours = 24.0
+
+[Announcements_Command]
+enabled = false
+announcements_acl = 
+default_announcement_channel = Public
+announcement_cooldown = 60
+announce.default = This is the default announcement.
+announce.bots = This is an announcement with the list of bots.
+announce.other = This is a different announcement on another topic.
+
+[Airplanes_Command]
+enabled = false
+api_url = https://api.adsb.lol/v2/
+default_radius = 25
+max_results = 3
+url_timeout = 10
+
+[Wx_Command]
+enabled = false
+temperature_unit = celsius
+wind_speed_unit = kmh
+
+[WebViewer_Command]
+enabled = false
+
+[Sun_Command]
+enabled = false
+
+[Solar_Command]
+enabled = false
+
+[Solarforecast_Command]
+enabled = false
+
+[Satpass_Command]
+enabled = false
+
+[Roll_Command]
+enabled = false
+
+[Repeater_Command]
+enabled = false
+
+[Ping_Command]
+enabled = false
+
+[Version_Command]
+enabled = false
+
+[Moon_Command]
+enabled = false
+
+[Magic8_Command]
+enabled = false
+
+[Hfcond_Command]
+enabled = false
+
+[Help_Command]
+enabled = false
+
+[Hello_Command]
+enabled = false
+
+[Dice_Command]
+enabled = false
+
+[Cmd_Command]
+enabled = false
+
+[Channels_Command]
+enabled = false
+
+[Catfact_Command]
+enabled = false
+
+[Aqi_Command]
+enabled = false
+
+[Llm_Command]
+enabled = true
+endpoint = http://192.168.0.104:11434/v1/chat/completions
+model = qwen3.5:2b-q4_K_M
+reasoning_effort = none
+system_prompt = Tu es Baliz, l'assistant du reseau MeshCore Bretagne, base a Morlaix dans le Finistere. MeshCore est un projet mondial open source de reseau maille LoRa pour la messagerie texte hors infrastructure, utilisant notamment des Companions, Repeaters et Room Servers.Reponds en francais naturel, precis et factuel. Reste bref sans etre telegraphique : moins de 300 caracteres, une ou deux phrases courtes. Adapte le niveau de detail a la question et reformule naturellement les donnees du contexte.N'invente aucune information absente du contexte. Pour l'etat du reseau, rapporte uniquement les faits disponibles sans conclure qu'il est stable, bon ou mauvais sauf si le contexte le permet explicitement.Maintiens la continuite de la conversation. Garde un ton cordial mais evite les salutations et formules de politesse inutiles.
+max_tokens = 100
+temperature = 0.4
+top_p = 0.9
+timeout_seconds = 300
+strip_thinking_tags = true
+include_local_context = true
+context_include_weather = true
+context_include_repeaters = true
+context_include_network_status = true
+context_include_contacts = true
+context_include_moon = false
+context_include_sun = false
+context_include_commands = false
+context_include_system_metrics = false
+context_cache_seconds = 60
+context_weather_location = Bretagne, France
+context_window_seconds = 600
+context_max_turns = 5
+cpu_temp_threshold = 85
+public_enabled = true
+# Wiki.js public source collection and local lexical retrieval.
+[Rag_Service]
+enabled = true
+wiki_site_url = https://wiki.meshcore.bzh
+# Wiki.js stores these French pages under locale en.
+wiki_locale = en
+wiki_api_key =
+wiki_refresh_interval_seconds = 86400
+wiki_verify_ssl = true
+# materiel is excluded until its source views allow Guest access (currently 403).
+wiki_allowed_paths = configuration, démarrer, ressources
+wiki_rag_index_path = data/wiki_rag/meshcore_bzh_wiki_pages.jsonl
+wiki_rag_max_chunks = 2
+wiki_rag_chunk_chars = 1400
+wiki_rag_max_context_chars = 2400
+wiki_rag_min_term_len = 3
+wiki_rag_min_score = 6
+wiki_rag_relative_score = 0.55
+wiki_rag_stopwords =
+wiki_rag_aliases =
+
+[Advert_Command]
+enabled = true
+
+[Neighbors_Command]
+enabled = false
+
+[Test_Command]
+enabled = false
+require_path_bytes_greater_or_equal_to = 0
+require_path_bytes_failure_response = 
+
+[Trace_Command]
+enabled = false
+maximum_hops = 7
+trace_mode = one_byte
+timeout_base_seconds = 1.0
+timeout_per_hop_seconds = 0.5
+trace_retry_count = 2
+trace_retry_delay_seconds = 1.0
+update_graph_one_byte = true
+update_graph_two_byte = true
+
+[Feed_Manager]
+feed_manager_enabled = false
+default_check_interval_seconds = 300
+max_items_per_check = 10
+max_posts_per_check = 10
+feed_request_timeout = 30
+max_response_bytes = 2097152
+max_parsed_items = 500
+feed_user_agent = MeshCoreBot/1.0 FeedManager
+feed_rate_limit_seconds = 5.0
+max_message_length = 130
+default_output_format = {emoji} {body|truncate:100} - {date}\n{link|truncate:50}
+default_message_send_interval_seconds = 2.0
+shorten_urls = false
+allow_private_urls = false
+
+[Feed_Command]
+enabled = false
+allow_private_urls = false
+
+[Web_Viewer]
+enabled = true
+websocket_enabled = true
+host = 0.0.0.0
+port = 8080
+debug = false
+auto_start = true
+multibyte_monitor_enabled = false
+mesh_graph_cache_seconds = 30
+decode_hashtag_channels = 
+
+[PacketCapture]
+enabled = false
+output_file = 
+verbose = false
+debug = false
+raw_duplicate_window = 2.0
+rf_data_cache_timeout = 15.0
+mqtt_enabled = true
+mqtt_skip_unparseable_packets = true
+advert_require_valid_signature = false
+decode_payloads = false
+include_decoded = false
+decode_hashtag_channels = 
+decode_channel_keys = 
+decode_include_public = true
+log_rotation = off
+log_max_bytes = 50MB
+log_rotation_when = midnight
+log_backup_count = 5
+neighbors_enabled = false
+neighbors_interval_hours = 24
+neighbors_discover_window = 60
+neighbors_max = 32
+neighbors_feed_mesh_graph = true
+neighbors_collect_scopes = false
+neighbors_command_timeout = 20
+neighbors_scope_timeout = 0
+neighbors_scope_min_timeout = 8
+neighbors_scope_gap = 2.0
+neighbors_cycle_timeout = 600
+neighbors_self_scopes = 
+owner_public_key = 
+owner_email = 
+private_key_path = 
+auth_token_method = device
+iata = XYZ
+observer_name = 
+mqtt1_enabled = true
+mqtt1_server = mqtt-us-v1.letsmesh.net
+mqtt1_port = 443
+mqtt1_transport = websockets
+mqtt1_use_tls = true
+mqtt1_use_auth_token = true
+mqtt1_token_audience = mqtt-us-v1.letsmesh.net
+mqtt1_topic_status = meshcore/{IATA}/{PUBLIC_KEY}/status
+mqtt1_topic_packets = meshcore/{IATA}/{PUBLIC_KEY}/packets
+mqtt1_websocket_path = /mqtt
+mqtt1_client_id = 
+mqtt1_upload_packet_types = 
+mqtt2_enabled = true
+mqtt2_server = mqtt-eu-v1.letsmesh.net
+mqtt2_port = 443
+mqtt2_transport = websockets
+mqtt2_use_tls = true
+mqtt2_use_auth_token = true
+mqtt2_token_audience = mqtt-eu-v1.letsmesh.net
+mqtt2_topic_status = meshcore/{IATA}/{PUBLIC_KEY}/status
+mqtt2_topic_packets = meshcore/{IATA}/{PUBLIC_KEY}/packets
+mqtt2_websocket_path = /mqtt
+mqtt2_client_id = 
+mqtt2_upload_packet_types = 
+stats_in_status_enabled = true
+stats_refresh_interval = 300
+jwt_ttl_seconds = 86400
+jwt_renewal_interval = 86400
+health_check_interval = 30
+health_check_grace_period = 2
+
+[MapUploader]
+enabled = false
+api_url = https://map.meshcore.dev/api/v1/uploader/node
+private_key_path = 
+min_reupload_interval = 3600
+verbose = false
+
+[Weather_Service]
+enabled = false
+weather_alarm = 6:00
+my_position_lat = 
+my_position_lon = 
+weather_channel = #weather
+alerts_channel = #weather
+poll_weather_alerts_interval = 600000
+rain_nowcast_enabled = false
+poll_rain_nowcast_interval = 900000
+rain_nowcast_lead_minutes = 60
+rain_nowcast_renotify_minutes = 30
+rain_nowcast_cache_seconds = 300
+blitz_collection_interval = 600000
+blitz_alert_threshold = 10
+
+[MqttWeather]
+enabled = false
+
+[Earthquake_Service]
+enabled = false
+channel = #general
+poll_interval = 60000
+time_window_minutes = 10
+min_magnitude = 3.0
+minlatitude = 32.5
+maxlatitude = 42.0
+minlongitude = -124.5
+maxlongitude = -114.0
+send_link = true
+
+[Worldcup_Service]
+enabled = false
+channel = #general
+poll_interval = 60000
+live_poll_interval = 20000
+idle_interval = 1800
+announce_kickoff = true
+announce_goals = true
+announce_disallowed = true
+announce_red_cards = true
+announce_yellow_cards = false
+announce_stoppage = true
+announce_halftime = true
+announce_fulltime = true
+silence_mesh_output = false
+use_fastcast = false
+api_timeout = 10
+
+[Rate_Limits]
+
+
+[Webhook]
+enabled = false
+host = 127.0.0.1
+port = 8765
+
+[RepeaterPrefixCollision_Service]
+enabled = false
+channels = #mybotchannel
+notify_on_prefix_bytes = 1
+heard_window_days = 30
+prefix_free_days = 30
+post_process_delay_seconds = 0.5
+post_process_timeout_seconds = 15.0
+cooldown_minutes_per_prefix = 60
+notify_external_on_all_new_repeaters = false
+silence_mesh_output = false
+
+[DiscordBridge]
+enabled = false
+avatar_style = color
+
+[TelegramBridge]
+enabled = false
+
+[DARC_MoWaS_Service]
+enabled = false
+
+[Ask_Command]
+enabled = true
+aliases = baliz
+enabled_routes = test,path,mesh,wiki,weather,llm,bbs,info
+route_timeout_seconds = 120
+semantic_timeout_seconds = 300
+max_pages = 1
+
+[Mesh_Command]
+enabled = true
+public_enabled = true
+
+[Channel_Occupancy]
+# Estimation de l'airtime et historique local. La modulation de la radio prévaut.
+enabled = true
+sample_seconds = 60
+fast_window_seconds = 10
+window_seconds = 60
+slow_window_seconds = 900
+half_life_seconds = 300
+max_samples = 5000
+use_device_modulation = true
+spreading_factor = 9
+bandwidth_khz = 125
+coding_rate = 5
+preamble_symbols = 8
+
+[Vigilance_Service]
+enabled = true
+department = 29,22,35,56
+channel = #bretagne
+poll_interval = 3600000
+alert_levels = Jaune,Orange,Rouge
+notify_on_change = true
+reminder_interval = 86400
+offline_cache = true
+group_similar_alerts = false
+include_tomorrow = true
+silence_mesh_output = false

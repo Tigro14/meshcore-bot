@@ -1,445 +1,135 @@
-#!/usr/bin/env python3
-"""
-Ask command - Text-to-SQL agent for the MeshCore Bot.
-Generates a SQL query from a natural language question and executes it.
-"""
-
-import asyncio
+"""Assistant entry point. Routing and capabilities live in modules.assistant."""
 import re
-from typing import Any
 
-import requests
-
-from ..db_manager import validate_readonly_sql
+from ..assistant.dispatcher import AssistantDispatcher
+from ..assistant.response import send_answer
+from ..assistant.sender_policy import sender_may_use_llm
 from ..models import MeshMessage
 from .base_command import BaseCommand
 
-DB_SCHEMA = """\
-Tables and columns:
-- complete_contact_tracking: public_key, name, role(repeater/companion/roomserver/sensor), device_type, first_heard, last_heard, advert_count, latitude, longitude, city, state, country, signal_strength, snr, hop_count, is_currently_tracked, last_advert_timestamp, location_accuracy, contact_source, out_path, out_path_len, is_starred, out_bytes_per_hop
-- message_stats: timestamp, sender_id, channel, content, is_dm, hops, snr, rssi, path, scope_verdict(scoped/global/unknown), created_at
-- path_stats: timestamp, sender_id, channel, path_length, path_string, hops, created_at
-- observed_paths: public_key, packet_hash, from_prefix, to_prefix, path_hex, path_length, bytes_per_hop, packet_type, first_seen, last_seen, observation_count, snr, rssi
-- mesh_connections: from_prefix, to_prefix, from_public_key, to_public_key, observation_count, first_seen, last_seen, avg_hop_position, geographic_distance
-- neighbor_links: self_public_key, neighbor_public_key, first_seen, last_seen, observation_count, best_snr, last_snr, last_status, scopes
-- daily_stats: date, public_key, advert_count, first_advert_time, last_advert_time
-- repeater_contacts: public_key, name, device_type, first_seen, last_seen, contact_data, latitude, longitude, city, state, country, is_active, purge_count
-- unique_advert_packets: date, public_key, packet_hash, first_seen
-
-Notes:
-- UNITS: geographic_distance is in km. snr is in dB. signal_strength is RSSI in dBm (NOT snr). hops / path_length / bytes_per_hop / out_bytes_per_hop are unitless counts. advert_count is a packet count.
-- snr and signal_strength are DIFFERENT columns: snr (dB) is the signal-to-noise ratio; signal_strength (dBm) is the received power (RSSI). A question about "dB" / "SNR" / "signal strength in dB" means the `snr` column — never report signal_strength for an snr question, and never label snr as dBm.
-- Time columns: last_heard, first_heard, last_seen, first_seen, last_advert_timestamp are ISO datetime strings. date / first_advert_time / last_advert_time in daily_stats are dates/times. timestamp in message_stats and path_stats is Unix epoch (integer seconds).
-- SQLite ONLY. For the current time as an integer epoch, use strftime('%s','now') — e.g. "timestamp >= (CAST(strftime('%s','now') AS INTEGER) - 86400)". NEVER use EXTRACT(EPOCH FROM ...), NOW(), or any PostgreSQL/Oracle function; they are not valid SQLite and will cause a syntax error.
-- sender_id in message_stats/path_stats/command_stats is the node NAME (e.g. "Tigro"), not a public key. public_key is a hex string in complete_contact_tracking / observed_paths / repeater_contacts. To compare a message sender with a contact, join on NAME (m.sender_id = c.name), not on public_key.
-- Use LIMIT 20 max. Read-only: SELECT only.
-- Many rows have NULL latitude/longitude. Add WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 ONLY when the question actually needs a position (distance, radius, "farthest", coordinates). For questions that do NOT need a position (count, "heard", "active", "how many", snr/rssi thresholds, advert counts), do NOT filter on latitude — otherwise you silently drop every node without a known position and undercount.
-- For "how far from me" use the provided Haversine formula (km) against complete_contact_tracking.latitude/longitude. Do NOT use mesh_connections.geographic_distance for a sender-relative distance; it is the fixed node-to-node distance in km.
-- "Longest link" / "plus longue liaison" / "farthest link": use path_stats.path_length (hops) for the longest observed route, or mesh_connections.geographic_distance (km) for the longest node-to-node link. Do NOT build it as "max hops joined to a located contact" — the sender of the longest route often has no known position, so a JOIN to latitude/longitude returns nothing.
-- "Direct neighbors of <node>" / "voisins directs": use mesh_connections (edges where from_public_key or to_public_key = the node's public key, or the 2-char prefix matches). neighbor_links is generally empty and must not be the source for a neighbor count.
-- "Node without a region" / "sans region" / "no region code" means a node whose channel messages were sent as an unscoped FLOOD, i.e. message_stats.scope_verdict = 'global'. Only 'global' counts (positive evidence of no region); 'unknown' (no evidence) and 'scoped' (has a region) must be excluded. Rows have NULL scope_verdict only for very old / DM messages — treat NULL as unknown, not region-less. Example: SELECT COUNT(DISTINCT m.sender_id) FROM message_stats m WHERE m.scope_verdict='global' AND m.is_dm=0 AND m.timestamp >= (CAST(strftime('%s','now') AS INTEGER) - 86400). To also restrict to a radius or role, JOIN complete_contact_tracking c ON c.name = m.sender_id and filter on c.latitude/longitude/role.
-- No firmware version or hardware/model info is stored in this database. If asked about version or hardware, reply: 'not tracked in DB'
-- Only query the tables listed above. Do NOT query: bbs_messages, bot_metadata, channels, clock_sync_*, command_stats, daily_rollup, dashboard_snapshot, feed_*, generic_cache, geocoding_cache, greeted_users, greeter_rollout, neighbor_observations, packet_stream, purging_log, schema_version
-- ALWAYS resolve public_key to name: JOIN complete_contact_tracking c ON c.public_key = <table>.public_key and SELECT c.name. Truncate names to 15 chars: SUBSTR(c.name, 1, 15) AS name. Never SELECT a raw public_key or prefix as the primary identifier.
-- When selecting a distance, alias it with its unit, e.g. ROUND(<haversine>,1) AS distance_km
-"""
-
 
 class AskCommand(BaseCommand):
-    """Text-to-SQL agent: converts natural language questions to SQL queries."""
-
     name = "ask"
-    keywords = ["ask", "query", "sql"]
-    description = "Ask a question about the mesh network data (contacts, messages, paths)"
-    requires_dm = False
-    cooldown_seconds = 30
+    keywords = ["ask"]
+    description = "Assistant: route questions to mesh data, Wiki, RF tools or conversation"
+    short_description = description
     category = "special"
-
-    short_description = "Query the mesh database with natural language (contacts, messages, paths, stats)"
-    usage = "ask <question about the mesh>"
-    examples = [
-        "ask combien de répéteurs actifs sur 7 jours",
-        "ask top 10 expéditeurs sur 30 jours",
-        "ask quel est le chemin le plus long observé",
-        "ask évolution des contacts uniques sur 30 jours",
-        "ask les nœuds avec le meilleur SNR",
-        "ask combien de messages par jour cette semaine",
-        "ask quels pays sont représentés dans le mesh",
+    cooldown_seconds = 5
+    usage = "ask <question>"
+    examples = ["ask comment tu me reçois ?", "ask combien de répéteurs actifs ?"]
+    settings_schema = [
+        {"key": "enabled_routes", "label": "Enabled routes", "type": "list",
+         "default": "test,path,mesh,wiki,weather,llm,bbs,info", "help": "Allowed capabilities: test,path,mesh,wiki,weather,llm,bbs,info."},
+        {"key": "route_timeout_seconds", "label": "Processing timeout", "type": "int",
+         "default": 120, "min": 1, "max": 300, "unit": "seconds"},
+        {"key": "semantic_timeout_seconds", "label": "Classification timeout", "type": "int",
+         "default": 300, "min": 1, "max": 300, "unit": "seconds"},
+        {"key": "semantic_routing_enabled", "label": "Closed-catalog LLM routing", "type": "bool",
+         "default": True, "help": "Select a validated operation from enabled_routes. Failure returns unavailable; no Wiki fallback."},
+        {"key": "max_pages", "label": "Maximum reply pages", "type": "int",
+         "default": 1, "min": 1, "max": 8},
     ]
 
-    def __init__(self, bot: Any):
+    def __init__(self, bot):
         super().__init__(bot)
         self.ask_enabled = self.get_config_value("Ask_Command", "enabled", fallback=True, value_type="bool")
-        self.endpoint = self.get_config_value(
-            "Llm_Command", "endpoint", fallback="http://127.0.0.1:8080/v1/chat/completions", value_type="str"
-        )
-        self.timeout_seconds = max(
-            1.0,
-            min(
-                300.0,
-                self.get_config_value("Llm_Command", "timeout_seconds", fallback=60.0, value_type="float"),
-            ),
-        )
-        self.max_tokens = max(
-            8, min(500, self.get_config_value("Llm_Command", "max_tokens", fallback=200, value_type="int"))
-        )
-        self.model = self.get_config_value("Llm_Command", "model", fallback="", value_type="str")
+        self.enabled_routes = {r.strip().lower() for r in self.get_config_value(
+            "Ask_Command", "enabled_routes", fallback="test,path,mesh,wiki,weather,llm,bbs,info", value_type="str"
+        ).split(",") if r.strip()}
+        unknown = self.enabled_routes - {"test", "path", "mesh", "wiki", "weather", "llm", "bbs", "info"}
+        if unknown:
+            raise ValueError(f"Unknown assistant routes: {sorted(unknown)}")
+        self.route_timeout_seconds = max(1, min(300, self.get_config_value(
+            "Ask_Command", "route_timeout_seconds", fallback=120, value_type="int")))
+        self.max_pages = max(1, min(8, self.get_config_value("Ask_Command", "max_pages", fallback=1, value_type="int")))
+        self.dispatcher = AssistantDispatcher(self)
 
     def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
-        if not self.ask_enabled:
+        return sender_may_use_llm(self.bot, message) and self.ask_enabled and super().can_execute(message, skip_channel_check)
+
+    def _punctuated_trigger(self, content: str) -> tuple[str, str] | None:
+        """Recognize punctuation directly after an assistant keyword or alias."""
+        for keyword in sorted(self.keywords, key=lambda k: (len(k.split()), len(k)), reverse=True):
+            words = keyword.split()
+            if not words:
+                continue
+            pattern = r'\s+'.join(re.escape(word) for word in words) + r'[,;:!?]+\s*(.*)'
+            match = re.fullmatch(pattern, content.strip(), flags=re.I | re.S)
+            if match:
+                return keyword.lower(), match.group(1).strip()
+        return None
+
+    def split_trigger_and_args(self, content: str) -> tuple[str | None, str]:
+        trigger, question = super().split_trigger_and_args(content)
+        if trigger is not None:
+            return trigger, re.sub(r'^[,;:!?]+\s*', '', question)
+        return self._punctuated_trigger(question) or (None, question)
+
+    def mentioned_question(self, message: MeshMessage, content: str) -> str | None:
+        # The channel handler may already have removed the mention. Match the
+        # immutable on-air text, including bot names containing brackets.
+        mode = self.bot.config.get('Bot', 'respond_to_mentions', fallback='also').strip().lower()
+        name = self._get_bot_name()
+        mention = f'@[{name}]' if name else ''
+        original = message.original_content or message.content
+        if mode != 'false' and mention and mention.casefold() in original.casefold():
+            body = re.sub(re.escape(mention), '', content, flags=re.IGNORECASE).strip()
+            _, question = self.split_trigger_and_args(body)
+            return question
+        return None
+
+    def matches_keyword(self, message: MeshMessage) -> bool:
+        question = self.mentioned_question(message, message.content)
+        if question is not None:
+            message.content = 'ask ' + question
+            message.content_lower = message.content.lower()
+            return True
+        if super().matches_keyword(message):
+            return True
+        return self._cleaned_content_matches(
+            message, lambda content: self._punctuated_trigger(content) is not None
+        )
+
+    def bbs_text_pending(self, message: MeshMessage, content: str | None = None) -> bool:
+        """Claim only the explicitly requested body in this sender's BBS session."""
+        if not getattr(self, 'ask_enabled', False) or 'bbs' not in getattr(self, 'enabled_routes', ()):
             return False
-        return super().can_execute(message)
+        service = getattr(getattr(self, 'dispatcher', None), 'bbs', None)
+        context = service.context(message) if service is not None else None
+        if not context or context['awaiting'] != 'text':
+            return False
+        if message.is_dm:
+            return True
+        # A BBS session never makes the bot listen to unaddressed channel text.
+        body = message.content if content is None else content
+        trigger, _ = self.split_trigger_and_args(body)
+        return trigger is not None or self.mentioned_question(message, body) is not None
 
-    def _extract_question(self, message: MeshMessage) -> str | None:
-        prefix = (self.bot.config.get("Bot", "command_prefix", fallback="") or "").strip()
-        content = message.content or ""
-        keywords_alt = "|".join(re.escape(k) for k in [self.name] + self.keywords)
-        if prefix:
-            pattern = re.compile(rf"^{re.escape(prefix)}?(?:{keywords_alt})\s+(.+)", re.IGNORECASE)
-        else:
-            pattern = re.compile(rf"^(?:{keywords_alt})\s+(.+)", re.IGNORECASE)
-        match = pattern.match(content)
-        return match.group(1).strip() if match else None
-
-    def _get_sender_position(self, message: MeshMessage) -> tuple[float, float] | None:
-        """Look up the sender's GPS position from the DB."""
-        sender_id = message.sender_id or ""
-        if not sender_id:
-            return None
-        try:
-            with self.bot.db_manager.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT latitude, longitude FROM complete_contact_tracking WHERE name = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 LIMIT 1",
-                    (sender_id,),
-                )
-                row = cursor.fetchone()
-                if not row:
-                    cursor.execute(
-                        "SELECT latitude, longitude FROM complete_contact_tracking WHERE public_key = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 LIMIT 1",
-                        (sender_id,),
-                    )
-                    row = cursor.fetchone()
-                if row:
-                    return (float(row[0]), float(row[1]))
-        except Exception:
-            pass
-        return None
-
-    def _generate_sql(self, question: str, sender_pos: tuple[float, float] | None) -> str | None:
-        """Ask the LLM to generate a SQL query for the question."""
-        pos_info = ""
-        haversine = ""
-        if sender_pos:
-            lat, lon = sender_pos
-            pos_info = f"\nUser position: {lat:.5f}, {lon:.5f} (use for distance calculations)"
-            haversine = (
-                f"\nHaversine formula: 6371*2*ASIN(SQRT("
-                f"POWER(SIN(RADIANS(latitude-{lat:.5f})/2),2)+"
-                f"COS(RADIANS({lat:.5f}))*COS(RADIANS(latitude))*"
-                f"POWER(SIN(RADIANS(longitude-{lon:.5f})/2),2)))"
-            )
-
-        system_prompt = (
-            "You are a SQL query generator for a mesh network database. "
-            "Given a question, respond with ONLY a single SQL SELECT query. "
-            "No explanations, no markdown, just the SQL. "
-            "Use LIMIT 20. Read-only. " + DB_SCHEMA + haversine + pos_info
-        )
-        payload: dict[str, Any] = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question},
-            ],
-            "max_tokens": self.max_tokens,
-            "temperature": 0.1,
-            "top_p": 0.9,
-        }
-        if self.model:
-            payload["model"] = self.model
-        try:
-            response = requests.post(self.endpoint, json=payload, timeout=self.timeout_seconds)
-            if response.status_code != 200:
-                return None
-            data = response.json()
-            content = data["choices"][0]["message"]["content"].strip()
-            sql_match = re.search(r"```(?:sql)?\s*(SELECT.+?)```", content, re.DOTALL | re.IGNORECASE)
-            if sql_match:
-                return sql_match.group(1).strip()
-            select_match = re.search(r"(SELECT\s+.+?)(?:;\s*)$", content, re.DOTALL | re.IGNORECASE)
-            if select_match:
-                return select_match.group(1).strip()
-            if content.upper().startswith("SELECT"):
-                return content.rstrip(";").strip()
-            return None
-        except (requests.RequestException, KeyError, IndexError, ValueError) as e:
-            self.logger.warning(f"Ask command SQL generation error: {e}")
-            return None
-
-    def _execute_sql(self, sql: str) -> str:
-        """Execute a read-only SQL query and return compact results."""
-        ok, reason = validate_readonly_sql(sql)
-        if not ok:
-            return f"(rejected: {reason})"
-        if not re.search(r"\bLIMIT\s+\d+", sql, re.IGNORECASE):
-            sql += " LIMIT 20"
-        sql = re.sub(r"\bLIMIT\s+\d+", "LIMIT 20", sql, flags=re.IGNORECASE)
-        sql = sql.rstrip(";")
-
-        try:
-            with self.bot.db_manager.connection() as conn:
-                conn.execute("PRAGMA query_only = ON")
-                cursor = conn.cursor()
-                cursor.execute(sql)
-                rows = cursor.fetchall()
-                if not rows:
-                    return "(no results)"
-                lines = []
-                for row in rows[:20]:
-                    parts = [str(v) for v in row if v is not None]
-                    lines.append(", ".join(parts))
-                return "\n".join(lines)
-        except Exception as e:
-            self.logger.warning(f"Ask command SQL execution error: {e} | SQL: {sql[:200]}")
-            return f"(query error: {e})"
-
-    # Date + time (with optional fraction). Bare dates (no time) are kept.
-    _DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$")
-
-    def _question_asks_for_datetime(self, question: str) -> bool:
-        """Return True if the question is specifically about a date/time (keep timestamps)."""
-        q = (question or "").lower()
-        markers = (
-            "date", "jour", "quand", "qu'elle", "qu'elle est", "dernier", "derniere", "dernière",
-            "récent", "recente", "récente", "recent", "latest", "when", "time", "heure",
-            "timestamp", "moment", "plus récent", "plus recemment", "plus récente",
-        )
-        return any(m in q for m in markers)
-
-    def _postprocess_results(self, results: str, keep_datetime: bool = False) -> str:
-        """Clean raw SQL results before they are formatted for the mesh.
-
-        1. Replace hex public keys / prefixes with node names (best-effort).
-           The LLM sometimes selects a ``public_key`` (hex, commonly 64 chars but
-           occasionally longer) or a short prefix (e.g. ``from_prefix``) instead of a
-           name. Each such token is resolved against ``complete_contact_tracking``
-           (exact match first, then prefix) and swapped for the node name.
-           A token is a candidate if it is 8+ hex chars; prefix matching is only
-           attempted when it contains at least one hex letter (a-f), so pure numeric
-           values (timestamps, counts) are not mistaken for key prefixes.
-        2. Drop verbose ISO datetimes (date + time) to save message space — unless
-           the question is specifically about a date/time, in which case they are kept.
-        """
-        if not results or not results.strip():
-            return results
-        candidates: set[str] = set()
-        for line in results.splitlines():
-            for part in line.split(", "):
-                p = part.strip()
-                if re.fullmatch(r"[0-9a-fA-F]{8,}", p):
-                    candidates.add(p.lower())
-        name_map: dict[str, str] = {}
-        if candidates:
-            try:
-                with self.bot.db_manager.connection() as conn:
-                    cursor = conn.cursor()
-                    for cand in candidates:
-                        name = None
-                        # 1) Exact match (any length).
-                        cursor.execute(
-                            "SELECT name FROM complete_contact_tracking WHERE public_key = ? LIMIT 1",
-                            (cand,),
-                        )
-                        row = cursor.fetchone()
-                        if row:
-                            name = row[0]
-                        # 2) Prefix match, only if the token has at least one hex letter.
-                        if not name and re.search(r"[a-fA-F]", cand):
-                            cursor.execute(
-                                "SELECT name FROM complete_contact_tracking WHERE public_key LIKE ? LIMIT 1",
-                                (cand + "%",),
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                name = row[0]
-                        if name:
-                            name_map[cand] = name[:15]
-            except Exception as e:
-                self.logger.debug(f"Ask command pubkey->name resolution error: {e}")
-
-        def _process_part(part: str) -> str | None:
-            p = part.strip()
-            # Resolve a public key / prefix to a name.
-            if p.lower() in name_map:
-                return name_map[p.lower()]
-            # Drop verbose datetimes unless the question is about a date/time.
-            if not keep_datetime and self._DATETIME_RE.match(p):
-                return None
-            return part
-
-        out_lines = []
-        for line in results.splitlines():
-            parts = [processed for processed in (_process_part(part) for part in line.split(", ")) if processed is not None]
-            if parts:
-                out_lines.append(", ".join(parts))
-        return "\n".join(out_lines)
-
-    def _format_followup(self, question: str, sql_results: str) -> str | None:
-        """Second LLM call to format results into a mesh-friendly answer."""
-        prompt = (
-            f"The query returned these results:\n{sql_results}\n\n"
-            f"Answer the question: {question}\n\n"
-            "FORMAT RULES (mesh network, max 150 chars per message):\n"
-            "- One item per line: 'name: value unit'\n"
-            "- ALWAYS attach the CORRECT unit to every number, derived from what is actually being counted:\n"
-            "  * number of nodes / repeaters / contacts / users / senders -> 'nodes' (or 'repeaters' when the question is about repeaters)\n"
-            "  * number of messages / packets / TX / RX -> 'messages' (only for actual message counts)\n"
-            "  * distance -> km ; path length -> hops ; time -> days/hours/minutes ; percentage -> % ; signal -> dBm ; data -> bytes\n"
-            "- NEVER use 'messages' as the unit for a node/repeater/contact count. The unit must match the quantity the question asks about.\n"
-            "- Use node NAMES, never hex public keys or short prefixes\n"
-            "- NEVER show raw coordinates (lat/lon) or raw hex keys\n"
-            "- Max 10 items, no tables, no pipes\n"
-            "- Total response under 500 chars\n"
-            "- If the data is a single aggregate (count, total), just answer with the number and its unit"
-        )
-        payload: dict[str, Any] = {
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a concise assistant on a low-bandwidth mesh network. Reply briefly.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            "max_tokens": 150,
-            "temperature": 0.2,
-            "top_p": 0.9,
-        }
-        if self.model:
-            payload["model"] = self.model
-        try:
-            response = requests.post(self.endpoint, json=payload, timeout=self.timeout_seconds)
-            if response.status_code == 200:
-                data = response.json()
-                return data["choices"][0]["message"]["content"].strip()
-        except (requests.RequestException, KeyError, IndexError) as e:
-            self.logger.warning(f"Ask command followup error: {e}")
-        return None
-
-    async def _handle_help(self, message: MeshMessage) -> bool:
-        pfx = (self.bot.config.get("Bot", "command_prefix", fallback="") or "").strip()
-        lines = [
-            f"{pfx}ask <question> - query the mesh DB with NL",
-            f"{pfx}ask help - this help",
-            f"{pfx}ask tables - list available tables & columns",
-            "",
-            "Examples:",
-            '  "combien de répéteurs actifs sur 7 jours"',
-            '  "top 10 expéditeurs sur 30 jours"',
-            '  "quel est le chemin le plus long observé"',
-            '  "les n\u00f5uds avec le meilleur SNR"',
-            '  "combien de messages par jour cette semaine"',
-        ]
-        return await self._send_truncated(message, "\n".join(lines))
-
-    _ASK_TABLES = {
-        "complete_contact_tracking",
-        "message_stats",
-        "observed_paths",
-        "mesh_connections",
-        "neighbor_links",
-        "daily_stats",
-        "repeater_contacts",
-        "unique_advert_packets",
-        "path_stats",
-    }
-
-    async def _handle_tables(self, message: MeshMessage) -> bool:
-        try:
-            with self.bot.db_manager.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-                )
-                tables = [row[0] for row in cursor.fetchall() if row[0] in self._ASK_TABLES]
-                lines = []
-                for table in tables:
-                    cursor.execute(f'PRAGMA table_info("{table}")')
-                    cols = [row[1] for row in cursor.fetchall()]
-                    lines.append(f"{table}: {', '.join(cols)}")
-                if not lines:
-                    return await self._send_truncated(message, "(no tables found)")
-        except Exception as e:
-            self.logger.warning(f"Ask tables error: {e}")
-            return await self._send_truncated(message, f"(error: {e})")
-        return await self._send_truncated(message, "\n".join(lines))
-
-    async def _send_truncated(self, message: MeshMessage, text: str) -> bool:
-        max_length = self.get_max_message_length(message)
-        if len(text) <= max_length:
-            return await self.send_response(message, text)
-        lines = text.split("\n")
-        pages: list[str] = []
-        current = ""
-        for line in lines:
-            candidate = f"{current}\n{line}" if current else line
-            if len(candidate) <= max_length:
-                current = candidate
-            else:
-                if current:
-                    pages.append(current)
-                current = line
-        if current:
-            pages.append(current)
-        total = len(pages)
-        for i, page in enumerate(pages):
-            suffix = f" ({i+1}/{total})" if total > 1 else ""
-            await self.send_response(message, page + suffix)
-            await asyncio.sleep(0.3)
-        return True
+    def claim_bbs_text(self, message: MeshMessage, content: str | None = None) -> bool:
+        if message.bbs_body_session is not None:
+            return True
+        if not self.bbs_text_pending(message, content):
+            return False
+        message.bbs_body_session = self.dispatcher.bbs.body_session(message)
+        return message.bbs_body_session is not None
 
     async def execute(self, message: MeshMessage) -> bool:
-        question = self._extract_question(message)
-        if not question:
-            pfx = (self.bot.config.get("Bot", "command_prefix", fallback="") or "").strip()
-            return await self.send_response(message, f"Usage: {pfx}ask <question about the mesh>")
-
-        q_lower = question.lower().strip()
-        if q_lower in ("help", "?", "h"):
-            return await self._handle_help(message)
-        if q_lower in ("tables", "schema", "db"):
-            return await self._handle_tables(message)
-
-        self.logger.info(f"Ask command: {question}")
-
-        # Get sender position for distance-based queries
-        sender_pos = self._get_sender_position(message)
-
-        # Step 1: Generate SQL
-        sql = await asyncio.to_thread(self._generate_sql, question, sender_pos)
-        if not sql:
-            return await self.send_response(message, "Could not generate a query. Try rephrasing.")
-
-        self.logger.debug(f"Ask command generated SQL: {sql}")
-
-        # Step 2: Execute
-        sql_results = await asyncio.to_thread(self._execute_sql, sql)
-        # Step 2b: Post-process — resolve pubkeys to names, drop verbose datetimes
-        #          (unless the question is specifically about a date/time).
-        keep_dt = self._question_asks_for_datetime(question)
-        sql_results = await asyncio.to_thread(self._postprocess_results, sql_results, keep_dt)
-        self.logger.debug(f"Ask command SQL results: {sql_results[:500]}")
-
-        # Step 3: Format with LLM followup
-        formatted = await asyncio.to_thread(self._format_followup, question, sql_results)
-        if formatted:
-            self.logger.debug(f"Ask command formatted response: {formatted}")
+        if not sender_may_use_llm(self.bot, message):
+            return False
+        # Matching may strip mentions or collapse spaces. Read the immutable
+        # on-air body so a BBS message retains mentions and original spacing.
+        source = message.original_content or message.content
+        name = self._get_bot_name()
+        if isinstance(name, str) and name:
+            source = re.sub(r'^\s*' + re.escape('@[' + name + ']') + r'\s*', '', source, count=1, flags=re.I)
+            trigger, _ = self.split_trigger_and_args(source)
+            if not message.is_dm and trigger is None:
+                source = re.sub(r'\s*' + re.escape('@[' + name + ']') + r'\s*$', '', source, count=1, flags=re.I)
+        if message.is_dm and self.bbs_text_pending(message):
+            question = message.original_content or message.content
         else:
-            self.logger.warning("Ask command followup returned empty; falling back to raw SQL results")
-            formatted = sql_results
-
-        # Truncate for mesh message limits
-        max_length = self.get_max_message_length(message)
-        if len(formatted) > max_length:
-            formatted = formatted[:max_length]
-
-        return await self.send_response(message, formatted)
+            _, question = self.split_trigger_and_args(source)
+        text = await self.dispatcher.answer(question, message)
+        if text is None:  # BBS has already sent the reply and committed delivery.
+            return True
+        return await send_answer(self, message, text, max_pages=self.max_pages)

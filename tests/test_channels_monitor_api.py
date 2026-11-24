@@ -204,8 +204,14 @@ class TestChannelsViewFeed:
         assert entry["qr"]["secret"] == hashtag_secret("#fr-idf")
         assert entry["qr"]["uri"].startswith("meshcore://channel/add?name=fr-idf&secret=")
 
+    def test_a_monitored_name_is_not_offered_before_the_radio_subscribes(self, gated_viewer):
+        data = _client(gated_viewer).get("/api/channels/view").get_json()
+        assert data["channels"] == []
+        assert data["monitor_channels"] == ["#fr-idf"]
+
     def test_the_bots_region_for_the_channel_travels_in_the_qr(self, gated_viewer):
         """A join from the QR lands the app on the region the bot posts here at."""
+        _seed_channels(gated_viewer, [(0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf"))])
         _write_channel_config(gated_viewer, {
             "flood_scope.fr-idf": "#idf",
             "outgoing_flood_scope_override": "#west",
@@ -214,18 +220,28 @@ class TestChannelsViewFeed:
         assert entry["qr"]["uri"].endswith("&region_scope=idf")
 
     def test_the_override_scopes_every_channel_without_its_own_entry(self, gated_viewer):
+        _seed_channels(gated_viewer, [(0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf"))])
         _write_channel_config(gated_viewer, {"outgoing_flood_scope_override": "#west"})
         entry = _client(gated_viewer).get("/api/channels/view").get_json()["channels"][0]
         assert entry["qr"]["uri"].endswith("&region_scope=west")
 
     def test_no_region_configured_and_the_qr_stays_plain(self, gated_viewer):
+        _seed_channels(gated_viewer, [(0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf"))])
         entry = _client(gated_viewer).get("/api/channels/view").get_json()["channels"][0]
         assert "region_scope" not in entry["qr"]["uri"]
 
-    def test_a_hashtag_qr_is_offered_even_before_the_radio_subscribes(self, gated_viewer):
-        entry = _client(gated_viewer).get("/api/channels/view").get_json()["channels"][0]
-        assert entry["on_radio"] is False
-        assert entry["qr"]["secret"] == hashtag_secret("#fr-idf")
+    def test_public_region_qr_keeps_the_same_publication_boundary(self, gated_viewer):
+        shared_key = hashtag_secret("#fr-idf")
+        _seed_channels(gated_viewer, [
+            (0, "#fr-idf", "hashtag", shared_key),
+            (1, "secreto", "custom", PRIVATE_CUSTOM_KEY),
+        ])
+        _publish(gated_viewer, "#fr-idf", shared_key)
+        _write_channel_config(gated_viewer, {"flood_scope.fr-idf": "#idf"})
+        data = _login(gated_viewer).get("/api/channels/published").get_json()
+        assert data["is_admin"] is False
+        assert [channel["name"] for channel in data["channels"]] == ["#fr-idf"]
+        assert data["channels"][0]["qr"]["uri"].endswith("&region_scope=idf")
 
     def test_the_public_channel_is_never_in_the_anonymous_feed(self, gated_viewer):
         _seed_channels(gated_viewer, [(2, "Public", "custom", "11" * 16)])
@@ -258,21 +274,13 @@ class TestChannelsViewFeed:
     def test_anonymous_requests_are_not_flagged_admin(self, gated_viewer):
         assert _client(gated_viewer).get("/api/channels/view").get_json()["is_admin"] is False
 
-    def test_a_custom_channel_the_radio_has_no_key_for_has_no_qr(self, viewer):
-        """Monitored but not created yet: nothing scannable, and a reason why."""
-        resp = _client(viewer).post(
-            "/api/channels/settings",
-            json={"channels": ["secreto"]},
-            content_type="application/json",
-            headers={"X-Requested-With": "XMLHttpRequest"},
-        )
+    def test_a_custom_channel_without_a_radio_slot_stays_in_settings_only(self, viewer):
+        resp = _post_settings(viewer, ["secreto"])
         assert resp.status_code == 200
-        entry = next(
-            c for c in _client(viewer).get("/api/channels/view").get_json()["channels"]
-            if c["name"] == "secreto"
-        )
-        assert entry["qr"] is None
-        assert entry["share_reason"] == "private_key"
+        assert "secreto" not in {
+            c["name"] for c in _client(viewer).get("/api/channels/view").get_json()["channels"]
+        }
+        assert _client(viewer).get("/api/channels/settings").get_json()["monitor_channels"] == ["secreto"]
 
     def test_the_monitor_list_travels_with_the_channels(self, gated_viewer):
         data = _client(gated_viewer).get("/api/channels/view").get_json()
@@ -284,12 +292,7 @@ class TestChannelsViewFeed:
 # ---------------------------------------------------------------------------
 
 class TestListedDecodeOnlyChannels:
-    """[Channels_List] and [Web_Viewer] decode_hashtag_channels put names on the page that
-    the radio holds no slot for.  They stay on the page — the bot publishes them through its
-    ``channels`` command and derives their hashtag key — but the feed labels them with
-    ``decoded``, because a card with a QR on a public page must not read as a channel the bot
-    answers on.
-    """
+    """Join cards describe radio subscriptions, not the internal example catalog."""
 
     def _declare(self, viewer, tmp_path, keys):
         with open(tmp_path / "config.ini", "a", encoding="utf-8") as handle:
@@ -301,32 +304,41 @@ class TestListedDecodeOnlyChannels:
     def _feed(self, client):
         return {c["name"]: c for c in client.get("/api/channels/view").get_json()["channels"]}
 
-    def test_a_listed_channel_is_shared_with_a_derived_qr(self, gated_viewer, tmp_path):
-        self._declare(gated_viewer, tmp_path, ["weather"])
-        entry = self._feed(_client(gated_viewer))["#weather"]
-        assert entry["decoded"] is True
-        assert entry["monitored"] is False
-        assert entry["on_radio"] is False
-        assert entry["qr"]["secret"] == hashtag_secret("#weather")
+    @pytest.mark.parametrize("admin", [False, True])
+    def test_catalog_examples_are_not_shared_as_join_cards(self, gated_viewer, tmp_path, admin):
+        self._declare(gated_viewer, tmp_path, ["weather", "sports.sounders"])
+        client = _login(gated_viewer) if admin else _client(gated_viewer)
+        assert "#weather" not in self._feed(client)
+        assert "#sounders" not in self._feed(client)
+        # Keep the existing decoding/catalog data; merely viewing the page changes no slots.
+        assert "#weather" in {c["name"] for c in gated_viewer._get_channels()}
+        assert _operations(gated_viewer) == []
 
-    def test_a_categorized_key_is_shared_under_its_wire_name(self, gated_viewer, tmp_path):
-        self._declare(gated_viewer, tmp_path, ["sports.sounders"])
-        assert "#sounders" in self._feed(_client(gated_viewer))
+    def test_a_real_radio_subscription_is_kept_even_when_also_listed(self, gated_viewer, tmp_path):
+        _seed_channels(gated_viewer, [(0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf")),
+                                      (1, "#weather", "hashtag", hashtag_secret("#weather"))])
+        self._declare(gated_viewer, tmp_path, ["weather", "sports.sounders"])
+        entries = self._feed(_login(gated_viewer))
+        assert set(entries) == {"#fr-idf", "#weather"}
+        assert entries["#weather"]["on_radio"] is True
+        assert entries["#weather"]["decoded"] is False
+        assert entries["#weather"]["qr"]["secret"] == hashtag_secret("#weather")
 
-    def test_a_channel_the_radio_holds_is_not_flagged_decoded(self, gated_viewer, tmp_path):
-        _seed_channels(gated_viewer, [(0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf"))])
-        self._declare(gated_viewer, tmp_path, ["weather"])
-        entries = self._feed(_client(gated_viewer))
-        assert entries["#fr-idf"]["decoded"] is False
-        assert entries["#fr-idf"]["on_radio"] is True
-        assert entries["#weather"]["decoded"] is True
-
-    def test_a_listed_channel_that_is_also_monitored_reads_as_monitored(self, gated_viewer, tmp_path):
+    def test_monitor_settings_remain_available_before_a_radio_slot_exists(self, gated_viewer, tmp_path):
         self._declare(gated_viewer, tmp_path, ["fr-idf"])
-        entry = self._feed(_client(gated_viewer))["#fr-idf"]
-        assert entry["monitored"] is True
-        assert entry["decoded"] is True
-        assert entry["on_radio"] is False
+        assert "#fr-idf" not in self._feed(_login(gated_viewer))
+        settings = _login(gated_viewer).get("/api/channels/settings").get_json()
+        assert settings["monitor_channels"] == ["#fr-idf"]
+
+    def test_an_extra_decoder_name_without_a_slot_is_not_displayed(self, gated_viewer, tmp_path):
+        config_path = tmp_path / "config.ini"
+        config = configparser.ConfigParser()
+        config.read(config_path, encoding="utf-8")
+        config.set("Web_Viewer", "decode_hashtag_channels", "#decode-only")
+        with config_path.open("w", encoding="utf-8") as handle:
+            config.write(handle)
+        assert "#decode-only" not in self._feed(_login(gated_viewer))
+        assert "#decode-only" in {c["name"] for c in gated_viewer._get_channels()}
 
 
 # ---------------------------------------------------------------------------
@@ -504,7 +516,7 @@ class TestChannelRegionSettings:
 
     @staticmethod
     def _public_qrs(viewer):
-        feed = _client(viewer).get("/api/channels/view").get_json()
+        feed = _client(viewer).get("/api/channels/published").get_json()
         return {channel["name"]: channel["qr"] for channel in feed["channels"]}
 
     def test_admin_save_updates_the_published_and_private_qrs(self, gated_viewer, tmp_path):
@@ -541,7 +553,7 @@ class TestChannelRegionSettings:
         assert qrs["#fr-idf"]["uri"].endswith("&region_scope=fr")
         assert qrs["#second"]["uri"].endswith("&region_scope=fr-bre")
         assert qrs["#fr-idf"]["secret"] == hashtag_secret("#fr-idf")
-        admin_channels = client.get("/api/channels/view").get_json()["channels"]
+        admin_channels = client.get("/channels/settings/view").get_json()["channels"]
         private = next(channel["qr"] for channel in admin_channels if channel["name"] == "secreto")
         assert private["uri"].endswith("&region_scope=private")
         assert private["secret"] == PRIVATE_CUSTOM_KEY
@@ -582,3 +594,83 @@ class TestChannelRegionSettings:
         assert response.status_code == 400
         assert gated_viewer._load_merged_config().items("Channels") == old
         assert not _operations(gated_viewer)
+
+
+class TestPublishedChannelsFeed:
+    def _seed(self, viewer):
+        _seed_channels(viewer, [
+            (0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf")),
+            (1, "#hidden", "hashtag", hashtag_secret("#hidden")),
+            (2, "opendata", "custom", "ef" * 16),
+            (3, "secreto", "custom", PRIVATE_CUSTOM_KEY),
+        ])
+        _publish(viewer, "#fr-idf")
+        _publish(viewer, "opendata", "ef" * 16)
+
+    @pytest.mark.parametrize("fixture_name", ["viewer", "gated_viewer"])
+    def test_only_published_radio_channels_are_returned(self, request, fixture_name):
+        viewer = request.getfixturevalue(fixture_name)
+        self._seed(viewer)
+        response = _client(viewer).get("/api/channels/published")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["is_admin"] is False
+        assert {channel["name"] for channel in data["channels"]} == {"#fr-idf", "opendata"}
+        assert all(channel["published"] and channel["on_radio"] for channel in data["channels"])
+        assert PRIVATE_CUSTOM_KEY not in response.get_data(as_text=True)
+        assert "secreto" not in response.get_data(as_text=True)
+        assert "#hidden" not in response.get_data(as_text=True)
+        assert response.headers["Cache-Control"] == "private, no-store"
+
+    def test_client_headers_cannot_upgrade_the_public_feed(self, viewer):
+        self._seed(viewer)
+        response = _client(viewer).get("/api/channels/published", headers={
+            "Authorization": "Basic ZmFrZTpmYWtl", "X-Forwarded-User": "admin",
+            "X-Admin": "true",
+        })
+        assert response.get_json()["is_admin"] is False
+        assert PRIVATE_CUSTOM_KEY not in response.get_data(as_text=True)
+
+    def test_real_admin_still_gets_all_radio_channels_from_the_existing_feed(self, gated_viewer):
+        self._seed(gated_viewer)
+        client = _login(gated_viewer)
+        all_channels = client.get("/api/channels/view")
+        assert all_channels.get_json()["is_admin"] is True
+        assert len(all_channels.get_json()["channels"]) == 4
+        assert PRIVATE_CUSTOM_KEY in all_channels.get_data(as_text=True)
+        public = client.get("/api/channels/published")
+        assert public.get_json()["is_admin"] is False
+        assert PRIVATE_CUSTOM_KEY not in public.get_data(as_text=True)
+
+    def test_hidden_monitored_names_are_not_leaked_in_public_metadata(self, viewer):
+        self._seed(viewer)
+        viewer.config.set("Channels", "monitor_channels", "secreto,#fr-idf")
+        data = _client(viewer).get("/api/channels/published").get_json()
+        assert data["monitor_channels"] == ["#fr-idf"]
+        assert _operations(viewer) == []
+
+
+class TestAuthenticatedChannelsProbe:
+    _seed = TestPublishedChannelsFeed._seed
+    def test_probe_denies_anonymous_access_without_redirect(self, gated_viewer):
+        self._seed(gated_viewer)
+        response = _client(gated_viewer).get("/channels/settings/view")
+        assert response.status_code == 401
+        assert response.is_json
+        assert "Location" not in response.headers
+        assert "WWW-Authenticate" not in response.headers
+        assert PRIVATE_CUSTOM_KEY not in response.get_data(as_text=True)
+
+    def test_probe_accepts_existing_admin_session(self, gated_viewer):
+        self._seed(gated_viewer)
+        response = _login(gated_viewer).get("/channels/settings/view")
+        assert response.status_code == 200
+        assert response.get_json()["is_admin"] is True
+        assert len(response.get_json()["channels"]) == 4
+        assert response.headers["Cache-Control"] == "private, no-store"
+
+    def test_probe_does_not_trust_client_identity_headers(self, gated_viewer):
+        response = _client(gated_viewer).get("/channels/settings/view", headers={
+            "Authorization": "Basic ZmFrZTpmYWtl", "X-Forwarded-User": "admin",
+        })
+        assert response.status_code == 401

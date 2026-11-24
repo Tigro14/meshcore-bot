@@ -15,8 +15,8 @@ from modules.commands.bbs_command import (
     BBSCommand,
 )
 from modules.db_migrations import (
-    _m0034_bbs_inbox_table,
-    _m0035_bbs_inbox_notification_stages,
+    _m0035_bbs_inbox_table,
+    _m0036_bbs_inbox_notification_stages,
 )
 from tests.conftest import mock_message
 
@@ -54,8 +54,8 @@ def _make_db_manager(
     conn = _create_tracked_connection()
     if with_bbs_inbox:
         # Use the real migrations so the test schema can never drift from prod.
-        _m0034_bbs_inbox_table(conn.cursor())
-        _m0035_bbs_inbox_notification_stages(conn.cursor())
+        _m0035_bbs_inbox_table(conn.cursor())
+        _m0036_bbs_inbox_notification_stages(conn.cursor())
     if with_legacy:
         conn.execute(
             """

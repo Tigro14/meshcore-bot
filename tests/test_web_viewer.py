@@ -566,6 +566,51 @@ class TestRadioRoutes:
 
 class TestContactRoutes:
 
+    def test_adverts_follow_window_sort_and_filtered_totals(self, client, viewer):
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        keys = ['fac1' * 16, 'fac2' * 16, 'fac3' * 16]
+        for key, name in zip(keys, ['AdvertWindow Alpha', 'AdvertWindow Beta', 'AdvertWindow Old']):
+            _insert_contact(viewer, key, name)
+        with closing(sqlite3.connect(viewer.db_path)) as conn:
+            for key, total, age in zip(keys, [100, 20, 50], [1, 1, 72]):
+                conn.execute(
+                    'UPDATE complete_contact_tracking SET advert_count=?, last_heard=? WHERE public_key=?',
+                    (total, (now-timedelta(hours=age)).isoformat(' '), key))
+            for key, ages in [(keys[0], [1, 48]), (keys[1], [1, 2, 3])]:
+                for i, age in enumerate(ages):
+                    at = now-timedelta(hours=age)
+                    conn.execute(
+                        'INSERT INTO unique_advert_packets(date,public_key,packet_hash,first_seen) VALUES (?,?,?,?)',
+                        (at.date().isoformat(), key, key+str(i), at.isoformat(' ')))
+            conn.commit()
+        params = dict(since='24h', search='AdvertWindow', sort='advert_count',
+                      direction='desc', page=1, page_size=1)
+        data = client.get('/api/contacts', query_string=params).get_json()
+        assert data['pagination']['total_items'] == 2  # old TEXT timestamp excluded
+        assert data['tracking_data'][0]['user_id'] == keys[1]
+        assert data['tracking_data'][0]['advert_count'] == 3
+        assert data['server_stats']['advertisements_24h'] == 4  # both pages
+        assert data['server_stats']['advertisements_7d'] == 5
+        params['since'] = 'all'
+        data = client.get('/api/contacts', query_string=params).get_json()
+        assert data['tracking_data'][0]['user_id'] == keys[0]
+        assert data['tracking_data'][0]['advert_count'] == 100
+        params.update(since='7d', search='AdvertWindow Alpha')
+        data = client.get('/api/contacts', query_string=params).get_json()
+        assert data['tracking_data'][0]['advert_count'] == 2
+        assert data['server_stats']['advertisements_24h'] == 1
+
+    def test_contacts_load_when_viewer_runs_as_standalone_script(self, viewer):
+        import runpy
+        key = 'fa99' * 16
+        _insert_contact(viewer, key, 'StandaloneAdvert')
+        namespace = runpy.run_path(
+            str(Path(__file__).resolve().parents[1] / 'modules/web_viewer/app.py'),
+            run_name='standalone_viewer_test')
+        result = namespace['BotDataViewer']._get_tracking_data(viewer, since='all')
+        assert any(row['user_id'] == key for row in result['tracking_data'])
+
     def test_api_contacts_default(self, client):
         resp = client.get("/api/contacts")
         assert resp.status_code == 200

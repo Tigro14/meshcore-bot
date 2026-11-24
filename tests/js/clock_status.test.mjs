@@ -23,34 +23,34 @@ const viewer = Object.create(context.TimeClass.prototype);
 viewer.escapeHtml = value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
 test('UTC sync time is minutes ago, not an hour ago, in the French timezone', () => {
-    assert.equal(viewer.formatTimestamp('2026-11-05T14:00:45+00:00'), '2m ago');
-    assert.equal(viewer.formatTimestamp('2026-11-05 14:00:45'), '2m ago');
+    assert.equal(viewer.formatTimestamp('2026-11-05T14:00:45+00:00'), 'il y a 2 min');
+    assert.equal(viewer.formatTimestamp('2026-11-05 14:00:45'), 'il y a 2 min');
     assert.equal(viewer.timestampDate('2026-11-05 14:00:45').toISOString(), '2026-11-05T14:00:45.000Z');
 });
 
-test('Relay A keeps its numeric drift and restricts verification to the clock column', () => {
-    viewer.updateTargets([{ id: 1, target: 'ab'.repeat(32), contact_name: 'Relay A', enabled: true,
+test('Concarneau keeps its numeric drift and restricts verification to the clock column', () => {
+    viewer.updateTargets([{ id: 1, target: 'ab'.repeat(32), contact_name: 'Concarneau', enabled: true,
         clock_state: 'awaiting_verification', clock_drift_status: 'unset', clock_timestamp_valid: false, clock_drift: 1793177892,
         clock_observed_at: Date.parse('2026-11-05T00:58:15Z') / 1000, clock_source: 'advert',
         last_sync_success: true, last_sync_at: '2026-11-05T14:01:10+00:00',
     }]);
-    assert.match(container.innerHTML, /Awaiting verification/);
-    assert.match(container.innerHTML, /Delivery confirmed/);
+    assert.match(container.innerHTML, /Horloge à vérifier/);
+    assert.match(container.innerHTML, /Réception confirmée/);
     assert.match(container.innerHTML, />\s*20754d8h</);
-    assert.match(container.innerHTML, /Measured at/);
+    assert.match(container.innerHTML, /Mesuré le/);
     assert.doesNotMatch(container.innerHTML, />\s*OK\s*</);
-    assert.doesNotMatch(container.innerHTML, /Clock unset/);
-    assert.equal((container.innerHTML.match(/Awaiting verification/g) || []).length, 1);
+    assert.doesNotMatch(container.innerHTML, /Horloge non réglée/);
+    assert.equal((container.innerHTML.match(/Horloge à vérifier/g) || []).length, 1);
 });
 
-test('Relay B good measurement and earlier missing ACK are presented separately', () => {
-    viewer.updateTargets([{ id: 2, target: 'cd'.repeat(32), contact_name: 'Relay B', enabled: true,
+test('Trédudon good measurement and earlier missing ACK are presented separately', () => {
+    viewer.updateTargets([{ id: 2, target: 'cd'.repeat(32), contact_name: 'Trédudon', enabled: true,
         clock_state: 'in_sync', clock_drift_status: 'in_sync', clock_timestamp_valid: true, clock_drift: 9,
         clock_observed_at: Date.parse('2026-11-05T11:52:11Z') / 1000, clock_source: 'message',
         last_sync_success: false, last_sync_at: '2026-11-05T11:53:23+00:00',
     }]);
-    assert.match(container.innerHTML, /In sync/);
-    assert.match(container.innerHTML, /Delivery unconfirmed/);
+    assert.match(container.innerHTML, /À l’heure/);
+    assert.match(container.innerHTML, /Réception non confirmée/);
     assert.match(container.innerHTML, /bg-success/);
     assert.match(container.innerHTML, />9s</);
     assert.doesNotMatch(container.innerHTML, /3591s|>\s*Fail\s*</);
@@ -77,8 +77,8 @@ test('anonymous visitors get a read-only table without admin controls', () => {
 });
 
 test('clock rejection and stale measurements cannot render as success', () => {
-    assert.match(viewer.clockStatusBadge('rejected'), /Command rejected/);
-    assert.match(viewer.clockStatusBadge('stale'), /Old observation/);
+    assert.match(viewer.clockStatusBadge('rejected'), /Commande refusée/);
+    assert.match(viewer.clockStatusBadge('stale'), /Mesure ancienne/);
     assert.doesNotMatch(viewer.clockStatusBadge('rejected'), /bg-success|OK/);
 });
 
@@ -123,6 +123,6 @@ test('rejected setting updates report the error and reload the persisted value',
     let reloads = 0;
     instance.loadData = async () => { reloads++; };
     await instance.toggleAutoClkreboot(7, true);
-    assert.match(errors[0], /not saved.*HTTP 403/);
+    assert.match(errors[0], /non enregistré.*HTTP 403/);
     assert.equal(reloads, 1);
 });

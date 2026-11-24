@@ -20,10 +20,10 @@ const ctx = vm.createContext({
 });
 vm.runInContext(source.slice(start, end), ctx);
 for (const [state, reason, label, detail] of [
-    ['not_sent', 'contact_table_full', 'Not sent', 'radio contact table is full'],
-    ['unconfirmed', 'ack_missing', 'Delivery unconfirmed', 'No ACK received'],
-    ['acknowledged', 'ack_received', 'Delivery confirmed', 'ACK received'],
-    ['partial', 'ack_missing', 'Partially sent', 'No ACK received'],
+    ['not_sent', 'contact_table_full', 'Non émis', 'contacts de la radio est pleine'],
+    ['unconfirmed', 'ack_missing', 'Livraison non confirmée', 'Aucun accusé'],
+    ['acknowledged', 'ack_received', 'Livraison confirmée', 'Accusé de réception reçu'],
+    ['partial', 'ack_missing', 'Envoi partiel', 'Aucun accusé'],
 ]) {
     test(`DM delivery label reflects ${state}`, () => {
         const text = ctx.buildReply({ command: { success: state === 'acknowledged', dm_delivery: { state, reason } } }).textContent;

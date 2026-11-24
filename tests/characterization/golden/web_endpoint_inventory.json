@@ -1289,6 +1289,37 @@
    "GET"
   ]
  },
+ "/api/mesh/entry-points": {
+  "GET locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "POST locked anon": {
+   "content_type": "application/json",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "api_mesh_entry_points",
+  "methods": [
+   "GET",
+   "POST"
+  ]
+ },
  "/api/mesh/nodes": {
   "GET locked anon": {
    "content_type": "application/json",
@@ -2292,6 +2323,28 @@
    "x_frame_options": "SAMEORIGIN"
   },
   "endpoint": "mesh",
+  "methods": [
+   "GET"
+  ]
+ },
+ "/mesh-entry-points": {
+  "GET locked anon": {
+   "content_type": "text/html",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "GET open": {
+   "content_type": "text/html",
+   "csp_script_src": "script-src 'self' 'unsafe-inline'",
+   "location": "",
+   "status": 200,
+   "x_content_type_options": "nosniff",
+   "x_frame_options": "SAMEORIGIN"
+  },
+  "endpoint": "mesh_entry_points_page",
   "methods": [
    "GET"
   ]

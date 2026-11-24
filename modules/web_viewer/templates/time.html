@@ -6,12 +6,17 @@
 <style>
     .time-page-heading {gap:12px;flex-wrap:wrap}
     .time-config-panel code {overflow-wrap:anywhere;white-space:normal}
+    .time-config-methods {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+    .time-config-method {min-width:0;padding:16px;border:1px solid var(--bs-border-color,#dee2e6);border-radius:8px}
+    .time-config-method li + li {margin-top:8px}
+    .time-config-cli {display:block;margin-top:8px;padding:12px;background:var(--bs-tertiary-bg,#f8f9fa);border-radius:6px;line-height:1.6}
     #clock-sync-targets-container {max-width:100%;overflow-x:auto}
     .time-targets-table {width:100%}
     .time-targets-table td {overflow-wrap:anywhere}
     .time-targets-table .time-target-name {min-width:0}
     .time-targets-header {gap:12px;flex-wrap:wrap}
     @media(max-width:991.98px) {
+        .time-config-methods {grid-template-columns:minmax(0,1fr)}
         .time-page-heading h1 {font-size:clamp(1.35rem,5.2vw,1.8rem);line-height:1.25}
         .time-targets-header > span {min-width:0;overflow-wrap:anywhere}
         #clock-sync-targets-container {overflow:visible}
@@ -56,50 +61,29 @@
                 <i class="fas fa-info-circle"></i> Configuration
             </div>
             <div class="card-body">
-                <div class="alert alert-secondary small mb-3" style="opacity:0.9;">
-                    <i class="fas fa-info-circle me-1"></i>
-                    <strong>FR:</strong> Cette fonction envoie la commande <code id="desc-command">clock sync admin</code> par DM aux nœuds ci-dessous pour synchroniser leur horloge.<br>
-                    La commande est envoyée si la mesure récente dépasse <strong>Min Sync Drift</strong>, ou si la dérive est inconnue. Une réception confirmée ne prouve pas que l'horloge est réglée.<br>
-                    Pour que cela fonctionne, le nœud cible doit avoir ajouté le bot dans sa liste d'<strong>admins</strong>.<br><br>
-                    <strong>Méthode Android (la plus simple) :</strong><br>
-                    1. Ouvrez l'app Meshcore sur le nœud cible<br>
-                    2. Allez dans <strong>Admin → Contrôle d'accès</strong><br>
-                    3. Appuyez sur le bouton <strong>"+"</strong> pour ajouter un accès<br>
-                    4. Cherchez et sélectionnez <strong id="desc-bot-name">...</strong> dans les contacts<br>
-                    5. Réglez le niveau sur <strong>Admin</strong><br>
-                    6. Validez avec la <strong>coche</strong> en haut à droite<br><br>
-                    <strong>Alternative (pubkey) :</strong> Ajouter manuellement la public key du bot :<br>
-                    <code class="user-select-all" id="desc-bot-pubkey">...</code><br><br>
-                    <strong>EN:</strong> This feature sends <code id="desc-command-en">clock sync admin</code> via DM to each listed node to sync its clock.<br>
-                    The command is sent if a recent measurement exceeds <strong>Min Sync Drift</strong>, or if the drift is unknown. Confirmed delivery does not prove that the clock is synchronized.<br>
-                    For this to work, the target node must have added the bot to its <strong>admins</strong> list.<br><br>
-                    <strong>Android method (easiest):</strong><br>
-                    1. Open the Meshcore app on the target node<br>
-                    2. Go to <strong>Admin → Access Control</strong><br>
-                    3. Tap the <strong>"+"</strong> button to add access<br>
-                    4. Search and select <strong id="desc-bot-name-en">...</strong> from contacts<br>
-                    5. Set level to <strong>Admin</strong><br>
-                    6. Confirm with the <strong>checkmark</strong> in the top right<br><br>
-                    <strong>Alternative (pubkey):</strong> Manually add the bot's public key:<br>
-                    <code class="user-select-all" id="desc-bot-pubkey-en">...</code>
+                <p class="mb-3">Pour permettre à Baliz de synchroniser l’horloge de votre répéteur, ajoutez-le comme <strong>administrateur</strong> avec l’une des deux méthodes suivantes.</p>
+                <div class="time-config-methods">
+                    <section class="time-config-method" aria-labelledby="time-method-app">
+                        <h2 class="h6 mb-3" id="time-method-app">Méthode 1 — Application officielle MeshCore</h2>
+                        <ol class="mb-0 ps-3">
+                            <li>Depuis les contacts de l’application, ouvrez votre répéteur et connectez-vous en administrateur.</li>
+                            <li>Dans ses réglages d’administration, ouvrez <strong>Contrôle d’accès</strong>.</li>
+                            <li>Appuyez sur <strong>+</strong>, puis sélectionnez <strong id="desc-bot-name">[BOT] Baliz</strong> dans vos contacts.</li>
+                            <li>Choisissez le niveau <strong>Admin</strong>, puis validez avec la <strong>coche en haut à droite</strong>.</li>
+                        </ol>
+                    </section>
+                    <section class="time-config-method" aria-labelledby="time-method-cli">
+                        <h2 class="h6 mb-3" id="time-method-cli">Méthode 2 — Commande CLI</h2>
+                        <ol class="mb-0 ps-3">
+                            <li>Dans l’administration de votre répéteur, ouvrez l’onglet <strong>CLI</strong>.</li>
+                            <li>Copiez et exécutez cette commande :
+                                <code class="time-config-cli user-select-all" id="desc-setperm-command">setperm 44c4ed01d4d6015c8047acf5d5539812e6a5a826c8236f704347fd608229659d 3</code>
+                            </li>
+                            <li>Vérifiez que le répéteur répond <strong>OK</strong>.</li>
+                        </ol>
+                    </section>
                 </div>
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>Clock_Sync_Admin Settings:</h6>
-                        <ul class="mb-0">
-                            <li><strong>Enabled:</strong> <span id="config-enabled">-</span></li>
-                            <li><strong>Schedule (cron):</strong> <code id="config-schedule">-</code></li>
-                            <li><strong>Command Payload:</strong> <code id="config-payload">-</code></li>
-                            <li><strong>Min Sync Drift:</strong> <span id="config-min-drift">-</span> s</li>
-                        </ul>
-                    </div>
-                    <div class="col-md-6">
-                        <h6>Dashboard Settings:</h6>
-                        <ul class="mb-0">
-                            <li><strong>Max Clock Drift:</strong> <span id="config-max-drift">-</span> seconds</li>
-                        </ul>
-                    </div>
-                </div>
+                <p class="alert alert-info mt-3 mb-0">Pour terminer, ajoutez votre répéteur dans <strong><a href="#new-target-input">Clock_Sync_Admin Targets</a></strong>, dans le champ ci-dessous.</p>
             </div>
         </div>
     </div>
@@ -187,6 +171,10 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block page_libs %}
+<script src="{{ url_for('static', filename='vendor/chart.js/chart.umd.js') }}"></script>
 {% endblock %}
 
 {% block extra_js %}
@@ -453,12 +441,12 @@
                     content.innerHTML = '<div class="text-muted text-center">No sync history yet.</div>';
                     return;
                 }
-                let html = '<table class="table table-sm mb-0"><thead><tr><th>Date</th><th>Delivery</th><th>Detail</th></tr></thead><tbody>';
+                let html = '<table class="table table-sm mb-0"><thead><tr><th>Date</th><th>Envoi</th><th>Détail</th></tr></thead><tbody>';
                 history.forEach(h => {
                     const time = this.formatTimestamp(h.at);
                     const status = h.success
-                        ? '<span class="badge bg-info text-dark">Delivery confirmed</span>'
-                        : '<span class="badge bg-secondary">Delivery unconfirmed</span>';
+                        ? '<span class="badge bg-info text-dark">Réception confirmée</span>'
+                        : '<span class="badge bg-secondary">Réception non confirmée</span>';
                     const detail = h.error ? this.escapeHtml(h.error) : '-';
                     html += `<tr><td class="text-muted small">${time}</td><td>${status}</td><td class="small">${detail}</td></tr>`;
                 });
@@ -485,21 +473,18 @@
                     this.updateTargets(targetsData.targets || []);
                     if (targetsData.config) {
                         const cfg = targetsData.config;
-                        this.updateElement('config-enabled', cfg.enabled ? 'Yes' : 'No');
+                        this.updateElement('config-enabled', cfg.enabled ? 'Oui' : 'Non');
                         this.updateElement('config-schedule', cfg.schedule || '0 3 * * *');
                         this.updateElement('config-payload', cfg.command_payload || 'clock sync admin');
                         this.updateElement('config-min-drift', cfg.min_sync_drift ?? 60);
                         this.updateElement('config-max-drift', cfg.max_clock_drift_seconds ?? 300);
                         // Fill description fields
-                        const cmd = cfg.command_payload || 'clock sync admin';
                         const pubkey = cfg.bot_public_key || '...';
                         const botName = cfg.bot_name || 'MeshCore Bot';
-                        this.updateElement('desc-command', cmd);
-                        this.updateElement('desc-command-en', cmd);
-                        this.updateElement('desc-bot-pubkey', pubkey);
-                        this.updateElement('desc-bot-pubkey-en', pubkey);
+                        if (/^[0-9a-f]{64}$/i.test(pubkey)) {
+                            this.updateElement('desc-setperm-command', `setperm ${pubkey.toLowerCase()} 3`);
+                        }
                         this.updateElement('desc-bot-name', botName);
-                        this.updateElement('desc-bot-name-en', botName);
                         // Update enabled badge
                         const badge = document.getElementById('clock-sync-enabled-badge');
                         if (badge) {
@@ -537,9 +522,9 @@
             }
 
             let html = '<table class="time-targets-table table table-sm align-middle mb-0">';
-            html += '<thead><tr><th>Target</th><th>Measured drift</th><th>Clock</th><th>Battery</th>'
+            html += '<thead><tr><th>Target</th><th>Décalage mesuré</th><th>Horloge</th><th>Battery</th>'
                 + (isAdmin ? '<th>Auto clkreboot</th>' : '')
-                + '<th>Last send</th>'
+                + '<th>Dernier envoi</th>'
                 + (isAdmin ? '<th class="text-end">Actions</th>' : '')
                 + '</tr></thead><tbody>';
             targets.forEach(t => {
@@ -556,7 +541,7 @@
                     clock_drift_status: t.clock_drift_status,
                 });
                 if (t.clock_observed_at) {
-                    const source = t.clock_source === 'advert' ? 'advert' : 'message';
+                    const source = t.clock_source === 'advert' ? 'annonce' : 'message';
                     driftHtml += `<div class="small text-muted">${this.formatObservation(t.clock_observed_at)} · ${source}</div>`;
                 }
                 const syncBadge = this.clockStatusBadge(t.clock_state);
@@ -588,7 +573,7 @@
                 // Last sync time
                 let lastSync = '-';
                 if (t.last_sync_at) {
-                    const delivery = t.last_sync_success ? 'Delivery confirmed' : 'Delivery unconfirmed';
+                    const delivery = t.last_sync_success ? 'Réception confirmée' : 'Réception non confirmée';
                     lastSync = `${delivery}<div class="small text-muted">${this.formatTimestamp(t.last_sync_at)}</div>`;
                 }
 
@@ -625,11 +610,11 @@
                         ${nameLink}
                         ${contactName ? `<br><code class="small">${displayTarget.substring(0, 16)}...</code>` : ''}
                     </td>
-                    <td class="time-target-drift" data-label="Measured drift">${driftHtml}</td>
-                    <td data-label="Clock">${syncBadge}</td>
-                    <td data-label="Battery">${batteryHtml}</td>
+                    <td class="time-target-drift" data-label="Décalage mesuré">${driftHtml}</td>
+                    <td data-label="Horloge">${syncBadge}</td>
+                    <td data-label="Batterie">${batteryHtml}</td>
                     ${autoCell}
-                    <td class="text-muted small" data-label="Last send">${lastSync}</td>
+                    <td class="text-muted small" data-label="Dernier envoi">${lastSync}</td>
                     ${actionsCell}
                 </tr>`;
             });
@@ -695,7 +680,7 @@
                 new Chart(ctx, {
                     type: 'line',
                     data: {
-                        labels: points.map(p => this.formatTimestamp(p.observed_at)),
+                        labels: points.map(p => this.formatBatteryTimestamp(p.observed_at)),
                         datasets: [{
                             label: 'Voltage (V)',
                             data: points.map(p => p.voltage),
@@ -718,16 +703,21 @@
             }
         }
 
+        formatBatteryTimestamp(timestamp) {
+            const date = this.timestampDate(timestamp);
+            return date ? date.toLocaleString('fr-FR') : '-';
+        }
+
         clockStatusBadge(state) {
             const states = {
-                in_sync: ['success', 'In sync'],
-                warning: ['warning text-dark', 'Clock drift'],
-                out_of_sync: ['danger', 'Out of sync'],
-                unset: ['danger', 'Clock unset'],
-                awaiting_verification: ['warning text-dark', 'Awaiting verification'],
-                rejected: ['danger', 'Command rejected'],
-                stale: ['secondary', 'Old observation'],
-                unknown: ['secondary', 'Not measured'],
+                in_sync: ['success', 'À l’heure'],
+                warning: ['warning text-dark', 'Décalage à corriger'],
+                out_of_sync: ['danger', 'Décalage observé'],
+                unset: ['danger', 'Horloge non réglée'],
+                awaiting_verification: ['warning text-dark', 'Horloge à vérifier'],
+                rejected: ['danger', 'Commande refusée'],
+                stale: ['secondary', 'Mesure ancienne'],
+                unknown: ['secondary', 'Non mesurée'],
             };
             const [color, label] = states[state] || states.unknown;
             return `<span class="badge bg-${color}">${label}</span>`;
@@ -745,17 +735,17 @@
 
         formatObservation(ts) {
             const date = this.timestampDate(ts);
-            return date ? `Measured at ${date.toLocaleString()}` : 'Unknown date';
+            return date ? `Mesuré le ${date.toLocaleString('fr-FR')}` : 'Date inconnue';
         }
 
         formatTimestamp(ts) {
             const date = this.timestampDate(ts);
             if (!date) return '-';
             const diff = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-            if (diff < 60) return `${diff}s ago`;
-            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-            return `${Math.floor(diff / 86400)}d ago`;
+            if (diff < 60) return `il y a ${diff} s`;
+            if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
+            if (diff < 86400) return `il y a ${Math.floor(diff / 3600)} h`;
+            return `il y a ${Math.floor(diff / 86400)} j`;
         }
 
         async toggleTarget(id, currentEnabled) {
@@ -780,10 +770,10 @@
                     body: JSON.stringify({ auto_clkreboot_enabled: autoClkrebootEnabled }),
                 });
                 if (!response.ok) {
-                    throw new Error(`Unable to save setting (HTTP ${response.status}).`);
+                    throw new Error(`Impossible d’enregistrer le réglage (HTTP ${response.status}).`);
                 }
             } catch (err) {
-                alert('Auto clkreboot setting not saved : ' + err.message);
+                alert('Réglage Auto clkreboot non enregistré : ' + err.message);
             } finally {
                 await this.loadData();
             }

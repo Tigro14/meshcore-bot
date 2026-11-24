@@ -354,6 +354,24 @@ class StatsCommand(BaseCommand):
         """
         return self.translate('commands.stats.help')
 
+    def can_use_service(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        return super().can_use_service(message, skip_channel_check=skip_channel_check)
+
+    async def execute_service(self, message: MeshMessage) -> bool:
+        """Read the same Tigro statistics without public enable gate or cleanup."""
+        parts = message.content.split()
+        topic = parts[1] if len(parts) > 1 else 'general'
+        methods = {'general': self._get_basic_stats,
+                   'messages': self._get_bot_user_leaderboard,
+                   'channels': self._get_channel_leaderboard}
+        if topic == 'paths':
+            response = await self._get_path_leaderboard(message)
+        elif topic == 'adverts':
+            response = await self._get_adverts_leaderboard(message, show_hashes='hashes' in parts)
+        else:
+            response = await methods[topic]()
+        return await self.send_response(message, response)
+
     async def execute(self, message: MeshMessage) -> bool:
         """Execute the stats command.
 

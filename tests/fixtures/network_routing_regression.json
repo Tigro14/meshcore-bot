@@ -1,0 +1,144 @@
+[
+  {
+    "question": "combien de répéteurs dans le réseau ?",
+    "function": "mesh.count_repeaters",
+    "args": {
+      "hours": 0,
+      "country": ""
+    }
+  },
+  {
+    "question": "Tu connais combien de relais ?",
+    "function": "mesh.count_repeaters",
+    "args": {
+      "hours": 0,
+      "country": ""
+    }
+  },
+  {
+    "question": "Combien de répéteurs actifs depuis 24h ?",
+    "function": "mesh.count_repeaters",
+    "args": {
+      "hours": 24,
+      "country": ""
+    }
+  },
+  {
+    "question": "résumé du réseau",
+    "function": "mesh.summary"
+  },
+  {
+    "question": "reseau",
+    "function": "mesh.summary"
+  },
+  {
+    "question": "Fais-moi un bilan du mesh",
+    "function": "mesh.summary"
+  },
+  {
+    "question": "Combien de nœuds actifs ?",
+    "function": "mesh.count_nodes",
+    "args": {
+      "hours": 24
+    }
+  },
+  {
+    "question": "Liste les répéteurs",
+    "function": "mesh.list_repeaters",
+    "args": {
+      "sort": "recent"
+    }
+  },
+  {
+    "question": "Quels relais sont les plus proches de moi ?",
+    "function": "mesh.near"
+  },
+  {
+    "question": "les répéteurs avec le plus de liens",
+    "function": "mesh.relay_connectivity"
+  },
+  {
+    "question": "Quels relais sont les mieux connectés ?",
+    "function": "mesh.relay_connectivity"
+  },
+  {
+    "question": "Quel est le meilleur répéteur ?",
+    "function": "llm.clarify"
+  },
+  {
+    "question": "Par quels relais passe mon message ?",
+    "function": "path.message"
+  },
+  {
+    "question": "Tu me reçois ?",
+    "function": "test.receive"
+  },
+  {
+    "question": "conditions radio",
+    "function": "mesh.hfcond"
+  },
+  {
+    "question": "Quels canaux utilise-t-on en Bretagne ?",
+    "function": "wiki.lookup"
+  },
+  {
+    "question": "merci",
+    "function": "llm.chat"
+  },
+  {
+    "question": "statistiques de la télémétrie ?",
+    "function": "llm.clarify"
+  },
+  {
+    "question": "meteo st brieuc",
+    "function": "weather.forecast",
+    "args": {
+      "period": "today"
+    },
+    "place": "st brieuc"
+  },
+  {
+    "question": "meteo chateauneuf du faou",
+    "function": "weather.forecast",
+    "args": {
+      "period": "today"
+    },
+    "place": "chateauneuf du faou"
+  },
+  {
+    "question": "météo demain à Brest",
+    "function": "weather.forecast",
+    "args": {
+      "location": "Brest",
+      "period": "tomorrow"
+    }
+  },
+  {
+    "question": "tropo",
+    "function": "mesh.hfcond"
+  },
+  {
+    "question": "test",
+    "function": "test.receive"
+  },
+  {
+    "question": "ping",
+    "function": "test.receive"
+  },
+  {
+    "question": "Quelle région par défaut sur un compagnon ?",
+    "function": "wiki.lookup"
+  },
+  {
+    "question": "Région",
+    "function": "wiki.lookup"
+  },
+  {
+    "question": "Peux-tu tester ma réception ?",
+    "function": "test.receive"
+  },
+  {
+    "question": "Comment régler le scope de mon T-Deck ?",
+    "function": "wiki.lookup"
+  }
+]

@@ -259,6 +259,8 @@ class WxCommand(WeatherCommandMixin, BaseCommand):
                  "(outside the US) instead of replying with an error. Shared weather setting."},
         {"key": "default_city", "label": "Default city", "type": "str", "section": "Weather",
          "default": "", "help": "City used for a bare 'wx' when no location is given. Shared weather setting."},
+        {"key": "default_location_label", "label": "Default location label", "type": "str", "section": "Weather",
+         "default": "", "help": "Display label used by ASK for the default weather location, including any preposition."},
         {"key": "default_state", "label": "Default state", "type": "str", "section": "Weather",
          "default": "", "help": "2-letter state for city disambiguation (e.g. WA). Shared weather setting."},
         {"key": "default_country", "label": "Default country", "type": "str", "section": "Weather",
@@ -301,6 +303,14 @@ class WxCommand(WeatherCommandMixin, BaseCommand):
     # down to nothing (or negative, which the -10/-20 arithmetic in the period
     # formatters would turn into dropped fields).
     MIN_BODY_BUDGET = 40
+
+    def provider_description(self) -> str:
+        """Describe the initialized forecast backend without exposing configuration."""
+        if self.delegate_command is not None:
+            return 'Mon fournisseur principal pour les prévisions météo est Open-Meteo.'
+        if self._openmeteo is not None:
+            return 'J’utilise NOAA/NWS, avec Open-Meteo en complément hors de leur zone de couverture.'
+        return 'Mon fournisseur principal pour les prévisions météo est NOAA / National Weather Service.'
 
     def __init__(self, bot):
         super().__init__(bot)
@@ -454,20 +464,21 @@ class WxCommand(WeatherCommandMixin, BaseCommand):
         )
 
     def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
-        """Override to delegate or use base class cooldown"""
-        # Check if wx command is enabled
-        if not self.wx_enabled:
-            return False
+        """Check direct wx access; ASK can use the capability independently."""
+        return self.wx_enabled and self.can_use_service(message, skip_channel_check)
+
+    def can_use_service(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        """Allow ASK to use weather while the direct wx command stays hidden."""
 
         if self.delegate_command:
             # Enforce [Wx_Command] channels first; delegate uses skip_channel_check
             # so [Wx_Command] channels override is honored when using Open-Meteo
             if not self.is_channel_allowed(message):
                 return False
-            return self.delegate_command.can_execute(message, skip_channel_check=True)
+            return self.delegate_command.can_use_service(message, skip_channel_check=True)
 
         # Use base class for cooldown and other checks
-        return super().can_execute(message)
+        return super().can_use_service(message, skip_channel_check)
 
     def get_remaining_cooldown(self, user_id: Optional[str] = None) -> int:
         """Get remaining cooldown time for a specific user"""
@@ -864,6 +875,8 @@ class WxCommand(WeatherCommandMixin, BaseCommand):
             using_companion_location: If True, always include location prefix even if same state
         """
         try:
+            # Captured capability results always name their source place for LLM grounding.
+            using_companion_location = using_companion_location or isinstance(getattr(message, "capture_sink", None), list)
             # Convert location to lat/lon based on type, with the location prefix the reply carries
             if location_type == "coordinates":
                 reply, lat, lon, location_prefix = self._locate_coordinates(location)

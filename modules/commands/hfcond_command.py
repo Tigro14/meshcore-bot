@@ -3,6 +3,8 @@
 HF Conditions Command - Provides HF band conditions for ham radio
 """
 
+import asyncio
+
 from ..models import MeshMessage
 from ..solar_conditions import hf_band_conditions
 from .base_command import BaseCommand
@@ -40,6 +42,22 @@ class HfcondCommand(BaseCommand):
         super().__init__(bot)
         self.hfcond_enabled = self.get_config_value('Hfcond_Command', 'enabled', fallback=True, value_type='bool')
 
+    def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        """Check if this command can be executed with the given message.
+
+        Args:
+            message: The message triggering the command.
+
+        Returns:
+            bool: True if command is enabled and checks pass, False otherwise.
+        """
+        if not self.hfcond_enabled:
+            return False
+        return self.can_use_service(message, skip_channel_check)
+
+    def can_use_service(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        return super().can_use_service(message, skip_channel_check=skip_channel_check)
+
     async def execute(self, message: MeshMessage) -> bool:
         """Execute the hfcond command.
 
@@ -51,7 +69,7 @@ class HfcondCommand(BaseCommand):
         """
         try:
             # Get HF band conditions
-            hf_info = hf_band_conditions()
+            hf_info = await asyncio.to_thread(hf_band_conditions)
 
             # Send response using unified method
             response = self.translate('commands.hfcond.header', info=hf_info)

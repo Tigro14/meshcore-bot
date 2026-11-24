@@ -641,13 +641,15 @@ class LocalWikiRag:
         index_path: str,
         *,
         max_chunks: int = 2,
+        procedure_max_sections: int = 6,
+        procedure_max_context_chars: int = 6000,
         max_chars_per_chunk: int = 1400,
         max_context_chars: int = 2400,
         min_term_len: int = 3,
         min_score: float = 6.0,
         relative_score: float = 0.55,
         fuzzy_ratio: float = 0.86,
-        min_matching_terms: int = 2,
+        min_matching_terms: int = 1,
         stopwords: Iterable[str] = (),
         aliases: dict[str, str] | None = None,
         source: WikiJsSource | None = None,
@@ -655,6 +657,8 @@ class LocalWikiRag:
     ) -> None:
         self.index_path = Path(index_path)
         self.max_chunks = max(1, min(8, int(max_chunks)))
+        self.procedure_max_sections = max(1, min(12, int(procedure_max_sections)))
+        self.procedure_max_context_chars = max(300, min(12000, int(procedure_max_context_chars)))
         self.max_chars_per_chunk = max(120, min(4000, int(max_chars_per_chunk)))
         self.max_context_chars = max(300, min(12000, int(max_context_chars)))
         self.min_term_len = max(2, min(12, int(min_term_len)))
@@ -747,7 +751,14 @@ class LocalWikiRag:
         self.logger.info("Loaded Wiki.js RAG index: sections=%d path=%s", len(sections), self.index_path)
         return sections
 
-    def _score(self, query_terms: list[str], query_phrases: list[str], section: WikiRagSection) -> float:
+    def _score(
+        self,
+        query_terms: list[str],
+        query_phrases: list[str],
+        section: WikiRagSection,
+        *,
+        requests_values: bool = False,
+    ) -> float:
         content_norm = _normalize_search(section.content)
         content_tokens = self._tokenize(section.content)
         content_counts = Counter(content_tokens)
@@ -785,29 +796,300 @@ class LocalWikiRag:
                 score += 6
             elif phrase in content_norm:
                 score += 5
+        # Action words carry more intent than the device noun. Without this,
+        # a conceptual diagram headed "Regions" can outrank the section that
+        # actually explains how to add one.
+        action_families = (
+            # A manual may call the same operation "add", "configure" or
+            # "set". They express one setup/mutation intent and must compete
+            # on the device and the usable evidence, not the exact verb.
+            (r"\b(?:ajout\w*|add\w*|associ\w*|assign\w*|configur\w*|parametr\w*|setup|set)\b",),
+            (r"\b(?:retir\w*|supprim\w*|remove\w*|delet\w*)\b",),
+            (r"\b(?:activ\w*|enable\w*)\b",),
+            (r"\b(?:desactiv\w*|disable\w*)\b",),
+            (r"\b(?:install\w*)\b",),
+        )
+        query_norm = " ".join(query_terms)
+        section_norm = " ".join((section_title_norm, page_title_norm, content_norm))
+        if self._markdown_table_section(section):
+            table_subjects = self._table_subject_terms(section)
+            query_subjects = set(query_terms) | {term.rstrip("s") for term in query_terms}
+            if table_subjects & query_subjects:
+                score += 16
+        if requests_values and self._structured_values_section(section):
+            # Lists of allowed values are often stored in fenced ``text``
+            # blocks rather than Markdown tables. Treat them as evidence, not
+            # as diagrams, and prefer the section whose heading names the
+            # requested subject.
+            score += 14
+            subjects = {
+                term.rstrip("s")
+                for term in page_title_terms | section_title_terms | path_terms
+            }
+            query_subjects = {term.rstrip("s") for term in query_terms}
+            # Reward each metadata subject. A device-qualified request such as
+            # "regions for a Companion" must outrank a generic Regions page.
+            score += min(20, 10 * len(subjects & query_subjects))
+        for (pattern,) in action_families:
+            if re.search(pattern, query_norm):
+                score += 12 if re.search(pattern, section_title_norm) else 0
+                score += 7 if re.search(pattern, section_norm) else -6
+                if self._fenced_command_blocks(section):
+                    # Operational questions benefit more from executable
+                    # commands than conceptual prose or UI navigation.
+                    score += 16
         return score
 
-    def _matching_terms(self, query_terms: list[str], section: WikiRagSection) -> set[str]:
-        title_terms = set(self._tokenize(section.page_title)) | set(self._tokenize(section.section_title))
-        path_terms = set(self._tokenize(section.path.replace("/", " ")))
-        content_terms = set(self._tokenize(section.content))
-        return {term for term in set(query_terms) if term in title_terms or term in path_terms or term in content_terms}
+    @staticmethod
+    def _navigation_section(section: WikiRagSection) -> bool:
+        """Recognize link directories, not prose that merely cites a source."""
+        if re.search(r"^\s*(?:```|~~~)", section.content, re.MULTILINE):
+            return False
+        lines = [line.strip() for line in section.content.splitlines()
+                 if line.strip() and not line.lstrip().startswith(("#", "{."))
+                 and line.strip() not in {"---", "***"}]
+        links = sum(bool(re.match(r"^(?:[-*+]\s+)?\[[^\]]+\]\([^)]+\)\s*$", line))
+                    for line in lines)
+        return links >= 2 and links / max(1, len(lines)) >= 0.6
+
+    @staticmethod
+    def _table_subject_terms(section: WikiRagSection) -> set[str]:
+        content = section.content.replace("\\n", "\n")
+        for raw_line in content.splitlines():
+            line = raw_line.strip().lstrip(">").strip().strip("|")
+            cells = [cell.strip() for cell in line.split("|")]
+            if len(cells) < 2 or re.fullmatch(r"[-:\s]+", cells[0]):
+                continue
+            terms = set(re.findall(r"[\w-]+", _normalize_search(cells[0])))
+            return terms | {term.rstrip("s") for term in terms}
+        return set()
+
+    @staticmethod
+    def _markdown_table_section(section: WikiRagSection) -> bool:
+        content = section.content.replace("\\n", "\n")
+        compact_rows = re.findall(
+            r"(?m)^\s*>?\s*\|?\s*[^|\n]{1,40}\s*\|\s*[^|\n]{1,80}\s*\|?\s*$",
+            content,
+        )
+        if len(compact_rows) >= 3:
+            return True
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        # Accept both Markdown tables and the compact tables commonly embedded
+        # in fenced ``text`` blocks by Wiki.js.
+        pipe_rows = sum("|" in line for line in lines)
+        separator = any(
+            "|" in line and re.fullmatch(r"[-:|\s]{5,}", line)
+            for line in lines
+        )
+        tabular_rows = sum(line.count("|") >= 2 for line in lines)
+        return separator or tabular_rows >= 3 or pipe_rows >= 4
+
+    @staticmethod
+    def _fenced_value_lists(section: WikiRagSection) -> list[list[str]]:
+        """Return compact value lists without confusing UI paths for values."""
+        lists: list[list[str]] = []
+        content = section.content.replace("\\n", "\n")
+        for block in re.findall(
+            r"(?ms)^\s*(?:```|~~~)[^\n]*\n(.*?)^\s*(?:```|~~~)\s*$",
+            content,
+        ):
+            values: list[str] = []
+            lines = [line.strip() for line in block.splitlines() if line.strip()]
+            for line in lines:
+                # Configuration values and identifiers are compact. Arrows,
+                # prose, commands and tree branches are deliberately rejected.
+                if re.fullmatch(r"[#@]?[\w][\w./%:+-]{0,31}", line, flags=re.UNICODE):
+                    if line not in values:
+                        values.append(line)
+            if 2 <= len(values) <= 20 and len(values) / max(1, len(lines)) >= 0.6:
+                lists.append(values)
+        return lists
+
+    @staticmethod
+    def _fenced_command_blocks(section: WikiRagSection) -> list[list[str]]:
+        """Return compact, coherent command blocks from fenced Wiki content."""
+        commands: list[list[str]] = []
+        content = section.content.replace("\\n", "\n")
+        for block in re.findall(
+            r"(?ms)^\s*(?:```|~~~)[^\n]*\n(.*?)^\s*(?:```|~~~)\s*$",
+            content,
+        ):
+            lines = [line.strip() for line in block.splitlines() if line.strip()]
+            if not 2 <= len(lines) <= 12:
+                continue
+            if any(len(line) > 160 or re.search(r"(?:-->|<--|\|\||[▼▲▶◀])", line) for line in lines):
+                continue
+            tokens = [re.findall(r"\S+", line) for line in lines]
+            if any(len(parts) < 2 for parts in tokens):
+                continue
+            # A command sequence normally shares the executable or namespace
+            # (for example: region def/default/save). Requiring that common
+            # prefix rejects menus, prose, value lists and ASCII diagrams.
+            prefixes = [parts[0].casefold() for parts in tokens]
+            if len(set(prefixes)) != 1 or not re.fullmatch(r"[\w./:+-]+", prefixes[0]):
+                continue
+            commands.append(lines)
+        return commands
+
+    @classmethod
+    def _structured_values_section(cls, section: WikiRagSection) -> bool:
+        return cls._markdown_table_section(section) or bool(cls._fenced_value_lists(section))
+
+    @staticmethod
+    def _diagram_section(section: WikiRagSection) -> bool:
+        """Recognize diagrams and table-only schemas that are poor answer text."""
+        content = section.content
+        if re.search(r"(?im)^\s*```\s*(?:mermaid|graph|flowchart|sequenceDiagram)\b", content):
+            return True
+        # Wiki pages also use fenced ``text`` blocks for ASCII flow charts.
+        # Judge each fenced block independently so surrounding prose cannot
+        # dilute the structural-line ratio.
+        for block in re.findall(r"(?ms)^\s*(?:```|~~~)[^\n]*\n(.*?)^\s*(?:```|~~~)\s*$", content):
+            block_lines = [line.strip() for line in block.splitlines() if line.strip()]
+            if not block_lines:
+                continue
+            structural = sum(bool(re.search(
+                r"(?:-->|<--|\|\||[▼▲▶◀]|^[|+\\/_ -]{3,}$|^\|.*\|$)", line
+            )) for line in block_lines)
+            if structural >= 2 and structural / len(block_lines) >= 0.35:
+                return True
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        if not lines:
+            return False
+        structural = sum(bool(re.search(
+            r"(?:-->|<--|\|\||\{\{|\}\}|^\|.*\|$|^\s*[-:| ]{5,}\s*$)", line
+        )) for line in lines)
+        return structural >= 2 and structural / len(lines) >= 0.45
+
+    def _page_evidence(self, terms: list[str], section: WikiRagSection) -> float:
+        """Use metadata rather than page length or repeated body keywords."""
+        title = set(self._tokenize(section.page_title))
+        heading = set(self._tokenize(section.section_title))
+        path = set(self._tokenize(section.path.replace("/", " ")))
+        title |= {term.rstrip("s") for term in title}
+        heading |= {term.rstrip("s") for term in heading}
+        path |= {term.rstrip("s") for term in path}
+        # Action verbs describe what to do, not which device or subject page
+        # should supply the answer. Ignoring them for page focus prevents an
+        # exact "Add ..." heading on the wrong device from tying the page whose
+        # title/path actually names the requested device.
+        subject_terms = {
+            term
+            for term in terms
+            if not re.fullmatch(
+                r"configur\w*|install\w*|parametr\w*|setup|set|ajout\w*|add\w*|"
+                r"associ\w*|assign\w*|retir\w*|supprim\w*|remove\w*|activ\w*|"
+                r"enable\w*|disable\w*",
+                term,
+            )
+        }
+        evidence = sum(
+            8 * (term in title) + 12 * (term in heading) + 4 * (term in path)
+            for term in subject_terms
+        )
+        # In natural-language relation questions the final subject commonly
+        # qualifies the requested device or target ("regions for a repeater",
+        # "policy on a gateway"). Prefer pages that name that qualifier in
+        # their title/path over concept pages that only mention it in a heading.
+        qualifier = next((term for term in reversed(terms) if term in subject_terms), "")
+        if qualifier and (qualifier in title or qualifier in path):
+            evidence += 20
+        return evidence
+
+    @staticmethod
+    def _page_key(section: WikiRagSection) -> tuple[str, str, str]:
+        # Keep locales/sites separate, including externally managed corpora.
+        return section.source_url, section.locale, section.path
+
+    def _procedure_page(self, query: str, terms: list[str], sections: list[WikiRagMatch], primary):
+        """Expand only a broad setup question about an unambiguous page topic.
+
+        Specific parameter questions and definitions keep lexical retrieval.
+        This vocabulary describes intents, never devices or regional settings.
+        """
+        normalized = _normalize_search(query)
+        if not re.search(
+            r"\b(configur\w*|install\w*|parametr\w*|setup|set up|ajout\w*|add\w*|"
+            r"associ\w*|assign\w*|retir\w*|supprim\w*|remove\w*|activ\w*|enable\w*|disable\w*)\b",
+            normalized,
+        ):
+            return False
+        if re.search(r"\b(pourquoi|why|definition|what is|qu.est.ce)\b", normalized):
+            return False
+        if primary is None:
+            return False
+        page = next(m.section for m in sections if self._page_key(m.section) == primary)
+        topic = set(self._tokenize(page.page_title + ' ' + page.path.replace('/', ' ')))
+        topic |= {t[:-1] for t in topic if t.endswith('s')}
+        intent = {'bonjour', 'salut', 'hello', 'please', 'svp', 'comment', 'how', 'faire', 'do'}
+        subject = {t for t in terms if t not in intent and not re.fullmatch(
+            r'configur\w*|install\w*|parametr\w*|setup|ajout\w*|add\w*|associ\w*|assign\w*|'
+            r'retir\w*|supprim\w*|remove\w*|activ\w*|enable\w*|disable\w*', t)}
+        return bool(subject) and subject <= topic
+
+    @staticmethod
+    def _procedure_content(content: str) -> str:
+        """Omit optional collapsed explanations, but retain cautions/conditions."""
+        def compact(match):
+            text = match.group(0)
+            if re.search(r'(?i)warning|important|attention|prerequis|prerequisite|'
+                         r'\bif\b|\bsi\b|must|require|adapt|avant|before', text):
+                return text
+            return ''
+        return re.sub(r'<details\b[^>]*>.*?</details>', compact, content,
+                      flags=re.IGNORECASE | re.DOTALL).strip()
+
+    @staticmethod
+    def _procedural_section(section: WikiRagSection) -> bool:
+        heading = _normalize_search(section.section_title)
+        return bool(re.search(r'^\s*\d+[.)]', heading) or re.search(
+            r'(?im)^\s*>.*(?:important|warning|attention|prerequis)', section.content) or re.search(
+            r'\b(prerequis|prerequisites?|requirements?|parametres?|settings?|verification|'
+            r'verify|checks?|avertissement|warnings?|sauvegard\w*|save|ajout\w*|add\w*|'
+            r'associ\w*|assign\w*|retir\w*|supprim\w*|remove\w*|activ\w*|enable\w*)\b', heading)
+            or (bool(re.search(r'(?m)^\s*```', section.content))
+                and not LocalWikiRag._diagram_section(section)))
+
+    def _matching_terms(self, query_terms, section):
+        words = set(self._tokenize(' '.join((section.page_title, section.section_title, section.path.replace('/', ' '), section.content))))
+        return set(query_terms) & words
 
     def retrieve(self, query: str) -> WikiRagResult | None:
         query_terms = self._tokenize(query)
         if not query_terms:
             return None
         query_phrases = [f"{query_terms[index]} {query_terms[index + 1]}" for index in range(len(query_terms) - 1)]
-        required_matching_terms = 1 if len(query_terms) <= 1 else self.min_matching_terms
 
+        query_norm = _normalize_search(query)
+        requests_values = bool(re.search(
+            r"\b(?:donne|liste|quels?|quelles?|list|show|values?|options?|supported)\b",
+            query_norm,
+        ))
+        requests_diagram = bool(re.search(r"\b(?:diagramme|schema|tableau|diagram|schema|table)\b", query_norm))
         scored: list[WikiRagMatch] = []
+        pages: dict[tuple[str, str, str], float] = {}
         for section in self._load_sections():
-            score = self._score(query_terms, query_phrases, section)
-            if score <= 0:
-                continue
-            if len(self._matching_terms(query_terms, section)) < required_matching_terms:
-                continue
-            scored.append(WikiRagMatch(score=score, section=section))
+            score = self._score(
+                query_terms,
+                query_phrases,
+                section,
+                requests_values=requests_values,
+            )
+            navigation = self._navigation_section(section)
+            diagram = self._diagram_section(section)
+            useful_table = requests_values and self._structured_values_section(section)
+            if navigation:
+                score *= 0.25
+            if diagram and not requests_diagram and not useful_table:
+                score *= 0.15
+            if score > 0:
+                if self.min_matching_terms > 1 and len(set(query_terms)) > 1 and len(self._matching_terms(query_terms, section)) < self.min_matching_terms:
+                    continue
+                scored.append(WikiRagMatch(score=score, section=section))
+                key = self._page_key(section)
+                evidence = self._page_evidence(query_terms, section)
+                penalty = 0.25 if navigation else (0.15 if diagram and not useful_table else 1.0)
+                pages[key] = max(pages.get(key, 0.0), evidence * penalty)
         if not scored:
             return None
         scored.sort(key=lambda match: (-match.score, match.section.section_index, match.section.path))
@@ -816,17 +1098,54 @@ class LocalWikiRag:
             return None
 
         threshold = max(self.min_score, best_score * self.relative_score)
+        # Focus only when metadata clearly identifies a page. Ambiguous or
+        # multi-page questions retain the global ranking. Never promote a
+        # section that fails the existing relevance thresholds.
+        page_ranking = sorted(pages.items(), key=lambda item: -item[1])
+        primary = None
+        if not requests_values and len(set(query_terms)) >= 2 and page_ranking[0][1] >= 12:
+            runner_up = page_ranking[1][1] if len(page_ranking) > 1 else 0
+            if page_ranking[0][1] > runner_up * 1.25:
+                primary = page_ranking[0][0]
+        if primary is not None:
+            scored.sort(key=lambda match: (
+                self._page_key(match.section) != primary,
+                -match.score, match.section.section_index, match.section.path,
+            ))
+        procedure = self._procedure_page(query, query_terms, scored, primary)
+        if procedure:
+            # Page relevance was established above. Numbered steps and their
+            # prerequisites may legitimately share none of the query's words.
+            procedural = [m for m in scored if self._page_key(m.section) == primary
+                          and self._procedural_section(m.section)]
+            if procedural:
+                scored = sorted(procedural, key=lambda m: m.section.section_index)
+            else:
+                procedure = False
+        if not procedure and primary is not None:
+            page = next(m.section for m in scored if self._page_key(m.section) == primary)
+            topic = set(self._tokenize(page.page_title + ' ' + page.path.replace('/', ' ')))
+            topic |= {t[:-1] for t in topic if t.endswith('s')}
+            specific = {t for t in query_terms if t not in topic
+                        and t not in {'bonjour', 'salut', 'hello', 'comment', 'how', 'please', 'svp'}
+                        and not re.fullmatch(r'configur\w*|install\w*|parametr\w*|setup', t)}
+            focused = [m for m in scored if self._page_key(m.section) == primary
+                       and specific & set(self._tokenize(m.section.section_title + ' ' + m.section.content))
+                       and m.score >= self.min_score]
+            if specific and focused:
+                scored = focused
+                threshold = max(self.min_score, max(m.score for m in focused) * self.relative_score)
         selected: list[WikiRagMatch] = []
         seen: set[str] = set()
         for match in scored:
-            if match.score < threshold:
+            if not procedure and match.score < threshold:
                 continue
             signature = _normalize_search(match.section.content)
             if signature in seen:
                 continue
             seen.add(signature)
             selected.append(match)
-            if len(selected) >= self.max_chunks:
+            if len(selected) >= (self.procedure_max_sections if procedure else self.max_chunks):
                 break
         if not selected:
             return None
@@ -836,7 +1155,8 @@ class LocalWikiRag:
         parts = [begin_marker]
         # Reserve enough room for the closing marker. Build the context to the
         # configured budget instead of truncating the final string mid-source.
-        remaining = self.max_context_chars - len(begin_marker) - len(end_marker) - 4
+        context_limit = self.procedure_max_context_chars if procedure else self.max_context_chars
+        remaining = context_limit - len(begin_marker) - len(end_marker) - 104
         included: list[WikiRagMatch] = []
         for number, match in enumerate(selected, start=1):
             section = match.section
@@ -851,15 +1171,23 @@ class LocalWikiRag:
             if section.source_url:
                 metadata.append(f"url: {section.source_url}")
             prefix = "\n".join(metadata) + "\ncontent:\n"
-            content_budget = min(self.max_chars_per_chunk, remaining - len(prefix) - 2)
+            content_budget = remaining - len(prefix) - 2
+            if not procedure:
+                content_budget = min(self.max_chars_per_chunk, content_budget)
             if content_budget < 80:
                 break
-            block = prefix + _clip_context(section.content, content_budget)
+            content = self._procedure_content(section.content) if procedure else section.content
+            if procedure and len(content) > content_budget:
+                # Never provide half a step with its save command or warning missing.
+                break
+            block = prefix + _clip_context(content, content_budget)
             parts.append(block)
             included.append(match)
             remaining -= len(block) + 2
         if not included:
             return None
+        if procedure and len(included) < len(scored):
+            parts.append("INCOMPLETE PROCEDURE: context budget omitted steps; do not claim completeness.")
         parts.append(end_marker)
         context = "\n\n".join(parts)
         return WikiRagResult(context=context, matches=tuple(included), best_score=best_score)

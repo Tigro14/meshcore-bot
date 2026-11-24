@@ -1021,7 +1021,7 @@ log_backup_count = 3
 # created by systemd sandboxing (ProtectSystem) is a configuration fact, not a
 # storage fault, and must never trigger a reboot.
 enabled = true
-reboot_on_erofs = true
+reboot_on_erofs = false
 failure_threshold = 3
 cooldown_seconds = 900
 writable_prefixes = /var/lib/meshcore-bot,/var/log/meshcore-bot,/dev/shm
@@ -1188,6 +1188,10 @@ weather_provider = noaa
 # Default city name for empty "wx" / "gwx" commands when companion location is unavailable
 # Use English city names (examples: Seattle or Seattle, WA)
 #default_city =
+
+# Optional label used in ASK's natural-language answer for the default location.
+# This may include the appropriate preposition, for example "In Seattle" or "En Bretagne".
+default_location_label =
 
 # Default state for city name disambiguation
 # When users type "wx seattle", it will search for "seattle, WA, USA"
@@ -2022,6 +2026,8 @@ url_timeout = 10
 
 # Command stubs (enable/channels only; omit to use global monitor_channels)
 [Wx_Command]
+# Controls the direct wx/weather keywords. ASK may still use the weather
+# capability internally when its weather route is enabled.
 enabled = true
 
 # Units come from [Weather] temperature_unit / wind_speed_unit. Set these
@@ -2129,7 +2135,25 @@ enabled = true
 [Aqi_Command]
 enabled = true
 # channels =
+[Ask_Command]
+# Assistant entry: aliases are additive; ask remains available.
+enabled = true
+aliases = baliz
+enabled_routes = test,path,mesh,wiki,weather,llm
+route_timeout_seconds = 120
+# Use the LLM only when the deterministic router cannot classify the question.
+semantic_routing_enabled = true
+max_pages = 4
+
+[Mesh_Command]
+# Natural-language questions over locally observed network data (formerly ask).
+enabled = true
+public_enabled = true
+# channels =
+
 [Llm_Command]
+# Direct llm access can be hidden while the service stays enabled for ask.
+public_enabled = true
 # AI chat command (primary keyword: llm; aliases: ia, ai, chat)
 # Connects to a local llama.cpp OpenAI-compatible endpoint for short mesh replies.
 enabled = false
@@ -2144,9 +2168,8 @@ ping_timeout_seconds = 2.0
 ping_cache_seconds = 60
 
 # When a reply has no visible content, the finish_reason decides what happened:
-# "stop" means the model answered inside its thinking block, so reasoning_content is
-# sent; "length" means the answer was cut by max_tokens and is reported as truncated;
-# anything else keeps the chain-of-thought off the air.
+# Baliz never sends hidden reasoning_content over the radio. Empty visible
+# responses use the existing bounded retry and user-facing error path.
 
 # Fallback endpoint (default: the endpoint below, i.e. local llama.cpp)
 fallback_endpoint = http://127.0.0.1:8080/v1/chat/completions
@@ -2156,6 +2179,10 @@ endpoint = http://127.0.0.1:8080/v1/chat/completions
 
 # Optional model name (blank = server default model)
 model =
+
+# Optional OpenAI-compatible reasoning effort (for example: none, low, medium, high).
+# Leave blank for backends or models that do not support this parameter.
+reasoning_effort =
 
 # System prompt (keep short for mesh bandwidth)
 system_prompt = You are a helpful assistant on a low-bandwidth mesh network. Reply briefly in one short sentence.
@@ -2216,8 +2243,15 @@ context_include_system_metrics = true
 # Cache TTL for injected context (seconds)
 context_cache_seconds = 60
 
+# Conversation history window (seconds) and max turns to retain
+# context_window_seconds = 600
+# context_max_turns = 5
+
+# Weather location for LLM context (used when context_include_weather = true)
+# context_weather_location = Paris, France
 # Optional local Wiki.js lexical RAG (no embeddings / no vector DB)
-wiki_rag_enabled = false
+[Rag_Service]
+enabled = false
 # Base URL of any Wiki.js instance (no site-specific URL is built into the bot)
 wiki_site_url =
 # Optional locale passed to Wiki.js pages.list (empty = all visible locales)
@@ -2237,6 +2271,11 @@ wiki_allowed_paths =
 wiki_rag_index_path = data/wiki_rag/wiki_pages.jsonl
 # Number of independently scored sections injected into the prompt
 wiki_rag_max_chunks = 2
+# Broad configuration questions: complete steps from a clearly identified page.
+wiki_procedure_max_sections = 6
+wiki_procedure_max_context_chars = 6000
+# Wiki response budget; independent of conversational LLM responses.
+wiki_response_max_tokens = 384
 # Per-section and total prompt budgets
 wiki_rag_chunk_chars = 1400
 wiki_rag_max_context_chars = 2400
@@ -2245,17 +2284,12 @@ wiki_rag_min_term_len = 3
 # Absolute and relative relevance thresholds
 wiki_rag_min_score = 6
 wiki_rag_relative_score = 0.55
-wiki_rag_min_matching_terms = 2
+# Optional stricter matching; 1 preserves Baliz page/procedure retrieval.
+wiki_rag_min_matching_terms = 1
 # Optional comma-separated search stopwords and aliases (alias=canonical)
 wiki_rag_stopwords =
 wiki_rag_aliases =
 
-# Conversation history window (seconds) and max turns to retain
-# context_window_seconds = 600
-# context_max_turns = 5
-
-# Weather location for LLM context (used when context_include_weather = true)
-# context_weather_location = Paris, France
 [Advert_Command]
 enabled = true
 # channels =
@@ -3053,6 +3087,26 @@ alert_throttle = 3600
 # Levels: Vert, Jaune, Orange, Rouge
 # Default: Orange,Rouge (only alert on elevated vigilance)
 alert_levels = Orange,Rouge
+
+# Optional change-driven policy. On first non-green vigilance or any change of
+# color/phenomena, send immediately after detection; repeat unchanged alerts only
+# after reminder_interval seconds. A return to green closes a previously sent alert
+# once. Last successfully transmitted alerts survive restarts in bot_metadata.
+# When false, the existing alert_throttle behavior above is retained.
+notify_on_change = false
+reminder_interval = 86400
+
+# Keep complete bulletins for explicitly historical offline answers to vigi.
+# The monitor announces failed updates once, then recovery (and cache expiry).
+# Cached information is never used to clear or update a live vigilance.
+offline_cache = false
+
+# In change mode, combine due departments with identical levels and phenomena.
+# Each department retains its own sent state and reminder deadline.
+group_similar_alerts = false
+
+# Keep today's and tomorrow's official bulletins and time windows separately.
+include_tomorrow = false
 
 # When true, alerts go only to Discord/Telegram webhooks, not the mesh channel.
 # Default: false

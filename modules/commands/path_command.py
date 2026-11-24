@@ -488,6 +488,21 @@ class PathCommand(BaseCommand):
         )
         return self._format_path_response(node_ids, repeater_info)
 
+    def can_execute(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        """Check if this command can be executed with the given message.
+
+        Args:
+            message: The message triggering the command.
+
+        Returns:
+            bool: True if command is enabled and checks pass, False otherwise.
+        """
+        return self.path_enabled and self.can_use_service(message, skip_channel_check)
+
+    def can_use_service(self, message: MeshMessage, skip_channel_check: bool = False) -> bool:
+        """Public visibility is separate from authorized internal invocation."""
+        return super().can_use_service(message, skip_channel_check=skip_channel_check)
+
     async def execute(self, message: MeshMessage) -> bool:
         """Execute path decode command"""
         self.logger.info("Path command executed | %s", message_metadata(message))

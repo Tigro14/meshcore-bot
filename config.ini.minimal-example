@@ -492,6 +492,7 @@ ping_cache_seconds = 60
 endpoint = http://127.0.0.1:8080/v1/chat/completions
 # Optional model name (blank = server default model)
 model =
+reasoning_effort =
 # Keep prompt short for mesh responses
 system_prompt = You are a helpful assistant on a low-bandwidth mesh network. Reply briefly in one short sentence.
 max_tokens = 80

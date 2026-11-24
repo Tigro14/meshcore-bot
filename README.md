@@ -1,5 +1,7 @@
 # MeshCore Bot
 
+**Baliz :** la branche `baliz` contient la version spécifique utilisée en production. Voir le [suivi de production et l'organisation des branches](docs/baliz-production.md) pour les versions publiées, leur validation et le rôle des autres branches.
+
 A Python bot that connects to MeshCore mesh networks via serial port, BLE, or TCP/IP. The bot responds to messages containing configured keywords, executes commands, and provides various data services including weather, solar conditions, and satellite pass information. A web viewer provides a browser-based dashboard for monitoring and managing the bot.
 
 

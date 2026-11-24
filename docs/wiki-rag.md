@@ -6,10 +6,11 @@ vector database, and it contains no built-in wiki address or site-specific path.
 
 ## Configuration
 
-Enable it in `[Llm_Command]`:
+Enable it in `[Rag_Service]`:
 
 ```ini
-wiki_rag_enabled = true
+[Rag_Service]
+enabled = true
 wiki_site_url = https://wiki.example.org
 wiki_locale = en
 wiki_refresh_interval_seconds = 86400
@@ -25,6 +26,18 @@ wiki_rag_relative_score = 0.55
 wiki_rag_stopwords =
 wiki_rag_aliases =
 ```
+
+The RAG settings belong to this shared configuration section; endpoint, model,
+conversation prompt and history stay in `[Llm_Command]`. This does not create a
+public `rag` command or a background service plugin. The `wiki` assistant route
+uses this configuration and still needs the LLM for synthesis.
+
+For migration, move every `wiki_*` setting from `[Llm_Command]` into
+`[Rag_Service]` and rename `wiki_rag_enabled` to `enabled`. Old settings remain
+readable when the corresponding new key is absent. New values take precedence,
+including explicit `false` and empty strings. `MESHCORE_WIKI_API_KEY` retains
+precedence over the configured API key. Remove old keys after migration to avoid
+ambiguity. Merely adding the example's `enabled = false` explicitly disables RAG.
 
 `wiki_site_url` accepts any absolute HTTP or HTTPS Wiki.js base URL.
 `wiki_allowed_paths` is mandatory for automatic collection. Each value includes an
@@ -109,9 +122,17 @@ URL, update time, content type and original content. At query time the retriever
    and expands configured aliases;
 3. scores exact terms and adjacent phrases, prioritizing section title, page title
    and path over repeated matches in the body;
-4. applies `wiki_rag_min_score` and `wiki_rag_relative_score`;
-5. removes duplicate sections and retains at most `wiki_rag_max_chunks`;
-6. builds a bounded reference block without cutting its closing delimiter.
+4. discounts link directories (at least two standalone links making up 60% of
+   meaningful lines) to one quarter of their score; ordinary prose with links
+   and fenced code are not classified as directories;
+5. ranks pages by their strongest title/path/section-title evidence, not by page
+   length. When the leading page has at least 12 metadata points, exceeds the
+   runner-up by more than 25%, and the query has at least two distinct search
+   terms, its relevant sections are considered first. Otherwise global section
+   ranking remains in place, allowing answers from multiple pages;
+6. applies `wiki_rag_min_score` and `wiki_rag_relative_score`;
+7. removes duplicate sections and retains at most `wiki_rag_max_chunks`;
+8. builds a bounded reference block without cutting its closing delimiter.
 
 When no section passes the thresholds, the normal LLM prompt is used. When a match
 exists, the wiki prompt is isolated from conversation history, weather, topology and
@@ -152,3 +173,48 @@ Collection is checked on demand, not on a background timer. The request that
 triggers a stale refresh waits for collection, although other event-loop work can
 continue. For large corpora, prebuild the index with the standalone collector and
 use an external schedule. Use separate index paths for separate source scopes.
+
+
+### Page selection and scope
+
+Page priority does not bypass relevance thresholds or increase the configured
+context budget. Lower-ranked pages can still fill remaining slots. This restores
+the benefit of narrowing a question to its relevant document without encoding
+site URLs, equipment names or page paths in the retriever. The heuristics use
+metadata and document structure; they are not a semantic classifier. The default
+two sections cannot guarantee coverage of every step in a long procedure.
+
+On the MeshCore Bretagne corpus used for validation, “Bonjour, comment configurer
+un répéteur ?” now selects the repeater introduction and its first settings step,
+instead of the introduction and a navigation directory. This is a retrieval
+validation, not a claim that LLM synthesis errors are fixed. No configuration
+budget changes are required.
+
+
+### Procedure-aware retrieval
+
+Broad setup questions (French/English intent vocabulary, with no device-specific
+rules) can expand an unambiguously identified page into its numbered steps,
+parameter tables, prerequisites, warnings and verification sections. The subject
+must match page metadata; a question naming an additional parameter stays targeted.
+Specific terms absent from page metadata are searched in section headings/content
+so repeated page titles do not outweigh the requested parameter.
+
+`Rag_Service` adds `wiki_procedure_max_sections = 6` and
+`wiki_procedure_max_context_chars = 6000`. These replace the ordinary excerpt
+limits only for detected broad procedures. Steps are kept complete and in source
+order; if a step cannot fit, expansion stops and the context is explicitly marked
+incomplete. No setting, equipment name or regional value is hardcoded. Detection
+is deliberately conservative and depends on useful page headings, not a semantic
+classifier. Unstructured procedures can still use ordinary lexical retrieval.
+
+`wiki_response_max_tokens = 384` controls wiki generation independently of
+conversational `Llm_Command.max_tokens`. The wiki prompt prioritizes exact technical
+values and commands, conditions, save/check steps and explicit adaptation of example
+values. Existing radio pagination still limits delivery; this token budget does not
+guarantee that an entire procedure fits one response. Conflicting source instructions
+must be reported, not silently corrected. Larger contexts may increase model latency.
+
+Optional HTML `details` explanations are omitted in procedure contexts unless
+they contain recognized caution/condition vocabulary. Main steps and code blocks
+remain intact. This compaction is conservative for French/English documentation.
