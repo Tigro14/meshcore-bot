@@ -4868,7 +4868,9 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 explicit = (candidates[0] if candidates else '').strip()
                 if not explicit:
                     for key, value in self.config.items('Channels', raw=True):
-                        if key == 'outgoing_flood_scope_override' or key.startswith('flood_scope.'):
+                        if key == 'outgoing_flood_scope_override' or (
+                            key.startswith('flood_scope.') and value.strip() != flood_scope.CHANNEL_SCOPE_INHERIT
+                        ):
                             candidates.append(value)
             if any(not flood_scope.is_global_marker((c or '').strip()) for c in candidates):
                 limit -= CHANNEL_REGIONAL_FLOOD_SCOPE_BODY_OVERHEAD
@@ -5261,6 +5263,8 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                     if not key.startswith('flood_scope.') or len(key) <= len('flood_scope.'):
                         continue
                     configured = (value or '').strip()
+                    if configured == flood_scope.CHANNEL_SCOPE_INHERIT:
+                        continue
                     channel_overrides.append({
                         'channel': key[len('flood_scope.'):],
                         'scope': (
@@ -6083,13 +6087,81 @@ class BotDataViewer(DashboardSnapshotMixin, LiveStreamMixin, SocketClientsMixin,
                 'is_admin': is_admin,
             })
 
+        def _channels_settings_view():
+            view = self._monitor_view()
+            default_region = qr_region_scope(self.config, None)
+            regions = {scope.removeprefix('#') for scope in _region_scope_view()['scopes']}
+            if default_region:
+                regions.add(default_region)
+            for channel in view['channels']:
+                entry = flood_scope.channel_scope_entry(self.config, channel['name'])
+                channel['region_override'] = (
+                    None if entry is None else
+                    '*' if flood_scope.is_global_marker(entry) else entry.removeprefix('#')
+                )
+                if channel['region_override'] not in (None, '*'):
+                    regions.add(channel['region_override'])
+            view['default_region'] = default_region
+            view['regions'] = sorted(regions, key=str.casefold)
+            return view
+
         @self.app.route('/api/channels/settings')
         @self._api_errors('Error getting channel monitor settings')
         def api_channels_settings_get():
-            """Monitored-channels view for the Settings page."""
-            # Re-read from disk so the page reflects edits made elsewhere.
+            """Monitored channels and region overrides for the Settings page."""
             self.config = self._load_merged_config()
-            return jsonify(self._monitor_view())
+            return jsonify(_channels_settings_view())
+
+        @self.app.route('/api/channels/settings/scopes', methods=['POST'])
+        @self._api_errors('Error saving channel regions')
+        def api_channel_scopes_save():
+            """Update the specified radio channels; null restores the default."""
+            data = request.get_json(silent=True)
+            changes = data.get('scopes') if isinstance(data, dict) else None
+            if not isinstance(changes, dict) or not changes:
+                return jsonify({'success': False, 'error': 'Indiquez les régions à enregistrer.'}), 400
+
+            config = self._load_merged_config()
+            self.config = config
+            target_path = _channels_section_target_path()
+            radio_keys = {
+                lookup_key(channel['name']) for channel in self._monitor_view()['channels']
+                if channel['on_radio']
+            }
+            updates: dict[str, str] = {}
+            seen: set[str] = set()
+            try:
+                for name, scope in changes.items():
+                    channel_key = lookup_key(name)
+                    if channel_key not in radio_keys:
+                        raise ValueError(f'Canal absent de la radio : {name}')
+                    if channel_key in seen:
+                        raise ValueError(f'Canal indiqué plusieurs fois : {name}')
+                    seen.add(channel_key)
+                    if scope is not None and not isinstance(scope, str):
+                        raise ValueError(f'Région invalide pour {name}')
+                    if scope is None or not scope.strip():
+                        value = flood_scope.CHANNEL_SCOPE_INHERIT
+                    else:
+                        value = flood_scope.validate_device_scope_name(scope)
+                        if flood_scope.is_global_marker(value):
+                            value = '*'
+                        elif flood_scope.is_global_marker(value.removeprefix('#')):
+                            raise ValueError(f'Nom de région réservé : {scope}')
+                    key = flood_scope.channel_scope_option(config, name) or f'flood_scope.{channel_key}'
+                    updates[key] = value
+                store = get_settings_store(config, target_path, self.db_manager)
+                store.write_values('Channels', updates)
+            except ValueError as exc:
+                return jsonify({'success': False, 'error': str(exc)}), 400
+
+            reload_op_id = _queue_config_reload_id()
+            self.config = self._load_merged_config()
+            return jsonify({
+                'success': True,
+                'reload_operation_id': reload_op_id,
+                'settings': _channels_settings_view(),
+            })
 
         @self.app.route('/api/channels/settings', methods=['POST'])
         @self._api_errors('Error saving channel monitor settings')

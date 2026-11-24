@@ -11,11 +11,13 @@ from __future__ import annotations
 import configparser
 import sqlite3
 from contextlib import closing
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from modules.config_validation import PUBLIC_CHANNEL_OVERRIDE_KEY
+from modules.models import MeshMessage
 from modules.web_viewer.app import BotDataViewer
 from modules.web_viewer.channel_monitor import hashtag_secret
 from modules.web_viewer.channel_visibility import channel_identity, set_visibility
@@ -162,7 +164,8 @@ class TestChannelsPageAccess:
     def test_the_settings_editor_opens_for_an_admin(self, gated_viewer):
         resp = _login(gated_viewer).get("/channels/settings")
         assert resp.status_code == 200
-        assert "Canaux surveill" in resp.get_data(as_text=True)
+        assert "Réglages des canaux" in resp.get_data(as_text=True)
+        assert 'id="cs-region-save"' in resp.get_data(as_text=True)
 
     def test_the_page_renders_when_auth_is_disabled(self, viewer):
         resp = _client(viewer).get("/channels")
@@ -489,3 +492,93 @@ class TestChannelProvisioning:
         body = _post_settings(viewer, ["public"]).get_json()
         assert body["provisioned"] == []
         assert not _operations(viewer, "add")
+
+
+class TestChannelRegionSettings:
+    @staticmethod
+    def _save(client, scopes):
+        return client.post(
+            "/api/channels/settings/scopes", json={"scopes": scopes},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+
+    @staticmethod
+    def _public_qrs(viewer):
+        feed = _client(viewer).get("/api/channels/view").get_json()
+        return {channel["name"]: channel["qr"] for channel in feed["channels"]}
+
+    def test_admin_save_updates_the_published_and_private_qrs(self, gated_viewer, tmp_path):
+        _seed_channels(gated_viewer, [
+            (0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf")),
+            (1, "#second", "hashtag", hashtag_secret("#second")),
+            (2, "secreto", "custom", PRIVATE_CUSTOM_KEY),
+        ])
+        _publish(gated_viewer, "#fr-idf")
+        _publish(gated_viewer, "#second")
+        _write_channel_config(gated_viewer, {
+            "outgoing_flood_scope_override": "#fr-bre",
+            "flood_scopes": "#fr, #fr-bre, *",
+        })
+        assert self._save(_client(gated_viewer), {"#fr-idf": "fr"}).status_code == 401
+
+        client = _login(gated_viewer)
+        settings = client.get("/api/channels/settings").get_json()
+        assert settings["default_region"] == "fr-bre"
+        assert settings["regions"] == ["fr", "fr-bre"]
+        assert settings["channels"][0]["region_override"] is None
+
+        response = self._save(client, {"#fr-idf": "fr", "secreto": "#private"})
+        assert response.status_code == 200
+        result = response.get_json()
+        assert result["settings"]["channels"][0]["region_override"] == "fr"
+        assert [item["id"] for item in _operations(gated_viewer, "config_reload")] == [
+            result["reload_operation_id"],
+        ]
+        assert _written_monitor_channels(tmp_path) == "#fr-idf"
+        assert not _operations(gated_viewer, "add")
+        qrs = self._public_qrs(gated_viewer)
+        assert set(qrs) == {"#fr-idf", "#second"}
+        assert qrs["#fr-idf"]["uri"].endswith("&region_scope=fr")
+        assert qrs["#second"]["uri"].endswith("&region_scope=fr-bre")
+        assert qrs["#fr-idf"]["secret"] == hashtag_secret("#fr-idf")
+        admin_channels = client.get("/api/channels/view").get_json()["channels"]
+        private = next(channel["qr"] for channel in admin_channels if channel["name"] == "secreto")
+        assert private["uri"].endswith("&region_scope=private")
+        assert private["secret"] == PRIVATE_CUSTOM_KEY
+        message = MeshMessage("test", channel="#fr-idf")
+        assert message.effective_outgoing_flood_scope(SimpleNamespace(config=gated_viewer.config)) == "#fr"
+
+    def test_default_restores_inheritance_even_with_a_base_override(self, gated_viewer, tmp_path):
+        _seed_channels(gated_viewer, [(0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf"))])
+        _publish(gated_viewer, "#fr-idf")
+        _write_channel_config(gated_viewer, {
+            "outgoing_flood_scope_override": "#fr-bre",
+            "flood_scope.#fr-idf": "#other",
+        })
+        overlay = tmp_path / "local" / "config.ini"
+        overlay.parent.mkdir(exist_ok=True)
+        overlay.write_text("[Channels]\nmonitor_channels = #fr-idf\n", encoding="utf-8")
+        client = _login(gated_viewer)
+        assert self._save(client, {"#fr-idf": "*"}).status_code == 200
+        assert "region_scope=" not in self._public_qrs(gated_viewer)["#fr-idf"]["uri"]
+        result = self._save(client, {"#fr-idf": None}).get_json()
+        assert result["settings"]["channels"][0]["region_override"] is None
+        assert self._public_qrs(gated_viewer)["#fr-idf"]["uri"].endswith("&region_scope=fr-bre")
+        _write_channel_config(gated_viewer, {"outgoing_flood_scope_override": "#fr"})
+        assert self._public_qrs(gated_viewer)["#fr-idf"]["uri"].endswith("&region_scope=fr")
+
+    @pytest.mark.parametrize("changes", [
+        {"#ghost": "fr"}, {"#second": "brétagne"}, {"#second": "#" + "a" * 30},
+        {"#second": ["fr"]}, {"#second": "fr\nstartup_flood_scope = fr"},
+        {"#second": "#none"}, {"second": "fr", "#second": "fr-bre"},
+    ])
+    def test_bad_updates_leave_the_file_and_operation_queue_intact(self, gated_viewer, changes):
+        _seed_channels(gated_viewer, [
+            (0, "#fr-idf", "hashtag", hashtag_secret("#fr-idf")),
+            (1, "#second", "hashtag", hashtag_secret("#second")),
+        ])
+        old = gated_viewer._load_merged_config().items("Channels")
+        response = self._save(_login(gated_viewer), {"#fr-idf": "fr", **changes})
+        assert response.status_code == 400
+        assert gated_viewer._load_merged_config().items("Channels") == old
+        assert not _operations(gated_viewer)
