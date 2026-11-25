@@ -1,0 +1,2172 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the MeshCore bot and its services">
+      
+      
+      
+        <link rel="canonical" href="https://agessaman.github.io/meshcore-bot/baliz-production/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
+    
+    
+      
+        <title>Baliz : production et branches - Meshcore Bot Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#baliz-production-et-branches" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Meshcore Bot Documentation" class="md-header__button md-logo" aria-label="Meshcore Bot Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Meshcore Bot Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Baliz : production et branches
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/agessaman/meshcore-bot" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    meshcore-bot
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quick Start
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+  
+  Installation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../web-viewer/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Web Viewer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../channel-message-visibility/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Channel message visibility
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../command-reference/" class="md-tabs__link">
+          
+  
+  
+  Command Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../service-plugins/" class="md-tabs__link">
+          
+  
+  
+  Service Plugins
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../upgrade/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrade
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../solar-conditions-provenance/" class="md-tabs__link">
+          
+  
+  
+  Project
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Meshcore Bot Documentation" class="md-nav__button md-logo" aria-label="Meshcore Bot Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Meshcore Bot Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/agessaman/meshcore-bot" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    meshcore-bot
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Installation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../home-assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home Assistant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../service-installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scheduled-messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scheduled messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../local-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local plugins and services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checkin-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Check-in API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../path-command-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Path Command
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../wiki-rag/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Universal Wiki.js RAG
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../baliz-assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Baliz assistant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config-validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Config validation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../region-scopes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Region scopes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../region-warnings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Region warnings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../channel-occupancy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channel occupancy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../io-health-monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage monitoring and power cycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repeater-watch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater watch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web-viewer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web Viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../channel-message-visibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channel message visibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Command Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../command-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repeater-commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../command-reference-website/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Command Website
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../develop-command-scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developing Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Plugins
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Service Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../service-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../discord-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Discord Bridge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram Bridge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packet-capture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packet Capture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../map-uploader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Map Uploader
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weather-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weather Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../earthquake-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Earthquake Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vigilance-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vigilance Météo-France
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repeater-prefix-collision-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater Prefix Collision
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../worldcup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    World Cup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FEEDS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Feed Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../solar-conditions-provenance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Solar conditions provenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="baliz-production-et-branches">Baliz : production et branches</h1>
+<h2 id="organisation">Organisation</h2>
+<table>
+<thead>
+<tr>
+<th>Branche</th>
+<th>Rôle</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>baliz</code></td>
+<td>Dernière version publiée de Baliz, avec ses fonctions et particularités. Le commit effectivement déployé est indiqué dans le suivi de production ci-dessous.</td>
+</tr>
+<tr>
+<td><code>main</code></td>
+<td>Branche historique du fork, distincte de la production Baliz. Cette synchronisation ne la modifie pas.</td>
+</tr>
+<tr>
+<td><code>config/baliz-identity</code></td>
+<td>Profil public et documentation de l'identité de Baliz, actualisés séparément du code.</td>
+</tr>
+<tr>
+<td><code>sync/production-20261105</code></td>
+<td>Publication des changements déjà déployés le 5 novembre 2026, puis intégration dans <code>baliz</code>.</td>
+</tr>
+<tr>
+<td><code>sync/tigro-20261106</code></td>
+<td>Intégration de <code>Tigro14/meshcore-bot:main</code> après fusion de la PR #80.</td>
+</tr>
+<tr>
+<td><code>sync/lxc103-production-20261107</code></td>
+<td>Publication de la source réellement déployée dans le LXC103, avec ses correctifs et ses réglages publics.</td>
+</tr>
+<tr>
+<td><code>sync/lxc103-production-20261109</code></td>
+<td>Publication des ajouts BBS et assistant effectivement déployés les 8 et 9 novembre.</td>
+</tr>
+<tr>
+<td><code>sync/lxc103-production-20261115</code></td>
+<td>Publication de la source du LXC103 : vigilance, Airtime et corrections de l’interface.</td>
+</tr>
+<tr>
+<td><code>feat/*</code>, <code>fix/*</code>, <code>sync/tigro-*</code></td>
+<td>Développements et intégrations isolés, à relire avant intégration dans <code>baliz</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Les mises à jour de Tigro sont intégrées dans Baliz en conservant ses particularités. Publier une version de production ne remplace pas <code>main</code>, ne réécrit pas l'historique et ne supprime pas les branches de travail existantes.</p>
+<h2 id="integration-de-tigro-main-17-novembre-2026">Intégration de Tigro main — 17 novembre 2026</h2>
+<p>La branche <code>sync/tigro-main-20261117</code> intègre les 35 commits de Tigro depuis
+<code>d3ba8888</code> jusqu’à <code>5c3ef93b18df74c5a32fc7295abc7c2d1eb2b28a</code> dans <code>baliz</code>.</p>
+<ul>
+<li>Cache Open-Meteo avec repli en cas d’échec, sélection des modèles Météo-France
+  pour la métropole, nouvelle tentative des requêtes et unités du vent explicites.</li>
+<li>Libellés français du bulletin météo quotidien et géocodage amélioré.</li>
+<li>Page Channels et QR codes d’ajout de canal, édition des canaux surveillés dans
+  Settings, QR d’ajout de contact et sessions web conservées après redémarrage.</li>
+<li>Page Real-time publique avec filtrage des canaux, réponses privées et journaux
+  réservés aux administrateurs. Nouveaux liens réseau dans Infos.</li>
+<li>Corrections Blitzortung MQTT, alertes de collision de préfixe et installation
+  des dépendances de géocodage.</li>
+</ul>
+<p>L’assistant Baliz, la vigilance bretonne, Airtime, Clock Sync et les migrations
+sont conservés. Les bulletins fournis à l’assistant conservent leur lieu pour
+empêcher une reformulation vers une autre ville. Le profil garde ses activations
+et réglages ; seule l’option supprimée <code>include_prefix_free_hint</code> est retirée.
+Cette suppression est répercutée dans <code>config/baliz-identity</code>.</p>
+<p>Publication GitHub uniquement : le LXC103 reste à
+<code>611cd5cb29235ba77481e61e9d66db79a6d3b562</code>. <code>main</code> n’est pas modifiée.
+Voir la <a href="../validation/baliz-tigro-main-20261117/">validation de l’intégration</a>.</p>
+<h2 id="alignement-avec-le-lxc103-17-novembre-2026">Alignement avec le LXC103 — 17 novembre 2026</h2>
+<p>La source installée reste <code>611cd5cb29235ba77481e61e9d66db79a6d3b562</code>, déjà
+publiée dans <code>baliz</code> par la PR #25. Les 312 fichiers contrôlés (310 fichiers
+applicatifs, <code>requirements.txt</code> et <code>config.ini.example</code>) sont identiques à
+GitHub. Le service et la radio sont opérationnels.</p>
+<p>Les deux profils publics reprennent les changements de réglage constatés :
+<code>Channels.monitor_channels = #bretagne</code> et
+<code>Vigilance_Service.group_similar_alerts = false</code>. Les réponses aux DM restent
+activées ; la vigilance continue de couvrir les quatre départements bretons.
+La destination temporaire <code>#meteo</code> reste locale ; le profil public conserve
+<code>#bretagne</code> pour les alertes.</p>
+<p>La publication passe par <code>sync/lxc103-production-20261117</code> vers <code>baliz</code> et
+<code>sync/baliz-identity-production-20261117</code> vers <code>config/baliz-identity</code>.
+Elle conserve <code>main</code> et ne modifie ni ne redémarre le serveur. Voir la
+<a href="../validation/baliz-production-sync-20261117/">validation</a>.</p>
+<h2 id="mise-a-jour-des-alertes-15-novembre-2026">Mise à jour des alertes — 15 novembre 2026</h2>
+<p>La source installée est <code>1b23c8215d8de191184d3da21e0487b57aa7949c</code>.
+Les 310 fichiers applicatifs correspondent à cette source ; aucun fichier
+supplémentaire n’a été trouvé sous <code>modules</code>. Le service et la radio sont actifs.</p>
+<p>Le mode par département réunit les journées dues, conserve les horaires et les
+niveaux, et affiche les noms des départements bretons. Les messages respectent
+la taille radio disponible sans tronquer les phénomènes. Le regroupement entre
+départements reste disponible et activé dans le profil public, comme sur le serveur.</p>
+<p>La publication conserve <code>main</code> et actualise séparément <code>config/baliz-identity</code>.
+La destination temporaire <code>#meteo</code> reste locale. Voir la
+<a href="../validation/baliz-vigilance-sync-20261115/">validation</a>.</p>
+<h2 id="alignement-avec-le-lxc103-15-novembre-2026">Alignement avec le LXC103 — 15 novembre 2026</h2>
+<p>La source installée est <code>3706f23eda89adf032f24eeb98924b41ca5915b5</code>,
+repérée par le tag <code>baliz-production-2026-11-15</code>. Les <strong>310 fichiers applicatifs</strong>
+ont été comparés au serveur par SHA-256 : aucune différence et aucun fichier
+supplémentaire sous <code>modules</code>. Le schéma est à <strong>39</strong>.</p>
+<p>La publication conserve les 34 commits depuis <code>7dbb84a9</code> avec leur historique :</p>
+<ul>
+<li>Vigilance des quatre départements bretons, bulletins datés d’aujourd’hui et
+  demain, cache hors ligne, rappels persistants et alertes condensées par journée,
+  niveau et phénomène.</li>
+<li>Attribution passive de l’airtime, reconstruction des émissions des répéteurs
+  et scénario de retransmissions attendues, avec couverture et limites explicites.</li>
+<li>Histogramme adapté à la période, courbe des paquets/minute, taille moyenne,
+  repères de minuit et quatre indicateurs de synthèse.</li>
+<li>Graphiques de batterie dans Time et Contacts, libellés de dates, noms du
+  tableau de bord et attribution des réponses aux requêtes concurrentes.</li>
+</ul>
+<p>Le profil public ajoute le relevé batterie quotidien à 03:00 et reprend les
+réglages publics durables de vigilance. <code>#meteo</code> est une destination temporaire
+du serveur ; le profil conserve <code>#bretagne</code>. L’identité publique est actualisée
+séparément dans <code>config/baliz-identity</code>.</p>
+<p><code>main</code> reste à <code>d3ba88887b19f123dd9a8905a31857da4472f4a9</code>. Les ajouts
+de publication portent uniquement sur le profil public et la documentation ;
+ils ne remplacent pas la configuration active. Aucun secret, prompt privé,
+message ou état de cible n’est exporté. Cette synchronisation ne modifie ni
+ne redémarre le LXC103.</p>
+<p>Voir la <a href="../validation/baliz-production-sync-20261115/">validation de l’alignement</a>.</p>
+<h2 id="alignement-avec-le-lxc103-9-novembre-2026">Alignement avec le LXC103 — 9 novembre 2026</h2>
+<p>La source déployée est <code>933731dcce070658ea44289cff585c8a96139a15</code>,
+repérée par le tag <code>baliz-production-2026-11-09</code>. Les 300 fichiers applicatifs
+ont été comparés au serveur : aucune différence ni fichier applicatif
+supplémentaire. Le schéma reste à 36.</p>
+<p>Les six commits de production depuis <code>42503744</code> sont conservés avec leur
+historique : BBS en langage naturel, saisie littérale et choix du destinataire,
+compteur de sauts reçu, fournisseur météo et provenance sur demande. Les
+messages BBS restent traités par le service existant. Les autres réponses de
+l'assistant ne reçoivent aucun ajout de provenance.</p>
+<p>Le profil public active <code>bbs</code> et <code>info</code> et conserve <code>test</code> désactivé en accès
+direct, comme sur le serveur. Le délai sémantique de 300 secondes est explicité
+dans le profil ; en production, il est hérité du délai LLM. L'identité publique
+est actualisée séparément dans <code>config/baliz-identity</code>.</p>
+<p>Cette publication ne modifie ni ne redémarre le LXC103. Elle conserve <code>main</code>
+au commit <code>d3ba88887b19f123dd9a8905a31857da4472f4a9</code>. Les secrets, prompts
+privés, messages, cibles Clock Sync et préférences de canaux ne sont pas copiés.
+Voir la <a href="../validation/baliz-production-sync-20261109/">validation de l'alignement</a>.</p>
+<h2 id="integration-de-tigro-main-7-novembre-2026">Intégration de Tigro main — 7 novembre 2026</h2>
+<p>La branche <code>sync/tigro-main-20261107</code> intègre Tigro <code>main</code> au commit
+<code>d3ba88887b19f123dd9a8905a31857da4472f4a9</code>, puis rejoint <code>baliz</code> par PR.
+Elle reprend les notifications privées du BBS, la résolution des noms dans ses
+statistiques et les pages publiques en lecture seule de Tigro. Les commandes
+administratives restent protégées lorsque l’authentification est activée.</p>
+<p>La migration des rappels BBS utilise le numéro 36 : les migrations 1 à 35 de Baliz
+restent inchangées. Le profil public, l’assistant, les règles d’accès au LLM,
+les corrections DM et horloges, la carte et le tutoriel français de Time sont
+conservés. Les anciens substituts BBS des messages planifiés sont retirés comme
+chez Tigro ; les nouveaux rappels passent en DM.</p>
+<p>Cette mise à jour concerne GitHub uniquement. Le LXC103 reste sur la source
+<code>75e06d7256b93fa627314137c84ab4eac8992b19</code> et n’est ni modifié ni redémarré.
+Les branches <code>main</code> et <code>config/baliz-identity</code> ne changent pas.
+Voir la <a href="../validation/baliz-tigro-main-20261107/">validation de l’intégration</a>.</p>
+<h2 id="alignement-avec-le-lxc103-7-novembre-2026">Alignement avec le LXC103 — 7 novembre 2026</h2>
+<p>La source de production est <code>75e06d7256b93fa627314137c84ab4eac8992b19</code>. Les
+empreintes de 296 fichiers applicatifs ont été comparées au serveur : aucune
+différence, aucun fichier applicatif supplémentaire. L'intégration conserve ces
+fichiers à l'identique et reprend les tests déjà publiés pour le démarrage du
+viewer.</p>
+<p>Le BBS, la vigilance, les régions de Contacts et la migration BBS 35 font
+désormais partie de <code>baliz</code>. Les corrections DM, Clock Sync, accès au LLM et le
+tutoriel français de Time sont conservés. Aucun nouveau code de Tigro, postérieur
+à celui déployé, n'est intégré par cette synchronisation.</p>
+<p>Le profil public reprend les valeurs vérifiées du LXC103, notamment les deux
+limites de sauts à 10 et le délai du routeur à 300 secondes. L'identité est
+actualisée séparément. Le fichier actif privé, les bases de données, les messages
+et les préférences de canaux et d'horloges restent sur le serveur.</p>
+<p>Cette opération publie la production existante ; elle ne redéploie ni ne
+redémarre le LXC103. La branche historique <code>main</code> reste inchangée. Voir la
+<a href="../validation/baliz-production-sync-20261107/">validation de l'alignement</a>.</p>
+<h2 id="integration-initialement-locale-de-dev-6-novembre-2026">Intégration initialement locale de dev — 6 novembre 2026</h2>
+<p>La branche locale <code>deploy/tigro-dev-local-20261106</code> reprend Tigro <code>dev</code> au commit <code>522409eb23288d2fc4ffae3a409db0be493e7f3c</code>, avec le BBS, la vigilance et l'indication de région dans Contacts. Elle conserve les particularités de Baliz et utilise la migration 35 pour le BBS, sans réutiliser la migration 34 d'occupation radio.</p>
+<p>Cette intégration avait été limitée au LXC103, sans publication sur GitHub.
+L'alignement du 7 novembre décrit ci-dessus l'intègre maintenant dans <code>baliz</code>.
+Voir la <a href="../validation/baliz-dev-lxc103-20261106/">validation locale initiale</a>.</p>
+<h2 id="synchronisation-github-du-6-novembre-2026">Synchronisation GitHub du 6 novembre 2026</h2>
+<p>La branche <code>baliz</code> intègre le <code>main</code> de Tigro au commit <code>d040c5ad94c03b29b29ade6001e1084264adc46f</code> (PR #80). Cette fusion conserve les fonctions propres à Baliz et rapproche les historiques des corrections DM et horloges déjà présentes dans les deux versions.</p>
+<p>Les corrections de typage et d'isolation des tests de Tigro, la documentation des DM et horloges et l'exécution des tests JavaScript dans le workflow sont reprises. Les textes français de Baliz, ses symboles de configuration, ses filtres et ses analyses de carte sont conservés. Le LLM, le routage sémantique, les règles d'accès et le profil public ne changent pas.</p>
+<p>Les nouveautés BBS, vigilance et indication de région dans Contacts présentes uniquement sur <code>dev</code> de Tigro ne font pas partie de cette fusion de <code>main</code>. Voir le <a href="../validation/baliz-sync-20261106/">compte rendu de validation</a>.</p>
+<p>Cette synchronisation met à jour le dépôt GitHub ; elle ne déploie pas de nouvelle version sur le LXC103.</p>
+<h2 id="production-du-5-novembre-2026">Production du 5 novembre 2026</h2>
+<ul>
+<li>Base GitHub : <code>72315457c6f97136a78b8cb29b5bbbcdbdc222bc</code>, intégration de Tigro du même jour.</li>
+<li>Source déployée sur le LXC103 : <code>a274f5a1625ab7b2776b110c1e2c425097a52808</code>.</li>
+<li>Tag de référence de cette source : <code>baliz-production-2026-11-05</code>.</li>
+<li>Les 12 commits suivants sont publiés avec leur historique d'origine. Les seuls ajouts de cette synchronisation sont cette documentation et son lien dans le README.</li>
+<li>Les empreintes de 295 fichiers applicatifs suivis (modules, point d'entrée et dépendances), dont les 25 fichiers applicatifs modifiés depuis la base, ont été comparées aux fichiers du LXC103 avant publication : aucune différence ni fichier manquant.</li>
+<li>Les anciennes notes de validation mentionnant une diffusion limitée au LXC décrivent l'autorisation initiale. La publication GitHub de cet ensemble a été autorisée ensuite, le 5 novembre 2026.</li>
+</ul>
+<h3 id="envois-prives-et-assistant">Envois privés et assistant</h3>
+<p>La préparation d'un DM vérifie une identité unique dans la radio, peut restaurer un contact à partir de données complètes et distingue une absence d'émission d'une réception non confirmée ou confirmée. Le délai minimal d'attente d'un ACK passe à 30 secondes, et la synchronisation d'horloge conserve les réponses reçues pendant cette attente.</p>
+<p>Seuls les expéditeurs identifiés comme compagnons peuvent déclencher le LLM. Les types inconnus, répéteurs et autres appareils ne déclenchent pas l'assistant. Le routage sémantique et les règles spécifiques de Baliz sont conservés.</p>
+<p>Validation : <a href="../validation/baliz-dm-resolution-20261105/">résolution et livraison des DM</a>, <a href="../validation/baliz-ack-companions-20261105/">ACK et compagnons</a>.</p>
+<h3 id="horloges">Horloges</h3>
+<p>Contacts et Time partagent les mêmes observations datées et les mêmes badges de dérive. La réception d'une commande ne vaut pas confirmation d'une horloge réglée. La dérive mesurée reste visible indépendamment du statut. Le bouton Auto clkreboot enregistre correctement le choix de chaque cible.</p>
+<p>Validation : <a href="../validation/baliz-clock-evidence-20261105/">observations et statut</a>, <a href="../validation/baliz-clock-drift-display-20261105/">dérive affichée</a>, <a href="../validation/baliz-auto-clkreboot-toggle-20261105/">Auto clkreboot</a>, <a href="../validation/baliz-shared-clock-badges-20261105/">badges communs</a>.</p>
+<h3 id="carte-et-telephone">Carte et téléphone</h3>
+<p>La carte indique les dérives par un symbole d'horloge distinct des avertissements de configuration. Les avertissements restent au premier plan et les fiches contenant beaucoup d'informations s'adaptent à l'espace disponible. Sur téléphone, les cibles Time s'affichent en cartes lisibles ; le bloc de configuration reste directement visible, comme demandé.</p>
+<p>Validation : <a href="../validation/baliz-mesh-clock-markers-20261105/">carte et fiches</a>, <a href="../validation/baliz-time-mobile-20261105/">Time sur téléphone</a>.</p>
+<h2 id="verifications-et-limites">Vérifications et limites</h2>
+<p>Les contrôles ciblés Python 3.10/3.13, JavaScript et les vérifications visuelles sont détaillés dans les notes ci-dessus. Aucun message radio de test n'a été envoyé par ces contrôles.</p>
+<p>Le dernier bilan complet, réalisé sur la base d'intégration de Tigro, était de 6 754 tests réussis, 44 échecs préexistants, 17 ignorés et 8 exclus, sans nouvel échec par rapport à sa référence. Les corrections de cette publication ont ensuite été vérifiées par des sélections ciblées ; ce bilan complet ne constitue donc pas un résultat de suite complète sur le présent commit. Les tests hérités encore en échec ne sont pas présentés comme réussis.</p>
+<p>Le workflow GitHub de tests existant cible <code>main</code>, <code>master</code> et <code>dev</code>. Une PR vers <code>baliz</code> ne le déclenche pas automatiquement. Les résultats locaux documentés restent distincts d'un résultat GitHub Actions.</p>
+<h2 id="configuration-et-donnees-locales">Configuration et données locales</h2>
+<p>Le dépôt conserve le profil public <code>config.ini.baliz</code>. Le fichier actif de production, les secrets, les bases de données, les messages privés et les préférences d'affichage des canaux restent sur le serveur. Le profil public n'est pas une copie à appliquer sur la configuration active.</p>
+<p>Cette publication ne déploie aucun changement supplémentaire dans le LXC103 et ne modifie aucun réglage en production.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "toc.integrate", "content.code.copy"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2316 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the MeshCore bot and its services">
+      
+      
+      
+        <link rel="canonical" href="https://agessaman.github.io/meshcore-bot/baliz-assistant/">
+      
+      
+        <link rel="prev" href="../wiki-rag/">
+      
+      
+        <link rel="next" href="../config-validation/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
+    
+    
+      
+        <title>Baliz assistant - Meshcore Bot Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#assistant-baliz-ask-mesh-et-llm" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Meshcore Bot Documentation" class="md-header__button md-logo" aria-label="Meshcore Bot Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Meshcore Bot Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Baliz assistant
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/agessaman/meshcore-bot" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    meshcore-bot
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quick Start
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+  
+  Installation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../web-viewer/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Web Viewer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../channel-message-visibility/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Channel message visibility
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../command-reference/" class="md-tabs__link">
+          
+  
+  
+  Command Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../service-plugins/" class="md-tabs__link">
+          
+  
+  
+  Service Plugins
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../upgrade/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrade
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../solar-conditions-provenance/" class="md-tabs__link">
+          
+  
+  
+  Project
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Meshcore Bot Documentation" class="md-nav__button md-logo" aria-label="Meshcore Bot Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Meshcore Bot Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/agessaman/meshcore-bot" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    meshcore-bot
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Installation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../home-assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home Assistant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../service-installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scheduled-messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scheduled messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../local-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local plugins and services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checkin-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Check-in API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../path-command-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Path Command
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../wiki-rag/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Universal Wiki.js RAG
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Baliz assistant
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Baliz assistant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#commandes-et-responsabilites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commandes et responsabilités
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#routage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-et-migration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration et migration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#organisation-du-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Organisation du code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-sur-le-lxc-109" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation sur le LXC 109
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resultats-du-12-septembre-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Résultats du 12 septembre 2026
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#boite-aux-lettres-en-langage-naturel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Boîte aux lettres en langage naturel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provenance-sur-demande" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provenance sur demande
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config-validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Config validation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../region-scopes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Region scopes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../region-warnings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Region warnings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../channel-occupancy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channel occupancy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../io-health-monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage monitoring and power cycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repeater-watch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater watch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web-viewer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web Viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../channel-message-visibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channel message visibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Command Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../command-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repeater-commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../command-reference-website/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Command Website
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../develop-command-scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developing Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Plugins
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Service Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../service-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../discord-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Discord Bridge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram Bridge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packet-capture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packet Capture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../map-uploader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Map Uploader
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weather-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weather Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../earthquake-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Earthquake Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vigilance-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vigilance Météo-France
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repeater-prefix-collision-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater Prefix Collision
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../worldcup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    World Cup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FEEDS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Feed Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../solar-conditions-provenance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Solar conditions provenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="assistant-baliz-ask-mesh-et-llm">Assistant Baliz : ask, mesh et llm</h1>
+<p>Cette architecture appartient pour le moment à la branche <code>baliz</code> du fork.
+Aucune PR vers Tigro n'est nécessaire pour l'utiliser.</p>
+<h2 id="commandes-et-responsabilites">Commandes et responsabilités</h2>
+<table>
+<thead>
+<tr>
+<th>Entrée</th>
+<th>Fonction</th>
+<th>Réglages</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ask</code>, alias configurable <code>baliz</code></td>
+<td>Routeur de l'assistant</td>
+<td><code>Ask_Command</code></td>
+</tr>
+<tr>
+<td><code>mesh</code>, <code>query</code>, <code>sql</code></td>
+<td>Questions libres sur les données réseau locales</td>
+<td><code>Mesh_Command</code></td>
+</tr>
+<tr>
+<td><code>llm</code>, <code>ia</code>, <code>ai</code>, <code>chat</code></td>
+<td>Accès direct au moteur conversationnel existant</td>
+<td><code>Llm_Command</code></td>
+</tr>
+<tr>
+<td><code>test</code>, <code>path</code></td>
+<td>Outils RF existants</td>
+<td>Sections existantes</td>
+</tr>
+</tbody>
+</table>
+<p><code>ask</code> ne génère plus de SQL. Les anciennes fonctions de <code>AskCommand</code> ont été
+extraites dans <code>MeshService</code>. <code>LlmCommand</code> délègue à <code>LlmService</code> et ne contient
+aucune règle de routage. Les deux services partagent le transport HTTP LLM.
+La conversation ne génère ni n'exécute plus de suivi <code>[[SQL: ...]]</code> : une requête
+sur la base doit passer par <code>mesh</code> (directement ou derrière <code>ask</code>).</p>
+<h2 id="routage">Routage</h2>
+<p>Le routeur est déterministe et indépendant des entrées/sorties. Il reconnaît des
+formulations françaises et anglaises. Il n'utilise pas de classification LLM.</p>
+<ol>
+<li>Route explicitement demandée (<code>ask mesh ...</code>, <code>ask wiki ...</code>, <code>ask llm ...</code>,
+   <code>ask test</code>, <code>ask path</code>) ou aide.</li>
+<li>Réception du message courant vers <code>test</code>.</li>
+<li>Chemin du message courant vers <code>path</code>.</li>
+<li>Salutations, présentation et demandes créatives (blague, histoire, poème,
+   chanson) vers <code>llm</code>, sans recherche Wiki.</li>
+<li>Intention documentaire explicite vers le Wiki.</li>
+<li>Question sur les observations réseau vers <code>mesh</code>.</li>
+<li>Recherche Wiki pour les autres formulations ; en l'absence de correspondance,
+   conversation générale.</li>
+</ol>
+<p>Une salutation devant une question technique ne change pas sa destination :
+<code>bonjour, combien de répéteurs actifs ?</code> reste une demande réseau. Une route
+explicite conserve toujours la priorité. Si <code>llm</code> est désactivé, une demande
+conversationnelle est refusée au lieu de contourner ce réglage par le Wiki.</p>
+<p>Une demande documentaire explicite sans source donne « Aucune source pertinente ».
+Elle ne se transforme pas en requête réseau ou en réponse inventée par le modèle.
+Une demande réseau n'interroge pas le Wiki. Les réponses documentaires excluent
+contexte live et historique, et ne sont pas ajoutées à l'historique général.
+<code>demain</code> seul ne déclenche aucun traitement météo. La météo n'est pas une route
+spécialisée de cette première version ; le contexte météo existant du LLM reste
+configurable. En cas de formulation ambiguë, utiliser une route explicite.</p>
+<h2 id="configuration-et-migration">Configuration et migration</h2>
+<p>Le <a href="../baliz-config/">profil de configuration Baliz issu du LXC 103</a> conserve
+l'identité et les réglages de production, sans le contournement de scope local.
+Il est fourni dans <code>config.ini.baliz</code>, avec les adaptations au routeur documentées.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[Ask_Command]</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="na">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">true</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="na">aliases</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">baliz</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="na">enabled_routes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test,path,mesh,wiki,llm</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="na">route_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">120</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="na">max_pages</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">4</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="k">[Mesh_Command]</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="na">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">true</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="na">public_enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">true</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="k">[Llm_Command]</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="na">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">true</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="na">public_enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">true</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="c1"># Conserver ici endpoint, model, timeout_seconds et les options de contexte.</span>
+</code></pre></div>
+<ul>
+<li>Ajouter <code>aliases = baliz</code> dans <code>Ask_Command</code>. Retirer cet alias de
+  <code>Llm_Command</code> s'il y figure, pour éviter deux commandes avec le même déclencheur.</li>
+<li>Reporter les restrictions de canaux de l'ancien <code>Ask_Command</code> dans
+  <code>Mesh_Command</code> si elles concernaient l'interrogation réseau. Définir séparément
+  les canaux autorisés pour l'assistant.</li>
+<li><code>ask &lt;question réseau&gt;</code> fonctionne toujours via routage ; <code>ask tables</code> et
+  <code>ask help</code> changent de sens. L'aide réseau est <code>mesh help</code>, le schéma <code>mesh tables</code>.</li>
+<li>Les alias <code>query</code> et <code>sql</code> appartiennent désormais à <code>mesh</code>.</li>
+<li>L'ancien réglage <code>Llm_Command.db_query_enabled</code> n'est plus utilisé. Activer
+  <code>Mesh_Command.enabled</code> et la route <code>mesh</code> à sa place.</li>
+<li><code>enabled</code> active la capacité. <code>public_enabled = false</code> masque seulement
+  l'accès direct de <code>llm</code> ou <code>mesh</code>, sans empêcher <code>ask</code> de l'utiliser.</li>
+<li>La route <code>wiki</code> exige <code>Llm_Command.enabled</code> et la configuration RAG existante.
+  Les réglages documentaires se trouvent dans <code>[Rag_Service]</code>.
+  Le RAG reste désactivé par défaut : configurer sa source avant utilisation.</li>
+<li>Les paramètres apparaissent dans l'éditeur des plugins. Les alias utilisent
+  l'éditeur de mots-clés déjà existant.</li>
+</ul>
+<p>Les autorisations de l'assistant <strong>et</strong> de la capacité cible s'appliquent.
+Les restrictions de canaux et les cooldowns ne sont pas contournés. Un outil
+indisponible produit une erreur explicite, sans basculer vers un autre outil.</p>
+<h2 id="organisation-du-code">Organisation du code</h2>
+<table>
+<thead>
+<tr>
+<th>Fichier</th>
+<th>Responsabilité</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>modules/commands/ask_command.py</code></td>
+<td>Alias, réglages, appel du dispatcher et réponse</td>
+</tr>
+<tr>
+<td><code>modules/assistant/router.py</code></td>
+<td>Décisions pures : route, question, raison</td>
+</tr>
+<tr>
+<td><code>modules/assistant/dispatcher.py</code></td>
+<td>Autorisations, capacités, délai, erreurs</td>
+</tr>
+<tr>
+<td><code>modules/assistant/mesh_service.py</code></td>
+<td>SQL en lecture seule sur les six tables réseau autorisées</td>
+</tr>
+<tr>
+<td><code>modules/assistant/llm_service.py</code></td>
+<td>Moteur existant : contexte, Wiki, génération et historique</td>
+</tr>
+<tr>
+<td><code>modules/assistant/llm_client.py</code></td>
+<td>Transport HTTP commun</td>
+</tr>
+<tr>
+<td><code>modules/assistant/response.py</code></td>
+<td>Pagination en octets UTF-8 et envoi final</td>
+</tr>
+</tbody>
+</table>
+<p>L'adaptateur RF utilise exclusivement les commandes <code>test</code> et <code>path</code> distribuées.
+Il copie le message réel, conserve son identité, sa portée régionale et ses
+métadonnées RF, puis capture les réponses par le mécanisme existant <code>capture_sink</code>.
+Il n'utilise pas le message synthétique du planificateur, ne remplace aucune
+méthode d'envoi et refuse les plugins de remplacement non audités. L'assistant
+émet ensuite la réponse capturée par le transport normal et ses limites RF.</p>
+<p>L'interrogation SQL conserve la validation lecture seule, borne les résultats à
+20 lignes, applique un contrôle SQLite des tables accessibles et une limite
+CPU de deux secondes pour la requête. La protection thermique est appliquée aux
+capacités LLM et mesh. Le timeout global coupe l'attente de l'assistant ; une
+requête HTTP déjà lancée dans un thread peut finir en arrière-plan jusqu'à son
+propre timeout, sans émettre de réponse radio.</p>
+<h2 id="validation-sur-le-lxc-109">Validation sur le LXC 109</h2>
+<p>Ne pas démarrer de service radio pour ces vérifications. Utiliser le compte
+<code>baliz-test</code>, le dépôt <code>/opt/baliz-test</code> et son environnement <code>.venv</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>.venv/bin/python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/test_assistant_router.py<span class="w"> </span>tests/test_assistant_integration.py<span class="w"> </span>tests/commands/test_llm_command.py<span class="w"> </span>tests/test_wiki_rag.py<span class="w"> </span>--no-cov
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>.venv/bin/python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests<span class="w"> </span>-m<span class="w"> </span><span class="s1">'not mqtt'</span><span class="w"> </span>--no-cov
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>.venv/bin/ruff<span class="w"> </span>check<span class="w"> </span>.
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>.venv/bin/mypy<span class="w"> </span>modules/
+</code></pre></div>
+<p>Le lanceur <code>scripts/baliz_assistant_smoke.py</code> teste les véritables commandes avec
+une base réseau fictive, un index documentaire connu et, si demandé, Ollama.
+Il capture toutes les réponses et n'initialise aucun companion radio.
+Les tests RF utilisent des messages de test ; ils ne remplacent pas une recette
+ultérieure avec de vrais paquets reçus.</p>
+<h2 id="resultats-du-12-septembre-2026">Résultats du 12 septembre 2026</h2>
+<p>Sur le LXC 109, code de l'architecture <code>a22b23f</code>, lanceur final <code>32b0587</code> :</p>
+<ul>
+<li>96 tests ciblés réussis (1,46 s).</li>
+<li>Suite complète : 4 733 réussis, 21 échecs, 12 ignorés et 7 désélectionnés (163,02 s).</li>
+<li>Les 21 échecs ont été reproduits sur le commit de base <code>7a6286d</code>, avec exactement
+  les mêmes identifiants : aucun nouvel échec. Ils concernent le Web Viewer
+  (<code>TestApiMeshEdgesEvidence</code>, <code>TestMultibyteMeshAggregateCache</code>).</li>
+<li>Ruff et mypy réussis sur Debian ; MkDocs strict et contrôle des logs réussis localement.</li>
+<li>Six scénarios du lanceur réussis, dont trois utilisant réellement Ollama
+  <code>gemma3:4b</code> et l'index Wiki du banc. Le scénario mesh retrouve les deux répéteurs
+  de sa base fictive. Le scénario path vérifie le cas sans données de chemin.</li>
+<li>Première tentative SQL : timeout à 90 s. Nouvelle tentative réussie avec
+  <code>--timeout 300</code>, adapté au modèle tournant sur CPU. Le délai est configurable,
+  et ne change aucun réglage de production.</li>
+</ul>
+<p>Commande du lanceur, en remplaçant l'adresse par celle du serveur du banc :</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>.venv/bin/python<span class="w"> </span>scripts/baliz_assistant_smoke.py<span class="w"> </span>--live<span class="w"> </span>--timeout<span class="w"> </span><span class="m">300</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--endpoint<span class="w"> </span>http://OLLAMA_HOST:11434/v1/chat/completions<span class="w"> </span>--model<span class="w"> </span>gemma3:4b<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--wiki-index<span class="w"> </span>/var/lib/baliz-test/wiki/pages.jsonl
+</code></pre></div>
+<p>Les rapports sont conservés dans <code>/var/lib/baliz-test/reports/assistant-*</code>.
+Le conteneur 103 n'a pas été modifié et aucun service radio n'a été démarré.
+Une recette RF réelle et la validation humaine des formulations du modèle
+restent nécessaires avant le passage en production.</p>
+<h2 id="boite-aux-lettres-en-langage-naturel">Boîte aux lettres en langage naturel</h2>
+<p>La route optionnelle <code>bbs</code> permet de déposer, compter et lire ses messages BBS sans syntaxe de commande. Un contact ambigu ou un texte manquant donne lieu à un échange limité à cinq minutes, lié à l’expéditeur et au canal ou DM. Les contenus lus restent gérés directement par la BBS, sans passage par le LLM. La lecture et le comptage restent réservés aux DM ; les commandes <code>bbs s</code>, <code>bbs list</code> et <code>bbs r</code> restent disponibles.</p>
+<p>Voir la <a href="../validation/baliz-bbs-assistant-20261108/">validation locale du 8 novembre</a>.</p>
+<p>Pendant la saisie BBS, une fois le destinataire choisi, la réponse entière devient le texte du message, sans passage dans le LLM. Écrire <code>annule</code> permet de quitter cette saisie. Voir la <a href="../validation/baliz-bbs-body-fix-20261108/">correction de priorité du texte BBS</a>.</p>
+<p>Pour déposer en une seule demande, séparer explicitement le contenu : <code>Laisse un message à Alpha : rendez-vous à midi.</code> Sans texte séparé, Baliz demande quoi transmettre après le choix du destinataire. Répondre par un nom ou un numéro ne peut pas servir de contenu. Voir la <a href="../validation/baliz-bbs-payload-fix-20261108/">validation de cette séparation</a>.</p>
+<p>Le catalogue expose <code>path.hops</code> pour le nombre de sauts du message actuel. Cette réponse passive utilise les métadonnées reçues, sans reformulation. Si le DM ne contient pas ce compteur, Baliz l’indique au lieu de déduire zéro de son ancien libellé « Direct ». Voir la <a href="../validation/baliz-message-hops-20261109/">validation du compteur reçu</a>.</p>
+<p><code>weather.provider</code> répond aux questions sur le fournisseur principal des prévisions météo de Baliz. Cette réponse vient du backend WX initialisé, sans appel météo ni génération de faits par le LLM. Les questions de prévision continuent à utiliser <code>weather.forecast</code>. Voir la <a href="../validation/baliz-weather-provider-20261109/">validation du fournisseur météo</a>.</p>
+<h2 id="provenance-sur-demande">Provenance sur demande</h2>
+<p>La route optionnelle <code>info</code> expose <code>info.provenance</code> pour les demandes explicites sur l’origine ou la méthode des données : réseau, positions, chemins, horloge, documents, airtime, BBS et conversation. La source météo reste accessible par <code>weather.provider</code>, qui décrit le service WX effectivement initialisé.</p>
+<p>Les descriptions proviennent d’un registre fermé et sont envoyées directement, sans génération ni reformulation. Elles ne sont ni ajoutées aux réponses ordinaires, ni injectées dans les appels LLM qui produisent ces réponses. Le routeur connaît seulement la fonction et ses catégories pour reconnaître une demande de provenance. Les restrictions du service concerné restent appliquées.</p>
+<p>Cette première version décrit les sources par fonction ; elle ne prétend pas retrouver le document ou l’observation précise d’une réponse antérieure. Sans catégorie indiquée, elle demande laquelle préciser. Voir la <a href="../validation/baliz-provenance-20261109/">validation du 9 novembre</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "toc.integrate", "content.code.copy"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

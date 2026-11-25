@@ -1,0 +1,2835 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the MeshCore bot and its services">
+      
+      
+      
+        <link rel="canonical" href="https://agessaman.github.io/meshcore-bot/channel-occupancy/">
+      
+      
+        <link rel="prev" href="../region-warnings/">
+      
+      
+        <link rel="next" href="../io-health-monitoring/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
+    
+    
+      
+        <title>Channel occupancy - Meshcore Bot Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#channel-occupancy" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Meshcore Bot Documentation" class="md-header__button md-logo" aria-label="Meshcore Bot Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Meshcore Bot Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Channel occupancy
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/agessaman/meshcore-bot" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    meshcore-bot
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quick Start
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+  
+  Installation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../web-viewer/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Web Viewer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../channel-message-visibility/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Channel message visibility
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../command-reference/" class="md-tabs__link">
+          
+  
+  
+  Command Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../service-plugins/" class="md-tabs__link">
+          
+  
+  
+  Service Plugins
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../upgrade/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrade
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../solar-conditions-provenance/" class="md-tabs__link">
+          
+  
+  
+  Project
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Meshcore Bot Documentation" class="md-nav__button md-logo" aria-label="Meshcore Bot Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Meshcore Bot Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/agessaman/meshcore-bot" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    meshcore-bot
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Installation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../home-assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home Assistant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../service-installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scheduled-messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scheduled messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-retention/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../local-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local plugins and services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checkin-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Check-in API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../path-command-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Path Command
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../wiki-rag/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Universal Wiki.js RAG
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../baliz-assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Baliz assistant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config-validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Config validation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../region-scopes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Region scopes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../region-warnings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Region warnings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channel occupancy
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channel occupancy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#baliz-received-copies-and-rf-roles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Baliz: received copies and RF roles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-is-and-what-it-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it is, and what it is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rx-share-and-tx-share-are-never-merged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rx share and tx share are never merged
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-channel-floor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The channel floor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-sender-share" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The sender share
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-emitter-share-who-occupies-the-channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The emitter share: who occupies the channel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-entry-relay-share-where-relayed-copies-entered-the-mesh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The entry-relay share: where relayed copies entered the mesh
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-period-shares-the-day-tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-period shares: the day tables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#storage-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage conventions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#live-numbers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live numbers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-local-network-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The local network view
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#passive-airtime-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Passive airtime analysis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-airtime-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The /airtime page
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-can-be-used-for" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this can be used for
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../io-health-monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage monitoring and power cycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repeater-watch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater watch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web-viewer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web Viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../channel-message-visibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channel message visibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Command Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../command-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repeater-commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../command-reference-website/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom Command Website
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../develop-command-scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developing Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Plugins
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Service Plugins
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../service-plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../discord-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Discord Bridge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram Bridge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packet-capture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Packet Capture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../map-uploader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Map Uploader
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weather-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weather Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../earthquake-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Earthquake Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vigilance-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vigilance Météo-France
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repeater-prefix-collision-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater Prefix Collision
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../worldcup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    World Cup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FEEDS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Feed Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../solar-conditions-provenance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Solar conditions provenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="channel-occupancy">Channel occupancy</h1>
+<h2 id="baliz-received-copies-and-rf-roles">Baliz: received copies and RF roles</h2>
+<p>The passive <code>/api/telemetry/occupancy/analysis?window=1h|24h|7d</code> model retains schema
+version 1 and advances its method version to 6. It adds <code>receptions</code>, computed from
+existing metadata; there is no migration, new radio transmission, or retention change.
+The separation of writer, first flood relay and heard emitter follows the questions
+raised by <a href="https://github.com/Tigro14/meshcore-bot/pull/97">Tigro's Airtime work</a>, while
+keeping Baliz's full-frame costing, 1/2/3-byte paths and existing reconstruction model.</p>
+<ul>
+<li><code>repetition_factor</code> is received copies divided by distinct payload fingerprints.</li>
+<li><code>additional_received_airtime_percent</code> is the airtime of receptions after the first
+  local reception of each fingerprint, divided by total received airtime. The first
+  reception is selected <strong>inside the requested period</strong>; it need not be the original
+  transmitter. Each copy uses its own complete frame length and recorded modulation.
+  Useful flood forwarding is included; this is neither a waste percentage nor a
+  global network repetition rate. Unknown short hashes do not collapse identities.</li>
+<li>The same weighted share is provided in <code>receptions.series</code> and the existing chart
+  bins. A bin can contain only additional copies of a packet first received in an
+  earlier bin of the selected period. Missing reception history remains unknown.</li>
+<li>Truncated queries expose <code>status: truncated</code> and null ratio/weighted-share fields.
+  A period with no receptions has no repetition factor or airtime share, not a measured
+  zero. These metrics apply to retained normalized RF frames, not undecodable RF energy.</li>
+<li><code>receptions.roles.emitters</code> attributes each eligible received flood copy to its last
+  relay; <code>entry_relays</code> attributes it to its first relay. Both contain <code>rx_airtime_ms</code>,
+  <code>received_packets</code> and message/advert/other counts. No-path flood copies with a known
+  author can name their direct emitter and have no entry relay. Direct-route paths and
+  TRACE never establish either relay role. Unresolved prefixes stay separate labels;
+  widths 1, 2 and 3 resolve only to a unique known repeater/room server. Unknown emitters
+  are explicit, and emitter rows plus that bucket reconcile with local RX airtime.</li>
+<li>Authors retain distinct-packet counts and reconstructed source-plus-relay radio cost.
+  They are ranked by that cost, with unknown costs last and a reconstruction-coverage
+  field. <strong>Author cost and received-copy role totals must never be summed.</strong></li>
+<li><code>receptions.comparison</code> compares the preceding equal-length period. Changes in received
+  airtime, distinct packets and additional-copy airtime share are supplied only if both
+  windows have confirmed continuous listening and untruncated, nonempty observations.
+  The pair ends at the latest fresh confirmed listening timestamp (at most 75 seconds
+  behind the request), exposed as <code>end_time</code>; this excludes the writer's unconfirmed
+  tail without bridging any internal outage. The page's selected-period totals still
+  end at the request time, and the comparison carries its own <code>current</code>/<code>previous</code> metrics.
+  Otherwise previous observations can be shown, but change fields are null. No automatic
+  congestion classification or alert is inferred.</li>
+</ul>
+<p>The page keeps four header cards and one combined chart. The chart summary reports
+distinct packets, receptions and additional-copy airtime; hover details show the same
+breakdown per bin. The existing Sources detail table switches between the three roles.
+Per-repeater reconstructed and scenario duty cycles remain separate from these RX metrics.</p>
+<p>This feature counts <strong>airtime</strong>: how much of the channel a packet takes, and how much
+the bot itself takes. It is off by default.</p>
+<h2 id="what-it-is-and-what-it-is-not">What it is, and what it is not</h2>
+<p>The bot is a <em>client</em> of a radio, not a controller of one. Over serial, BLE or TCP it
+cannot see whether the channel was busy, so nothing here measures occupancy in the
+radio-driver sense — CAD, LBT, or a clear-channel assessment. Those belong to a repeater
+or a modem, and a repeater's real occupancy comes from that repeater's own API.</p>
+<p>What this does is <strong>compute</strong> how long a packet of a given size occupies the channel at
+a given modulation, using the Semtech AN1200.13 expression:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>symbol_time = 2^SF / BW
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>airtime     = (preamble + 4.25 + symbols) * symbol_time
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>symbols     = 8 + ceil((8*PL - 4*SF + 28 + CRC - header) / (4*(SF - 2*DE))) * CR
+</code></pre></div>
+<p>The <code>4.25</code> is the sync pattern, which exists even with a zero-length preamble; <code>+16</code> is
+the CRC bits; <code>-20</code> is the difference between implicit and explicit header mode; <code>CR</code> is
+the coding-rate denominator (5..8). Low-data-rate optimization is applied by the
+datasheet's own rule (symbol time ≥ 16.38 ms) unless the configuration forces it.</p>
+<p>So a percentage from this page is a <strong>modelled</strong> channel load, correct for the
+modulation it is given, and wrong whenever the modulation is wrong. That is why the
+device's reported SF/BW/CR win over the configured ones: a bot configured for SF9 on a
+mesh running SF11 reports an airtime no packet on the channel has ever had.</p>
+<h2 id="rx-share-and-tx-share-are-never-merged">rx share and tx share are never merged</h2>
+<table>
+<thead>
+<tr>
+<th>Share</th>
+<th>What it counts</th>
+<th>Why it cannot stand for "the channel"</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>rx</td>
+<td>airtime the packets the node <strong>hears</strong> would take</td>
+<td>A node only hears part of the channel: hidden nodes, antenna gain, spatial reuse. It is a local observation.</td>
+</tr>
+<tr>
+<td>tx</td>
+<td>airtime the bot <strong>sends</strong></td>
+<td>The only part the bot can decide about. Counted at the moment the bot asks the radio to send, on the message body alone.</td>
+</tr>
+</tbody>
+</table>
+<p>A single combined percentage would present one node's hearing as the whole channel's
+airtime, so the API reports them apart and nothing here adds them.</p>
+<p>Every heard copy is counted separately, flood repetitions included: on the one shared
+radio channel each retransmission occupies the medium on its own. The sums can
+therefore exceed the window they are measured over — an rx share of 130% is a fact
+about parallel traffic, not an overflow. Each radio senses the carrier only near
+itself, so two relays can put the same packet on air at the same moment out of each
+other's hearing; the collision or the blend happens somewhere neither of them can
+observe locally. That is the CSMA/CD paradox: carrier sense is local, the channel is
+global, and a local share capped at 100% would hide the only sign of a saturated
+mesh. Nothing in the pipeline clamps the ratio; the chart bar clamps at the card
+width and says "more than fits" when it does.</p>
+<h2 id="the-channel-floor">The channel floor</h2>
+<p>The rx share is what this antenna heard. A copy heard deep in a flood tree also
+<em>proves</em> the copies that came before it: a packet received with a four-entry path was
+put on air at least four times before it arrived, whether or not those earlier copies
+ever reached this antenna — some of them ran in parallel elsewhere, out of earshot.
+Each window therefore also carries <code>rx_floor_ms</code> and <code>rx_floor_percent</code>: the heard
+copies at their measured cost, plus one priced copy for every shallower depth of a
+heard tree that no heard copy carries. The shallower copies are priced from the
+deepest heard one — each hop adds a path entry to the payload, a path entry being 2
+or 3 bytes depending on the packet's transport size, and a copy recorded with its own
+measured width is priced with that width rather than the fallback — and the
+modulation model does the rest.</p>
+<p>It is a floor, never a ceiling: parallel branches of the tree that no heard copy
+proves are additional and unprovable, so they stay out. A copy with no packet hash
+counts for itself alone: without an identity its repeats cannot be matched to a tree,
+and pricing an unprovable tree from an unknown would dress absence of evidence up as
+measurement.</p>
+<h2 id="the-sender-share">The sender share</h2>
+<p><code>occupancy_senders</code> ranks senders by airtime, every heard copy included, and the
+table adds up to the whole heard channel. Attribution is what the wire carries, not
+what a guess could supply:</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>Identity from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>adverts</td>
+<td>the advertised node's full 32-byte key, which is the first bytes of the payload: MeshCore signs adverts rather than encrypting them, so an advert relayed on a transport channel still names its advertiser</td>
+</tr>
+<tr>
+<td>the bot itself</td>
+<td>its own full key, recorded at transmission time</td>
+</tr>
+<tr>
+<td><code>unattributed</code></td>
+<td>everything else: the packet types that name no origin on the wire, message traffic above all</td>
+</tr>
+</tbody>
+</table>
+<p>A two-byte routing prefix is never used as a sender: it belongs to several keys, and a
+wrong identity in a table read as evidence is worse than an admitted unknown. The advert
+rule has a size floor rather than only a hex-shape check, because the head bytes of any
+readable payload are hex-shaped and a made-up key would be read as a station; the floor
+is what the advert structure actually needs (key + signature + name). On live traffic
+299 of the last 300 adverts carried a head key that resolves to a tracked contact. The
+reserved <code>unattributed</code> row is a bucket, not a station — it carries the airtime but is
+excluded from the talker count, which stays a count of identities this radio can name.
+Because every copy counts, the table's total can exceed the wall-clock span, exactly
+like the rx share does.</p>
+<p>One more honest source sits behind the <code>unattributed</code> row: this radio's own decryption.
+When the radio decrypts a message, the event names its author — the network authenticated
+that identity, the same proof class as an advert's signature — and when the message can be
+tied to a specific logged RF copy (a correlated row, never a fallback, see #80) and the
+author's key prefix completes to exactly one known contact, the copies of that packet whose
+airtime has not been written yet move out of the bucket, by packet hash. What has already
+been flushed stays <code>unattributed</code>: relabeling written rows would make the ledger claim a
+knowledge this station did not have at the time. So the bucket shrinks from the moment a
+message is understood onward, and never behind it. Undecryptable traffic — what this
+radio's keys do not open — stays in the bucket, named as unknown.</p>
+<p>The writer drains faster than the radio decrypts: the RF copy is recorded on the packet
+event, and the decryption that names the author can reach this listener seconds later. A
+tracked increment therefore waits in memory for <code>attribution_grace_sec</code> seconds (60 by
+default) past the newest copy heard under its packet identity before the flush writes it,
+and the shutdown flush closes that grace early so nothing stays behind. On MeshCore open
+channels the wait usually changes nothing: the channel key is shared and the delivery
+event the radio exposes names no author at all, so that anonymity is structural, not a
+gap in this measurement — the bucket is its honest ceiling. The grace exists for the
+traffic where an identity does exist: what this radio decrypts with its own keys.</p>
+<p>Each row also carries an <strong>advert slice</strong>: the part of that sender's airtime spent on
+ADVERT payloads, kept apart because adverts are what a station costs for being present
+on the mesh, not for talking — a repeater that floods adverts constantly racks up
+airtime without being chatty. A row written before the slice existed keeps it <code>NULL</code>,
+never 0: the split was not recorded for that traffic, and a 0% there would claim a
+station that never advertised. Once such a row is written again the slice counts from
+that write onward, so its stated share is a floor over the row's retained history.
+The page renders the share as a percent, and a dash where it is unknown.</p>
+<h2 id="the-emitter-share-who-occupies-the-channel">The emitter share: who occupies the channel</h2>
+<p><code>occupancy_senders</code> answers who WROTE the payload. <code>occupancy_emitters</code> answers the
+other question, and for channel occupancy the closer one: whose antenna put THIS copy
+on the air. MeshCore's flood routing answers it on the wire — every relay appends its
+node address to the path, the leading bytes of the relay's public key, 2 or 3 bytes
+depending on the packet's transport size — and the LAST entry is the station that
+carried the copy this radio heard. On sampled live traffic every path prefix resolved
+to a tracked repeater, and the last entry of a copy heard at −43 dBm resolved to a
+repeater a few metres from the antenna: the nearest relay is visible as an emitter even
+though it writes no payload of its own.</p>
+<table>
+<thead>
+<tr>
+<th>Emitter label</th>
+<th>From</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the path's last node address (4 or 6 hex digits)</td>
+<td>a relayed copy — the last entry is its transmitter</td>
+</tr>
+<tr>
+<td>a full public key</td>
+<td>a copy that arrived with no path, the sender's own antenna; and a transmission the bot made, charged to its own key</td>
+</tr>
+<tr>
+<td><code>unattributed</code></td>
+<td>copies the wire names no one for: undecoded traffic, direct copies whose only sender bytes are truncated, and TRACE paths, whose entries are per-hop SNR hashes, not node addresses</td>
+</tr>
+</tbody>
+</table>
+<p>The label stays as the wire sent it — and only a <strong>flood</strong> path names relays at all.
+A direct packet carries no route info, and what the decoder hands over for one is its
+transport codes read as path-sized chunks: the capture path therefore derives the
+path-based emitter and entry-relay labels only for <code>FLOOD</code> and <code>TRANSPORT_FLOOD</code> route
+types (on live traffic one direct ACK's transport code <code>62016C</code> reached the ledgers
+before this gate, and its two 6-char labels under <code>6201</code> froze that node's fold). The
+airtime is charged whatever the route type. The reader (<code>top_emitters</code>) turns a node address
+into a contact name only when exactly one tracked contact begins with those bytes; an
+ambiguous prefix stays bytes, because naming a prefix that could belong to several
+stations is a coin flip presented as a fact. A transmission is its own emitter, and an
+advert repeated by a relay spends the relay's presence budget too — the advert slice is
+kept per emitter exactly as it is per sender.</p>
+<p>The same relay can nonetheless stand in the ledger under two labels: MeshCore writes a
+node address <strong>2 bytes wide in short packets and 3 bytes wide in extended ones</strong>, so
+one antenna appears as <code>6201</code> on some copies and <code>62010a</code> on others. Two rows for one
+relay read as two emitters, so the reader folds the short label into the longer one —
+over the whole ledger, not just the page's rows: the wider partner is often the small
+row (on live traffic 237 relay copies sat under <code>6201</code> while its only possible wider
+address held 18, below the page the fold first saw), so the reader draws a wide pool
+before folding, and a prefix whose unique wider address is still not in the fetched
+rows is relabelled to it without summing an airtime that fetch never saw. It folds
+but only when the longer address is the only emitter address the ledger knows under
+that prefix, and the folded labels are listed in the row (<code>merged_prefixes</code>) rather
+than absorbed silently. With two longer addresses heard, the 2-byte copies cannot be
+told apart, and folding them into either would attribute copies to a station the wire
+did not name; the short row stays alone. The fold is a view rule: the ledger keeps the
+labels at the widths the wire sent them. The fold sees the whole ledger, not just the
+page: the reader fetches a wide pool before folding, and when the one wider address is
+known to the ledger but absent from the fetched rows entirely, the short row is
+relabelled to it — the prefix can only mean that address — without summing in the
+partner row's airtime, which that fetch never saw.</p>
+<p>The two ledgers hold the same copies once per fact each — carrier and emitter are two
+different stations — so they must never be summed: a sum would bill the channel twice.
+Their value is precisely that they disagree: a repeater near the antenna can occupy
+most of this channel without ever appearing in the senders table, because relaying
+carries other stations' payloads. <code>occupancy_emitters.advert_ms</code> is NOT NULL, unlike
+the senders' column: the split is known from this table's first write, so there is no
+legacy row for a zero to hide an unknown behind.</p>
+<h2 id="the-entry-relay-share-where-relayed-copies-entered-the-mesh">The entry-relay share: where relayed copies entered the mesh</h2>
+<p>The same flood path answers a third question per copy, read from its other end: the
+<strong>FIRST</strong> node address is the first relay that repeated the packet — the gateway
+through which the copy entered the mesh, as far as this radio can prove.
+<code>occupancy_relays</code> (migration 39) keeps that fact apart from the other two.</p>
+<p>It is important about what it is not. It is not the author: a multicast's routing
+header carries the channel's transport code and one address per relay, never the
+writing station's address, and the writer's own antenna usually sits behind the first
+relay, not equal to it. It is not the emitter either: that is the path's LAST entry,
+the antenna that carried the copy here. A one-hop path is the only case where the two
+are the same node. And a copy heard <strong>directly</strong> passed through no relay at all, so it
+belongs to no row here: <code>entry_relay_label()</code> returns None rather than inventing a hop
+the wire did not carry, and its airtime is already accounted by the emitter ledger.
+This table is therefore deliberately smaller than the other two, and absence from it
+is not silence.</p>
+<table>
+<thead>
+<tr>
+<th>Entry-relay label</th>
+<th>From</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the path's first node address (4 or 6 hex digits)</td>
+<td>a relayed copy — the first entry is its gateway</td>
+</tr>
+<tr>
+<td><em>(no row)</em></td>
+<td>a copy heard directly: it entered nothing; and TRACE paths, whose entries are per-hop SNR hashes, not node addresses</td>
+</tr>
+</tbody>
+</table>
+<p>The label rules are the emitter's rules unchanged: the ledger stores the node address
+at the width the wire sent it, the reader resolves it to a contact name only when
+exactly one tracked contact begins with those bytes, and the 2-byte/3-byte fold applies
+with the same uniqueness condition (<code>merged_prefixes</code> names what was merged).</p>
+<p>Three ledgers, three facts about every relayed copy — writer, gateway, antenna — and
+one airtime charge each. They must never be summed with one another; their value is
+that they answer three different questions, and a gateway that carries everyone's
+traffic can top this table without ever speaking for itself.</p>
+<h2 id="per-period-shares-the-day-tables">Per-period shares: the day tables</h2>
+<p><code>occupancy_senders</code>, <code>occupancy_emitters</code> and <code>occupancy_relays</code> are cumulative: each
+row answers "since first seen, within retention", and nothing can cut a cumulative
+total back to a window. A page whose history selector offers 24 h–90 d while its
+tables show those counters invites exactly that misreading, so the same samples also
+write three finer grains — <code>occupancy_sender_days</code>, <code>occupancy_emitter_days</code> and
+<code>occupancy_relay_days</code>, one row per station per <strong>UTC day</strong> — and the flush builds
+each cumulative row as the sum of the day rows it just wrote, so the two grains cannot
+drift apart. Any window is then a sum over whole
+days: <code>window_cutoff_day</code> aligns it to the day boundary, and the oldest day
+overlapping the window counts whole, because part of a day nobody measured cannot be
+priced.</p>
+<p>The day rows start the day the breakdown starts. Traffic already inside the
+cumulative tables before it cannot be distributed across days after the fact —
+inventing that distribution would fabricate per-day facts nobody recorded — so a long
+window understates traffic older than the breakdown, and the page says so rather than
+letting the number speak. A window with no day row for a station is that station
+absent from what this radio recorded in it, not a measured zero.</p>
+<h2 id="storage-conventions">Storage conventions</h2>
+<p>Three rules that come from the dashboard rollups and are worth knowing before reading a
+chart:</p>
+<ul>
+<li><strong>A gap is not a zero.</strong> A bucket that held no packet is absent from the result, not
+  <code>0.0</code>. Rendering an absence as zero produces a cliff at the retention boundary that a
+  reader interprets as an outage. A bucket that was observed and held nothing on air is
+  a real zero and stays a zero — those are two different facts.</li>
+<li><strong>Sums and counts, never means.</strong> A stored mean cannot be re-aggregated: averaging
+  averages loses the weights. Any window is rebuilt from sums.</li>
+<li><strong>Two clocks.</strong> Rolling windows use a monotonic clock, so an NTP correction or a
+  clock-sync command cannot stretch or shrink a window. Buckets are stored as UTC epoch
+  seconds, because that is what a reader queries.</li>
+</ul>
+<p>Percentiles use <strong>nearest-rank</strong> rather than interpolation. On a handful of samples the
+interpolated percentile under-reports the tail, and the tail — a burst — is the part
+anyone looks at. A percentile over 60-second buckets is not the same measurement as a
+percentile over the 10-second instant windows, and the API does not pretend otherwise.</p>
+<h2 id="live-numbers">Live numbers</h2>
+<p>The windows live in the bot process. The web viewer is a separate process and can only
+read what the writer left behind, so the snapshot is stored in <code>bot_metadata</code> under
+<code>occupancy.live</code>, at the writer's own flush cadence, once per batch — never on the
+packet path.</p>
+<p>The snapshot's <strong>age</strong> is part of the answer. Without an age, a quiet channel and a bot
+that stopped recording look identical. The reader marks the snapshot <code>stale</code> once it is
+older than twice the bucket size (at least 120 s).</p>
+<h2 id="the-local-network-view">The local network view</h2>
+<p>The airtime sums answer <em>how much</em> was on air. Each window also carries <em>who and what</em>
+this node heard:</p>
+<table>
+<thead>
+<tr>
+<th>Figure</th>
+<th>How it is counted</th>
+<th>What it cannot claim</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>talkers</td>
+<td>distinct rx senders inside the window whose packets carried an identity</td>
+<td>Who was talking but not heard from here; and the unattributed bucket, which is heard airtime, not a station.</td>
+</tr>
+<tr>
+<td>unnamed copies</td>
+<td>rx copies inside the window charged to the reserved unattributed sender bucket</td>
+<td>A station. It is heard airtime without a name, stated so the packet total reconciles with the talkers count.</td>
+</tr>
+<tr>
+<td>emitter addresses</td>
+<td>distinct emitter LABELS of the rx copies heard inside the window — the flood path's last node address, a full key for a direct hear</td>
+<td>Stations: one relay can stand under its 2-byte and its 3-byte address, and a prefix names a crowd as readily as a node. The unattributed bucket adds no label.</td>
+</tr>
+<tr>
+<td>repeats</td>
+<td>hashed packets heard ÷ unique packet hashes</td>
+<td>The full flood. Hashes cover only what this node heard, so the factor is a <strong>floor</strong> on the repetitions, not a census.</td>
+</tr>
+<tr>
+<td>copy cost</td>
+<td>of the hashed rx airtime (<code>rx_hashed_ms</code>), the slice spent on copies after the first one this station heard for that identity (<code>rx_copy_ms</code>) — each copy priced at its own modulation</td>
+<td>The network's first emission. The baseline is this station's hearing, bounded by <code>copy_horizon_seconds</code>: "first" means first heard inside a horizon, so a packet re-flooded more than a horizon apart counts as a new first occurrence. The two baselines differ by a bounded, per-identity offset, never by an invented zero. And it covers hashed airtime only: an unhashable packet cannot be matched to a copy of itself, so it sits outside the measure.</td>
+</tr>
+<tr>
+<td>avg hops</td>
+<td>mean <code>path_length</code> of the heard packets whose path was readable</td>
+<td>Transit vs local for packets whose path did not decode.</td>
+</tr>
+<tr>
+<td>channel floor</td>
+<td>heard copies plus the shallower copies each heard tree proves (see above)</td>
+<td>Parallel branches no heard copy proves. A floor, never a ceiling.</td>
+</tr>
+</tbody>
+</table>
+<p>The mesh reply states the first five as one line, in the reader's language, and each
+clause agrees with its own number: <code>1 talker, 1 unnamed copy, 1 emitter address</code> /
+<code>1 expéditeur identifié, 1 copie sans identité, 1 adresse émettrice</code>. The fr clause says
+<em>expéditeurs identifiés</em> and not <em>émetteurs</em> on purpose: in this feature <em>émetteur</em> names
+the station whose antenna carried a copy, which is a different fact from who wrote the
+payload — that label is what made a correct count read as a broken measurement when it sat
+next to a larger packet total. Three counts, three questions, never added together, and a
+count the window does not hold is left out rather than shown as 0.</p>
+<p>The repetition factor is what a flood router leaves behind: the same packet heard over
+several paths arrives several times with the same hash, so a window reading x2.5 was
+hearing the network repeat itself. The hop depth says how far the heard traffic came
+from — everything at 0 is a purely local pocket, a mean of 2 is traffic crossing the
+mesh.</p>
+<p>An unknown stays unknown, same rule as the airtime: a window that heard no hashable
+packet carries <em>no</em> repetition factor rather than x1.0 (that would claim a network
+without repeats from the absence of evidence), and a packet without path information is
+left out of the hop mean rather than averaged in as 0 hops. The copy share follows the
+same rule: <code>copy_percent</code> divides by the hashed airtime only — unhashable packets sit
+outside it — and is <em>absent</em>, not 0%, when no hashed packet was heard. A share of 0% is
+itself an answer: this station heard identities and none of them repeated.</p>
+<p>Two windows of the same length are also compared: each window carries <code>previous</code> —
+the equal-length window immediately before it, read from the same ring buffer — and a
+<code>trend</code> over it, but only while the buffer can cover both. A fresh start has no
+previous window, and a previous window with no samples is absent evidence, not a quiet
+baseline: both answer <code>insufficient_history</code> rather than turning a boot into a flood.
+And each window says what the buffer can prove about it: <code>truncated</code> is true when
+hashed traffic was heard but the ring buffer no longer reaches back over the whole
+window — the repeats and the copy cost are then bounds, and the mesh reply and the page
+mark them as such (<code>≥</code>, <code>(bounded)</code>) instead of dropping them.</p>
+<p>The copy cost is classified when the sample is recorded, while the writer's identity
+memory is warm, and rides along in the sample and the bucket as precomputed sums.
+Unlike the cardinalities, those sums re-aggregate: a reader adding buckets gets a
+correct sum of sums. That is why <code>rx_hashed_ms</code> and <code>rx_copy_ms</code> are the one part of
+the network view that <strong>is</strong> written to the buckets. Buckets written before the
+columns existed carry NULL, and a history period that spans them reports the copy share
+as unknown rather than as a ratio over part of the period — an invented average is as
+dishonest as an invented zero.</p>
+<p>These counts are deliberately <strong>not stored in the buckets</strong> — with the one exception
+of the copy cost, whose two sums do re-aggregate (see above). The buckets hold sums and
+counts because those re-aggregate across windows; cardinalities do not — the same talker
+in two buckets is one talker, and a reader summing the column would over-count exactly
+the busy senders the figure exists to rank. The network view therefore lives in the
+ring buffer and in the live snapshot, and its retention is the ring buffer's
+(<code>max_samples</code>), not the bucket retention.</p>
+<h2 id="configuration">Configuration</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">[Channel_Occupancy]</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="na">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">false</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="na">sample_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="na">fast_window_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">10</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="na">window_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="na">slow_window_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">900</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="na">half_life_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">300</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="na">max_samples</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">5000</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="na">copy_horizon_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">3600</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="na">attribution_grace_sec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="na">use_device_modulation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">true</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="na">spreading_factor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">9</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="na">bandwidth_khz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">125</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="na">coding_rate</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">5</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="na">preamble_symbols</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">8</span>
+</code></pre></div>
+<p>Recording happens on the packet path that fills <code>packet_stream</code>, so it runs when the web
+viewer's writer is running. Retention is the usual <code>[Data_Retention]</code> keys
+(<code>occupancy_samples_retention_days</code>, <code>occupancy_senders_retention_days</code>,
+<code>occupancy_emitters_retention_days</code>, <code>occupancy_relays_retention_days</code>) applied by the
+hourly cleanup scheduler; pruning is what makes a "last 30 days" chart actually mean 30
+days. The three per-station ledgers age on the same rule so a reader comparing them is
+never handed a young table against an old one, and the day tables age on the same keys
+as their ledgers — a selected window cannot reach further back than the totals it
+describes.</p>
+<p><code>copy_horizon_seconds</code> is the copy-cost baseline: an identity stays "already heard"
+that long, so copies of it inside the horizon are charged to the flood and a re-flood
+after it counts as a new first occurrence. It bounds both the writer's identity memory
+and the error the baseline can make — two occurrences of one identity more than a
+horizon apart are charged as two first copies, a constant offset per identity, never an
+invented zero.</p>
+<h2 id="reading-it">Reading it</h2>
+<p>The Web Viewer page <code>/airtime</code> draws all of this — the windows, the history chart,
+the percentiles, the sender share, the emitter share and the entry-relay share — from
+the two routes below, which are what it reads. The mesh command <code>airtime</code> answers with
+three figures and nothing else: the day's peak (the worst bucket of the UTC day at that
+bucket's own capacity), the average share over the last hour, and the average over the
+UTC day so far — all of them the rx share this radio hears. The averages divide by the
+capacity <strong>elapsed</strong>, not by the buckets that happen to exist: the writer leaves an
+empty bucket absent, so a denominator of existing buckets would let silence flatter
+itself by counting only busy minutes. A share above 100 % is possible and is not
+clamped — parallel transmissions each cost their airtime. A day with no sample recorded
+answers "nothing recorded", never 0 %. The page is the whole picture, the command is
+the three numbers a reader actually asks for; the network view, the per-sender ledgers
+and the modulation behind the estimate stay on the page, where there is room for them.
+The command replies in telegraphic style, built to fit one channel body,
+counted in <strong>bytes</strong> because an accented reply overflows the wire before it overflows a
+character count. The budget is what the sender's own reply path reports: 155 minus the
+radio's name and <code>": "</code>, and a further 10 when the reply leaves on a regional flood
+scope — a regional radio answers from a smaller body than the same radio answering
+globally. When the body runs out of room the reply travels in pieces through the
+splitter every long reply uses, so a cramped body still gets all three figures rather
+than half of one.</p>
+<p><code>GET /api/telemetry/occupancy</code> — the live windows, the network view and the sender share:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">"age_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mf">4.2</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">"stale"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">"sf"</span><span class="p">:</span><span class="w"> </span><span class="mi">11</span><span class="p">,</span><span class="w"> </span><span class="nt">"bw_khz"</span><span class="p">:</span><span class="w"> </span><span class="mf">125.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"coding_rate"</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="nt">"preamble"</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">"window_rx_percent"</span><span class="p">:</span><span class="w"> </span><span class="mf">6.4</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">"window_tx_percent"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.7</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">"window_rx_floor_percent"</span><span class="p">:</span><span class="w"> </span><span class="mf">11.1</span><span class="p">,</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="nt">"window_distinct_senders"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">"window_unattributed_packets"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="nt">"window_emitter_labels"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span><span class="nt">"window_dup_factor"</span><span class="p">:</span><span class="w"> </span><span class="mf">2.4</span><span class="p">,</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">  </span><span class="nt">"window_avg_hops"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.5</span><span class="p">,</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">  </span><span class="nt">"window_copy_percent"</span><span class="p">:</span><span class="w"> </span><span class="mf">41.3</span><span class="p">,</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">  </span><span class="nt">"window_truncated"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">  </span><span class="nt">"window_prev_rx_ms"</span><span class="p">:</span><span class="w"> </span><span class="mf">1980.4</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>window_dup_factor</code> and <code>window_avg_hops</code> are absent evidence rather than zero when no
+heard packet carried a hash or a path; in the <code>text</code> format they render as an empty
+value, not as <code>0</code>. <code>window_copy_percent</code> follows the same rule — <code>null</code> when no hashed
+packet was heard — and <code>window_truncated</code> says when the repeats and the copy share are
+bounds rather than a census. <code>window_prev_rx_ms</code> is the rx airtime of the equal window
+one length back, <code>null</code> when the ring buffer does not reach that far: a monitoring
+agent comparing snapshots gets the trend without keeping state of its own.</p>
+<p>The <code>top_senders</code> rows carry the stored columns (<code>sender</code>, <code>airtime_ms</code>, <code>packets</code>,
+<code>advert_ms</code>, <code>first_seen</code>, <code>last_seen</code>) plus what the route resolves for the page:
+<code>name</code> and <code>short</code> for a full public key that the contact tracking knows,
+<code>unattributed</code> for the reserved bucket, and <code>advert_percent</code> — the slice as a percent
+of that sender's own airtime, <code>null</code> when the slice is unknown.</p>
+<p>The <code>top_emitters</code> rows carry the same shape for the emitter ledger: <code>emitter</code> (a
+label, not necessarily a key), the same stored columns, and the same resolved
+<code>name</code>, <code>short</code>, <code>unattributed</code> and <code>advert_percent</code> — with <code>name</code> set for a node
+address only when exactly one tracked contact begins with those bytes. The two lists
+are two facts about the same copies; they must never be summed.</p>
+<p>The <code>top_relays</code> rows carry that shape for the entry-relay ledger: <code>relay</code> is always a
+node-address prefix — a flood path never carries a full key, and a direct copy never
+reaches this table — so <code>unattributed</code> is never set here, and <code>name</code> follows the same
+one-match rule. A relay row's absence is not silence: direct copies belong to no row
+by construction. The three lists hold the same copies once per fact each — writer,
+gateway, antenna — and must never be summed with one another.</p>
+<p>All three lists follow the page's history selector when the request carries <code>?days=N</code>
+(clamped to 1–90): the rows are then the day tables summed over that window,
+day-aligned, and the payload says which window it answers with
+<code>"share_window_days"</code>. Without <code>days</code> the cumulative ledgers answer, as they always
+did, and no <code>share_window_days</code> key is present.</p>
+<p>Each row of the three lists also carries <code>capacity_percent</code>: that row's share of what
+the channel could physically carry over the selected period, rounded to one decimal.
+The spectrum is one shared channel and one radio receives one packet at a time, so the
+ceiling is one channel-second per elapsed second — the payload exposes it as
+<code>"period_capacity_ms"</code>, next to <code>"period_start_ts"</code>, the first moment of the range
+answered: in the period view it is the day-aligned window's start (the selector says
+"24 h" while the window covers whole UTC days — the page prints the span it actually
+answers for so the percent can be checked), and in the cumulative view the oldest
+recorded moment in the ledgers (each station's <code>first_seen</code>, the oldest day row, the
+oldest sample bucket). A row at 100%
+would be one station filling the channel alone; a table summing above 100% is
+oversubscription — transmissions running in parallel whose copies this antenna still
+paid for. The three tables price the same medium from three ends, so the same ceiling
+applies to all three and their percentages are directly comparable — while the ledgers
+themselves stay unsummed. The percent is taken after the prefix fold, so one antenna
+carries one figure for all its copies, and it is <code>null</code> — not <code>0</code> — when the period's
+elapsed time is unknown (no recorded moment anywhere in the cumulative view).</p>
+<p>Each table's header also sums its whole ledger for the period, exposed as
+<code>"period_totals"</code>: <code>airtime_ms</code>, <code>packets</code>, <code>stations</code>, <code>advert_percent</code> and
+<code>last_seen</code> over every row of that ledger (day rows inside the window, or the whole
+cumulative table), plus the sum's own <code>capacity_percent</code> against the same ceiling.
+The sum is never just the page's slice — the entry count next to it says where the
+slice ends — and it is <code>null</code> (not 0) when the ledger holds no row for the period.
+<code>advert_percent</code> is <code>null</code> when the period mixes rows from before the advert split:
+a share over only the rows that know the split is an invented period figure.</p>
+<p><code>GET /api/telemetry/occupancy/history?days=7</code> — buckets as sums and counts, plus the
+nearest-rank percentiles. Only buckets that were written appear in <code>buckets</code>. Each
+bucket also carries <code>rx_hashed_ms</code> and <code>rx_copy_ms</code> — <code>NULL</code> for buckets written before
+that split was recorded — and the payload states the period's <code>copy_percent</code> (all or
+nothing: <code>null</code> when any bucket in the range predates the split, because a ratio over
+part of the period is an invented period figure). The payload also carries <code>previous</code>:
+the equal-length period before this one, in the same shape, kept as its own object so
+the reader can tell "nothing happened before" (the range was recorded and held nothing)
+from "nothing was recorded before" (the range predates retention). The <code>/airtime</code> page
+draws the comparison from it and states a change only when both periods hold recorded
+buckets.</p>
+<p>Both accept <code>?format=text</code>, which renders one field per line for a monitoring agent.
+Only scalar fields are rendered that way; the bucket list and the sender list are not,
+so read them as JSON. Both routes are on the anonymous allowlist, like the storage
+probe: the payload carries aggregate counters and sender keys that
+<code>GET /api/contacts</code> already shows.</p>
+<p><code>enabled</code> is the setting as the reader knows it, not the value the snapshot happened to
+be written under: recording can have been on when the snapshot was written and off now,
+which is two facts. The viewer re-reads <code>enabled</code> from <code>config.ini</code> on every request and
+only falls back to the copy it read at boot when the file cannot be read — a hot config
+reload never reaches the running viewer process, and a page that tells the reader to set
+the flag has to answer from the file the reader would edit. When the setting and the
+snapshot disagree the payload also carries <code>snapshot_enabled</code>, and
+the page says the same thing on screen — the setting is off now, and the figures shown
+were written while it was on, with the age saying how long ago. A request that fails is
+not evidence about the setting either, so the page takes back its claim rather than
+leaving it standing beside the error.</p>
+<h2 id="passive-airtime-analysis">Passive airtime analysis</h2>
+<p>The <code>/airtime</code> curve, duty-cycle estimates and modal detail tables are fed by a
+second, passive read model — <code>modules/airtime_analysis.py</code> and its companions
+(<code>airtime_capture</code>, <code>airtime_forwarding</code>, <code>airtime_quality</code>, <code>airtime_repetitions</code>),
+adopted from the <a href="https://github.com/Camousse88/meshcore-bot_Baliz/">Baliz fork</a>
+(Camille Ballon). It reads the same <code>packet_stream</code> the writer already fills and
+maintains its own <code>airtime_observations</code> table: one row per distinct packet plus
+capture-continuity intervals, so silence is recorded as silence rather than as the
+absence of a row.</p>
+<p>It answers different questions from the three ledgers above. It reconstructs, per
+distinct packet, who authored it and which relay retransmissions the flood history
+implies, so it can estimate a repeater's duty cycle ("reconstructed" and "scenario"
+percentages against the 10 % reference, 6 min/h) — something the ledgers, which price
+each heard copy at its own airtime, never claim. The reconstruction is an estimate:
+no inference here proves duty-cycle compliance, and the payload carries its
+<code>schema_version</code> and <code>method.version</code> so a reader can tell which method produced a
+number. <code>GET /api/telemetry/occupancy/analysis?window=1h|24h|7d</code> serves it; unknowns
+are <code>null</code>, never 0.</p>
+<p>The two read models are never summed: the analysis counts distinct packets and
+reconstructed relays over rolling windows (<code>1h</code>/<code>24h</code>/<code>7d</code>), the ledgers count heard
+copies per fact over whole UTC days. The /airtime page draws only the analysis; the
+ledgers stay recorded and stay served by <code>GET /api/telemetry/occupancy</code> (its
+<code>top_senders</code>, <code>top_relays</code>, <code>top_emitters</code> and <code>period_totals</code>), but nothing on the
+page renders them — see the page section below.</p>
+<h2 id="the-airtime-page">The /airtime page</h2>
+<p>The page is the Baliz design: French throughout, times displayed in Europe/Paris,
+unknowns shown as <code>N/D</code>, one chart (channel-occupation bars plus packets/min) up
+front, short top-five lists, and the station-ranking tables inside a modal. The
+period selector (<code>Dernière heure</code>, <code>Dernières 24 heures</code>, <code>7 derniers jours</code>) drives
+every card; a silence marker is drawn only where the recorder proves a complete
+window, so a gap never reads as a quiet channel.</p>
+<p>Every ranking of stations lives in the modal, over the analysis read model: its role
+tabs (authors, entry relays, emitters) and the "Voir tous" folds answer the same
+question the three by-airtime ledgers used to answer on this page, so the ledger card
+was retired rather than kept beside tables of the same stations under a second read
+model. The ledgers themselves — recorded daily, day-aligned, with the day's
+occupancy command reply built from them — are unchanged and still readable through
+<code>GET /api/telemetry/occupancy</code>; only their rendering left the page.</p>
+<p>The page keeps one rounding: every number is shown to at most two decimals, because
+a third decimal claims a precision the modelled sums do not carry and mixed rounding
+across cards reads as two different measurements of one fact. A non-zero average that
+would round to 0 at two decimals is shown below the floor (<code>&lt; 0,005</code>), never as 0.
+The page also still fetches <code>GET /api/telemetry/occupancy?limit=1</code> for one field
+only: whether the recorder in this process is on. The analysis read model does not
+know that, and a historical page has to say so rather than look live.</p>
+<h2 id="what-this-can-be-used-for">What this can be used for</h2>
+<ul>
+<li>Deciding whether a mesh is actually busy, or whether a channel looks busy only from
+  where you sit.</li>
+<li>Judging a bot's own contribution — a talker sending many short packets costs more
+  airtime than one sending a long message, which is why the sender share is ranked by
+  airtime and not by packet count.</li>
+<li>Setting a fairness limit, if one is ever added. A limit has to be built on airtime,
+  because a limit built on message count rewards short messages and punishes long ones.</li>
+</ul>
+<p>It cannot tell you whether the channel was clear, whether a packet was collided, or
+whether a repeater was hearing you. For that you need a repeater's own counters.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "toc.integrate", "content.code.copy"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>
