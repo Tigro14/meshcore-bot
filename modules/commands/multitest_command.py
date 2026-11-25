@@ -478,14 +478,14 @@ class MultitestCommand(BaseCommand):
     name = "multitest"
     honors_skip_channel_check = False
     enabled_attr = "multitest_enabled"
-    keywords = ['multitest', 'mt']
+    keywords = ['multitest', 'mt', 'm']
     description = "Listens for 6 seconds and collects all unique paths from incoming messages"
     category = "meshcore_info"
 
     # Documentation
     short_description = "Listens for 6 seconds and collects all unique paths your incoming messages took to reach the bot"
     usage = "multitest"
-    examples = ["multitest", "mt"]
+    examples = ["multitest", "mt", "m"]
 
     # Reply used when response_format is blank. Rendered through the same piped
     # engine as a configured template, so the two cannot drift apart.

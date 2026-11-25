@@ -1044,7 +1044,7 @@ stats paths
 
 ---
 
-### `multitest` or `mt`
+### `multitest`, `mt` or `m`
 
 Report every route one message took, not just the one that reached the bot.
 
@@ -1052,6 +1052,7 @@ Report every route one message took, not just the one that reached the bot.
 ```
 multitest
 mt
+m
 multitest long     # listen 10s, or wait 2x as long for CoreScope
 multitest xlong    # listen 14s, or wait 3x as long for CoreScope
 ```
